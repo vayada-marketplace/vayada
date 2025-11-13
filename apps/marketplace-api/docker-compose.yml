@@ -33,6 +33,21 @@ services:
       - ./app:/app/app
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ../vayada-creator-marketplace-frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+    container_name: vayada-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:
 
