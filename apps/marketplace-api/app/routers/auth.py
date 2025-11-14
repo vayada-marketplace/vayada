@@ -28,6 +28,22 @@ class RegisterResponse(BaseModel):
     message: str
 
 
+class LoginRequest(BaseModel):
+    """Login request model"""
+    email: EmailStr
+    password: str
+
+
+class LoginResponse(BaseModel):
+    """Login response model"""
+    id: str
+    email: str
+    name: str
+    type: str
+    status: str
+    message: str
+
+
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: RegisterRequest):
     """
@@ -91,4 +107,62 @@ async def register(request: RegisterRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Registration failed: {str(e)}"
+        )
+
+
+@router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+async def login(request: LoginRequest):
+    """
+    Login with email and password
+    
+    - **email**: User's email address
+    - **password**: User's password
+    """
+    try:
+        # Find user by email
+        user = await Database.fetchrow(
+            "SELECT id, email, password_hash, name, type, status FROM users WHERE email = $1",
+            request.email
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Verify password
+        password_valid = bcrypt.checkpw(
+            request.password.encode('utf-8'),
+            user['password_hash'].encode('utf-8')
+        )
+        
+        if not password_valid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Check if user account is suspended
+        if user['status'] == 'suspended':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is suspended"
+            )
+        
+        return LoginResponse(
+            id=str(user['id']),
+            email=user['email'],
+            name=user['name'],
+            type=user['type'],
+            status=user['status'],
+            message="Login successful"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
         )
