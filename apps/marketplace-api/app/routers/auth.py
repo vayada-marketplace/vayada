@@ -23,7 +23,7 @@ class RegisterResponse(BaseModel):
     id: str
     email: str
     name: str
-    type: str
+    type: Literal["creator", "hotel"]
     status: str
     message: str
 
@@ -39,7 +39,7 @@ class LoginResponse(BaseModel):
     id: str
     email: str
     name: str
-    type: str
+    type: Literal["creator", "hotel"]
     status: str
     message: str
 
