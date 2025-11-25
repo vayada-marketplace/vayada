@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.database import Database, check_database_connection
 from app.config import settings
-from app.routers import auth
+from app.routers import auth, creators, users
 
 
 @asynccontextmanager
@@ -64,4 +64,6 @@ async def health_db():
 
 # Include routers
 app.include_router(auth.router)
+app.include_router(creators.router)
+app.include_router(users.router)
 
