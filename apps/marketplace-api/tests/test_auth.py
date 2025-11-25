@@ -25,6 +25,10 @@ class TestAuth:
         assert data["type"] == "creator"
         assert data["status"] == "pending"
         assert "id" in data
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        assert "expires_in" in data
+        assert data["expires_in"] > 0
     
     def test_register_hotel(self, client):
         """Test hotel registration"""
@@ -42,6 +46,9 @@ class TestAuth:
         assert data["email"] == "newhotel@test.com"
         assert data["type"] == "hotel"
         assert "id" in data
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        assert "expires_in" in data
     
     def test_register_duplicate_email(self, client):
         """Test registration with duplicate email"""
@@ -110,6 +117,10 @@ class TestAuth:
         assert data["id"] == user_id
         assert data["type"] == "creator"
         assert "message" in data
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        assert "expires_in" in data
+        assert data["expires_in"] > 0
     
     def test_login_invalid_email(self, client):
         """Test login with invalid email"""

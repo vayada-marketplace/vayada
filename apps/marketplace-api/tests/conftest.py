@@ -32,6 +32,35 @@ def client(db_setup):
     return TestClient(app)
 
 
+def get_token_for_user(user_id: str) -> str:
+    """Helper function to get JWT token for a user_id (for use in tests)"""
+    from app.jwt_utils import create_access_token
+    from app.database import Database
+    import asyncio
+    
+    async def _get_token():
+        user = await Database.fetchrow(
+            "SELECT id, email, type FROM users WHERE id = $1",
+            user_id
+        )
+        if not user:
+            return None
+        return create_access_token(
+            data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
+        )
+    
+    return asyncio.run(_get_token())
+
+
+@pytest.fixture
+def auth_headers(test_user):
+    """Get authentication headers with JWT token for test_user"""
+    token = get_token_for_user(test_user)
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.fixture
 async def async_client(db_setup):
     """Create an async test client"""

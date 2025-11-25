@@ -8,11 +8,11 @@ from fastapi import status
 class TestUsers:
     """Test user endpoints"""
     
-    def test_update_email_success(self, client, test_user):
+    def test_update_email_success(self, client, test_user, auth_headers):
         """Test updating email successfully"""
         response = client.put(
             "/users/me",
-            headers={"X-User-Id": test_user},
+            headers=auth_headers,
             json={
                 "email": "updated@test.com"
             }
@@ -46,10 +46,14 @@ class TestUsers:
             }
         )
         
+        # Get token for user1
+        from tests.conftest import get_token_for_user
+        user1_token = get_token_for_user(user1_id)
+        
         # Try to update user1's email to user2's email
         response = client.put(
             "/users/me",
-            headers={"X-User-Id": user1_id},
+            headers={"Authorization": f"Bearer {user1_token}"},
             json={
                 "email": "user2@test.com"
             }
@@ -57,22 +61,22 @@ class TestUsers:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "already registered" in response.json()["detail"].lower()
     
-    def test_update_email_invalid_format(self, client, test_user):
+    def test_update_email_invalid_format(self, client, test_user, auth_headers):
         """Test updating email with invalid format"""
         response = client.put(
             "/users/me",
-            headers={"X-User-Id": test_user},
+            headers=auth_headers,
             json={
                 "email": "invalid-email"
             }
         )
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     
-    def test_update_email_missing(self, client, test_user):
+    def test_update_email_missing(self, client, test_user, auth_headers):
         """Test updating email with missing email field"""
         response = client.put(
             "/users/me",
-            headers={"X-User-Id": test_user},
+            headers=auth_headers,
             json={}
         )
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -83,10 +87,10 @@ class TestUsers:
             "/users/me",
             json={"email": "test@test.com"}
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY  # Missing header
+        assert response.status_code == status.HTTP_403_FORBIDDEN  # Missing Bearer token
     
     @pytest.mark.asyncio
-    async def test_update_email_same_email(self, client, test_user):
+    async def test_update_email_same_email(self, client, test_user, auth_headers):
         """Test updating email to the same email (should work)"""
         # Get current email first
         from app.database import Database
@@ -100,7 +104,7 @@ class TestUsers:
         # Try to update to same email
         response = client.put(
             "/users/me",
-            headers={"X-User-Id": test_user},
+            headers=auth_headers,
             json={
                 "email": current_email
             }

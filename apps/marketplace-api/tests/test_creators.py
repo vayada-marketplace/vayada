@@ -21,22 +21,22 @@ class TestCreators:
                 "name": "No Profile"
             }
         )
-        user_id = response.json()["id"]
+        token = response.json()["access_token"]
         
         # Try to get profile
         response = client.get(
             "/creators/me",
-            headers={"X-User-Id": user_id}
+            headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
-    def test_get_creator_profile_success(self, client, test_creator_profile):
+    def test_get_creator_profile_success(self, client, test_creator_profile, auth_headers):
         """Test getting creator profile successfully"""
         creator_id, user_id = test_creator_profile
         
         response = client.get(
             "/creators/me",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
@@ -47,13 +47,13 @@ class TestCreators:
         assert data["profile_complete"] == False
         assert isinstance(data["platforms"], list)
     
-    def test_update_creator_profile(self, client, test_creator_profile):
+    def test_update_creator_profile(self, client, test_creator_profile, auth_headers):
         """Test updating creator profile"""
         creator_id, user_id = test_creator_profile
         
         response = client.put(
             "/creators/me",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "location": "Updated Location",
                 "short_description": "Updated description",
@@ -68,13 +68,13 @@ class TestCreators:
         assert data["portfolio_link"] == "https://portfolio.com"
         assert data["phone"] == "+1-555-123-4567"
     
-    def test_update_creator_profile_partial(self, client, test_creator_profile):
+    def test_update_creator_profile_partial(self, client, test_creator_profile, auth_headers):
         """Test updating creator profile with partial data"""
         creator_id, user_id = test_creator_profile
         
         response = client.put(
             "/creators/me",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "location": "New Location Only"
             }
@@ -85,24 +85,24 @@ class TestCreators:
         # Other fields should remain unchanged
         assert data["short_description"] == "Test description"
     
-    def test_update_creator_profile_no_fields(self, client, test_creator_profile):
+    def test_update_creator_profile_no_fields(self, client, test_creator_profile, auth_headers):
         """Test updating creator profile with no fields"""
         creator_id, user_id = test_creator_profile
         
         response = client.put(
             "/creators/me",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={}
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
     
-    def test_create_platform(self, client, test_creator_profile):
+    def test_create_platform(self, client, test_creator_profile, auth_headers):
         """Test creating a platform"""
         creator_id, user_id = test_creator_profile
         
         response = client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "Instagram",
                 "handle": "@testcreator",
@@ -128,13 +128,13 @@ class TestCreators:
         assert data["gender_split"]["male"] == 45.0
         assert "id" in data
     
-    def test_create_platform_invalid_name(self, client, test_creator_profile):
+    def test_create_platform_invalid_name(self, client, test_creator_profile, auth_headers):
         """Test creating platform with invalid name"""
         creator_id, user_id = test_creator_profile
         
         response = client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "InvalidPlatform",
                 "handle": "@test",
@@ -144,14 +144,14 @@ class TestCreators:
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
     
-    def test_create_duplicate_platform(self, client, test_creator_profile):
+    def test_create_duplicate_platform(self, client, test_creator_profile, auth_headers):
         """Test creating duplicate platform"""
         creator_id, user_id = test_creator_profile
         
         # Create first platform
         client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "Instagram",
                 "handle": "@test1",
@@ -163,7 +163,7 @@ class TestCreators:
         # Try to create duplicate
         response = client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "Instagram",
                 "handle": "@test2",
@@ -174,14 +174,14 @@ class TestCreators:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "already exists" in response.json()["detail"].lower()
     
-    def test_update_platform(self, client, test_creator_profile):
+    def test_update_platform(self, client, test_creator_profile, auth_headers):
         """Test updating a platform"""
         creator_id, user_id = test_creator_profile
         
         # Create platform first
         create_response = client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "TikTok",
                 "handle": "@original",
@@ -194,7 +194,7 @@ class TestCreators:
         # Update platform
         response = client.put(
             f"/creators/me/platforms/{platform_id}",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "handle": "@updated",
                 "followers": 20000,
@@ -208,28 +208,28 @@ class TestCreators:
         assert data["engagement_rate"] == 4.0
         assert data["name"] == "TikTok"  # Name shouldn't change
     
-    def test_update_platform_not_found(self, client, test_creator_profile):
+    def test_update_platform_not_found(self, client, test_creator_profile, auth_headers):
         """Test updating non-existent platform"""
         creator_id, user_id = test_creator_profile
         fake_id = "00000000-0000-0000-0000-000000000000"
         
         response = client.put(
             f"/creators/me/platforms/{fake_id}",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "handle": "@updated"
             }
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
-    def test_delete_platform(self, client, test_creator_profile):
+    def test_delete_platform(self, client, test_creator_profile, auth_headers):
         """Test deleting a platform"""
         creator_id, user_id = test_creator_profile
         
         # Create platform first
         create_response = client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "YouTube",
                 "handle": "@todelete",
@@ -242,7 +242,7 @@ class TestCreators:
         # Delete platform
         response = client.delete(
             f"/creators/me/platforms/{platform_id}",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         assert response.status_code == status.HTTP_200_OK
         assert "deleted successfully" in response.json()["message"].lower()
@@ -250,42 +250,42 @@ class TestCreators:
         # Verify it's deleted
         get_response = client.get(
             "/creators/me",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         platforms = get_response.json()["platforms"]
         assert len(platforms) == 0
     
-    def test_delete_platform_not_found(self, client, test_creator_profile):
+    def test_delete_platform_not_found(self, client, test_creator_profile, auth_headers):
         """Test deleting non-existent platform"""
         creator_id, user_id = test_creator_profile
         fake_id = "00000000-0000-0000-0000-000000000000"
         
         response = client.delete(
             f"/creators/me/platforms/{fake_id}",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
     def test_unauthorized_access(self, client):
         """Test accessing creator endpoints without authentication"""
         response = client.get("/creators/me")
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY  # Missing header
+        assert response.status_code == status.HTTP_403_FORBIDDEN  # Missing Bearer token
     
-    def test_profile_complete_after_platform(self, client, test_creator_profile):
+    def test_profile_complete_after_platform(self, client, test_creator_profile, auth_headers):
         """Test that profile_complete becomes true after adding platform"""
         creator_id, user_id = test_creator_profile
         
         # Initially should be false
         response = client.get(
             "/creators/me",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         assert response.json()["profile_complete"] == False
         
         # Add platform
         client.post(
             "/creators/me/platforms",
-            headers={"X-User-Id": user_id},
+            headers=auth_headers,
             json={
                 "name": "Facebook",
                 "handle": "@test",
@@ -297,7 +297,7 @@ class TestCreators:
         # Should now be true
         response = client.get(
             "/creators/me",
-            headers={"X-User-Id": user_id}
+            headers=auth_headers
         )
         assert response.json()["profile_complete"] == True
 
