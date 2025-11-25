@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Literal
 import bcrypt
 from app.database import Database
+from app.jwt_utils import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -25,6 +26,8 @@ class RegisterResponse(BaseModel):
     name: str
     type: Literal["creator", "hotel"]
     status: str
+    access_token: str
+    token_type: str = "bearer"
     message: str
 
 
@@ -41,6 +44,8 @@ class LoginResponse(BaseModel):
     name: str
     type: Literal["creator", "hotel"]
     status: str
+    access_token: str
+    token_type: str = "bearer"
     message: str
 
 
@@ -92,12 +97,18 @@ async def register(request: RegisterRequest):
             request.type
         )
         
+        # Create JWT token
+        access_token = create_access_token(
+            data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
+        )
+        
         return RegisterResponse(
             id=str(user['id']),
             email=user['email'],
             name=user['name'],
             type=user['type'],
             status=user['status'],
+            access_token=access_token,
             message="User registered successfully"
         )
         
@@ -150,12 +161,18 @@ async def login(request: LoginRequest):
                 detail="Account is suspended"
             )
         
+        # Create JWT token
+        access_token = create_access_token(
+            data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
+        )
+        
         return LoginResponse(
             id=str(user['id']),
             email=user['email'],
             name=user['name'],
             type=user['type'],
             status=user['status'],
+            access_token=access_token,
             message="Login successful"
         )
         

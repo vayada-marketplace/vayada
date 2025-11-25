@@ -1,22 +1,39 @@
 """
 Dependencies for FastAPI routes
 """
-from fastapi import Header, HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from app.database import Database
+from app.jwt_utils import decode_access_token, get_user_id_from_token
+
+security = HTTPBearer()
 
 
-async def get_current_user_id(user_id: Optional[str] = Header(None, alias="X-User-Id")) -> str:
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """
-    Get current user ID from header.
+    Get current user ID from JWT token in Authorization header.
     
-    TODO: Replace with JWT token authentication
-    For now, expects X-User-Id header with the user's UUID
+    Expects: Authorization: Bearer <token>
     """
+    token = credentials.credentials
+    
+    # Decode token
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get user ID from token
+    user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Please provide X-User-Id header."
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
     # Verify user exists
@@ -28,7 +45,8 @@ async def get_current_user_id(user_id: Optional[str] = Header(None, alias="X-Use
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user ID"
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
     return user_id
