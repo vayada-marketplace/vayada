@@ -59,6 +59,16 @@ def decode_access_token(token: str) -> Optional[Dict]:
         return None
 
 
+def get_token_expiration_seconds() -> int:
+    """
+    Get token expiration time in seconds from settings
+    
+    Returns:
+        Expiration time in seconds
+    """
+    return settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+
 def get_user_id_from_token(token: str) -> Optional[str]:
     """
     Extract user ID from JWT token
@@ -73,4 +83,44 @@ def get_user_id_from_token(token: str) -> Optional[str]:
     if payload:
         return payload.get("sub")  # 'sub' is the standard JWT claim for subject (user ID)
     return None
+
+
+def get_token_expiration(token: str) -> Optional[datetime]:
+    """
+    Get token expiration time without full validation
+    
+    Args:
+        token: JWT token string
+    
+    Returns:
+        Expiration datetime, or None if token is invalid
+    """
+    try:
+        # Decode without verification to get expiration
+        payload = jwt.decode(
+            token,
+            options={"verify_signature": False}
+        )
+        exp = payload.get("exp")
+        if exp:
+            return datetime.utcfromtimestamp(exp)
+        return None
+    except:
+        return None
+
+
+def is_token_expired(token: str) -> bool:
+    """
+    Check if token is expired
+    
+    Args:
+        token: JWT token string
+    
+    Returns:
+        True if expired, False if valid, None if invalid format
+    """
+    exp = get_token_expiration(token)
+    if exp is None:
+        return True
+    return datetime.utcnow() >= exp
 

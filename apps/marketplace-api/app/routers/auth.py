@@ -1,12 +1,14 @@
 """
 Authentication routes
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal
 import bcrypt
 from app.database import Database
-from app.jwt_utils import create_access_token
+from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -28,6 +30,7 @@ class RegisterResponse(BaseModel):
     status: str
     access_token: str
     token_type: str = "bearer"
+    expires_in: int  # Token expiration time in seconds
     message: str
 
 
@@ -46,7 +49,17 @@ class LoginResponse(BaseModel):
     status: str
     access_token: str
     token_type: str = "bearer"
+    expires_in: int  # Token expiration time in seconds
     message: str
+
+
+class TokenValidationResponse(BaseModel):
+    """Token validation response model"""
+    valid: bool
+    expired: bool
+    user_id: str | None = None
+    email: str | None = None
+    type: str | None = None
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -109,6 +122,7 @@ async def register(request: RegisterRequest):
             type=user['type'],
             status=user['status'],
             access_token=access_token,
+            expires_in=get_token_expiration_seconds(),
             message="User registered successfully"
         )
         
@@ -173,6 +187,7 @@ async def login(request: LoginRequest):
             type=user['type'],
             status=user['status'],
             access_token=access_token,
+            expires_in=get_token_expiration_seconds(),
             message="Login successful"
         )
         
@@ -183,3 +198,81 @@ async def login(request: LoginRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login failed: {str(e)}"
         )
+
+
+@router.post("/validate-token", response_model=TokenValidationResponse, status_code=status.HTTP_200_OK)
+async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))):
+    """
+    Validate if the current token is still valid
+    
+    This endpoint can be used by the frontend to check if the token is still valid
+    before making API calls, or to refresh user information.
+    
+    Returns token validation status and user information.
+    
+    Note: This endpoint is optional - if no token is provided, returns valid=False
+    """
+    if not credentials:
+        return TokenValidationResponse(
+            valid=False,
+            expired=False,
+            user_id=None,
+            email=None,
+            type=None
+        )
+    
+    token = credentials.credentials
+    
+    # Check if token is expired
+    if is_token_expired(token):
+        return TokenValidationResponse(
+            valid=False,
+            expired=True,
+            user_id=None,
+            email=None,
+            type=None
+        )
+    
+    # Decode token
+    payload = decode_access_token(token)
+    if not payload:
+        return TokenValidationResponse(
+            valid=False,
+            expired=False,
+            user_id=None,
+            email=None,
+            type=None
+        )
+    
+    # Get user info
+    user_id = payload.get("sub")
+    if not user_id:
+        return TokenValidationResponse(
+            valid=False,
+            expired=False,
+            user_id=None,
+            email=None,
+            type=None
+        )
+    
+    user = await Database.fetchrow(
+        "SELECT id, email, type FROM users WHERE id = $1",
+        user_id
+    )
+    
+    if not user:
+        return TokenValidationResponse(
+            valid=False,
+            expired=False,
+            user_id=None,
+            email=None,
+            type=None
+        )
+    
+    return TokenValidationResponse(
+        valid=True,
+        expired=False,
+        user_id=str(user['id']),
+        email=user['email'],
+        type=user['type']
+    )
