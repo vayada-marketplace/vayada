@@ -110,6 +110,29 @@ async def register(request: RegisterRequest):
             request.type
         )
         
+        # Automatically create corresponding profile based on user type
+        if request.type == "creator":
+            # Create empty creator profile (location and short_description will be filled later)
+            await Database.execute(
+                """
+                INSERT INTO creators (user_id, location, short_description)
+                VALUES ($1, NULL, NULL)
+                """,
+                user['id']
+            )
+        elif request.type == "hotel":
+            # Create minimal hotel profile (name, category, location, email will be filled/updated later)
+            # Using defaults: name from user, category='Hotel', location='Not specified', email from user
+            await Database.execute(
+                """
+                INSERT INTO hotel_profiles (user_id, name, category, location, email)
+                VALUES ($1, $2, 'Hotel', 'Not specified', $3)
+                """,
+                user['id'],
+                user['name'],
+                user['email']
+            )
+        
         # Create JWT token
         access_token = create_access_token(
             data={"sub": str(user['id']), "email": user['email'], "type": user['type']}

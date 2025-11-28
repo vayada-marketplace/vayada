@@ -91,3 +91,35 @@ async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) ->
     
     return str(creator['id'])
 
+
+async def get_current_hotel_profile_id(user_id: str = Depends(get_current_user_id)) -> str:
+    """
+    Get current hotel profile ID from user ID.
+    Verifies that the user is a hotel and has a hotel profile.
+    """
+    # Verify user is a hotel
+    user = await Database.fetchrow(
+        "SELECT id, type FROM users WHERE id = $1",
+        user_id
+    )
+    
+    if user['type'] != 'hotel':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available for hotels"
+        )
+    
+    # Get hotel profile
+    hotel_profile = await Database.fetchrow(
+        "SELECT id FROM hotel_profiles WHERE user_id = $1",
+        user_id
+    )
+    
+    if not hotel_profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hotel profile not found. Please create your profile first."
+        )
+    
+    return str(hotel_profile['id'])
+

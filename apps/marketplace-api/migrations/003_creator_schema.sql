@@ -4,10 +4,11 @@
 -- 
 -- USER FLOW:
 -- 1. Registration: User registers with name, email, password, type='creator'
---    → Creates record in users table only
+--    → Creates record in users table
+--    → Automatically creates empty record in creators table (with NULL location/short_description)
 -- 2. Login: User logs in with email and password
 -- 3. Profile Completion: User must complete creator profile before creating requests
---    → Creates record in creators table
+--    → Updates creators table with location and short_description
 --    → User can add platforms (creator_platforms table)
 --
 -- IMPORTANT: This schema assumes the following tables exist:
@@ -28,9 +29,9 @@ CREATE TABLE public.creators (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   user_id uuid NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
   
-  -- REQUIRED fields for profile completion
-  location text NOT NULL,
-  short_description text NOT NULL,
+  -- Profile fields (nullable initially, required for profile completion)
+  location text,
+  short_description text,
   
   -- OPTIONAL fields
   portfolio_link text,
@@ -53,7 +54,9 @@ CREATE INDEX idx_creators_location ON public.creators(location);
 CREATE INDEX idx_creators_profile_complete ON public.creators(profile_complete);
 
 -- Comments
-COMMENT ON TABLE public.creators IS 'Creator profiles linked to users table. Created when user completes their profile after registration. One user with type=creator has one creator profile.';
+COMMENT ON TABLE public.creators IS 'Creator profiles linked to users table. Created automatically during registration. One user with type=creator has one creator profile.';
+COMMENT ON COLUMN public.creators.location IS 'Creator location. Required for profile completion but can be NULL initially.';
+COMMENT ON COLUMN public.creators.short_description IS 'Short description of the creator. Required for profile completion but can be NULL initially.';
 COMMENT ON COLUMN public.creators.profile_complete IS 'True when profile has all required fields (location, short_description) AND at least one platform added. User must have complete profile to create collaboration requests.';
 COMMENT ON COLUMN public.creators.profile_completed_at IS 'Timestamp when profile was marked as complete (when all requirements met).';
 
