@@ -12,3 +12,4 @@ ALTER TABLE public.creators
 COMMENT ON COLUMN public.creators.location IS 'Creator location. Required for profile completion but can be NULL initially.';
 COMMENT ON COLUMN public.creators.short_description IS 'Short description of the creator. Required for profile completion but can be NULL initially.';
 
+
