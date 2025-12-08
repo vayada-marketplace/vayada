@@ -185,8 +185,8 @@ async def test_hotel_user(db_setup):
     # Create hotel profile with defaults
     await Database.execute(
         """
-        INSERT INTO hotel_profiles (user_id, name, category, location, email)
-        VALUES ($1, $2, 'Hotel', 'Not specified', $3)
+        INSERT INTO hotel_profiles (user_id, name, location, email)
+        VALUES ($1, $2, 'Not specified', $3)
         """,
         user['id'],
         user['name'],

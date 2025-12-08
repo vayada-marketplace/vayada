@@ -13,7 +13,6 @@ router = APIRouter(prefix="/hotels", tags=["hotels"])
 class HotelProfileStatusHasDefaults(BaseModel):
     """Nested model for default value flags"""
     location: bool
-    category: bool
 
 
 class HotelProfileStatusResponse(BaseModel):
@@ -33,7 +32,8 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
     Returns:
     - profile_complete: Whether the profile is fully complete
     - missing_fields: Array of missing field names
-    - has_defaults: Object indicating if location/category are using default values
+    - has_defaults: Object indicating if location is using default value
+    - missing_listings: Whether at least one property listing is missing
     - completion_steps: Human-readable steps to complete the profile
     """
     try:
@@ -58,7 +58,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         # Get hotel profile
         hotel = await Database.fetchrow(
             """
-            SELECT id, name, category, location, email, website, about, picture, phone
+            SELECT id, name, location, email, website, about, picture, phone
             FROM hotel_profiles
             WHERE user_id = $1
             """,
@@ -86,7 +86,6 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         missing_fields = []
         completion_steps = []
         has_default_location = False
-        has_default_category = False
         
         # Check name
         if not hotel['name'] or not hotel['name'].strip():
@@ -101,17 +100,6 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
             has_default_location = True
             # Don't add to missing_fields - defaults are tracked separately
             completion_steps.append("Set a custom location (currently using default)")
-        
-        # Check category (required field, but check if it's the default)
-        if not hotel['category'] or not hotel['category'].strip():
-            missing_fields.append("category")
-            completion_steps.append("Set your hotel category")
-        elif hotel['category'].strip() == 'Hotel':
-            # 'Hotel' is the default value set during registration
-            has_default_category = True
-            # Note: We don't add to missing_fields for category default
-            # as it's technically filled, just using a default value
-            completion_steps.append("Update your hotel category (currently using default)")
         
         # Check email (required field)
         if not hotel['email'] or not hotel['email'].strip():
@@ -133,14 +121,13 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         
         # Determine if profile is complete
         # Profile is complete when:
-        # - All required fields are filled (name, location, category, email)
-        # - Location and category are not using default values
+        # - All required fields are filled (name, location, email)
+        # - Location is not using default value
         # - Optional fields like about and website are present (based on business logic)
         # - At least one listing exists
         profile_complete = (
             len(missing_fields) == 0 and
             not has_default_location and
-            not has_default_category and
             not missing_listings
         )
         
@@ -148,8 +135,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
             profile_complete=profile_complete,
             missing_fields=missing_fields,
             has_defaults=HotelProfileStatusHasDefaults(
-                location=has_default_location,
-                category=has_default_category
+                location=has_default_location
             ),
             missing_listings=missing_listings,
             completion_steps=completion_steps

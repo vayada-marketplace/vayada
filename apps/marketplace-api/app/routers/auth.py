@@ -121,12 +121,13 @@ async def register(request: RegisterRequest):
                 user['id']
             )
         elif request.type == "hotel":
-            # Create minimal hotel profile (name, category, location, email will be filled/updated later)
-            # Using defaults: name from user, category='Hotel', location='Not specified', email from user
+            # Create minimal hotel profile (name, location, email will be filled/updated later)
+            # Using defaults: name from user, location='Not specified', email from user
+            # Note: category is removed - accommodation_type exists at listing level only
             await Database.execute(
                 """
-                INSERT INTO hotel_profiles (user_id, name, category, location, email)
-                VALUES ($1, $2, 'Hotel', 'Not specified', $3)
+                INSERT INTO hotel_profiles (user_id, name, location, email)
+                VALUES ($1, $2, 'Not specified', $3)
                 """,
                 user['id'],
                 user['name'],
