@@ -106,4 +106,108 @@ async def test_user(db_setup):
     )
 
 
+@pytest.fixture
+async def test_creator_user(db_setup):
+    """Create a test creator user with profile and return user_id"""
+    from app.database import Database
+    import bcrypt
+    import uuid
+    
+    test_email = f"test_creator_{uuid.uuid4().hex[:8]}@test.com"
+    password_hash = bcrypt.hashpw("testpassword123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    # Clean up if exists
+    await Database.execute(
+        "DELETE FROM users WHERE email = $1",
+        test_email
+    )
+    
+    # Create user
+    user = await Database.fetchrow(
+        """
+        INSERT INTO users (email, password_hash, name, type, status)
+        VALUES ($1, $2, $3, $4, 'verified')
+        RETURNING id, email, name, type
+        """,
+        test_email,
+        password_hash,
+        "Test Creator",
+        "creator"
+    )
+    
+    # Create creator profile
+    await Database.execute(
+        """
+        INSERT INTO creators (user_id, location, short_description)
+        VALUES ($1, NULL, NULL)
+        """,
+        user['id']
+    )
+    
+    yield str(user['id'])
+    
+    # Cleanup
+    await Database.execute(
+        "DELETE FROM users WHERE id = $1",
+        user['id']
+    )
+
+
+@pytest.fixture
+async def test_hotel_user(db_setup):
+    """Create a test hotel user with profile and return user_id"""
+    from app.database import Database
+    import bcrypt
+    import uuid
+    
+    test_email = f"test_hotel_{uuid.uuid4().hex[:8]}@test.com"
+    password_hash = bcrypt.hashpw("testpassword123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    # Clean up if exists
+    await Database.execute(
+        "DELETE FROM users WHERE email = $1",
+        test_email
+    )
+    
+    # Create user
+    user = await Database.fetchrow(
+        """
+        INSERT INTO users (email, password_hash, name, type, status)
+        VALUES ($1, $2, $3, $4, 'verified')
+        RETURNING id, email, name, type
+        """,
+        test_email,
+        password_hash,
+        "Test Hotel",
+        "hotel"
+    )
+    
+    # Create hotel profile with defaults
+    await Database.execute(
+        """
+        INSERT INTO hotel_profiles (user_id, name, category, location, email)
+        VALUES ($1, $2, 'Hotel', 'Not specified', $3)
+        """,
+        user['id'],
+        user['name'],
+        user['email']
+    )
+    
+    yield str(user['id'])
+    
+    # Cleanup
+    await Database.execute(
+        "DELETE FROM users WHERE id = $1",
+        user['id']
+    )
+
+
+def get_auth_headers_for_user(user_id: str) -> dict:
+    """Get authentication headers for a specific user_id"""
+    token = get_token_for_user(user_id)
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 
