@@ -2,10 +2,12 @@
 Hotel profile routes
 """
 from fastapi import APIRouter, HTTPException, status, Depends
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator
+from typing import List, Optional, Literal
+from datetime import datetime
+from decimal import Decimal
 from app.database import Database
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 
 router = APIRouter(prefix="/hotels", tags=["hotels"])
 
@@ -147,5 +149,388 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile status: {str(e)}"
+        )
+
+
+# Request/Response models for hotel profile update
+class UpdateHotelProfileRequest(BaseModel):
+    """Request model for updating hotel profile"""
+    name: str = Field(..., min_length=2)
+    location: str = Field(..., min_length=1)
+    email: EmailStr
+    about: Optional[str] = Field(None, min_length=10, max_length=5000)
+    website: Optional[HttpUrl] = None
+    phone: Optional[str] = None
+    picture: Optional[HttpUrl] = None
+    
+    @field_validator('location')
+    @classmethod
+    def validate_location_not_default(cls, v):
+        """Ensure location is not the default value"""
+        if v.strip() == 'Not specified':
+            raise ValueError('Location must be updated from default value')
+        return v
+
+
+class HotelProfileResponse(BaseModel):
+    """Hotel profile response model"""
+    id: str
+    user_id: str
+    name: str
+    location: str
+    email: str
+    about: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    picture: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    listings: List[dict] = Field(default_factory=list)
+    
+    class Config:
+        from_attributes = True
+
+
+# Request/Response models for listing creation
+class CollaborationOfferingRequest(BaseModel):
+    """Collaboration offering request model"""
+    collaborationType: Literal["Free Stay", "Paid", "Discount"] = Field(alias="collaboration_type")
+    availabilityMonths: List[str] = Field(..., min_length=1, alias="availability_months")
+    platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
+    freeStayMinNights: Optional[int] = Field(None, gt=0, alias="free_stay_min_nights")
+    freeStayMaxNights: Optional[int] = Field(None, gt=0, alias="free_stay_max_nights")
+    paidMaxAmount: Optional[Decimal] = Field(None, gt=0, alias="paid_max_amount")
+    discountPercentage: Optional[int] = Field(None, ge=1, le=100, alias="discount_percentage")
+    
+    @model_validator(mode='after')
+    def validate_type_specific_fields(self):
+        """Validate type-specific fields are present"""
+        if self.collaborationType == "Free Stay":
+            if self.freeStayMinNights is None or self.freeStayMaxNights is None:
+                raise ValueError("free_stay_min_nights and free_stay_max_nights are required for Free Stay")
+            if self.freeStayMaxNights < self.freeStayMinNights:
+                raise ValueError("free_stay_max_nights must be >= free_stay_min_nights")
+        elif self.collaborationType == "Paid":
+            if self.paidMaxAmount is None:
+                raise ValueError("paid_max_amount is required for Paid collaboration")
+        elif self.collaborationType == "Discount":
+            if self.discountPercentage is None:
+                raise ValueError("discount_percentage is required for Discount collaboration")
+        return self
+    
+    class Config:
+        populate_by_name = True
+
+
+class CreatorRequirementsRequest(BaseModel):
+    """Creator requirements request model"""
+    platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
+    minFollowers: Optional[int] = Field(None, gt=0, alias="min_followers")
+    targetCountries: List[str] = Field(..., min_length=1, alias="target_countries")
+    targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
+    targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")
+    
+    @model_validator(mode='after')
+    def validate_age_range(self):
+        """Validate age range if both are provided"""
+        if self.targetAgeMin is not None and self.targetAgeMax is not None:
+            if self.targetAgeMax < self.targetAgeMin:
+                raise ValueError("target_age_max must be >= target_age_min")
+        return self
+    
+    class Config:
+        populate_by_name = True
+
+
+class CreateListingRequest(BaseModel):
+    """Request model for creating hotel listing"""
+    name: str = Field(..., min_length=1)
+    location: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=10)
+    accommodationType: Optional[Literal["Hotel", "Resort", "Boutique Hotel", "Lodge", "Apartment", "Villa"]] = Field(None, alias="accommodation_type")
+    images: List[str] = Field(default_factory=list)
+    collaborationOfferings: List[CollaborationOfferingRequest] = Field(..., min_length=1, alias="collaboration_offerings")
+    creatorRequirements: CreatorRequirementsRequest = Field(alias="creator_requirements")
+    
+    class Config:
+        populate_by_name = True
+
+
+class CollaborationOfferingResponse(BaseModel):
+    """Collaboration offering response model"""
+    id: str
+    listing_id: str
+    collaboration_type: str
+    availability_months: List[str]
+    platforms: List[str]
+    free_stay_min_nights: Optional[int] = None
+    free_stay_max_nights: Optional[int] = None
+    paid_max_amount: Optional[Decimal] = None
+    discount_percentage: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreatorRequirementsResponse(BaseModel):
+    """Creator requirements response model"""
+    id: str
+    listing_id: str
+    platforms: List[str]
+    min_followers: Optional[int] = None
+    target_countries: List[str]
+    target_age_min: Optional[int] = None
+    target_age_max: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ListingResponse(BaseModel):
+    """Listing response model"""
+    id: str
+    hotel_profile_id: str
+    name: str
+    location: str
+    description: str
+    accommodation_type: Optional[str] = None
+    images: List[str]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    collaboration_offerings: List[CollaborationOfferingResponse]
+    creator_requirements: CreatorRequirementsResponse
+
+
+@router.put("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
+async def update_hotel_profile(
+    request: UpdateHotelProfileRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Update the currently authenticated hotel's profile.
+    """
+    try:
+        # Verify user is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only available for hotels"
+            )
+        
+        # Get hotel profile
+        hotel = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        # Update hotel profile
+        await Database.execute(
+            """
+            UPDATE hotel_profiles 
+            SET name = $1, 
+                location = $2, 
+                email = $3, 
+                about = $4, 
+                website = $5, 
+                phone = $6, 
+                picture = $7,
+                updated_at = now()
+            WHERE id = $8
+            """,
+            request.name,
+            request.location,
+            request.email,
+            request.about,
+            str(request.website) if request.website else None,
+            request.phone,
+            str(request.picture) if request.picture else None,
+            hotel['id']
+        )
+        
+        # Fetch updated profile
+        updated_hotel = await Database.fetchrow(
+            """
+            SELECT id, user_id, name, location, email, about, website, phone, picture, 
+                   status, created_at, updated_at
+            FROM hotel_profiles
+            WHERE id = $1
+            """,
+            hotel['id']
+        )
+        
+        return HotelProfileResponse(
+            id=str(updated_hotel['id']),
+            user_id=str(updated_hotel['user_id']),
+            name=updated_hotel['name'],
+            location=updated_hotel['location'],
+            email=updated_hotel['email'],
+            about=updated_hotel['about'],
+            website=updated_hotel['website'],
+            phone=updated_hotel['phone'],
+            picture=updated_hotel['picture'],
+            status=updated_hotel['status'],
+            created_at=updated_hotel['created_at'],
+            updated_at=updated_hotel['updated_at'],
+            listings=[]
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update profile: {str(e)}"
+        )
+
+
+@router.post("/me/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
+async def create_hotel_listing(
+    request: CreateListingRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Create a new property listing for the currently authenticated hotel.
+    """
+    try:
+        # Verify user is a hotel and get hotel profile
+        hotel_profile_id = await get_current_hotel_profile_id(user_id)
+        
+        # Use transaction to ensure atomicity
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Create listing
+                listing = await conn.fetchrow(
+                    """
+                    INSERT INTO hotel_listings 
+                    (hotel_profile_id, name, location, description, accommodation_type, images)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, name, location, description, accommodation_type, images, 
+                              status, created_at, updated_at
+                    """,
+                    hotel_profile_id,
+                    request.name,
+                    request.location,
+                    request.description,
+                    request.accommodationType,
+                    request.images
+                )
+                
+                listing_id = listing['id']
+                
+                # Create collaboration offerings
+                offerings_response = []
+                for offering in request.collaborationOfferings:
+                    offering_record = await conn.fetchrow(
+                        """
+                        INSERT INTO listing_collaboration_offerings
+                        (listing_id, collaboration_type, availability_months, platforms,
+                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        RETURNING id, collaboration_type, availability_months, platforms,
+                                  free_stay_min_nights, free_stay_max_nights, paid_max_amount, 
+                                  discount_percentage, created_at, updated_at
+                        """,
+                        listing_id,
+                        offering.collaborationType,
+                        offering.availabilityMonths,
+                        offering.platforms,
+                        offering.freeStayMinNights,
+                        offering.freeStayMaxNights,
+                        offering.paidMaxAmount,
+                        offering.discountPercentage
+                    )
+                    
+                    offerings_response.append(CollaborationOfferingResponse(
+                        id=str(offering_record['id']),
+                        listing_id=str(listing_id),
+                        collaboration_type=offering_record['collaboration_type'],
+                        availability_months=offering_record['availability_months'],
+                        platforms=offering_record['platforms'],
+                        free_stay_min_nights=offering_record['free_stay_min_nights'],
+                        free_stay_max_nights=offering_record['free_stay_max_nights'],
+                        paid_max_amount=offering_record['paid_max_amount'],
+                        discount_percentage=offering_record['discount_percentage'],
+                        created_at=offering_record['created_at'],
+                        updated_at=offering_record['updated_at']
+                    ))
+                
+                # Create creator requirements
+                requirements = await conn.fetchrow(
+                    """
+                    INSERT INTO listing_creator_requirements
+                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, platforms, min_followers, target_countries, 
+                              target_age_min, target_age_max, created_at, updated_at
+                    """,
+                    listing_id,
+                    request.creatorRequirements.platforms,
+                    request.creatorRequirements.minFollowers,
+                    request.creatorRequirements.targetCountries,
+                    request.creatorRequirements.targetAgeMin,
+                    request.creatorRequirements.targetAgeMax
+                )
+                
+                requirements_response = CreatorRequirementsResponse(
+                    id=str(requirements['id']),
+                    listing_id=str(listing_id),
+                    platforms=requirements['platforms'],
+                    min_followers=requirements['min_followers'],
+                    target_countries=requirements['target_countries'],
+                    target_age_min=requirements['target_age_min'],
+                    target_age_max=requirements['target_age_max'],
+                    created_at=requirements['created_at'],
+                    updated_at=requirements['updated_at']
+                )
+        
+        return ListingResponse(
+            id=str(listing_id),
+            hotel_profile_id=hotel_profile_id,
+            name=listing['name'],
+            location=listing['location'],
+            description=listing['description'],
+            accommodation_type=listing['accommodation_type'],
+            images=listing['images'],
+            status=listing['status'],
+            created_at=listing['created_at'],
+            updated_at=listing['updated_at'],
+            collaboration_offerings=offerings_response,
+            creator_requirements=requirements_response
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create listing: {str(e)}"
         )
 
