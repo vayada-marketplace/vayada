@@ -1,6 +1,7 @@
 """
 Application configuration using environment variables
 """
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -15,13 +16,15 @@ class Settings(BaseSettings):
     API_VERSION: str = "1.0.0"
     
     # Database Configuration
-    DATABASE_URL: str = "postgresql://vayada_user:vayada_password@postgres:5432/vayada_db"
+    # Require explicit database URL in env (no baked-in default)
+    DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60
     
     # CORS Configuration
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Require explicit frontend origins in env (no baked-in default)
+    CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"  # Comma-separated or "*" for all
     CORS_ALLOW_HEADERS: str = "*"   # Comma-separated or "*" for all
