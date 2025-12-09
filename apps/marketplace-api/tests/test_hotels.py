@@ -261,3 +261,514 @@ class TestHotelProfileStatus:
             # Cleanup
             await Database.execute("DELETE FROM users WHERE id = $1", user['id'])
 
+
+class TestUpdateHotelProfile:
+    """Test hotel profile update endpoint"""
+    
+    def test_update_profile_unauthenticated(self, client):
+        """Test that unauthenticated requests return 401"""
+        response = client.put("/hotels/me", json={})
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    
+    def test_update_profile_wrong_user_type(self, client, test_creator_user):
+        """Test that creator users cannot update hotel profile"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        response = client.put(
+            "/hotels/me",
+            json={
+                "name": "Test Hotel",
+                "location": "Test Location",
+                "email": "test@test.com"
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+    
+    @pytest.mark.asyncio
+    async def test_update_profile_success(self, client, test_hotel_user):
+        """Test successful hotel profile update"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        request_data = {
+            "name": "Grand Luxury Resort",
+            "location": "Bali, Indonesia",
+            "email": "contact@grandluxury.com",
+            "about": "A stunning beachfront resort offering world-class amenities",
+            "website": "https://grandluxury.com",
+            "phone": "+62-361-123-4567"
+        }
+        
+        response = client.put("/hotels/me", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        assert data["name"] == "Grand Luxury Resort"
+        assert data["location"] == "Bali, Indonesia"
+        assert data["email"] == "contact@grandluxury.com"
+        assert data["about"] == "A stunning beachfront resort offering world-class amenities"
+        assert data["website"] == "https://grandluxury.com"
+        assert data["phone"] == "+62-361-123-4567"
+        assert "id" in data
+        assert "user_id" in data
+        assert "status" in data
+        assert "created_at" in data
+        assert "updated_at" in data
+    
+    def test_update_profile_default_location(self, client, test_hotel_user):
+        """Test that default location is rejected"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.put(
+            "/hotels/me",
+            json={
+                "name": "Test Hotel",
+                "location": "Not specified",  # Default value - should be rejected
+                "email": "test@test.com"
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "default" in response.json()["detail"].lower()
+    
+    def test_update_profile_missing_required_fields(self, client, test_hotel_user):
+        """Test update with missing required fields"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        # Missing name
+        response = client.put(
+            "/hotels/me",
+            json={
+                "location": "Test Location",
+                "email": "test@test.com"
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_update_profile_invalid_email(self, client, test_hotel_user):
+        """Test update with invalid email format"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.put(
+            "/hotels/me",
+            json={
+                "name": "Test Hotel",
+                "location": "Test Location",
+                "email": "invalid-email"  # Invalid email format
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_update_profile_about_too_short(self, client, test_hotel_user):
+        """Test update with about field too short"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.put(
+            "/hotels/me",
+            json={
+                "name": "Test Hotel",
+                "location": "Test Location",
+                "email": "test@test.com",
+                "about": "Short"  # Less than 10 chars
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+class TestCreateHotelListing:
+    """Test hotel listing creation endpoint"""
+    
+    def test_create_listing_unauthenticated(self, client):
+        """Test that unauthenticated requests return 401"""
+        response = client.post("/hotels/me/listings", json={})
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    
+    def test_create_listing_wrong_user_type(self, client, test_creator_user):
+        """Test that creator users cannot create hotel listings"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+    
+    @pytest.mark.asyncio
+    async def test_create_listing_success(self, client, test_hotel_user):
+        """Test successful listing creation"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        request_data = {
+            "name": "Luxury Beach Villa",
+            "location": "Bali, Indonesia",
+            "description": "A stunning beachfront villa with private pool and ocean views",
+            "accommodationType": "Villa",
+            "images": [],
+            "collaborationOfferings": [
+                {
+                    "collaborationType": "Free Stay",
+                    "availabilityMonths": ["January", "February", "March"],
+                    "platforms": ["Instagram", "TikTok"],
+                    "freeStayMinNights": 2,
+                    "freeStayMaxNights": 5
+                }
+            ],
+            "creatorRequirements": {
+                "platforms": ["Instagram", "TikTok"],
+                "minFollowers": 50000,
+                "targetCountries": ["USA", "Germany"],
+                "targetAgeMin": 25,
+                "targetAgeMax": 45
+            }
+        }
+        
+        response = client.post("/hotels/me/listings", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        
+        assert data["name"] == "Luxury Beach Villa"
+        assert data["location"] == "Bali, Indonesia"
+        assert data["description"] == "A stunning beachfront villa with private pool and ocean views"
+        assert data["accommodationType"] == "Villa"
+        assert len(data["collaborationOfferings"]) == 1
+        assert data["collaborationOfferings"][0]["collaborationType"] == "Free Stay"
+        assert data["collaborationOfferings"][0]["freeStayMinNights"] == 2
+        assert data["collaborationOfferings"][0]["freeStayMaxNights"] == 5
+        assert data["creatorRequirements"]["platforms"] == ["Instagram", "TikTok"]
+        assert data["creatorRequirements"]["minFollowers"] == 50000
+        assert "id" in data
+        assert "hotelProfileId" in data
+        assert "status" in data
+        assert "createdAt" in data
+        assert "updatedAt" in data
+    
+    @pytest.mark.asyncio
+    async def test_create_listing_with_multiple_offerings(self, client, test_hotel_user):
+        """Test listing creation with multiple collaboration offerings"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        request_data = {
+            "name": "Grand Hotel",
+            "location": "Paris, France",
+            "description": "A luxurious hotel in the heart of Paris with exceptional service",
+            "collaborationOfferings": [
+                {
+                    "collaborationType": "Free Stay",
+                    "availabilityMonths": ["January", "February"],
+                    "platforms": ["Instagram"],
+                    "freeStayMinNights": 2,
+                    "freeStayMaxNights": 4
+                },
+                {
+                    "collaborationType": "Paid",
+                    "availabilityMonths": ["March", "April"],
+                    "platforms": ["TikTok", "YouTube"],
+                    "paidMaxAmount": 5000
+                },
+                {
+                    "collaborationType": "Discount",
+                    "availabilityMonths": ["May", "June"],
+                    "platforms": ["Instagram", "Facebook"],
+                    "discountPercentage": 20
+                }
+            ],
+            "creatorRequirements": {
+                "platforms": ["Instagram"],
+                "targetCountries": ["USA"]
+            }
+        }
+        
+        response = client.post("/hotels/me/listings", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        
+        assert len(data["collaborationOfferings"]) == 3
+        # Verify each offering type has correct fields
+        free_stay = next(o for o in data["collaborationOfferings"] if o["collaborationType"] == "Free Stay")
+        assert free_stay["freeStayMinNights"] == 2
+        assert free_stay["freeStayMaxNights"] == 4
+        assert free_stay["paidMaxAmount"] is None
+        assert free_stay["discountPercentage"] is None
+        
+        paid = next(o for o in data["collaborationOfferings"] if o["collaborationType"] == "Paid")
+        assert paid["paidMaxAmount"] == 5000
+        assert paid["freeStayMinNights"] is None
+        assert paid["discountPercentage"] is None
+        
+        discount = next(o for o in data["collaborationOfferings"] if o["collaborationType"] == "Discount")
+        assert discount["discountPercentage"] == 20
+        assert discount["freeStayMinNights"] is None
+        assert discount["paidMaxAmount"] is None
+    
+    def test_create_listing_missing_required_fields(self, client, test_hotel_user):
+        """Test listing creation with missing required fields"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        # Missing name
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_create_listing_no_offerings(self, client, test_hotel_user):
+        """Test listing creation with no collaboration offerings"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [],  # Empty - should fail
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_create_listing_free_stay_missing_fields(self, client, test_hotel_user):
+        """Test Free Stay offering with missing required fields"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        # Missing freeStayMinNights and freeStayMaxNights
+                    }
+                ],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    
+    def test_create_listing_free_stay_invalid_nights(self, client, test_hotel_user):
+        """Test Free Stay offering with max_nights < min_nights"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 5,
+                        "freeStayMaxNights": 2  # Invalid - max < min
+                    }
+                ],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    
+    def test_create_listing_paid_missing_amount(self, client, test_hotel_user):
+        """Test Paid offering with missing paid_max_amount"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Paid",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        # Missing paidMaxAmount
+                    }
+                ],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    
+    def test_create_listing_discount_missing_percentage(self, client, test_hotel_user):
+        """Test Discount offering with missing discount_percentage"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Discount",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        # Missing discountPercentage
+                    }
+                ],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    
+    def test_create_listing_creator_requirements_no_platforms(self, client, test_hotel_user):
+        """Test listing creation with empty platforms in creator requirements"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 2,
+                        "freeStayMaxNights": 5
+                    }
+                ],
+                "creatorRequirements": {
+                    "platforms": [],  # Empty - should fail
+                    "targetCountries": ["USA"]
+                }
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_create_listing_creator_requirements_no_countries(self, client, test_hotel_user):
+        """Test listing creation with empty target_countries"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 2,
+                        "freeStayMaxNights": 5
+                    }
+                ],
+                "creatorRequirements": {
+                    "platforms": ["Instagram"],
+                    "targetCountries": []  # Empty - should fail
+                }
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_create_listing_invalid_age_range(self, client, test_hotel_user):
+        """Test listing creation with invalid age range"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Test description",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 2,
+                        "freeStayMaxNights": 5
+                    }
+                ],
+                "creatorRequirements": {
+                    "platforms": ["Instagram"],
+                    "targetCountries": ["USA"],
+                    "targetAgeMin": 45,
+                    "targetAgeMax": 25  # Invalid - max < min
+                }
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    
+    def test_create_listing_description_too_short(self, client, test_hotel_user):
+        """Test listing creation with description less than 10 characters"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        
+        response = client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Test Listing",
+                "location": "Test",
+                "description": "Short",  # Less than 10 chars
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 2,
+                        "freeStayMaxNights": 5
+                    }
+                ],
+                "creatorRequirements": {"platforms": ["Instagram"], "targetCountries": ["USA"]}
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+

@@ -309,3 +309,250 @@ class TestCreatorProfileStatus:
             # Cleanup
             await Database.execute("DELETE FROM users WHERE id = $1", user['id'])
 
+
+class TestUpdateCreatorProfile:
+    """Test creator profile update endpoint"""
+    
+    def test_update_profile_unauthenticated(self, client):
+        """Test that unauthenticated requests return 401"""
+        response = client.put("/creators/me", json={})
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    
+    def test_update_profile_wrong_user_type(self, client, test_hotel_user):
+        """Test that hotel users cannot update creator profile"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_hotel_user)
+        response = client.put(
+            "/creators/me",
+            json={
+                "name": "Test",
+                "location": "Test",
+                "shortDescription": "Test description",
+                "platforms": []
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+    
+    @pytest.mark.asyncio
+    async def test_update_profile_success(self, client, test_creator_user):
+        """Test successful profile update"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        request_data = {
+            "name": "Updated Creator Name",
+            "location": "New York, USA",
+            "shortDescription": "I'm a travel content creator with 10+ years of experience",
+            "portfolioLink": "https://portfolio.example.com",
+            "phone": "+1-555-123-4567",
+            "platforms": [
+                {
+                    "name": "Instagram",
+                    "handle": "@testcreator",
+                    "followers": 50000,
+                    "engagementRate": 3.5
+                },
+                {
+                    "name": "TikTok",
+                    "handle": "@testcreator",
+                    "followers": 75000,
+                    "engagementRate": 5.2
+                }
+            ]
+        }
+        
+        response = client.put("/creators/me", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        assert data["name"] == "Updated Creator Name"
+        assert data["location"] == "New York, USA"
+        assert data["shortDescription"] == "I'm a travel content creator with 10+ years of experience"
+        assert data["portfolioLink"] == "https://portfolio.example.com"
+        assert data["phone"] == "+1-555-123-4567"
+        assert len(data["platforms"]) == 2
+        assert data["audienceSize"] == 125000  # 50000 + 75000
+        assert "id" in data
+        assert "status" in data
+        assert "createdAt" in data
+        assert "updatedAt" in data
+    
+    @pytest.mark.asyncio
+    async def test_update_profile_with_analytics(self, client, test_creator_user):
+        """Test profile update with analytics data"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        request_data = {
+            "name": "Creator With Analytics",
+            "location": "Los Angeles, USA",
+            "shortDescription": "Travel creator with detailed analytics data",
+            "platforms": [
+                {
+                    "name": "Instagram",
+                    "handle": "@analyticscreator",
+                    "followers": 100000,
+                    "engagementRate": 4.5,
+                    "topCountries": [
+                        {"country": "United States", "percentage": 45.5},
+                        {"country": "Germany", "percentage": 12.3}
+                    ],
+                    "topAgeGroups": [
+                        {"ageRange": "25-34", "percentage": 42.1},
+                        {"ageRange": "35-44", "percentage": 28.5}
+                    ],
+                    "genderSplit": {
+                        "male": 35,
+                        "female": 65
+                    }
+                }
+            ]
+        }
+        
+        response = client.put("/creators/me", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        assert len(data["platforms"]) == 1
+        platform = data["platforms"][0]
+        assert platform["name"] == "Instagram"
+        assert platform["topCountries"] is not None
+        assert len(platform["topCountries"]) == 2
+        assert platform["topAgeGroups"] is not None
+        assert platform["genderSplit"] is not None
+        assert platform["genderSplit"]["male"] == 35
+        assert platform["genderSplit"]["female"] == 65
+    
+    def test_update_profile_missing_required_fields(self, client, test_creator_user):
+        """Test update with missing required fields"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        # Missing name
+        response = client.put(
+            "/creators/me",
+            json={
+                "location": "Test",
+                "shortDescription": "Test description",
+                "platforms": [{"name": "Instagram", "handle": "@test", "followers": 1000, "engagementRate": 2.0}]
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_update_profile_short_description_too_short(self, client, test_creator_user):
+        """Test update with short_description less than 10 characters"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        response = client.put(
+            "/creators/me",
+            json={
+                "name": "Test",
+                "location": "Test",
+                "shortDescription": "Short",  # Less than 10 chars
+                "platforms": [{"name": "Instagram", "handle": "@test", "followers": 1000, "engagementRate": 2.0}]
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_update_profile_no_platforms(self, client, test_creator_user):
+        """Test update with no platforms"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        response = client.put(
+            "/creators/me",
+            json={
+                "name": "Test",
+                "location": "Test",
+                "shortDescription": "This is a valid description",
+                "platforms": []  # Empty platforms
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    def test_update_profile_invalid_platform_data(self, client, test_creator_user):
+        """Test update with invalid platform data"""
+        from conftest import get_auth_headers_for_user
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        # Platform with 0 followers
+        response = client.put(
+            "/creators/me",
+            json={
+                "name": "Test",
+                "location": "Test",
+                "shortDescription": "This is a valid description",
+                "platforms": [
+                    {
+                        "name": "Instagram",
+                        "handle": "@test",
+                        "followers": 0,  # Invalid - must be > 0
+                        "engagementRate": 2.0
+                    }
+                ]
+            },
+            headers=headers
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    @pytest.mark.asyncio
+    async def test_update_profile_replaces_existing_platforms(self, client, test_creator_user):
+        """Test that updating profile replaces existing platforms"""
+        from conftest import get_auth_headers_for_user
+        
+        headers = get_auth_headers_for_user(test_creator_user)
+        
+        # Get creator ID
+        creator = await Database.fetchrow(
+            "SELECT id FROM creators WHERE user_id = $1",
+            test_creator_user
+        )
+        
+        # Add an existing platform
+        await Database.execute(
+            """
+            INSERT INTO creator_platforms (creator_id, name, handle, followers, engagement_rate)
+            VALUES ($1, 'YouTube', '@oldhandle', 10000, 2.0)
+            """,
+            creator['id']
+        )
+        
+        # Update with new platforms
+        request_data = {
+            "name": "Updated Creator",
+            "location": "Test Location",
+            "shortDescription": "This is a valid description",
+            "platforms": [
+                {
+                    "name": "Instagram",
+                    "handle": "@newhandle",
+                    "followers": 20000,
+                    "engagementRate": 3.0
+                }
+            ]
+        }
+        
+        response = client.put("/creators/me", json=request_data, headers=headers)
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        # Should only have the new platform, old one should be gone
+        assert len(data["platforms"]) == 1
+        assert data["platforms"][0]["name"] == "Instagram"
+        assert data["platforms"][0]["handle"] == "@newhandle"
+        
+        # Verify old platform is deleted
+        old_platforms = await Database.fetch(
+            "SELECT * FROM creator_platforms WHERE creator_id = $1 AND name = 'YouTube'",
+            creator['id']
+        )
+        assert len(old_platforms) == 0
+

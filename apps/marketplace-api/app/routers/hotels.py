@@ -260,45 +260,57 @@ class CreateListingRequest(BaseModel):
 class CollaborationOfferingResponse(BaseModel):
     """Collaboration offering response model"""
     id: str
-    listing_id: str
-    collaboration_type: str
-    availability_months: List[str]
+    listingId: str = Field(alias="listing_id")
+    collaborationType: str = Field(alias="collaboration_type")
+    availabilityMonths: List[str] = Field(alias="availability_months")
     platforms: List[str]
-    free_stay_min_nights: Optional[int] = None
-    free_stay_max_nights: Optional[int] = None
-    paid_max_amount: Optional[Decimal] = None
-    discount_percentage: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
+    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
+    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
+    paidMaxAmount: Optional[Decimal] = Field(None, alias="paid_max_amount")
+    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
 
 
 class CreatorRequirementsResponse(BaseModel):
     """Creator requirements response model"""
     id: str
-    listing_id: str
+    listingId: str = Field(alias="listing_id")
     platforms: List[str]
-    min_followers: Optional[int] = None
-    target_countries: List[str]
-    target_age_min: Optional[int] = None
-    target_age_max: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
+    minFollowers: Optional[int] = Field(None, alias="min_followers")
+    targetCountries: List[str] = Field(alias="target_countries")
+    targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
+    targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
 
 
 class ListingResponse(BaseModel):
     """Listing response model"""
     id: str
-    hotel_profile_id: str
+    hotelProfileId: str = Field(alias="hotel_profile_id")
     name: str
     location: str
     description: str
-    accommodation_type: Optional[str] = None
+    accommodationType: Optional[str] = Field(None, alias="accommodation_type")
     images: List[str]
     status: str
-    created_at: datetime
-    updated_at: datetime
-    collaboration_offerings: List[CollaborationOfferingResponse]
-    creator_requirements: CreatorRequirementsResponse
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
+    creatorRequirements: CreatorRequirementsResponse = Field(alias="creator_requirements")
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
 
 
 @router.put("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
@@ -463,19 +475,19 @@ async def create_hotel_listing(
                         offering.discountPercentage
                     )
                     
-                    offerings_response.append(CollaborationOfferingResponse(
-                        id=str(offering_record['id']),
-                        listing_id=str(listing_id),
-                        collaboration_type=offering_record['collaboration_type'],
-                        availability_months=offering_record['availability_months'],
-                        platforms=offering_record['platforms'],
-                        free_stay_min_nights=offering_record['free_stay_min_nights'],
-                        free_stay_max_nights=offering_record['free_stay_max_nights'],
-                        paid_max_amount=offering_record['paid_max_amount'],
-                        discount_percentage=offering_record['discount_percentage'],
-                        created_at=offering_record['created_at'],
-                        updated_at=offering_record['updated_at']
-                    ))
+                    offerings_response.append(CollaborationOfferingResponse.model_validate({
+                        "id": str(offering_record['id']),
+                        "listing_id": str(listing_id),
+                        "collaboration_type": offering_record['collaboration_type'],
+                        "availability_months": offering_record['availability_months'],
+                        "platforms": offering_record['platforms'],
+                        "free_stay_min_nights": offering_record['free_stay_min_nights'],
+                        "free_stay_max_nights": offering_record['free_stay_max_nights'],
+                        "paid_max_amount": offering_record['paid_max_amount'],
+                        "discount_percentage": offering_record['discount_percentage'],
+                        "created_at": offering_record['created_at'],
+                        "updated_at": offering_record['updated_at']
+                    }))
                 
                 # Create creator requirements
                 requirements = await conn.fetchrow(
@@ -494,32 +506,32 @@ async def create_hotel_listing(
                     request.creatorRequirements.targetAgeMax
                 )
                 
-                requirements_response = CreatorRequirementsResponse(
-                    id=str(requirements['id']),
-                    listing_id=str(listing_id),
-                    platforms=requirements['platforms'],
-                    min_followers=requirements['min_followers'],
-                    target_countries=requirements['target_countries'],
-                    target_age_min=requirements['target_age_min'],
-                    target_age_max=requirements['target_age_max'],
-                    created_at=requirements['created_at'],
-                    updated_at=requirements['updated_at']
-                )
+                requirements_response = CreatorRequirementsResponse.model_validate({
+                    "id": str(requirements['id']),
+                    "listing_id": str(listing_id),
+                    "platforms": requirements['platforms'],
+                    "min_followers": requirements['min_followers'],
+                    "target_countries": requirements['target_countries'],
+                    "target_age_min": requirements['target_age_min'],
+                    "target_age_max": requirements['target_age_max'],
+                    "created_at": requirements['created_at'],
+                    "updated_at": requirements['updated_at']
+                })
         
-        return ListingResponse(
-            id=str(listing_id),
-            hotel_profile_id=hotel_profile_id,
-            name=listing['name'],
-            location=listing['location'],
-            description=listing['description'],
-            accommodation_type=listing['accommodation_type'],
-            images=listing['images'],
-            status=listing['status'],
-            created_at=listing['created_at'],
-            updated_at=listing['updated_at'],
-            collaboration_offerings=offerings_response,
-            creator_requirements=requirements_response
-        )
+        return ListingResponse.model_validate({
+            "id": str(listing_id),
+            "hotel_profile_id": hotel_profile_id,
+            "name": listing['name'],
+            "location": listing['location'],
+            "description": listing['description'],
+            "accommodation_type": listing['accommodation_type'],
+            "images": listing['images'],
+            "status": listing['status'],
+            "created_at": listing['created_at'],
+            "updated_at": listing['updated_at'],
+            "collaboration_offerings": offerings_response,
+            "creator_requirements": requirements_response
+        })
         
     except HTTPException:
         raise
