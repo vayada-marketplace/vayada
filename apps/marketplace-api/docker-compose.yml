@@ -29,6 +29,9 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      # Force the backend to talk to the postgres service inside the Docker network
+      DATABASE_URL: postgresql://vayada_user:vayada_password@postgres:5432/vayada_db
     volumes:
       - ./app:/app/app
     restart: unless-stopped

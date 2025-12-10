@@ -13,3 +13,5 @@ COMMENT ON COLUMN public.creators.location IS 'Creator location. Required for pr
 COMMENT ON COLUMN public.creators.short_description IS 'Short description of the creator. Required for profile completion but can be NULL initially.';
 
 
+
+
