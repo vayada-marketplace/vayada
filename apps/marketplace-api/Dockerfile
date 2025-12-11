@@ -9,6 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 
+# Copy scripts and migrations for running migrations
+COPY scripts/ ./scripts/
+COPY migrations/ ./migrations/
+
 # Expose port (default, can be overridden by env)
 EXPOSE 8000
 
