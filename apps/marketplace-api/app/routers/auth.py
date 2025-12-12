@@ -121,17 +121,17 @@ async def register(request: RegisterRequest):
                 user['id']
             )
         elif request.type == "hotel":
-            # Create minimal hotel profile (name, location, email will be filled/updated later)
-            # Using defaults: name from user, location='Not specified', email from user
+            # Create minimal hotel profile (name, location will be filled/updated later)
+            # Using defaults: name from user, location='Not specified'
+            # Note: email is stored in users table only (like creators)
             # Note: category is removed - accommodation_type exists at listing level only
             await Database.execute(
                 """
-                INSERT INTO hotel_profiles (user_id, name, location, email)
-                VALUES ($1, $2, 'Not specified', $3)
+                INSERT INTO hotel_profiles (user_id, name, location)
+                VALUES ($1, $2, 'Not specified')
                 """,
                 user['id'],
-                user['name'],
-                user['email']
+                user['name']
             )
         
         # Create JWT token

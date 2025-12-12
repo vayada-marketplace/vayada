@@ -57,12 +57,14 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
                 detail="This endpoint is only available for hotels"
             )
         
-        # Get hotel profile
+        # Get hotel profile with email from users table
         hotel = await Database.fetchrow(
             """
-            SELECT id, name, location, email, website, about, picture, phone
-            FROM hotel_profiles
-            WHERE user_id = $1
+            SELECT hp.id, hp.name, hp.location, hp.website, hp.about, hp.picture, hp.phone,
+                   u.email
+            FROM hotel_profiles hp
+            JOIN users u ON hp.user_id = u.id
+            WHERE hp.user_id = $1
             """,
             user_id
         )
@@ -103,10 +105,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
             # Don't add to missing_fields - defaults are tracked separately
             completion_steps.append("Set a custom location (currently using default)")
         
-        # Check email (required field)
-        if not hotel['email'] or not hotel['email'].strip():
-            missing_fields.append("email")
-            completion_steps.append("Add your contact email")
+        # Email is always in users table, so no need to check it here
         
         # Check optional but recommended fields
         if not hotel['about'] or not hotel['about'].strip():
@@ -123,10 +122,11 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         
         # Determine if profile is complete
         # Profile is complete when:
-        # - All required fields are filled (name, location, email)
+        # - All required fields are filled (name, location)
         # - Location is not using default value
         # - Optional fields like about and website are present (based on business logic)
         # - At least one listing exists
+        # Note: Email is always in users table, so not checked here
         profile_complete = (
             len(missing_fields) == 0 and
             not has_default_location and
@@ -352,23 +352,21 @@ async def update_hotel_profile(
                 detail="Hotel profile not found"
             )
         
-        # Update hotel profile
+        # Update hotel profile (email is stored in users table, not hotel_profiles)
         await Database.execute(
             """
             UPDATE hotel_profiles 
             SET name = $1, 
                 location = $2, 
-                email = $3, 
-                about = $4, 
-                website = $5, 
-                phone = $6, 
-                picture = $7,
+                about = $3, 
+                website = $4, 
+                phone = $5, 
+                picture = $6,
                 updated_at = now()
-            WHERE id = $8
+            WHERE id = $7
             """,
             request.name,
             request.location,
-            request.email,
             request.about,
             str(request.website) if request.website else None,
             request.phone,
@@ -376,13 +374,27 @@ async def update_hotel_profile(
             hotel['id']
         )
         
-        # Fetch updated profile
+        # Update email in users table if provided
+        if request.email:
+            await Database.execute(
+                """
+                UPDATE users 
+                SET email = $1, updated_at = now()
+                WHERE id = $2
+                """,
+                request.email,
+                user_id
+            )
+        
+        # Fetch updated profile with email from users table
         updated_hotel = await Database.fetchrow(
             """
-            SELECT id, user_id, name, location, email, about, website, phone, picture, 
-                   status, created_at, updated_at
-            FROM hotel_profiles
-            WHERE id = $1
+            SELECT hp.id, hp.user_id, hp.name, hp.location, hp.about, hp.website, hp.phone, hp.picture, 
+                   hp.status, hp.created_at, hp.updated_at,
+                   u.email
+            FROM hotel_profiles hp
+            JOIN users u ON hp.user_id = u.id
+            WHERE hp.id = $1
             """,
             hotel['id']
         )

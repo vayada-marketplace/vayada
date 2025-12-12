@@ -68,14 +68,13 @@ class TestHotelProfileStatus:
         # Create complete hotel profile
         hotel = await Database.fetchrow(
             """
-            INSERT INTO hotel_profiles (user_id, name, location, email, website, about)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO hotel_profiles (user_id, name, location, website, about)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id
             """,
             user['id'],
             "Grand Hotel",
             "Paris, France",  # Not default
-            test_email,
             "https://grandhotel.com",
             "A luxurious hotel in the heart of Paris"
         )
@@ -134,13 +133,12 @@ class TestHotelProfileStatus:
         # Create hotel profile with default location
         await Database.execute(
             """
-            INSERT INTO hotel_profiles (user_id, name, location, email, about)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO hotel_profiles (user_id, name, location, about)
+            VALUES ($1, $2, $3, $4)
             """,
             user['id'],
             "Test Hotel",
             "Not specified",  # Default
-            test_email,
             "A nice hotel"
         )
         
@@ -184,13 +182,12 @@ class TestHotelProfileStatus:
         # Create hotel profile with missing about and website
         await Database.execute(
             """
-            INSERT INTO hotel_profiles (user_id, name, location, email, about, website)
-            VALUES ($1, $2, $3, $4, NULL, NULL)
+            INSERT INTO hotel_profiles (user_id, name, location, about, website)
+            VALUES ($1, $2, $3, NULL, NULL)
             """,
             user['id'],
             "Test Hotel",
-            "Paris, France",
-            test_email
+            "Paris, France"
         )
         
         try:
@@ -235,13 +232,12 @@ class TestHotelProfileStatus:
         # Create hotel profile with empty strings
         await Database.execute(
             """
-            INSERT INTO hotel_profiles (user_id, name, location, email, about, website)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO hotel_profiles (user_id, name, location, about, website)
+            VALUES ($1, $2, $3, $4, $5)
             """,
             user['id'],
             "Test Hotel",
             "Paris, France",
-            test_email,
             "   ",  # Only whitespace
             ""  # Empty string
         )
