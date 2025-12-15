@@ -55,19 +55,19 @@ class PlatformRequest(BaseModel):
 
 
 class UpdateCreatorProfileRequest(BaseModel):
-    """Request model for updating creator profile"""
-    name: str = Field(..., min_length=1)
-    location: str = Field(..., min_length=1)
-    shortDescription: str = Field(..., min_length=10, max_length=500, alias="short_description")
+    """Request model for updating creator profile (partial updates supported)"""
+    name: Optional[str] = Field(None, min_length=1)
+    location: Optional[str] = Field(None, min_length=1)
+    shortDescription: Optional[str] = Field(None, min_length=10, max_length=500, alias="short_description")
     portfolioLink: Optional[HttpUrl] = Field(None, alias="portfolio_link")
     phone: Optional[str] = None
-    platforms: List[PlatformRequest] = Field(..., min_length=1)
+    platforms: Optional[List[PlatformRequest]] = Field(None, min_length=1)
     audienceSize: Optional[int] = Field(None, alias="audience_size", gt=0)
     
     @model_validator(mode='after')
     def validate_audience_size(self):
-        """Calculate audience size if not provided"""
-        if self.audienceSize is None:
+        """Calculate audience size if platforms are provided and audienceSize is not"""
+        if self.platforms is not None and self.audienceSize is None:
             self.audienceSize = sum(p.followers for p in self.platforms)
         return self
     
@@ -401,9 +401,10 @@ async def update_creator_profile(
 ):
     """
     Update the currently authenticated creator's profile.
+    Supports partial updates - only provided fields will be updated.
     
-    This endpoint updates basic profile information and replaces all existing platforms
-    with the provided platforms array.
+    If platforms are provided, all existing platforms will be replaced with the new ones.
+    If platforms are not provided, existing platforms remain unchanged.
     """
     try:
         # Verify user is a creator
@@ -442,65 +443,87 @@ async def update_creator_profile(
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Update user name
-                await conn.execute(
-                    "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
-                    request.name,
-                    user_id
-                )
-                
-                # Update creator profile
-                await conn.execute(
-                    """
-                    UPDATE creators 
-                    SET location = $1, 
-                        short_description = $2, 
-                        portfolio_link = $3, 
-                        phone = $4,
-                        updated_at = now()
-                    WHERE id = $5
-                    """,
-                    request.location,
-                    request.shortDescription,
-                    str(request.portfolioLink) if request.portfolioLink else None,
-                    request.phone,
-                    creator_id
-                )
-                
-                # Delete existing platforms (replace strategy)
-                await conn.execute(
-                    "DELETE FROM creator_platforms WHERE creator_id = $1",
-                    creator_id
-                )
-                
-                # Insert new platforms
-                for platform in request.platforms:
-                    # Prepare analytics data as JSONB (asyncpg handles Python dicts/lists automatically)
-                    top_countries_data = [tc.model_dump() for tc in platform.topCountries] if platform.topCountries else None
-                    top_age_groups_data = [tag.model_dump() for tag in platform.topAgeGroups] if platform.topAgeGroups else None
-                    gender_split_data = platform.genderSplit.model_dump() if platform.genderSplit else None
-                    
+                # Update user name if provided
+                if request.name is not None:
                     await conn.execute(
-                        """
-                        INSERT INTO creator_platforms 
-                        (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        """,
-                        creator_id,
-                        platform.name,
-                        platform.handle,
-                        platform.followers,
-                        Decimal(str(platform.engagementRate)),
-                        top_countries_data,
-                        top_age_groups_data,
-                        gender_split_data
+                        "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
+                        request.name,
+                        user_id
                     )
+                
+                # Build dynamic UPDATE query for creator profile
+                update_fields = []
+                update_values = []
+                param_counter = 1
+                
+                if request.location is not None:
+                    update_fields.append(f"location = ${param_counter}")
+                    update_values.append(request.location)
+                    param_counter += 1
+                
+                if request.shortDescription is not None:
+                    update_fields.append(f"short_description = ${param_counter}")
+                    update_values.append(request.shortDescription)
+                    param_counter += 1
+                
+                if request.portfolioLink is not None:
+                    update_fields.append(f"portfolio_link = ${param_counter}")
+                    update_values.append(str(request.portfolioLink))
+                    param_counter += 1
+                
+                if request.phone is not None:
+                    update_fields.append(f"phone = ${param_counter}")
+                    update_values.append(request.phone)
+                    param_counter += 1
+                
+                # Update creator profile if there are fields to update
+                if update_fields:
+                    update_fields.append("updated_at = now()")
+                    update_values.append(creator_id)  # WHERE clause parameter
+                    
+                    update_query = f"""
+                        UPDATE creators 
+                        SET {', '.join(update_fields)}
+                        WHERE id = ${param_counter}
+                    """
+                    await conn.execute(update_query, *update_values)
+                
+                # Update platforms only if provided (replace strategy)
+                if request.platforms is not None:
+                    # Delete existing platforms
+                    await conn.execute(
+                        "DELETE FROM creator_platforms WHERE creator_id = $1",
+                        creator_id
+                    )
+                    
+                    # Insert new platforms
+                    for platform in request.platforms:
+                        # Prepare analytics data as JSONB (asyncpg handles Python dicts/lists automatically)
+                        top_countries_data = [tc.model_dump() for tc in platform.topCountries] if platform.topCountries else None
+                        top_age_groups_data = [tag.model_dump() for tag in platform.topAgeGroups] if platform.topAgeGroups else None
+                        gender_split_data = platform.genderSplit.model_dump() if platform.genderSplit else None
+                        
+                        await conn.execute(
+                            """
+                            INSERT INTO creator_platforms 
+                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            creator_id,
+                            platform.name,
+                            platform.handle,
+                            platform.followers,
+                            Decimal(str(platform.engagementRate)),
+                            top_countries_data,
+                            top_age_groups_data,
+                            gender_split_data
+                        )
         
         # Fetch updated profile with platforms
         creator_data = await Database.fetchrow(
             """
             SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
-                   c.created_at, c.updated_at, u.status
+                   c.created_at, c.updated_at, u.status, u.name as user_name
             FROM creators c
             JOIN users u ON u.id = c.user_id
             WHERE c.id = $1
@@ -538,7 +561,7 @@ async def update_creator_profile(
         
         return CreatorProfileResponse(
             id=str(creator_data['id']),
-            name=request.name,
+            name=request.name if request.name is not None else creator_data['user_name'],
             location=creator_data['location'],
             short_description=creator_data['short_description'],
             portfolio_link=creator_data['portfolio_link'],
