@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 import json
 from app.database import Database
-from app.dependencies import get_current_user_id, get_current_creator_id
+from app.dependencies import get_current_user_id
 
 router = APIRouter(prefix="/creators", tags=["creators"])
 
@@ -85,6 +85,52 @@ class PlatformResponse(BaseModel):
     topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
     topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
     genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class ReviewResponse(BaseModel):
+    """Review response model"""
+    id: str
+    hotelId: Optional[str] = Field(None, alias="hotel_id")
+    hotelName: Optional[str] = Field(None, alias="hotel_name")
+    rating: int
+    comment: Optional[str] = None
+    createdAt: datetime = Field(alias="created_at")
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class RatingResponse(BaseModel):
+    """Rating summary response model"""
+    averageRating: float = Field(alias="average_rating")
+    totalReviews: int = Field(alias="total_reviews")
+    reviews: List[ReviewResponse] = Field(default_factory=list)
+    
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class CreatorProfileFullResponse(BaseModel):
+    """Full creator profile response model for GET /creators/me"""
+    id: str
+    name: str
+    email: str
+    phone: Optional[str] = None
+    location: str
+    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
+    shortDescription: Optional[str] = Field(None, alias="short_description")
+    profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    platforms: List[PlatformResponse]
+    rating: RatingResponse
+    status: str
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
     
     class Config:
         populate_by_name = True
@@ -216,6 +262,135 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile status: {str(e)}"
+        )
+
+
+@router.get("/me", response_model=CreatorProfileFullResponse)
+async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
+    """
+    Get the complete profile data for the currently authenticated creator user.
+    """
+    try:
+        # Verify user is a creator
+        user = await Database.fetchrow(
+            "SELECT id, type, name, email, status FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'creator':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only available for creators"
+            )
+        
+        # Get creator profile
+        creator = await Database.fetchrow(
+            """
+            SELECT id, location, short_description, portfolio_link, phone, 
+                   created_at, updated_at
+            FROM creators
+            WHERE user_id = $1
+            """,
+            user_id
+        )
+        
+        if not creator:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Creator profile not found"
+            )
+        
+        creator_id = creator['id']
+        
+        # Get platforms
+        platforms_data = await Database.fetch(
+            """
+            SELECT id, name, handle, followers, engagement_rate, 
+                   top_countries, top_age_groups, gender_split
+            FROM creator_platforms
+            WHERE creator_id = $1
+            ORDER BY name
+            """,
+            creator_id
+        )
+        
+        platforms_response = [
+            PlatformResponse(
+                id=str(p['id']),
+                name=p['name'],
+                handle=p['handle'],
+                followers=p['followers'],
+                engagement_rate=float(p['engagement_rate']),
+                topCountries=p['top_countries'],
+                topAgeGroups=p['top_age_groups'],
+                genderSplit=p['gender_split']
+            ) for p in platforms_data
+        ]
+        
+        # Get ratings and reviews
+        ratings_data = await Database.fetch(
+            """
+            SELECT cr.id, cr.hotel_id, cr.rating, cr.comment, cr.created_at,
+                   hp.name as hotel_name
+            FROM creator_ratings cr
+            LEFT JOIN hotel_profiles hp ON cr.hotel_id = hp.id
+            WHERE cr.creator_id = $1
+            ORDER BY cr.created_at DESC
+            """,
+            creator_id
+        )
+        
+        total_reviews = len(ratings_data)
+        average_rating = (
+            sum(r['rating'] for r in ratings_data) / total_reviews
+            if total_reviews > 0 else 0.0
+        )
+        
+        reviews_response = [
+            ReviewResponse(
+                id=str(r['id']),
+                hotelId=str(r['hotel_id']) if r['hotel_id'] else None,
+                hotelName=r['hotel_name'],
+                rating=r['rating'],
+                comment=r['comment'],
+                created_at=r['created_at']
+            ) for r in ratings_data
+        ]
+        
+        rating_response = RatingResponse(
+            average_rating=round(average_rating, 2),
+            total_reviews=total_reviews,
+            reviews=reviews_response
+        )
+        
+        return CreatorProfileFullResponse(
+            id=str(creator_id),
+            name=user['name'],
+            email=user['email'],
+            phone=creator['phone'],
+            location=creator['location'] or "",
+            portfolio_link=creator['portfolio_link'],
+            short_description=creator['short_description'],
+            profile_picture=None,  # Not stored in current schema
+            platforms=platforms_response,
+            rating=rating_response,
+            status=user['status'],
+            created_at=creator['created_at'],
+            updated_at=creator['updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get profile: {str(e)}"
         )
 
 
