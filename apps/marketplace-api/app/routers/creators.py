@@ -327,9 +327,9 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
                 handle=p['handle'],
                 followers=p['followers'],
                 engagement_rate=float(p['engagement_rate']),
-                topCountries=p['top_countries'],
-                topAgeGroups=p['top_age_groups'],
-                genderSplit=p['gender_split']
+                topCountries=json.loads(p['top_countries']) if p['top_countries'] else None,
+                topAgeGroups=json.loads(p['top_age_groups']) if p['top_age_groups'] else None,
+                genderSplit=json.loads(p['gender_split']) if p['gender_split'] else None
             ) for p in platforms_data
         ]
         
@@ -498,10 +498,10 @@ async def update_creator_profile(
                     
                     # Insert new platforms
                     for platform in request.platforms:
-                        # Prepare analytics data as JSONB (asyncpg handles Python dicts/lists automatically)
-                        top_countries_data = [tc.model_dump() for tc in platform.topCountries] if platform.topCountries else None
-                        top_age_groups_data = [tag.model_dump() for tag in platform.topAgeGroups] if platform.topAgeGroups else None
-                        gender_split_data = platform.genderSplit.model_dump() if platform.genderSplit else None
+                        # Prepare analytics data as JSONB (serialize to string for DB)
+                        top_countries_data = json.dumps([tc.model_dump() for tc in platform.topCountries]) if platform.topCountries else None
+                        top_age_groups_data = json.dumps([tag.model_dump() for tag in platform.topAgeGroups]) if platform.topAgeGroups else None
+                        gender_split_data = json.dumps(platform.genderSplit.model_dump()) if platform.genderSplit else None
                         
                         await conn.execute(
                             """
@@ -554,9 +554,9 @@ async def update_creator_profile(
                 handle=p['handle'],
                 followers=p['followers'],
                 engagement_rate=float(p['engagement_rate']),
-                top_countries=p['top_countries'],
-                top_age_groups=p['top_age_groups'],
-                gender_split=p['gender_split']
+                top_countries=json.loads(p['top_countries']) if p['top_countries'] else None,
+                top_age_groups=json.loads(p['top_age_groups']) if p['top_age_groups'] else None,
+                gender_split=json.loads(p['gender_split']) if p['gender_split'] else None
             ))
         
         return CreatorProfileResponse(
