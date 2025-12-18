@@ -38,6 +38,24 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
+    # Email Configuration
+    EMAIL_ENABLED: bool = True
+    EMAIL_FROM_ADDRESS: str = Field("noreply@vayada.com", description="Email address to send from")
+    EMAIL_FROM_NAME: str = "Vayada"
+    FRONTEND_URL: str = Field("https://vayada.com", description="Frontend URL for reset password links")
+    
+    # SMTP Configuration (for sending emails via SMTP)
+    SMTP_HOST: str = Field("", description="SMTP server host (e.g., smtp.gmail.com)")
+    SMTP_PORT: int = 587
+    SMTP_USER: str = Field("", description="SMTP username/email")
+    SMTP_PASSWORD: str = Field("", description="SMTP password")
+    SMTP_USE_TLS: bool = True
+    
+    # Alternative: Email Service API (e.g., SendGrid, AWS SES)
+    # If using an email service, set EMAIL_SERVICE_API_KEY instead of SMTP settings
+    EMAIL_SERVICE_API_KEY: str = Field("", description="API key for email service (SendGrid, etc.)")
+    EMAIL_SERVICE_PROVIDER: str = Field("smtp", description="Email service provider: 'smtp', 'sendgrid', 'ses'")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

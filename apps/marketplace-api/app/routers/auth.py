@@ -5,8 +5,14 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal
 import bcrypt
+import logging
+
+logger = logging.getLogger(__name__)
 from app.database import Database
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
+from app.auth import create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used, hash_password
+from app.email_service import send_email, create_password_reset_email_html
+from app.config import settings
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 
@@ -60,6 +66,31 @@ class TokenValidationResponse(BaseModel):
     user_id: str | None = None
     email: str | None = None
     type: str | None = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Forgot password request model"""
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Forgot password response model"""
+    message: str
+    # Note: In production, token should not be returned. 
+    # This is for development/testing purposes only.
+    # In production, send the token via email instead.
+    token: str | None = None  # Only returned in development mode
+
+
+class ResetPasswordRequest(BaseModel):
+    """Reset password request model"""
+    token: str
+    new_password: str = Field(..., min_length=8, description="New password must be at least 8 characters")
+
+
+class ResetPasswordResponse(BaseModel):
+    """Reset password response model"""
+    message: str
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -300,3 +331,142 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
         email=user['email'],
         type=user['type']
     )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_200_OK)
+async def forgot_password(request: ForgotPasswordRequest):
+    """
+    Request a password reset
+    
+    - **email**: User's email address
+    
+    This endpoint will:
+    1. Check if the email exists
+    2. Generate a secure reset token
+    3. Store the token in the database (expires in 1 hour)
+    4. Return a success message
+    
+    Note: In production, the reset token should be sent via email.
+    For development/testing, the token is returned in the response.
+    """
+    try:
+        # Find user by email
+        user = await Database.fetchrow(
+            "SELECT id, email, name, status FROM users WHERE email = $1",
+            request.email
+        )
+        
+        # Always return success message (security best practice - don't reveal if email exists)
+        # But only create token if user exists and is not suspended
+        if user and user['status'] != 'suspended':
+            # Create password reset token (expires in 1 hour)
+            token = await create_password_reset_token(str(user['id']), expires_in_hours=1)
+            
+            # Create reset link
+            reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            
+            # Get user name for email personalization
+            user_name = user.get('name') or user['email'].split('@')[0]
+            
+            # Create email content
+            html_body = create_password_reset_email_html(reset_link, user_name)
+            
+            # Send email
+            email_sent = await send_email(
+                to_email=user['email'],
+                subject="Reset Your Vayada Password",
+                html_body=html_body
+            )
+            
+            # In development mode, return token for testing if email failed
+            # In production, always return None for token
+            return_token = None
+            if settings.DEBUG and not email_sent:
+                # If email sending failed in debug mode, return token for testing
+                return_token = token
+                logger.warning(f"Email sending failed in debug mode. Returning token in response.")
+            
+            return ForgotPasswordResponse(
+                message="If an account with that email exists, a password reset link has been sent.",
+                token=return_token
+            )
+        else:
+            # Still return success (security best practice)
+            return ForgotPasswordResponse(
+                message="If an account with that email exists, a password reset link has been sent.",
+                token=None
+            )
+            
+    except Exception as e:
+        # Still return success message (security best practice)
+        return ForgotPasswordResponse(
+            message="If an account with that email exists, a password reset link has been sent.",
+            token=None
+        )
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK)
+async def reset_password(request: ResetPasswordRequest):
+    """
+    Reset password using a reset token
+    
+    - **token**: Password reset token (from forgot-password endpoint)
+    - **new_password**: New password (minimum 8 characters)
+    
+    This endpoint will:
+    1. Validate the reset token
+    2. Check if token is expired or already used
+    3. Update the user's password
+    4. Mark the token as used
+    """
+    try:
+        # Validate the reset token
+        token_data = await validate_password_reset_token(request.token)
+        
+        if not token_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired reset token"
+            )
+        
+        user_id = token_data['user_id']
+        
+        # Hash the new password
+        password_hash = hash_password(request.new_password)
+        
+        # Update user's password
+        await Database.execute(
+            """
+            UPDATE users
+            SET password_hash = $1, updated_at = now()
+            WHERE id = $2
+            """,
+            password_hash,
+            user_id
+        )
+        
+        # Mark token as used
+        await mark_password_reset_token_as_used(request.token)
+        
+        # Optionally: Invalidate all existing tokens for this user (security best practice)
+        # This prevents reuse of any other tokens that might have been generated
+        await Database.execute(
+            """
+            UPDATE password_reset_tokens
+            SET used = true
+            WHERE user_id = $1 AND used = false
+            """,
+            user_id
+        )
+        
+        return ResetPasswordResponse(
+            message="Password has been reset successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset password: {str(e)}"
+        )
