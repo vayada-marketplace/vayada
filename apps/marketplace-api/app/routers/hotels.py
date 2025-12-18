@@ -248,7 +248,7 @@ class CreateListingRequest(BaseModel):
     name: str = Field(..., min_length=1)
     location: str = Field(..., min_length=1)
     description: str = Field(..., min_length=10)
-    accommodationType: Optional[Literal["Hotel", "Resort", "Boutique Hotel", "Lodge", "Apartment", "Villa"]] = Field(None, alias="accommodation_type")
+    accommodationType: Optional[Literal["Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"]] = Field(None, alias="accommodation_type")
     images: List[str] = Field(default_factory=list)
     collaborationOfferings: List[CollaborationOfferingRequest] = Field(..., min_length=1, alias="collaboration_offerings")
     creatorRequirements: CreatorRequirementsRequest = Field(alias="creator_requirements")
@@ -262,7 +262,7 @@ class UpdateListingRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1)
     location: Optional[str] = Field(None, min_length=1)
     description: Optional[str] = Field(None, min_length=10)
-    accommodationType: Optional[Literal["Hotel", "Resort", "Boutique Hotel", "Lodge", "Apartment", "Villa"]] = Field(None, alias="accommodation_type")
+    accommodationType: Optional[Literal["Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"]] = Field(None, alias="accommodation_type")
     images: Optional[List[str]] = None
     collaborationOfferings: Optional[List[CollaborationOfferingRequest]] = Field(None, alias="collaboration_offerings")
     creatorRequirements: Optional[CreatorRequirementsRequest] = Field(None, alias="creator_requirements")
