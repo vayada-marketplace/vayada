@@ -8,6 +8,10 @@ from datetime import datetime
 from decimal import Decimal
 from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
+from app.email_service import send_email, create_profile_completion_email_html
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/hotels", tags=["hotels"])
 
@@ -502,11 +506,11 @@ async def update_hotel_profile(
                 detail="This endpoint is only available for hotels"
             )
         
-        # Get current hotel profile
+        # Get current hotel profile with completion status
         hotel = await Database.fetchrow(
             """
             SELECT id, user_id, name, location, about, website, phone, picture,
-                   status, created_at, updated_at
+                   status, created_at, updated_at, profile_complete
             FROM hotel_profiles
             WHERE user_id = $1
             """,
@@ -518,6 +522,8 @@ async def update_hotel_profile(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
+        
+        was_complete_before = hotel.get('profile_complete', False)
         
         # Build dynamic UPDATE query for hotel_profiles table
         update_fields = []
@@ -578,18 +584,44 @@ async def update_hotel_profile(
                 user_id
             )
         
-        # Fetch updated profile with email from users table
+        # Fetch updated profile with email from users table and check if profile became complete
         updated_hotel = await Database.fetchrow(
             """
             SELECT hp.id, hp.user_id, hp.name, hp.location, hp.about, hp.website, hp.phone, hp.picture, 
-                   hp.status, hp.created_at, hp.updated_at,
-                   u.email
+                   hp.status, hp.created_at, hp.updated_at, hp.profile_complete,
+                   u.email, u.name as user_name
             FROM hotel_profiles hp
             JOIN users u ON hp.user_id = u.id
             WHERE hp.id = $1
             """,
             hotel['id']
         )
+        
+        # Check if profile just became complete (transition from incomplete to complete)
+        is_complete_now = updated_hotel.get('profile_complete', False)
+        profile_just_completed = not was_complete_before and is_complete_now
+        
+        # Send confirmation email if profile just became complete
+        if profile_just_completed:
+            try:
+                user_email = updated_hotel['email']
+                user_name = updated_hotel.get('user_name') or updated_hotel.get('name') or user_email.split('@')[0]
+                
+                html_body = create_profile_completion_email_html(user_name, "hotel")
+                
+                email_sent = await send_email(
+                    to_email=user_email,
+                    subject="🎉 Your Hotel Profile is Complete!",
+                    html_body=html_body
+                )
+                
+                if email_sent:
+                    logger.info(f"Profile completion email sent to {user_email}")
+                else:
+                    logger.warning(f"Failed to send profile completion email to {user_email}")
+            except Exception as e:
+                # Don't fail the request if email fails
+                logger.error(f"Error sending profile completion email: {str(e)}")
         
         # Get all listings for this hotel (same as GET endpoint)
         listings_data = await Database.fetch(

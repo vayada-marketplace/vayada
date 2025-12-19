@@ -7,8 +7,12 @@ from typing import List, Optional, Literal
 from datetime import datetime
 from decimal import Decimal
 import json
+import logging
 from app.database import Database
 from app.dependencies import get_current_user_id
+from app.email_service import send_email, create_profile_completion_email_html
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/creators", tags=["creators"])
 
@@ -425,9 +429,9 @@ async def update_creator_profile(
                 detail="This endpoint is only available for creators"
             )
         
-        # Get creator profile
+        # Get creator profile with completion status
         creator = await Database.fetchrow(
-            "SELECT id FROM creators WHERE user_id = $1",
+            "SELECT id, profile_complete FROM creators WHERE user_id = $1",
             user_id
         )
         
@@ -438,6 +442,7 @@ async def update_creator_profile(
             )
         
         creator_id = creator['id']
+        was_complete_before = creator.get('profile_complete', False)
         
         # Start transaction - update user name, creator profile, and platforms
         pool = await Database.get_pool()
@@ -519,17 +524,43 @@ async def update_creator_profile(
                             gender_split_data
                         )
         
-        # Fetch updated profile with platforms
+        # Fetch updated profile with platforms and check if profile became complete
         creator_data = await Database.fetchrow(
             """
             SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
-                   c.created_at, c.updated_at, u.status, u.name as user_name
+                   c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
             FROM creators c
             JOIN users u ON u.id = c.user_id
             WHERE c.id = $1
             """,
             creator_id
         )
+        
+        # Check if profile just became complete (transition from incomplete to complete)
+        is_complete_now = creator_data.get('profile_complete', False)
+        profile_just_completed = not was_complete_before and is_complete_now
+        
+        # Send confirmation email if profile just became complete
+        if profile_just_completed:
+            try:
+                user_email = creator_data['email']
+                user_name = creator_data['user_name'] or user_email.split('@')[0]
+                
+                html_body = create_profile_completion_email_html(user_name, "creator")
+                
+                email_sent = await send_email(
+                    to_email=user_email,
+                    subject="🎉 Your Creator Profile is Complete!",
+                    html_body=html_body
+                )
+                
+                if email_sent:
+                    logger.info(f"Profile completion email sent to {user_email}")
+                else:
+                    logger.warning(f"Failed to send profile completion email to {user_email}")
+            except Exception as e:
+                # Don't fail the request if email fails
+                logger.error(f"Error sending profile completion email: {str(e)}")
         
         platforms_data = await Database.fetch(
             """

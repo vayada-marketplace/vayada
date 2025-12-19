@@ -249,6 +249,74 @@ async def _send_email_ses(
         return False
 
 
+def create_profile_completion_email_html(user_name: str, user_type: str) -> str:
+    """
+    Create HTML email template for profile completion confirmation
+    
+    Args:
+        user_name: User's name
+        user_type: 'creator' or 'hotel'
+    
+    Returns:
+        HTML email body
+    """
+    profile_type = "Creator" if user_type == "creator" else "Hotel"
+    dashboard_link = f"{settings.FRONTEND_URL}/{'profile' if user_type == 'creator' else 'hotel/dashboard'}"
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Profile Completed - {profile_type}</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h1 style="color: #2c3e50; margin-top: 0;">🎉 Profile Completed!</h1>
+        </div>
+        
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <p>Hi {user_name},</p>
+            
+            <p>Congratulations! Your {profile_type.lower()} profile on Vayada has been completed successfully.</p>
+            
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p style="margin: 0; color: #2e7d32; font-weight: bold;">✅ Your profile is now complete and ready for review!</p>
+            </div>
+            
+            <p>Our team will now review your profile and verify your information. Once approved, your profile will go live and you'll be able to:</p>
+            
+            <ul style="color: #666;">
+                <li>Connect with {('hotels' if user_type == 'creator' else 'creators')} on the platform</li>
+                <li>Start receiving collaboration opportunities</li>
+                <li>Build your presence on Vayada</li>
+            </ul>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{dashboard_link}" 
+                   style="background-color: #007bff; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                    View Your Profile
+                </a>
+            </div>
+            
+            <p style="color: #666; font-size: 14px; margin-top: 30px;">
+                <strong>What's next?</strong><br>
+                You'll receive an email notification once your profile has been reviewed and approved by our team.
+            </p>
+        </div>
+        
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
+            <p>© {settings.EMAIL_FROM_NAME}. All rights reserved.</p>
+            <p>This is an automated message, please do not reply to this email.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
+
+
 def create_password_reset_email_html(reset_link: str, user_name: Optional[str] = None) -> str:
     """
     Create HTML email template for password reset
