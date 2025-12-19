@@ -75,7 +75,7 @@ async def create_password_reset_token(user_id: str, expires_in_hours: int = 1) -
     from app.database import Database
     
     token = generate_password_reset_token()
-    expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
     
     await Database.execute(
         """
@@ -121,7 +121,7 @@ async def validate_password_reset_token(token: str) -> Optional[dict]:
         return None
     
     # Check if token is expired
-    if datetime.utcnow() > token_record['expires_at']:
+    if datetime.now(timezone.utc) > token_record['expires_at']:
         return None
     
     # Check if user account is suspended

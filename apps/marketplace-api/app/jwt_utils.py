@@ -1,7 +1,7 @@
 """
 JWT token utilities
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
 import jwt
 from app.config import settings
@@ -21,11 +21,11 @@ def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
     
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
     
     encoded_jwt = jwt.encode(
         to_encode,
@@ -103,13 +103,13 @@ def get_token_expiration(token: str) -> Optional[datetime]:
         )
         exp = payload.get("exp")
         if exp:
-            return datetime.utcfromtimestamp(exp)
+            return datetime.fromtimestamp(exp, tz=timezone.utc)
         return None
     except:
         return None
 
 
-def is_token_expired(token: str) -> bool:
+def is_token_expired(token: str) -> Optional[bool]:
     """
     Check if token is expired
     
@@ -117,10 +117,13 @@ def is_token_expired(token: str) -> bool:
         token: JWT token string
     
     Returns:
-        True if expired, False if valid, None if invalid format
+        True if expired, False if valid and not expired, None if invalid format
     """
     exp = get_token_expiration(token)
     if exp is None:
-        return True
-    return datetime.utcnow() >= exp
+        return None  # Invalid token format - cannot determine if expired
+    # Ensure exp is timezone-aware for comparison
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) >= exp
 

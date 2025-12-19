@@ -398,22 +398,28 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
     
     token = credentials.credentials
     
-    # Check if token is expired
-    if is_token_expired(token):
+    # Decode token first to check if it's valid
+    payload = decode_access_token(token)
+    if not payload:
+        # Invalid token - check if it's expired or just malformed
+        is_exp = is_token_expired(token)
+        # If is_exp is None, token is invalid (not a valid JWT format)
+        # If is_exp is True, token is expired
+        # If is_exp is False, token is valid but signature is wrong
         return TokenValidationResponse(
             valid=False,
-            expired=True,
+            expired=is_exp if is_exp is not None else False,  # False if invalid format, True if expired
             user_id=None,
             email=None,
             type=None
         )
     
-    # Decode token
-    payload = decode_access_token(token)
-    if not payload:
+    # Check if token is expired (only if payload exists)
+    is_exp = is_token_expired(token)
+    if is_exp is True:
         return TokenValidationResponse(
             valid=False,
-            expired=False,
+            expired=True,
             user_id=None,
             email=None,
             type=None
