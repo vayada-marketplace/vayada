@@ -10,8 +10,11 @@ import logging
 logger = logging.getLogger(__name__)
 from app.database import Database
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
-from app.auth import create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used, hash_password
-from app.email_service import send_email, create_password_reset_email_html
+from app.auth import (
+    create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used, 
+    hash_password, create_email_verification_code, verify_email_code, mark_email_as_verified
+)
+from app.email_service import send_email, create_password_reset_email_html, create_email_verification_html
 from app.config import settings
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
@@ -91,6 +94,123 @@ class ResetPasswordRequest(BaseModel):
 class ResetPasswordResponse(BaseModel):
     """Reset password response model"""
     message: str
+
+
+class SendVerificationCodeRequest(BaseModel):
+    """Send verification code request model"""
+    email: EmailStr
+
+
+class SendVerificationCodeResponse(BaseModel):
+    """Send verification code response model"""
+    message: str
+    code: Optional[str] = None  # Only returned in DEBUG mode for testing
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    """Verify email code request model"""
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
+
+
+class VerifyEmailCodeResponse(BaseModel):
+    """Verify email code response model"""
+    message: str
+    verified: bool
+
+
+@router.post("/send-verification-code", response_model=SendVerificationCodeResponse, status_code=status.HTTP_200_OK)
+async def send_verification_code(request: SendVerificationCodeRequest):
+    """
+    Send a 6-digit verification code to the user's email address.
+    This is used during registration to verify the email address.
+    
+    The code expires in 15 minutes and can only be used once.
+    """
+    try:
+        # Check if email is already registered
+        existing_user = await Database.fetchrow(
+            "SELECT id FROM users WHERE email = $1",
+            request.email
+        )
+        
+        if existing_user:
+            # Don't reveal if email exists for security
+            return SendVerificationCodeResponse(
+                message="If this email is not registered, a verification code has been sent.",
+                code=None
+            )
+        
+        # Generate and store verification code
+        code = await create_email_verification_code(request.email, expires_in_minutes=15)
+        
+        # Create email content
+        html_body = create_email_verification_html(code, None)
+        
+        # Send email
+        email_sent = await send_email(
+            to_email=request.email,
+            subject="Verify Your Email - Vayada",
+            html_body=html_body
+        )
+        
+        if not email_sent and settings.DEBUG:
+            # In debug mode, return code if email fails
+            return SendVerificationCodeResponse(
+                message="Verification code sent. (Email failed, code returned for debug)",
+                code=code
+            )
+        elif not email_sent:
+            # In production, return generic message
+            return SendVerificationCodeResponse(
+                message="If this email is not registered, a verification code has been sent.",
+                code=None
+            )
+        else:
+            return SendVerificationCodeResponse(
+                message="Verification code sent to your email.",
+                code=code if settings.DEBUG else None
+            )
+            
+    except Exception as e:
+        logger.error(f"Error sending verification code: {e}")
+        # Return generic message for security
+        return SendVerificationCodeResponse(
+            message="If this email is not registered, a verification code has been sent.",
+            code=None
+        )
+
+
+@router.post("/verify-email-code", response_model=VerifyEmailCodeResponse, status_code=status.HTTP_200_OK)
+async def verify_email_code_endpoint(request: VerifyEmailCodeRequest):
+    """
+    Verify a 6-digit code sent to the user's email.
+    This marks the email as verified for future registration.
+    """
+    try:
+        # Verify the code
+        is_valid = await verify_email_code(request.email, request.code)
+        
+        if is_valid:
+            # Mark email as verified (if user exists, update their status)
+            await mark_email_as_verified(request.email)
+            
+            return VerifyEmailCodeResponse(
+                message="Email verified successfully!",
+                verified=True
+            )
+        else:
+            return VerifyEmailCodeResponse(
+                message="Invalid or expired verification code. Please request a new code.",
+                verified=False
+            )
+            
+    except Exception as e:
+        logger.error(f"Error verifying email code: {e}")
+        return VerifyEmailCodeResponse(
+            message="An error occurred while verifying the code. Please try again.",
+            verified=False
+        )
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)

@@ -249,6 +249,60 @@ async def _send_email_ses(
         return False
 
 
+def create_email_verification_html(verification_code: str, user_name: Optional[str] = None) -> str:
+    """
+    Create HTML email template for email verification code
+    
+    Args:
+        verification_code: 6-digit verification code
+        user_name: Optional user name for personalization
+    
+    Returns:
+        HTML email body
+    """
+    name = user_name or "there"
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Verify Your Email</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h1 style="color: #2c3e50; margin-top: 0;">Verify Your Email</h1>
+        </div>
+        
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <p>Hi {name},</p>
+            
+            <p>Thank you for registering with Vayada! Please use the verification code below to verify your email address:</p>
+            
+            <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; margin: 30px 0; text-align: center;">
+                <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #007bff; font-family: 'Courier New', monospace;">
+                    {verification_code}
+                </div>
+            </div>
+            
+            <p style="color: #666; font-size: 14px;">
+                <strong>This code will expire in 15 minutes.</strong><br>
+                If you didn't request this code, please ignore this email.
+            </p>
+        </div>
+        
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
+            <p>© {settings.EMAIL_FROM_NAME}. All rights reserved.</p>
+            <p>This is an automated message, please do not reply to this email.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
+
+
 def create_profile_completion_email_html(user_name: str, user_type: str) -> str:
     """
     Create HTML email template for profile completion confirmation

@@ -3,8 +3,9 @@ Authentication utilities
 """
 import bcrypt
 import secrets
+import random
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 def hash_password(password: str) -> str:
@@ -152,6 +153,121 @@ async def mark_password_reset_token_as_used(token: str) -> bool:
         WHERE token = $1 AND used = false
         """,
         token
+    )
+    
+    return result == "UPDATE 1"
+
+
+def generate_email_verification_code() -> str:
+    """Generate a 6-digit verification code"""
+    return f"{random.randint(100000, 999999)}"
+
+
+async def create_email_verification_code(email: str, expires_in_minutes: int = 15) -> str:
+    """
+    Create and store an email verification code
+    
+    Args:
+        email: Email address to verify
+        expires_in_minutes: Code expiration time in minutes (default: 15 minutes)
+    
+    Returns:
+        The generated 6-digit verification code
+    """
+    from app.database import Database
+    
+    code = generate_email_verification_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
+    
+    # Invalidate any existing unused codes for this email
+    await Database.execute(
+        """
+        UPDATE email_verification_codes
+        SET used = true
+        WHERE email = $1 AND used = false AND expires_at > now()
+        """,
+        email
+    )
+    
+    # Insert new code
+    await Database.execute(
+        """
+        INSERT INTO email_verification_codes (email, code, expires_at)
+        VALUES ($1, $2, $3)
+        """,
+        email,
+        code,
+        expires_at
+    )
+    
+    return code
+
+
+async def verify_email_code(email: str, code: str) -> bool:
+    """
+    Verify an email verification code
+    
+    Args:
+        email: Email address
+        code: 6-digit verification code
+    
+    Returns:
+        True if code is valid and not expired, False otherwise
+    """
+    from app.database import Database
+    
+    # Get the most recent unused code for this email
+    code_record = await Database.fetchrow(
+        """
+        SELECT id, expires_at, used
+        FROM email_verification_codes
+        WHERE email = $1 AND code = $2 AND used = false
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        email,
+        code
+    )
+    
+    if not code_record:
+        return False
+    
+    # Check if code is expired
+    if datetime.now(timezone.utc) > code_record['expires_at']:
+        return False
+    
+    # Mark code as used
+    await Database.execute(
+        """
+        UPDATE email_verification_codes
+        SET used = true
+        WHERE id = $1
+        """,
+        code_record['id']
+    )
+    
+    return True
+
+
+async def mark_email_as_verified(email: str) -> bool:
+    """
+    Mark a user's email as verified
+    
+    Args:
+        email: Email address to mark as verified
+    
+    Returns:
+        True if email was marked as verified, False otherwise
+    """
+    from app.database import Database
+    
+    result = await Database.execute(
+        """
+        UPDATE users
+        SET email_verified = true
+        WHERE email = $1
+        """,
+        email
     )
     
     return result == "UPDATE 1"
