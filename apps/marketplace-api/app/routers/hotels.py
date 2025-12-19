@@ -324,7 +324,7 @@ class ListingResponse(BaseModel):
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
-    creatorRequirements: CreatorRequirementsResponse = Field(alias="creator_requirements")
+    creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
     
     class Config:
         populate_by_name = True
