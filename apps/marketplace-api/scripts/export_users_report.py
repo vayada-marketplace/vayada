@@ -4,9 +4,12 @@ Export all registered users to a beautiful HTML report and CSV file
 """
 import asyncio
 import sys
+import os
+import argparse
 from pathlib import Path
 from datetime import datetime
 import csv
+import asyncpg
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,11 +18,29 @@ from app.database import Database
 from app.config import settings
 
 
-async def export_users_report():
+async def export_users_report(database_url: str = None):
     """Export users to HTML and CSV files"""
+    pool = None
     try:
+        # Use provided database URL or fall back to settings
+        db_url = database_url or os.getenv('DATABASE_URL') or settings.DATABASE_URL
+        
         print("🔗 Connecting to database...")
-        await Database.get_pool()
+        
+        # Create connection pool directly if custom URL provided
+        if database_url:
+            pool = await asyncpg.create_pool(
+                database_url,
+                min_size=1,
+                max_size=5,
+                command_timeout=60
+            )
+            # Temporarily replace Database._pool
+            original_pool = Database._pool
+            Database._pool = pool
+        else:
+            pool = await Database.get_pool()
+        
         print("✅ Connected to database\n")
         
         # Fetch all users
@@ -336,9 +357,17 @@ async def export_users_report():
         traceback.print_exc()
         sys.exit(1)
     finally:
+        if pool:
+            await pool.close()
         await Database.close_pool()
 
 
 if __name__ == "__main__":
-    asyncio.run(export_users_report())
+    parser = argparse.ArgumentParser(description='Export users report from database')
+    parser.add_argument('--database-url', '-d', 
+                       help='Database connection URL (e.g., postgresql://user:pass@host:port/dbname)',
+                       default=None)
+    args = parser.parse_args()
+    
+    asyncio.run(export_users_report(args.database_url))
 
