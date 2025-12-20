@@ -64,6 +64,23 @@ async def run_migrations():
                 # Read and execute migration
                 sql = migration_file.read_text()
                 
+                # Remove comments and check if there's actual SQL
+                # Split by lines, remove comment-only lines and empty lines
+                lines = [line for line in sql.split('\n') 
+                         if line.strip() and not line.strip().startswith('--')]
+                sql_content = '\n'.join(lines).strip()
+                
+                # Skip empty migrations (only whitespace/comments)
+                if not sql_content:
+                    print(f"⏭️  Skipping {filename} (empty or comments only)")
+                    # Still mark as executed
+                    await conn.execute(
+                        "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+                        filename
+                    )
+                    print()
+                    continue
+                
                 # Execute in a transaction
                 async with conn.transaction():
                     await conn.execute(sql)

@@ -35,3 +35,4 @@ COMMENT ON COLUMN public.email_verification_codes.expires_at IS 'When the code e
 COMMENT ON COLUMN public.email_verification_codes.used IS 'Whether the code has been used';
 COMMENT ON COLUMN public.users.email_verified IS 'Whether the user has verified their email address';
 
+

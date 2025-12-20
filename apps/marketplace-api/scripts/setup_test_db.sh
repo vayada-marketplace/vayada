@@ -57,3 +57,4 @@ echo ""
 echo "Test database setup complete!"
 echo "You can now run tests with: pytest tests/ -v"
 
+

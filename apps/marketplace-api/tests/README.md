@@ -90,3 +90,4 @@ You can override this by setting the `TEST_DATABASE_URL` environment variable.
 - Email sending is disabled in tests (mocked)
 - Tests use a separate JWT secret key for security
 
+

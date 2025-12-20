@@ -10,3 +10,4 @@ DROP COLUMN IF EXISTS email;
 
 -- Update the comment to reflect removal of email
 COMMENT ON TABLE public.hotel_profiles IS 'Main hotel account/profile. One user with type=hotel has one hotel profile. A hotel profile can own multiple property listings. Email is stored in users table only.';
+

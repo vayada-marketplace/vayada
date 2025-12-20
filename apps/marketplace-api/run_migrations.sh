@@ -49,3 +49,4 @@ echo "   psql \"$DATABASE_URL\" -c \"\\dt\""
 
 
 
+

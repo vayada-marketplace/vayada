@@ -30,3 +30,4 @@ COMMENT ON COLUMN public.password_reset_tokens.token IS 'Unique secure token for
 COMMENT ON COLUMN public.password_reset_tokens.expires_at IS 'Token expiration timestamp (typically 1 hour from creation)';
 COMMENT ON COLUMN public.password_reset_tokens.used IS 'Whether the token has been used to reset password';
 
+
