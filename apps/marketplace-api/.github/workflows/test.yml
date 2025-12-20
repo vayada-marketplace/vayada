@@ -28,7 +28,7 @@ jobs:
           POSTGRES_PASSWORD: vayada_password
           POSTGRES_DB: vayada_db
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U vayada_user -d vayada_db"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -38,6 +38,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,30 +55,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Create test database
+      - name: Wait for PostgreSQL
         run: |
-          PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_db -c "CREATE DATABASE vayada_test_db;"
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in {1..30}; do
+            if PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_db -c '\q' 2>/dev/null; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Attempt $i/30: Waiting for PostgreSQL..."
+            sleep 2
+          done
         env:
           PGHOST: localhost
           PGPORT: 5432
           PGUSER: vayada_user
           PGPASSWORD: vayada_password
       
-      - name: Install PostgreSQL client
+      - name: Create test database
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_db -c "CREATE DATABASE vayada_test_db;" || echo "Database might already exist"
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: vayada_user
+          PGPASSWORD: vayada_password
       
       - name: Run database migrations
         run: |
-          # Wait for database to be ready
-          until PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_test_db -c '\q' 2>/dev/null; do
-            echo "Waiting for database..."
-            sleep 1
-          done
+          # Verify test database is ready
+          echo "Verifying test database connection..."
+          PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_test_db -c '\q'
           
           # Run migrations using the migration script
-          export DATABASE_URL=postgresql://vayada_user:vayada_password@localhost:5432/vayada_test_db
+          echo "Running migrations..."
           python scripts/run_migrations.py
         env:
           PGHOST: localhost
