@@ -84,13 +84,14 @@ jobs:
           
           # Run migrations using the migration script
           echo "Running migrations..."
-          python scripts/run_migrations.py
+          PYTHONPATH=. python scripts/run_migrations.py
         env:
           PGHOST: localhost
           PGPORT: 5432
           PGUSER: vayada_user
           PGPASSWORD: vayada_password
           DATABASE_URL: postgresql://vayada_user:vayada_password@localhost:5432/vayada_test_db
+          PYTHONPATH: .
       
       - name: Run tests
         run: |
