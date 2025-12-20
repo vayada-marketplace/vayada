@@ -92,6 +92,11 @@ jobs:
           PGPASSWORD: vayada_password
           DATABASE_URL: postgresql://vayada_user:vayada_password@localhost:5432/vayada_test_db
           PYTHONPATH: .
+          CORS_ORIGINS: "http://localhost:3000,http://localhost:3001"
+          EMAIL_ENABLED: "true"
+          DEBUG: "true"
+          JWT_SECRET_KEY: "test-secret-key-for-testing-only"
+          FRONTEND_URL: "http://localhost:3000"
       
       - name: Run tests
         run: |
