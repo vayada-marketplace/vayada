@@ -1,7 +1,7 @@
 """
 Application configuration using environment variables
 """
-from pydantic import Field
+from pydantic import Field, ConfigDict
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 
@@ -74,10 +74,11 @@ class Settings(BaseSettings):
     GENERATE_THUMBNAILS: bool = Field(True, description="Whether to generate thumbnails")
     THUMBNAIL_SIZE: int = Field(300, description="Thumbnail size in pixels (square)")
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True
+    )
     
     @property
     def cors_origins_list(self) -> List[str]:

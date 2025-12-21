@@ -515,9 +515,34 @@ async def update_hotel_profile(
                 picture_url_from_json = str(request.picture) if request.picture is not None else None
             except ValidationError as e:
                 # Re-raise validation errors as HTTP 422
+                # Convert errors to JSON-serializable format
+                import json
+                errors = []
+                for error in e.errors():
+                    # Ensure all values in error dict are JSON serializable
+                    serializable_error = {}
+                    for key, value in error.items():
+                        if key == 'loc':
+                            # Convert location tuple/list to list of strings
+                            serializable_error[key] = [str(v) for v in value] if value else []
+                        elif key == 'ctx' and value:
+                            # Convert context dict to string if it contains non-serializable values
+                            try:
+                                json.dumps(value)
+                                serializable_error[key] = value
+                            except (TypeError, ValueError):
+                                serializable_error[key] = str(value)
+                        else:
+                            # Convert other values to strings if not JSON serializable
+                            try:
+                                json.dumps(value)
+                                serializable_error[key] = value
+                            except (TypeError, ValueError):
+                                serializable_error[key] = str(value)
+                    errors.append(serializable_error)
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=e.errors()
+                    detail=errors
                 )
             except Exception as e:
                 logger.warning(f"Failed to parse JSON body: {e}")
