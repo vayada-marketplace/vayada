@@ -2,7 +2,7 @@
 Hotel profile routes
 """
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Request
-from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator, ValidationError, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime
 from decimal import Decimal
@@ -181,6 +181,8 @@ class UpdateHotelProfileRequest(BaseModel):
 
 class HotelProfileResponse(BaseModel):
     """Hotel profile response model"""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: str
     user_id: str
     name: str
@@ -194,9 +196,6 @@ class HotelProfileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     listings: List[dict] = Field(default_factory=list)
-    
-    class Config:
-        from_attributes = True
 
 
 # Request/Response models for listing creation
@@ -226,8 +225,7 @@ class CollaborationOfferingRequest(BaseModel):
                 raise ValueError("discount_percentage is required for Discount collaboration")
         return self
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CreatorRequirementsRequest(BaseModel):
@@ -246,8 +244,7 @@ class CreatorRequirementsRequest(BaseModel):
                 raise ValueError("target_age_max must be >= target_age_min")
         return self
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CreateListingRequest(BaseModel):
@@ -260,8 +257,7 @@ class CreateListingRequest(BaseModel):
     collaborationOfferings: List[CollaborationOfferingRequest] = Field(..., min_length=1, alias="collaboration_offerings")
     creatorRequirements: CreatorRequirementsRequest = Field(alias="creator_requirements")
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class UpdateListingRequest(BaseModel):
@@ -274,8 +270,7 @@ class UpdateListingRequest(BaseModel):
     collaborationOfferings: Optional[List[CollaborationOfferingRequest]] = Field(None, alias="collaboration_offerings")
     creatorRequirements: Optional[CreatorRequirementsRequest] = Field(None, alias="creator_requirements")
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CollaborationOfferingResponse(BaseModel):
@@ -292,9 +287,7 @@ class CollaborationOfferingResponse(BaseModel):
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class CreatorRequirementsResponse(BaseModel):
@@ -309,9 +302,7 @@ class CreatorRequirementsResponse(BaseModel):
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class ListingResponse(BaseModel):
@@ -329,9 +320,7 @@ class ListingResponse(BaseModel):
     collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
     creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 @router.get("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
@@ -524,6 +513,12 @@ async def update_hotel_profile(
                 phone = request.phone
                 # Extract picture URL from JSON if provided
                 picture_url_from_json = str(request.picture) if request.picture is not None else None
+            except ValidationError as e:
+                # Re-raise validation errors as HTTP 422
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=e.errors()
+                )
             except Exception as e:
                 logger.warning(f"Failed to parse JSON body: {e}")
                 # If JSON parsing fails, continue with Form data (if any)

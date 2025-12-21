@@ -2,7 +2,7 @@
 Creator profile routes
 """
 from fastapi import APIRouter, HTTPException, status, Depends
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime
 from decimal import Decimal
@@ -54,8 +54,7 @@ class PlatformRequest(BaseModel):
     topAgeGroups: Optional[List[TopAgeGroup]] = Field(None, alias="top_age_groups")
     genderSplit: Optional[GenderSplit] = Field(None, alias="gender_split")
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class UpdateCreatorProfileRequest(BaseModel):
@@ -76,8 +75,7 @@ class UpdateCreatorProfileRequest(BaseModel):
             self.audienceSize = sum(p.followers for p in self.platforms)
         return self
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PlatformResponse(BaseModel):
@@ -91,9 +89,7 @@ class PlatformResponse(BaseModel):
     topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
     genderSplit: Optional[dict] = Field(None, alias="gender_split")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class ReviewResponse(BaseModel):
@@ -105,9 +101,7 @@ class ReviewResponse(BaseModel):
     comment: Optional[str] = None
     createdAt: datetime = Field(alias="created_at")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class RatingResponse(BaseModel):
@@ -116,9 +110,7 @@ class RatingResponse(BaseModel):
     totalReviews: int = Field(alias="total_reviews")
     reviews: List[ReviewResponse] = Field(default_factory=list)
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class CreatorProfileFullResponse(BaseModel):
@@ -137,9 +129,7 @@ class CreatorProfileFullResponse(BaseModel):
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class CreatorProfileResponse(BaseModel):
@@ -157,9 +147,7 @@ class CreatorProfileResponse(BaseModel):
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 @router.get("/me/profile-status", response_model=CreatorProfileStatusResponse)
