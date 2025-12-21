@@ -1,7 +1,7 @@
 """
 Hotel profile routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Request
 from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -483,23 +483,48 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
 
 @router.put("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
 async def update_hotel_profile(
-    name: Optional[str] = Form(None),
-    location: Optional[str] = Form(None),
-    email: Optional[EmailStr] = Form(None),
-    about: Optional[str] = Form(None),
-    website: Optional[str] = Form(None),
-    phone: Optional[str] = Form(None),
-    picture: Optional[UploadFile] = File(None),
+    http_request: Request,
+    name: Optional[str] = Form(default=None),
+    location: Optional[str] = Form(default=None),
+    email: Optional[EmailStr] = Form(default=None),
+    about: Optional[str] = Form(default=None),
+    website: Optional[str] = Form(default=None),
+    phone: Optional[str] = Form(default=None),
+    picture: Optional[UploadFile] = File(default=None),
     user_id: str = Depends(get_current_user_id)
 ):
     """
     Update the currently authenticated hotel's profile.
     Supports partial updates - only provided fields will be updated.
     
-    - **picture**: Upload a profile picture file (JPEG, PNG, or WEBP)
-      If provided, the image will be uploaded to S3 and the URL will be stored.
+    Accepts either:
+    - JSON body (UpdateHotelProfileRequest) for text fields
+    - multipart/form-data for file uploads (picture) and text fields
+    
+    If JSON body is provided, it takes precedence over Form fields.
     """
     try:
+        # Check if request is JSON and parse it
+        # FastAPI will parse Form data if content-type is multipart/form-data
+        # For JSON requests, we need to manually parse the body
+        content_type = http_request.headers.get("content-type", "")
+        
+        # If it's JSON (not multipart), parse JSON body
+        if "application/json" in content_type and "multipart/form-data" not in content_type:
+            try:
+                json_data = await http_request.json()
+                request = UpdateHotelProfileRequest(**json_data)
+                # Use JSON body values
+                name = request.name
+                location = request.location
+                email = request.email
+                about = request.about
+                website = str(request.website) if request.website is not None else None
+                phone = request.phone
+            except Exception as e:
+                logger.warning(f"Failed to parse JSON body: {e}")
+                # If JSON parsing fails, continue with Form data (if any)
+        
         # Verify user is a hotel
         user = await Database.fetchrow(
             "SELECT id, type, email FROM users WHERE id = $1",
