@@ -195,18 +195,20 @@ async def verify_email_code_endpoint(request: VerifyEmailCodeRequest):
             # Mark email as verified (if user exists, update their status)
             await mark_email_as_verified(request.email)
             
+            logger.info(f"Email verification successful for: {request.email}")
             return VerifyEmailCodeResponse(
                 message="Email verified successfully!",
                 verified=True
             )
         else:
+            logger.warning(f"Email verification failed for: {request.email} with code: {request.code}")
             return VerifyEmailCodeResponse(
                 message="Invalid or expired verification code. Please request a new code.",
                 verified=False
             )
             
     except Exception as e:
-        logger.error(f"Error verifying email code: {e}")
+        logger.error(f"Error verifying email code for {request.email}: {e}", exc_info=True)
         return VerifyEmailCodeResponse(
             message="An error occurred while verifying the code. Please try again.",
             verified=False
