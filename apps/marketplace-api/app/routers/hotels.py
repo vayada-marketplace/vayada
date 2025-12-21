@@ -1,7 +1,7 @@
 """
 Hotel profile routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
 from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -9,6 +9,9 @@ from decimal import Decimal
 from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 from app.email_service import send_email, create_profile_completion_email_html
+from app.s3_service import upload_file_to_s3, generate_file_key
+from app.image_processing import validate_image, process_image, generate_thumbnail, get_image_info
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -480,12 +483,21 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
 
 @router.put("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
 async def update_hotel_profile(
-    request: UpdateHotelProfileRequest,
+    name: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+    email: Optional[EmailStr] = Form(None),
+    about: Optional[str] = Form(None),
+    website: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    picture: Optional[UploadFile] = File(None),
     user_id: str = Depends(get_current_user_id)
 ):
     """
     Update the currently authenticated hotel's profile.
     Supports partial updates - only provided fields will be updated.
+    
+    - **picture**: Upload a profile picture file (JPEG, PNG, or WEBP)
+      If provided, the image will be uploaded to S3 and the URL will be stored.
     """
     try:
         # Verify user is a hotel
@@ -525,39 +537,108 @@ async def update_hotel_profile(
         
         was_complete_before = hotel.get('profile_complete', False)
         
+        # Handle picture upload if provided
+        picture_url = None
+        if picture is not None:
+            try:
+                # Read file content
+                file_content = await picture.read()
+                
+                if file_content:
+                    # Validate image
+                    is_valid, error_message = validate_image(
+                        file_content,
+                        picture.filename or "image",
+                        picture.content_type
+                    )
+                    
+                    if not is_valid:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=error_message or "Invalid image file"
+                        )
+                    
+                    # Process image (resize if needed)
+                    processed_content = file_content
+                    if settings.IMAGE_RESIZE_WIDTH > 0 or settings.IMAGE_RESIZE_HEIGHT > 0:
+                        processed_content = process_image(
+                            file_content,
+                            resize_width=settings.IMAGE_RESIZE_WIDTH if settings.IMAGE_RESIZE_WIDTH > 0 else None,
+                            resize_height=settings.IMAGE_RESIZE_HEIGHT if settings.IMAGE_RESIZE_HEIGHT > 0 else None,
+                            quality=85
+                        )
+                    
+                    # Generate file key
+                    file_key = generate_file_key("hotels", picture.filename or "image.jpg", user_id)
+                    
+                    # Upload to S3
+                    content_type = picture.content_type or "image/jpeg"
+                    picture_url = await upload_file_to_s3(
+                        processed_content,
+                        file_key,
+                        content_type=content_type,
+                        make_public=settings.S3_USE_PUBLIC_URLS
+                    )
+                    
+                    # Generate thumbnail if enabled
+                    if settings.GENERATE_THUMBNAILS:
+                        try:
+                            thumbnail_content = generate_thumbnail(
+                                file_content,
+                                size=settings.THUMBNAIL_SIZE,
+                                quality=85
+                            )
+                            thumbnail_key = file_key.replace(".", "_thumb.")
+                            await upload_file_to_s3(
+                                thumbnail_content,
+                                thumbnail_key,
+                                content_type="image/jpeg",
+                                make_public=settings.S3_USE_PUBLIC_URLS
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to generate thumbnail: {e}")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error uploading picture: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to upload picture: {str(e)}"
+                )
+        
         # Build dynamic UPDATE query for hotel_profiles table
         update_fields = []
         update_values = []
         param_counter = 1
         
-        if request.name is not None:
+        if name is not None:
             update_fields.append(f"name = ${param_counter}")
-            update_values.append(request.name)
+            update_values.append(name)
             param_counter += 1
         
-        if request.location is not None:
+        if location is not None:
             update_fields.append(f"location = ${param_counter}")
-            update_values.append(request.location)
+            update_values.append(location)
             param_counter += 1
         
-        if request.about is not None:
+        if about is not None:
             update_fields.append(f"about = ${param_counter}")
-            update_values.append(request.about)
+            update_values.append(about)
             param_counter += 1
         
-        if request.website is not None:
+        if website is not None:
             update_fields.append(f"website = ${param_counter}")
-            update_values.append(str(request.website))
+            update_values.append(website)
             param_counter += 1
         
-        if request.phone is not None:
+        if phone is not None:
             update_fields.append(f"phone = ${param_counter}")
-            update_values.append(request.phone)
+            update_values.append(phone)
             param_counter += 1
         
-        if request.picture is not None:
+        if picture_url is not None:
             update_fields.append(f"picture = ${param_counter}")
-            update_values.append(str(request.picture))
+            update_values.append(picture_url)
             param_counter += 1
         
         # Only update if there are fields to update
@@ -573,14 +654,14 @@ async def update_hotel_profile(
             await Database.execute(update_query, *update_values)
         
         # Update email in users table if provided
-        if request.email is not None:
+        if email is not None:
             await Database.execute(
                 """
                 UPDATE users 
                 SET email = $1, updated_at = now()
                 WHERE id = $2
                 """,
-                request.email,
+                email,
                 user_id
             )
         

@@ -215,13 +215,21 @@ async def verify_email_code(email: str, code: str) -> bool:
         True if code is valid and not expired, False otherwise
     """
     from app.database import Database
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     # Get the most recent unused code for this email
+    # Use database-side timezone comparison to avoid timezone issues
+    # This ensures consistent timezone handling regardless of server timezone
     code_record = await Database.fetchrow(
         """
-        SELECT id, expires_at, used
+        SELECT id, expires_at, used, created_at
         FROM email_verification_codes
-        WHERE email = $1 AND code = $2 AND used = false
+        WHERE email = $1 
+          AND code = $2 
+          AND used = false
+          AND expires_at > now()
         ORDER BY created_at DESC
         LIMIT 1
         """,
@@ -230,10 +238,7 @@ async def verify_email_code(email: str, code: str) -> bool:
     )
     
     if not code_record:
-        return False
-    
-    # Check if code is expired
-    if datetime.now(timezone.utc) > code_record['expires_at']:
+        logger.debug(f"No valid code found for email: {email}, code: {code}")
         return False
     
     # Mark code as used
@@ -246,6 +251,7 @@ async def verify_email_code(email: str, code: str) -> bool:
         code_record['id']
     )
     
+    logger.debug(f"Code verified successfully for email: {email}, expires_at: {code_record['expires_at']}")
     return True
 
 

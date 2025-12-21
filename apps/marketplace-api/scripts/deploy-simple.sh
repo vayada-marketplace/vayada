@@ -57,20 +57,30 @@ if [ "$1" == "--deploy" ]; then
         CLUSTER_NAME="vayada-backend-cluster"
         SERVICE_NAME="vayada-backend-service"
         
+        # Check if service exists
         if aws ecs describe-services --cluster ${CLUSTER_NAME} --services ${SERVICE_NAME} --region ${AWS_REGION} &> /dev/null; then
+            echo "   Updating ECS service..."
             aws ecs update-service \
                 --cluster ${CLUSTER_NAME} \
                 --service ${SERVICE_NAME} \
                 --force-new-deployment \
-                --region ${AWS_REGION} \
-                --output json > /dev/null
+                --region ${AWS_REGION} > /dev/null
             
             echo "✅ ECS deployment triggered!"
             echo "   Cluster: ${CLUSTER_NAME}"
             echo "   Service: ${SERVICE_NAME}"
             echo "   Deployment in progress..."
+            echo ""
+            echo "   Monitor deployment:"
+            echo "   aws ecs describe-services --cluster ${CLUSTER_NAME} --services ${SERVICE_NAME} --region ${AWS_REGION}"
         else
-            echo "   ECS service not found. Please deploy manually."
+            echo "   ⚠️  ECS service '${SERVICE_NAME}' not found in cluster '${CLUSTER_NAME}'"
+            echo ""
+            echo "   Available services:"
+            aws ecs list-services --cluster ${CLUSTER_NAME} --region ${AWS_REGION} --output table || echo "   (Could not list services)"
+            echo ""
+            echo "   Please update the service name or deploy manually:"
+            echo "   aws ecs update-service --cluster ${CLUSTER_NAME} --service <service-name> --force-new-deployment --region ${AWS_REGION}"
         fi
     else
         echo "   Please deploy manually using AWS Console or CLI"
@@ -79,4 +89,9 @@ fi
 
 echo ""
 echo "✨ Done!"
+
+
+
+
+
 

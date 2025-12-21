@@ -3,7 +3,7 @@ Application configuration using environment variables
 """
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -55,6 +55,24 @@ class Settings(BaseSettings):
     # If using an email service, set EMAIL_SERVICE_API_KEY instead of SMTP settings
     EMAIL_SERVICE_API_KEY: str = Field("", description="API key for email service (SendGrid, etc.)")
     EMAIL_SERVICE_PROVIDER: str = Field("smtp", description="Email service provider: 'smtp', 'sendgrid', 'ses'")
+    
+    # AWS S3 Configuration for image storage
+    AWS_REGION: str = Field("eu-west-1", description="AWS region for S3 bucket")
+    S3_BUCKET_NAME: str = Field("", description="S3 bucket name for storing images")
+    AWS_ACCESS_KEY_ID: str = Field("", description="AWS access key ID for S3")
+    AWS_SECRET_ACCESS_KEY: str = Field("", description="AWS secret access key for S3")
+    S3_PUBLIC_URL_EXPIRY: int = Field(3600, description="Public URL expiry time in seconds (default: 1 hour)")
+    S3_USE_PUBLIC_URLS: bool = Field(True, description="Whether to use public URLs or signed URLs")
+    
+    # Image Upload Configuration
+    MAX_IMAGE_SIZE_MB: int = Field(5, description="Maximum image file size in MB")
+    ALLOWED_IMAGE_TYPES: List[str] = Field(default_factory=lambda: ["image/jpeg", "image/png", "image/webp", "image/jpg"], description="Allowed MIME types for image uploads")
+    MAX_IMAGE_WIDTH: int = Field(4000, description="Maximum image width in pixels")
+    MAX_IMAGE_HEIGHT: int = Field(4000, description="Maximum image height in pixels")
+    IMAGE_RESIZE_WIDTH: int = Field(1920, description="Resize width for uploaded images (0 = no resize)")
+    IMAGE_RESIZE_HEIGHT: int = Field(1920, description="Resize height for uploaded images (0 = no resize)")
+    GENERATE_THUMBNAILS: bool = Field(True, description="Whether to generate thumbnails")
+    THUMBNAIL_SIZE: int = Field(300, description="Thumbnail size in pixels (square)")
     
     class Config:
         env_file = ".env"

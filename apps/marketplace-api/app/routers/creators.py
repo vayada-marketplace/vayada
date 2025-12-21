@@ -65,6 +65,7 @@ class UpdateCreatorProfileRequest(BaseModel):
     shortDescription: Optional[str] = Field(None, min_length=10, max_length=500, alias="short_description")
     portfolioLink: Optional[HttpUrl] = Field(None, alias="portfolio_link")
     phone: Optional[str] = None
+    profilePicture: Optional[str] = Field(None, alias="profile_picture", description="S3 URL of the profile picture")
     platforms: Optional[List[PlatformRequest]] = Field(None, min_length=1)
     audienceSize: Optional[int] = Field(None, alias="audience_size", gt=0)
     
@@ -149,6 +150,7 @@ class CreatorProfileResponse(BaseModel):
     shortDescription: str = Field(alias="short_description")
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     phone: Optional[str] = None
+    profilePicture: Optional[str] = Field(None, alias="profile_picture")
     platforms: List[PlatformResponse]
     audienceSize: int = Field(alias="audience_size")
     status: str
@@ -297,7 +299,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
         creator = await Database.fetchrow(
             """
             SELECT id, location, short_description, portfolio_link, phone, 
-                   created_at, updated_at
+                   profile_picture, created_at, updated_at
             FROM creators
             WHERE user_id = $1
             """,
@@ -381,7 +383,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
             location=creator['location'] or "",
             portfolio_link=creator['portfolio_link'],
             short_description=creator['short_description'],
-            profile_picture=None,  # Not stored in current schema
+            profile_picture=creator['profile_picture'],
             platforms=platforms_response,
             rating=rating_response,
             status=user['status'],
@@ -409,6 +411,10 @@ async def update_creator_profile(
     
     If platforms are provided, all existing platforms will be replaced with the new ones.
     If platforms are not provided, existing platforms remain unchanged.
+    
+    For profile picture:
+    - Option 1: Upload image first using POST /upload/image/creator-profile, then include the returned URL in profilePicture field
+    - Option 2: Provide an existing S3 URL directly in profilePicture field
     """
     try:
         # Verify user is a creator
@@ -481,6 +487,11 @@ async def update_creator_profile(
                     update_values.append(request.phone)
                     param_counter += 1
                 
+                if request.profilePicture is not None:
+                    update_fields.append(f"profile_picture = ${param_counter}")
+                    update_values.append(request.profilePicture)
+                    param_counter += 1
+                
                 # Update creator profile if there are fields to update
                 if update_fields:
                     update_fields.append("updated_at = now()")
@@ -528,7 +539,7 @@ async def update_creator_profile(
         creator_data = await Database.fetchrow(
             """
             SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
-                   c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
+                   c.profile_picture, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
             FROM creators c
             JOIN users u ON u.id = c.user_id
             WHERE c.id = $1
@@ -597,6 +608,7 @@ async def update_creator_profile(
             short_description=creator_data['short_description'],
             portfolio_link=creator_data['portfolio_link'],
             phone=creator_data['phone'],
+            profile_picture=creator_data['profile_picture'],
             platforms=platforms_response,
             audience_size=audience_size,
             status=creator_data['status'],
