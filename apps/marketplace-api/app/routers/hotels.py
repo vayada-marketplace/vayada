@@ -510,6 +510,7 @@ async def update_hotel_profile(
         content_type = http_request.headers.get("content-type", "")
         
         # If it's JSON (not multipart), parse JSON body
+        picture_url_from_json = None
         if "application/json" in content_type and "multipart/form-data" not in content_type:
             try:
                 json_data = await http_request.json()
@@ -521,6 +522,8 @@ async def update_hotel_profile(
                 about = request.about
                 website = str(request.website) if request.website is not None else None
                 phone = request.phone
+                # Extract picture URL from JSON if provided
+                picture_url_from_json = str(request.picture) if request.picture is not None else None
             except Exception as e:
                 logger.warning(f"Failed to parse JSON body: {e}")
                 # If JSON parsing fails, continue with Form data (if any)
@@ -661,9 +664,11 @@ async def update_hotel_profile(
             update_values.append(phone)
             param_counter += 1
         
-        if picture_url is not None:
+        # Use picture URL from JSON if provided, otherwise use uploaded file URL
+        final_picture_url = picture_url_from_json if picture_url_from_json is not None else picture_url
+        if final_picture_url is not None:
             update_fields.append(f"picture = ${param_counter}")
-            update_values.append(picture_url)
+            update_values.append(final_picture_url)
             param_counter += 1
         
         # Only update if there are fields to update
