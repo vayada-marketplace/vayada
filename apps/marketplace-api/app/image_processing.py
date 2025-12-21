@@ -42,9 +42,22 @@ def validate_image(
             return False, f"Invalid image format. Allowed formats: JPEG, PNG, WEBP"
         
         # Validate dimensions
+        # If resizing is enabled, allow larger images (they'll be resized anyway)
+        # But still enforce a reasonable maximum to prevent memory issues
         width, height = image.size
-        if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:
-            return False, f"Image dimensions exceed maximum allowed size ({settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT})"
+        
+        # If resizing is enabled, use a more lenient limit (10x the resize target)
+        # Otherwise use the configured max dimensions
+        if settings.IMAGE_RESIZE_WIDTH > 0 or settings.IMAGE_RESIZE_HEIGHT > 0:
+            # Allow up to 10x the resize target (e.g., 19200x19200 if resizing to 1920x1920)
+            max_allowed_width = max(settings.MAX_IMAGE_WIDTH, settings.IMAGE_RESIZE_WIDTH * 10) if settings.IMAGE_RESIZE_WIDTH > 0 else settings.MAX_IMAGE_WIDTH
+            max_allowed_height = max(settings.MAX_IMAGE_HEIGHT, settings.IMAGE_RESIZE_HEIGHT * 10) if settings.IMAGE_RESIZE_HEIGHT > 0 else settings.MAX_IMAGE_HEIGHT
+        else:
+            max_allowed_width = settings.MAX_IMAGE_WIDTH
+            max_allowed_height = settings.MAX_IMAGE_HEIGHT
+        
+        if width > max_allowed_width or height > max_allowed_height:
+            return False, f"Image dimensions exceed maximum allowed size ({max_allowed_width}x{max_allowed_height})"
         
         # Validate content type if provided
         if content_type:
