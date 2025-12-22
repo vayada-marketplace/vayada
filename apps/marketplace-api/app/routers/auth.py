@@ -36,7 +36,7 @@ class RegisterResponse(BaseModel):
     id: str
     email: str
     name: str
-    type: Literal["creator", "hotel"]
+    type: Literal["creator", "hotel", "admin"]
     status: str
     access_token: str
     token_type: str = "bearer"
@@ -55,7 +55,7 @@ class LoginResponse(BaseModel):
     id: str
     email: str
     name: str
-    type: Literal["creator", "hotel"]
+    type: Literal["creator", "hotel", "admin"]
     status: str
     access_token: str
     token_type: str = "bearer"
