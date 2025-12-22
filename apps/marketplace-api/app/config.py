@@ -85,7 +85,11 @@ class Settings(BaseSettings):
         """Parse CORS origins from comma-separated string"""
         origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
         # Always allow our canonical domains even if secrets/env omit them
-        canonical_origins = ["https://vayada.com", "https://www.vayada.com"]
+        canonical_origins = [
+            "https://vayada.com",
+            "https://www.vayada.com",
+            "https://aibtbbbcps.eu-west-1.awsapprunner.com"  # Admin frontend
+        ]
         # Preserve order while de-duplicating
         seen = set()
         merged = []
