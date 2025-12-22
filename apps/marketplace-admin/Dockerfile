@@ -18,6 +18,9 @@ COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+# Ensure public directory exists (Next.js may need it)
+RUN mkdir -p ./public
+
 # Build the application
 RUN npm run build
 
@@ -34,6 +37,7 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Public assets are not bundled into the standalone output; copy them explicitly
+# (public directory is created in builder stage, so this will always work)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
