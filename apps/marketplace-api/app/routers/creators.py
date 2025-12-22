@@ -30,13 +30,13 @@ class CreatorProfileStatusResponse(BaseModel):
 # Request/Response models for profile update
 class TopCountry(BaseModel):
     """Top country analytics data"""
-    country: str
+    country: Optional[str] = None
     percentage: float = Field(..., ge=0, le=100)
 
 
 class TopAgeGroup(BaseModel):
     """Top age group analytics data"""
-    ageRange: str
+    ageRange: Optional[str] = None
     percentage: float = Field(..., ge=0, le=100)
 
 
