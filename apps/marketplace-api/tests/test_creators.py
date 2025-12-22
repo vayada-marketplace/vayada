@@ -343,8 +343,8 @@ class TestGetCreatorProfile:
             "@testcreator",
             10000,
             3.5,
-            '[{"country": "US", "percentage": 60}]',
-            '[{"ageRange": "18-24", "percentage": 40}]',
+            '[{"country": "US"}]',
+            '[{"ageRange": "18-24"}]',
             '{"male": 30, "female": 70}'
         )
         
@@ -1027,12 +1027,12 @@ class TestUpdateCreatorProfile:
                         "followers": 10000,
                         "engagement_rate": 3.5,
                         "top_countries": [
-                            {"country": "US", "percentage": 60},
-                            {"country": "UK", "percentage": 40}
+                            {"country": "US"},
+                            {"country": "UK"}
                         ],
                         "top_age_groups": [
-                            {"ageRange": "18-24", "percentage": 50},
-                            {"ageRange": "25-34", "percentage": 50}
+                            {"ageRange": "18-24"},
+                            {"ageRange": "25-34"}
                         ],
                         "gender_split": {
                             "male": 30,

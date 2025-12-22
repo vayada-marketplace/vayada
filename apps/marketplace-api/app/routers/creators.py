@@ -31,13 +31,11 @@ class CreatorProfileStatusResponse(BaseModel):
 class TopCountry(BaseModel):
     """Top country analytics data"""
     country: Optional[str] = None
-    percentage: float = Field(..., ge=0, le=100)
 
 
 class TopAgeGroup(BaseModel):
     """Top age group analytics data"""
     ageRange: Optional[str] = None
-    percentage: float = Field(..., ge=0, le=100)
 
 
 class GenderSplit(BaseModel):
