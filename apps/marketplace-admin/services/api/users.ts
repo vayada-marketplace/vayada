@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './client'
-import type { User, UpdateUserRequest } from '@/lib/types'
+import type { User, CreateUserRequest, UpdateUserRequest } from '@/lib/types'
 
 export interface UsersListResponse {
   users: User[]
@@ -26,6 +26,13 @@ export interface UpdateUserStatusResponse {
 }
 
 export const usersService = {
+  /**
+   * Create a new user
+   */
+  createUser: async (data: CreateUserRequest): Promise<User> => {
+    return apiClient.post<User>('/admin/users', data)
+  },
+
   /**
    * Get all users (with optional filters and pagination)
    */

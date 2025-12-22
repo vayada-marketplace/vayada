@@ -6,7 +6,8 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed:users": "node scripts/seed-mock-users.js"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
