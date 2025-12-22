@@ -11,6 +11,8 @@ import logging
 from app.database import Database
 from app.dependencies import get_current_user_id
 from app.email_service import send_email, create_profile_completion_email_html
+from app.auth import create_email_verification_token
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -545,16 +547,33 @@ async def update_creator_profile(
                 user_email = creator_data['email']
                 user_name = creator_data['user_name'] or user_email.split('@')[0]
                 
-                html_body = create_profile_completion_email_html(user_name, "creator")
+                # Check if email is already verified
+                user_record = await Database.fetchrow(
+                    "SELECT email_verified FROM users WHERE id = $1",
+                    user_id
+                )
+                email_verified = user_record.get('email_verified', False) if user_record else False
+                
+                # Generate verification token and link if email is not verified
+                verification_link = None
+                if not email_verified:
+                    try:
+                        token = await create_email_verification_token(user_id, expires_in_hours=48)
+                        verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+                    except Exception as e:
+                        logger.error(f"Error creating email verification token: {str(e)}")
+                        # Continue without verification link if token creation fails
+                
+                html_body = create_profile_completion_email_html(user_name, "creator", verification_link)
                 
                 email_sent = await send_email(
                     to_email=user_email,
-                    subject="🎉 Your Creator Profile is Complete!",
+                    subject="🎉 Your Creator Profile is Complete!" + (" - Verify Your Email" if not email_verified else ""),
                     html_body=html_body
                 )
                 
                 if email_sent:
-                    logger.info(f"Profile completion email sent to {user_email}")
+                    logger.info(f"Profile completion email sent to {user_email}" + (" with verification link" if verification_link else ""))
                 else:
                     logger.warning(f"Failed to send profile completion email to {user_email}")
             except Exception as e:

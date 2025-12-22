@@ -303,19 +303,34 @@ def create_email_verification_html(verification_code: str, user_name: Optional[s
     return html
 
 
-def create_profile_completion_email_html(user_name: str, user_type: str) -> str:
+def create_profile_completion_email_html(user_name: str, user_type: str, verification_link: Optional[str] = None) -> str:
     """
-    Create HTML email template for profile completion confirmation
+    Create HTML email template for profile completion confirmation with email verification
     
     Args:
         user_name: User's name
         user_type: 'creator' or 'hotel'
+        verification_link: Optional email verification link (if provided, includes verification section)
     
     Returns:
         HTML email body
     """
     profile_type = "Creator" if user_type == "creator" else "Hotel"
     dashboard_link = f"{settings.FRONTEND_URL}/{'profile' if user_type == 'creator' else 'hotel/dashboard'}"
+    
+    # Build verification section if link is provided
+    verification_section = ""
+    if verification_link:
+        verification_section = f"""
+            <p style="margin: 20px 0 10px 0; color: #666; font-size: 14px;">Please verify your email address to complete your account setup:</p>
+            <div style="text-align: center; margin: 15px 0;">
+                <a href="{verification_link}"   
+                   style="color: #007bff; text-decoration: underline; font-size: 14px;">
+                    Verify Email Address
+                </a>
+            </div>
+            <p style="margin: 10px 0 20px 0; color: #999; font-size: 12px;">This link will expire in 48 hours.</p>
+        """
     
     html = f"""
     <!DOCTYPE html>
@@ -338,6 +353,8 @@ def create_profile_completion_email_html(user_name: str, user_type: str) -> str:
             <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
                 <p style="margin: 0; color: #2e7d32; font-weight: bold;">✅ Your profile is now complete and ready for review!</p>
             </div>
+            
+            {verification_section}
             
             <p>Our team will now review your profile and verify your information. Once approved, your profile will go live and you'll be able to:</p>
             

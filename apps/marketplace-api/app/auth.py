@@ -278,3 +278,116 @@ async def mark_email_as_verified(email: str) -> bool:
     
     return result == "UPDATE 1"
 
+
+def generate_email_verification_token() -> str:
+    """Generate a secure email verification token"""
+    return secrets.token_urlsafe(32)
+
+
+async def create_email_verification_token(user_id: str, expires_in_hours: int = 48) -> str:
+    """
+    Create an email verification token for a user
+    
+    Args:
+        user_id: User ID
+        expires_in_hours: Token expiration time in hours (default: 48 hours)
+    
+    Returns:
+        The generated verification token
+    """
+    from app.database import Database
+    
+    token = generate_email_verification_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+    
+    # Invalidate any existing unused tokens for this user
+    await Database.execute(
+        """
+        UPDATE email_verification_tokens
+        SET used = true
+        WHERE user_id = $1 AND used = false AND expires_at > now()
+        """,
+        user_id
+    )
+    
+    # Insert new token
+    await Database.execute(
+        """
+        INSERT INTO email_verification_tokens (user_id, token, expires_at)
+        VALUES ($1, $2, $3)
+        """,
+        user_id,
+        token,
+        expires_at
+    )
+    
+    return token
+
+
+async def validate_email_verification_token(token: str) -> Optional[dict]:
+    """
+    Validate an email verification token
+    
+    Args:
+        token: Email verification token
+    
+    Returns:
+        Dictionary with user_id and email if token is valid, None otherwise
+    """
+    from app.database import Database
+    
+    # Get token from database
+    token_record = await Database.fetchrow(
+        """
+        SELECT evt.id, evt.user_id, evt.expires_at, evt.used, u.email, u.status
+        FROM email_verification_tokens evt
+        JOIN users u ON u.id = evt.user_id
+        WHERE evt.token = $1
+        """,
+        token
+    )
+    
+    if not token_record:
+        return None
+    
+    # Check if token is used
+    if token_record['used']:
+        return None
+    
+    # Check if token is expired (use database-side comparison for consistency)
+    if datetime.now(timezone.utc) > token_record['expires_at']:
+        return None
+    
+    # Check if user account is suspended
+    if token_record['status'] == 'suspended':
+        return None
+    
+    return {
+        'user_id': str(token_record['user_id']),
+        'email': token_record['email']
+    }
+
+
+async def mark_email_verification_token_as_used(token: str) -> bool:
+    """
+    Mark an email verification token as used
+    
+    Args:
+        token: Email verification token
+    
+    Returns:
+        True if token was marked as used, False otherwise
+    """
+    from app.database import Database
+    
+    result = await Database.execute(
+        """
+        UPDATE email_verification_tokens
+        SET used = true
+        WHERE token = $1 AND used = false
+        """,
+        token
+    )
+    
+    return result == "UPDATE 1"
+

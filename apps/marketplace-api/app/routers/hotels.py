@@ -12,6 +12,7 @@ from app.email_service import send_email, create_profile_completion_email_html
 from app.s3_service import upload_file_to_s3, generate_file_key
 from app.image_processing import validate_image, process_image, generate_thumbnail, get_image_info
 from app.config import settings
+from app.auth import create_email_verification_token
 import logging
 
 logger = logging.getLogger(__name__)
@@ -738,16 +739,33 @@ async def update_hotel_profile(
                 user_email = updated_hotel['email']
                 user_name = updated_hotel.get('user_name') or updated_hotel.get('name') or user_email.split('@')[0]
                 
-                html_body = create_profile_completion_email_html(user_name, "hotel")
+                # Check if email is already verified
+                user_record = await Database.fetchrow(
+                    "SELECT email_verified FROM users WHERE id = $1",
+                    user_id
+                )
+                email_verified = user_record.get('email_verified', False) if user_record else False
+                
+                # Generate verification token and link if email is not verified
+                verification_link = None
+                if not email_verified:
+                    try:
+                        token = await create_email_verification_token(user_id, expires_in_hours=48)
+                        verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+                    except Exception as e:
+                        logger.error(f"Error creating email verification token: {str(e)}")
+                        # Continue without verification link if token creation fails
+                
+                html_body = create_profile_completion_email_html(user_name, "hotel", verification_link)
                 
                 email_sent = await send_email(
                     to_email=user_email,
-                    subject="🎉 Your Hotel Profile is Complete!",
+                    subject="🎉 Your Hotel Profile is Complete!" + (" - Verify Your Email" if not email_verified else ""),
                     html_body=html_body
                 )
                 
                 if email_sent:
-                    logger.info(f"Profile completion email sent to {user_email}")
+                    logger.info(f"Profile completion email sent to {user_email}" + (" with verification link" if verification_link else ""))
                 else:
                     logger.warning(f"Failed to send profile completion email to {user_email}")
             except Exception as e:

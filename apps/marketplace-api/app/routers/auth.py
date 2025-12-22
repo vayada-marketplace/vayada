@@ -1,7 +1,7 @@
 """
 Authentication routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from pydantic import BaseModel, EmailStr, Field
 from typing import Literal
 import bcrypt
@@ -12,7 +12,8 @@ from app.database import Database
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
 from app.auth import (
     create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used, 
-    hash_password, create_email_verification_code, verify_email_code, mark_email_as_verified
+    hash_password, create_email_verification_code, verify_email_code, mark_email_as_verified,
+    validate_email_verification_token, mark_email_verification_token_as_used
 )
 from app.email_service import send_email, create_password_reset_email_html, create_email_verification_html
 from app.config import settings
@@ -597,4 +598,70 @@ async def reset_password(request: ResetPasswordRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset password: {str(e)}"
+        )
+
+
+class VerifyEmailResponse(BaseModel):
+    """Email verification response model"""
+    message: str
+    verified: bool
+    email: str | None = None
+
+
+@router.get("/verify-email", response_model=VerifyEmailResponse, status_code=status.HTTP_200_OK)
+async def verify_email_endpoint(token: str = Query(..., description="Email verification token")):
+    """
+    Verify email address using a verification token from the profile completion email.
+    
+    This endpoint is called when a user clicks the verification link in their email.
+    The token is provided as a query parameter.
+    
+    - **token**: Email verification token from the profile completion email
+    
+    Returns:
+    - Success message if verification is successful
+    - Error message if token is invalid, expired, or already used
+    """
+    try:
+        # Validate the verification token
+        token_data = await validate_email_verification_token(token)
+        
+        if not token_data:
+            logger.warning(f"Invalid or expired email verification token attempted")
+            return VerifyEmailResponse(
+                message="Invalid or expired verification token. Please request a new verification link.",
+                verified=False,
+                email=None
+            )
+        
+        user_id = token_data['user_id']
+        email = token_data['email']
+        
+        # Mark email as verified
+        email_verified = await mark_email_as_verified(email)
+        
+        if not email_verified:
+            logger.error(f"Failed to mark email as verified for user {user_id}")
+            return VerifyEmailResponse(
+                message="Failed to verify email. Please try again or contact support.",
+                verified=False,
+                email=email
+            )
+        
+        # Mark token as used
+        await mark_email_verification_token_as_used(token)
+        
+        logger.info(f"Email verified successfully for user {user_id} ({email})")
+        return VerifyEmailResponse(
+            message="Email verified successfully! Your account is now fully activated.",
+            verified=True,
+            email=email
+        )
+        
+    except Exception as e:
+        logger.error(f"Error verifying email with token: {str(e)}", exc_info=True)
+        return VerifyEmailResponse(
+            message="An error occurred while verifying your email. Please try again or contact support.",
+            verified=False,
+            email=None
         )
