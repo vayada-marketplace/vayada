@@ -5,7 +5,6 @@ WORKDIR /app
 
 # Copy package files
 COPY package.json package-lock.json* ./
-# Use npm install if package-lock.json doesn't exist, otherwise use npm ci
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Stage 2: Builder
@@ -17,9 +16,6 @@ COPY . .
 # Accept build argument for API URL
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-
-# Ensure public directory exists (Next.js may need it)
-RUN mkdir -p ./public
 
 # Build the application
 RUN npm run build
@@ -36,9 +32,8 @@ RUN adduser --system --uid 1001 nextjs
 # Copy necessary files from standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-# Public assets are not bundled into the standalone output; copy them explicitly
-# (public directory is created in builder stage, so this will always work)
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+# Public assets are not bundled into the standalone output; copy them explicitly if they exist
+# (Admin frontend doesn't have a public directory, so this is optional)
 
 USER nextjs
 
@@ -48,4 +43,3 @@ ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
-

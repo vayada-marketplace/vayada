@@ -219,7 +219,30 @@ export default function UsersPage() {
         email: fullUser.email,
         status: fullUser.status,
       })
-      setProfileForm(fullUser.creator_profile || fullUser.hotel_profile || {})
+      
+      // Properly set profile form based on user type
+      if (fullUser.type === 'creator' && fullUser.creator_profile) {
+        setProfileForm({
+          location: fullUser.creator_profile.location || '',
+          bio: fullUser.creator_profile.bio || '',
+          website: fullUser.creator_profile.website || '',
+          niche: fullUser.creator_profile.niche || '',
+          follower_count: fullUser.creator_profile.follower_count || undefined,
+        })
+      } else if (fullUser.type === 'hotel' && fullUser.hotel_profile) {
+        setProfileForm({
+          hotel_name: fullUser.hotel_profile.hotel_name || '',
+          address: fullUser.hotel_profile.address || '',
+          city: fullUser.hotel_profile.city || '',
+          country: fullUser.hotel_profile.country || '',
+          phone: fullUser.hotel_profile.phone || '',
+          website: fullUser.hotel_profile.website || '',
+          star_rating: fullUser.hotel_profile.star_rating || undefined,
+        })
+      } else {
+        setProfileForm({})
+      }
+      
       setActiveTab('profile')
       
       // Load social media platforms only for creators
