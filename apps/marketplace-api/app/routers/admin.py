@@ -112,6 +112,169 @@ class UpdateUserStatusResponse(BaseModel):
     new_status: str
 
 
+class CreateUserRequest(BaseModel):
+    """Request model for creating a new user"""
+    name: str = Field(..., min_length=1, description="User's full name")
+    email: EmailStr = Field(..., description="User's email address")
+    password: str = Field(..., min_length=8, description="User's password (min 8 characters)")
+    type: Literal["creator", "hotel", "admin"] = Field(..., description="User type")
+    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = Field(
+        default="pending", 
+        description="Initial user status"
+    )
+    avatar: Optional[str] = Field(None, description="Avatar URL")
+    email_verified: Optional[bool] = Field(default=False, description="Whether email is verified")
+
+
+class CreateUserResponse(BaseModel):
+    """Response model for user creation"""
+    message: str
+    user: UserDetailResponse
+
+
+@router.post("/users", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    request: CreateUserRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Create a new user.
+    
+    Admin can create users with initial profile data.
+    For creator/hotel types, basic profile records will be created automatically.
+    """
+    try:
+        from app.auth import hash_password
+        
+        # Check if email already exists
+        existing_user = await Database.fetchrow(
+            "SELECT id FROM users WHERE email = $1",
+            request.email
+        )
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already in use"
+            )
+        
+        # Hash password
+        password_hash = hash_password(request.password)
+        
+        # Create user
+        new_user = await Database.fetchrow(
+            """
+            INSERT INTO users (email, password_hash, name, type, status, avatar, email_verified)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, email, name, type, status, email_verified, avatar, created_at, updated_at
+            """,
+            request.email,
+            password_hash,
+            request.name,
+            request.type,
+            request.status,
+            request.avatar,
+            request.email_verified
+        )
+        
+        user_id = str(new_user['id'])
+        
+        # Create profile based on user type
+        creator_profile = None
+        hotel_profile = None
+        
+        if request.type == 'creator':
+            # Create empty creator profile
+            creator = await Database.fetchrow(
+                """
+                INSERT INTO creators (user_id)
+                VALUES ($1)
+                RETURNING id, location, short_description, portfolio_link, phone,
+                        profile_picture, profile_complete, profile_completed_at,
+                        created_at, updated_at
+                """,
+                user_id
+            )
+            if creator:
+                creator_profile = {
+                    'id': str(creator['id']),
+                    'location': creator['location'],
+                    'short_description': creator['short_description'],
+                    'portfolio_link': creator['portfolio_link'],
+                    'phone': creator['phone'],
+                    'profile_picture': creator['profile_picture'],
+                    'profile_complete': creator['profile_complete'],
+                    'profile_completed_at': creator['profile_completed_at'].isoformat() if creator['profile_completed_at'] else None,
+                    'created_at': creator['created_at'].isoformat(),
+                    'updated_at': creator['updated_at'].isoformat(),
+                    'platforms': []
+                }
+        
+        elif request.type == 'hotel':
+            # Create hotel profile with placeholder location
+            hotel = await Database.fetchrow(
+                """
+                INSERT INTO hotel_profiles (user_id, name, location)
+                VALUES ($1, $2, 'Not specified')
+                RETURNING id, name, location, about, website, phone,
+                        picture, profile_complete, profile_completed_at,
+                        created_at, updated_at
+                """,
+                user_id,
+                request.name  # Use user name as initial hotel name
+            )
+            if hotel:
+                # Get listings count (will be 0 for new hotel)
+                listings_count = await Database.fetchval(
+                    "SELECT COUNT(*) FROM hotel_listings WHERE hotel_profile_id = $1",
+                    hotel['id']
+                )
+                
+                hotel_profile = {
+                    'id': str(hotel['id']),
+                    'name': hotel['name'],
+                    'location': hotel['location'],
+                    'about': hotel['about'],
+                    'website': hotel['website'],
+                    'phone': hotel['phone'],
+                    'picture': hotel['picture'],
+                    'profile_complete': hotel['profile_complete'],
+                    'profile_completed_at': hotel['profile_completed_at'].isoformat() if hotel['profile_completed_at'] else None,
+                    'created_at': hotel['created_at'].isoformat(),
+                    'updated_at': hotel['updated_at'].isoformat(),
+                    'listings_count': listings_count
+                }
+        
+        user_detail = UserDetailResponse(
+            id=user_id,
+            email=new_user['email'],
+            name=new_user['name'],
+            type=new_user['type'],
+            status=new_user['status'],
+            email_verified=new_user['email_verified'],
+            avatar=new_user['avatar'],
+            created_at=new_user['created_at'],
+            updated_at=new_user['updated_at'],
+            creator_profile=creator_profile,
+            hotel_profile=hotel_profile
+        )
+        
+        logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
+        
+        return CreateUserResponse(
+            message="User created successfully",
+            user=user_detail
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
+
+
 @router.get("/users", response_model=UserListResponse, status_code=status.HTTP_200_OK)
 async def list_users(
     page: int = Query(1, ge=1, description="Page number"),

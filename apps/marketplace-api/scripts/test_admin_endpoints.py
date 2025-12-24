@@ -159,9 +159,137 @@ def test_update_user_status(token: str, user_id: str):
         return False
 
 
+def test_create_user(token: str):
+    """Test creating a new user"""
+    print_section("5. Testing Create User (POST /admin/users)")
+    
+    url = f"{API_URL}/admin/users"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create a test user with unique email
+    import time
+    timestamp = int(time.time())
+    payload = {
+        "name": f"Test User {timestamp}",
+        "email": f"testuser{timestamp}@example.com",
+        "password": "TestPassword123!",
+        "type": "creator",
+        "status": "pending",
+        "email_verified": False
+    }
+    
+    print(f"POST {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 201:
+            data = response.json()
+            print(f"\n✅ Success!")
+            print(f"   Created user: {data.get('user', {}).get('name')} ({data.get('user', {}).get('email')})")
+            print(f"   User ID: {data.get('user', {}).get('id')}")
+            print(f"   Type: {data.get('user', {}).get('type')}")
+            print(f"   Status: {data.get('user', {}).get('status')}")
+            
+            # Check if creator profile was created
+            if data.get('user', {}).get('creator_profile'):
+                print(f"   ✅ Creator profile created")
+            
+            return data.get('user', {}).get('id')
+        else:
+            print(f"\n❌ Failed!")
+            return None
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return None
+
+
+def test_create_user_duplicate_email(token: str):
+    """Test creating a user with duplicate email (should fail)"""
+    print_section("5b. Testing Create User with Duplicate Email (should fail)")
+    
+    url = f"{API_URL}/admin/users"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Use a known email (the admin email)
+    payload = {
+        "name": "Duplicate Test User",
+        "email": ADMIN_EMAIL,  # This should already exist
+        "password": "TestPassword123!",
+        "type": "creator",
+        "status": "pending"
+    }
+    
+    print(f"POST {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 400:
+            print(f"\n✅ Correctly rejected duplicate email!")
+            return True
+        else:
+            print(f"\n❌ Should have rejected duplicate email but didn't!")
+            return False
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return False
+
+
+def test_create_hotel_user(token: str):
+    """Test creating a hotel user"""
+    print_section("5c. Testing Create Hotel User (POST /admin/users)")
+    
+    url = f"{API_URL}/admin/users"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create a test hotel user with unique email
+    import time
+    timestamp = int(time.time())
+    payload = {
+        "name": f"Test Hotel {timestamp}",
+        "email": f"testhotel{timestamp}@example.com",
+        "password": "TestPassword123!",
+        "type": "hotel",
+        "status": "pending",
+        "email_verified": False
+    }
+    
+    print(f"POST {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 201:
+            data = response.json()
+            print(f"\n✅ Success!")
+            print(f"   Created hotel: {data.get('user', {}).get('name')} ({data.get('user', {}).get('email')})")
+            print(f"   User ID: {data.get('user', {}).get('id')}")
+            
+            # Check if hotel profile was created
+            if data.get('user', {}).get('hotel_profile'):
+                print(f"   ✅ Hotel profile created")
+                print(f"   Hotel name: {data.get('user', {}).get('hotel_profile', {}).get('name')}")
+                print(f"   Location: {data.get('user', {}).get('hotel_profile', {}).get('location')}")
+            
+            return data.get('user', {}).get('id')
+        else:
+            print(f"\n❌ Failed!")
+            return None
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return None
+
+
 def test_update_user(token: str, user_id: str):
     """Test updating user information"""
-    print_section(f"5. Testing Update User (PUT /admin/users/{user_id})")
+    print_section(f"6. Testing Update User (PUT /admin/users/{user_id})")
     
     url = f"{API_URL}/admin/users/{user_id}"
     headers = {"Authorization": f"Bearer {token}"}
@@ -239,11 +367,22 @@ def main():
         
         # Test 4: Update user status
         test_update_user_status(token, user_id)
-        
-        # Test 5: Update user
-        test_update_user(token, user_id)
     
-    # Test 6: Unauthorized access
+    # Test 5: Create user (creator)
+    created_user_id = test_create_user(token)
+    
+    # Test 5b: Test duplicate email rejection
+    test_create_user_duplicate_email(token)
+    
+    # Test 5c: Create hotel user
+    created_hotel_id = test_create_hotel_user(token)
+    
+    # Test 6: Update user (use created user if available, otherwise existing)
+    test_user_id = created_user_id or user_id
+    if test_user_id and test_user_id != "test-user-id":
+        test_update_user(token, test_user_id)
+    
+    # Test 7: Unauthorized access
     test_unauthorized_access()
     
     print_section("TEST SUITE COMPLETE")
