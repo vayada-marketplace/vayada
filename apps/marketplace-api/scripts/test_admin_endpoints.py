@@ -287,9 +287,87 @@ def test_create_hotel_user(token: str):
         return None
 
 
+def test_delete_user(token: str, user_id: str):
+    """Test deleting a user"""
+    print_section(f"6. Testing Delete User (DELETE /admin/users/{user_id})")
+    
+    url = f"{API_URL}/admin/users/{user_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    print(f"DELETE {url}")
+    print(f"⚠️  WARNING: This will permanently delete the user and all related data!")
+    
+    try:
+        response = requests.delete(url, headers=headers, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"\n✅ Success!")
+            print(f"   Deleted user ID: {data.get('deleted_user_id')}")
+            print(f"   Cascade deleted: {json.dumps(data.get('cascade_deleted', {}), indent=2)}")
+            return True
+        else:
+            print(f"\n❌ Failed!")
+            return False
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return False
+
+
+def test_delete_nonexistent_user(token: str):
+    """Test deleting a non-existent user (should fail)"""
+    print_section("6b. Testing Delete Non-existent User (should fail)")
+    
+    fake_user_id = "00000000-0000-0000-0000-000000000000"
+    url = f"{API_URL}/admin/users/{fake_user_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    print(f"DELETE {url}")
+    
+    try:
+        response = requests.delete(url, headers=headers, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 404:
+            print(f"\n✅ Correctly rejected non-existent user!")
+            return True
+        else:
+            print(f"\n❌ Should have returned 404 but got {response.status_code}!")
+            return False
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return False
+
+
+def test_delete_own_account(token: str, admin_id: str):
+    """Test deleting own admin account (should fail)"""
+    print_section("6c. Testing Delete Own Admin Account (should fail)")
+    
+    url = f"{API_URL}/admin/users/{admin_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    print(f"DELETE {url}")
+    print(f"⚠️  Attempting to delete own admin account (should be rejected)")
+    
+    try:
+        response = requests.delete(url, headers=headers, verify=False, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 400:
+            print(f"\n✅ Correctly prevented self-deletion!")
+            return True
+        else:
+            print(f"\n❌ Should have rejected self-deletion but didn't!")
+            return False
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        return False
+
+
 def test_update_user(token: str, user_id: str):
     """Test updating user information"""
-    print_section(f"6. Testing Update User (PUT /admin/users/{user_id})")
+    print_section(f"7. Testing Update User (PUT /admin/users/{user_id})")
     
     url = f"{API_URL}/admin/users/{user_id}"
     headers = {"Authorization": f"Bearer {token}"}
@@ -319,7 +397,7 @@ def test_update_user(token: str, user_id: str):
 
 def test_unauthorized_access():
     """Test that non-admin users cannot access admin endpoints"""
-    print_section("6. Testing Unauthorized Access (should fail)")
+    print_section("8. Testing Unauthorized Access (should fail)")
     
     url = f"{API_URL}/admin/users"
     headers = {"Authorization": "Bearer invalid_token"}
@@ -377,12 +455,40 @@ def main():
     # Test 5c: Create hotel user
     created_hotel_id = test_create_hotel_user(token)
     
-    # Test 6: Update user (use created user if available, otherwise existing)
-    test_user_id = created_user_id or user_id
-    if test_user_id and test_user_id != "test-user-id":
-        test_update_user(token, test_user_id)
+    # Test 6: Delete user (use created user if available, otherwise skip)
+    if created_user_id:
+        test_delete_user(token, created_user_id)
     
-    # Test 7: Unauthorized access
+    # Test 6b: Delete non-existent user (should fail)
+    test_delete_nonexistent_user(token)
+    
+    # Test 6c: Try to delete own account (should fail)
+    # Get admin ID from token or use a placeholder
+    admin_user_id = None
+    try:
+        # Try to get admin user details
+        admin_response = requests.get(
+            f"{API_URL}/admin/users",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"type": "admin", "page_size": 1},
+            verify=False,
+            timeout=10
+        )
+        if admin_response.status_code == 200:
+            admin_users = admin_response.json().get('users', [])
+            if admin_users:
+                admin_user_id = admin_users[0].get('id')
+    except:
+        pass
+    
+    if admin_user_id:
+        test_delete_own_account(token, admin_user_id)
+    
+    # Test 7: Update user (use created hotel if available, otherwise skip)
+    if created_hotel_id:
+        test_update_user(token, created_hotel_id)
+    
+    # Test 8: Unauthorized access
     test_unauthorized_access()
     
     print_section("TEST SUITE COMPLETE")

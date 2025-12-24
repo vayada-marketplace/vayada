@@ -132,6 +132,13 @@ class CreateUserResponse(BaseModel):
     user: UserDetailResponse
 
 
+class DeleteUserResponse(BaseModel):
+    """Response model for user deletion"""
+    message: str
+    deleted_user_id: str
+    cascade_deleted: dict
+
+
 @router.post("/users", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     request: CreateUserRequest,
@@ -272,6 +279,99 @@ async def create_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create user: {str(e)}"
+        )
+
+
+@router.delete("/users/{user_id}", response_model=DeleteUserResponse, status_code=status.HTTP_200_OK)
+async def delete_user(
+    user_id: str,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Delete a user and all associated data (cascade delete).
+    
+    This will delete:
+    - User record
+    - Creator profile (if creator) and all platforms
+    - Hotel profile (if hotel) and all listings
+    - All related records due to CASCADE constraints
+    
+    Admins cannot delete their own account.
+    """
+    try:
+        # Check if user exists and get type for cascade info
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Prevent admin from deleting themselves
+        if user_id == admin_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete your own admin account"
+            )
+        
+        # Count related records before deletion (for response)
+        cascade_info = {}
+        
+        if user['type'] == 'creator':
+            # Count platforms
+            creator = await Database.fetchrow(
+                "SELECT id FROM creators WHERE user_id = $1",
+                user_id
+            )
+            if creator:
+                platform_count = await Database.fetchrow(
+                    "SELECT COUNT(*) as count FROM creator_platforms WHERE creator_id = $1",
+                    creator['id']
+                )
+                cascade_info['platforms'] = platform_count['count'] if platform_count else 0
+            else:
+                cascade_info['platforms'] = 0
+        
+        elif user['type'] == 'hotel':
+            # Count listings
+            hotel = await Database.fetchrow(
+                "SELECT id FROM hotel_profiles WHERE user_id = $1",
+                user_id
+            )
+            if hotel:
+                listing_count = await Database.fetchrow(
+                    "SELECT COUNT(*) as count FROM hotel_listings WHERE hotel_profile_id = $1",
+                    hotel['id']
+                )
+                cascade_info['listings'] = listing_count['count'] if listing_count else 0
+            else:
+                cascade_info['listings'] = 0
+        
+        # Delete user (CASCADE will handle related records)
+        await Database.execute(
+            "DELETE FROM users WHERE id = $1",
+            user_id
+        )
+        
+        logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']})")
+        
+        return DeleteUserResponse(
+            message="User deleted successfully",
+            deleted_user_id=user_id,
+            cascade_deleted=cascade_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(e)}"
         )
 
 
