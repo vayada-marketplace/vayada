@@ -150,3 +150,16 @@ jobs:
           echo "Image pushed successfully!"
           echo "Latest: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest"
           echo "Commit SHA: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+
+      - name: Deploy to ECS
+        run: |
+          echo "🚀 Deploying to ECS..."
+          aws ecs update-service \
+            --cluster vayada-backend-cluster \
+            --service vayada-backend-service \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ ECS deployment triggered!"
+          echo "   The service will pull the latest image and deploy it."
+          echo "   Monitor deployment: aws ecs describe-services --cluster vayada-backend-cluster --services vayada-backend-service --region ${{ env.AWS_REGION }}"
