@@ -84,20 +84,14 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> List[str]:
         """Parse CORS origins from comma-separated string"""
         origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-        # Always allow our canonical domains even if secrets/env omit them
-        canonical_origins = [
-            "https://vayada.com",
-            "https://www.vayada.com",
-            "https://aibtbbbcps.eu-west-1.awsapprunner.com"  # Admin frontend
-        ]
-        # Preserve order while de-duplicating
+        # Remove duplicates while preserving order
         seen = set()
-        merged = []
-        for origin in origins + canonical_origins:
+        unique_origins = []
+        for origin in origins:
             if origin and origin not in seen:
                 seen.add(origin)
-                merged.append(origin)
-        return merged
+                unique_origins.append(origin)
+        return unique_origins
     
     @property
     def cors_methods_list(self) -> List[str]:
