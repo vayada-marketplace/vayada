@@ -362,14 +362,34 @@ async def get_user_details(
                             return json.loads(value)
                         return value
                     
+                    # Convert top_countries from dict to list format if needed
+                    def convert_top_countries(value):
+                        parsed = parse_jsonb(value)
+                        if parsed is None:
+                            return None
+                        if isinstance(parsed, dict):
+                            # Convert dict {"USA": 40, "UK": 25} to [{"country": "USA", "percentage": 40}, ...]
+                            return [{"country": k, "percentage": v} for k, v in parsed.items()]
+                        return parsed
+                    
+                    # Convert top_age_groups from dict to list format if needed
+                    def convert_top_age_groups(value):
+                        parsed = parse_jsonb(value)
+                        if parsed is None:
+                            return None
+                        if isinstance(parsed, dict):
+                            # Convert dict {"25-34": 45, "35-44": 30} to [{"ageRange": "25-34", "percentage": 45}, ...]
+                            return [{"ageRange": k, "percentage": v} for k, v in parsed.items()]
+                        return parsed
+                    
                     platforms.append(PlatformResponse(
                         id=str(p['id']),
-                        name=p['name'],
+     ‘                   name=p['name'],
                         handle=p['handle'],
                         followers=p['followers'],
                         engagement_rate=float(p['engagement_rate']),
-                        top_countries=parse_jsonb(p['top_countries']),
-                        top_age_groups=parse_jsonb(p['top_age_groups']),
+                        top_countries=convert_top_countries(p['top_countries']),
+                        top_age_groups=convert_top_age_groups(p['top_age_groups']),
                         gender_split=parse_jsonb(p['gender_split']),
                         created_at=p['created_at'],
                         updated_at=p['updated_at']
