@@ -384,7 +384,7 @@ async def get_user_details(
                     
                     platforms.append(PlatformResponse(
                         id=str(p['id']),
-     ‘                   name=p['name'],
+                        name=p['name'],
                         handle=p['handle'],
                         followers=p['followers'],
                         engagement_rate=float(p['engagement_rate']),
