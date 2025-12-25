@@ -20,17 +20,17 @@ export default function LoginPage() {
   const [submitError, setSubmitError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Check if token expired
+  // Check if token expired or if registered
   useEffect(() => {
     if (searchParams.get('expired') === 'true') {
       setTokenExpired(true)
     }
     
-    // Redirect if already logged in as admin
-    if (authService.isLoggedIn() && authService.isAdmin()) {
-      router.push('/dashboard')
+    if (searchParams.get('registered') === 'true') {
+      setSubmitError('')
+      // Show success message could be added here
     }
-  }, [searchParams, router])
+  }, [searchParams])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -194,6 +194,16 @@ export default function LoginPage() {
           >
             {isSubmitting ? 'Signing In...' : 'Sign In'}
           </Button>
+
+          {/* Register Link */}
+          <div className="text-center">
+            <p className="text-sm text-gray-600">
+              Don't have an account?{' '}
+              <a href="/register" className="text-primary-600 hover:text-primary-700 font-medium">
+                Sign up
+              </a>
+            </p>
+          </div>
         </form>
       </div>
     </div>

@@ -3,21 +3,35 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
-import { usersService } from '@/services/api/users'
+import { usersService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
+import { Button, Input } from '@/components/ui'
 import type { User } from '@/lib/types'
+import {
+  MagnifyingGlassIcon,
+  UserIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+} from '@heroicons/react/24/outline'
+import { Modal } from '@/components/ui/Modal'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    verified: 0,
-    rejected: 0,
-    suspended: 0,
-  })
+  const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterType, setFilterType] = useState<'all' | 'hotel' | 'creator' | 'admin'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'verified' | 'rejected' | 'suspended'>('all')
+  
+  // Pagination
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+  
+  // Modal state
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
 
   useEffect(() => {
     if (!authService.isLoggedIn() || !authService.isAdmin()) {
@@ -25,109 +39,436 @@ export default function DashboardPage() {
       return
     }
 
-    loadStats()
-  }, [router])
+    loadUsers()
+  }, [router, page, filterType, filterStatus])
 
-  const loadStats = async () => {
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (page === 1) {
+        loadUsers()
+      } else {
+        setPage(1) // Reset to page 1 when search changes
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  const loadUsers = async () => {
     try {
       setLoading(true)
       setError('')
       
-      // Fetch first page to get total count, then calculate stats from all statuses
-      const [allResponse, pendingResponse, verifiedResponse, rejectedResponse, suspendedResponse] = await Promise.all([
-        usersService.getAllUsers({ page: 1, page_size: 1 }),
-        usersService.getAllUsers({ status: 'pending', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ status: 'verified', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ status: 'rejected', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ status: 'suspended', page: 1, page_size: 1 }),
-      ])
+      const params: any = {
+        page,
+        page_size: pageSize,
+      }
+      if (filterType !== 'all') params.type = filterType
+      if (filterStatus !== 'all') params.status = filterStatus
+      if (searchTerm) params.search = searchTerm
       
-      setStats({
-        total: allResponse.total || 0,
-        pending: pendingResponse.total || 0,
-        verified: verifiedResponse.total || 0,
-        rejected: rejectedResponse.total || 0,
-        suspended: suspendedResponse.total || 0,
-      })
+      const response = await usersService.getAllUsers(params)
+      setUsers(response.users || [])
+      setTotal(response.total || 0)
+      setTotalPages(Math.ceil((response.total || 0) / pageSize))
     } catch (err) {
       if (err instanceof ApiErrorResponse) {
-        // If endpoint doesn't exist yet, show placeholder
         if (err.status === 404) {
-          setError('Admin endpoints not yet configured. Please set up backend admin routes.')
+          setError('Backend endpoint /admin/users not found. Please ensure the backend API is running and the endpoint is configured.')
+        } else if (err.status === 401) {
+          setError('Authentication failed. Please login again.')
+          authService.logout()
+        } else if (err.status === 403) {
+          setError('Access denied. Admin privileges required.')
         } else {
-          setError(err.data.detail as string || 'Failed to load statistics')
+          setError(err.data.detail as string || 'Failed to load users')
         }
       } else {
-        setError('Failed to load dashboard statistics')
+        setError('Failed to load users. Please check your connection and try again.')
       }
     } finally {
       setLoading(false)
     }
   }
 
-  const statCards = [
-    { label: 'Total Users', value: stats.total, color: 'bg-blue-500' },
-    { label: 'Pending', value: stats.pending, color: 'bg-yellow-500' },
-    { label: 'Verified', value: stats.verified, color: 'bg-green-500' },
-    { label: 'Rejected', value: stats.rejected, color: 'bg-red-500' },
-    { label: 'Suspended', value: stats.suspended, color: 'bg-gray-500' },
-  ]
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    setPage(1)
+    loadUsers()
+  }
+
+  const handleLogout = () => {
+    authService.logout()
+  }
+
+  const getStatusBadgeColor = (status: User['status']) => {
+    switch (status) {
+      case 'verified':
+        return 'bg-green-100 text-green-800'
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800'
+      case 'rejected':
+        return 'bg-red-100 text-red-800'
+      case 'suspended':
+        return 'bg-gray-100 text-gray-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getTypeBadgeColor = (type: User['type']) => {
+    switch (type) {
+      case 'admin':
+        return 'bg-purple-100 text-purple-800'
+      case 'hotel':
+        return 'bg-blue-100 text-blue-800'
+      case 'creator':
+        return 'bg-indigo-100 text-indigo-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const startItem = (page - 1) * pageSize + 1
+  const endItem = Math.min(page * pageSize, total)
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-2 text-gray-600">Overview of user management</p>
-      </div>
-
-      {error && (
-        <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800">{error}</p>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-center py-12">
-          <p className="text-gray-600">Loading statistics...</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
-          {statCards.map((card) => (
-            <div
-              key={card.label}
-              className="bg-white overflow-hidden shadow rounded-lg"
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+              <p className="text-sm text-gray-600">Manage all users in the system</p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleLogout}
             >
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <div className={`${card.color} rounded-md p-3`}>
-                      <div className="w-6 h-6 bg-white rounded opacity-50"></div>
-                    </div>
+              Logout
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div className="px-4 sm:px-6 lg:px-8 py-8">
+        {/* Filters and Search */}
+        <div className="mb-6 bg-white p-4 rounded-lg shadow">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Search by name or email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <select
+                value={filterType}
+                onChange={(e) => {
+                  setFilterType(e.target.value as any)
+                  setPage(1)
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900"
+              >
+                <option value="all">All Types</option>
+                <option value="hotel">Hotels</option>
+                <option value="creator">Creators</option>
+                <option value="admin">Admins</option>
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value as any)
+                  setPage(1)
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="verified">Verified</option>
+                <option value="rejected">Rejected</option>
+                <option value="suspended">Suspended</option>
+              </select>
+              <Button type="submit" variant="primary">Search</Button>
+            </div>
+          </form>
+        </div>
+
+        {error && (
+          <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p className="text-sm text-yellow-800">{error}</p>
+          </div>
+        )}
+
+        {/* Users Table */}
+        {loading ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow">
+            <p className="text-gray-600">Loading users...</p>
+          </div>
+        ) : users.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow">
+            <UserIcon className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No users found</h3>
+            <p className="mt-1 text-sm text-gray-500">Try adjusting your filters or search terms.</p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      User
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Type
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Email Verified
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Created
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {users.map((user) => (
+                    <tr 
+                      key={user.id} 
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setSelectedUser(user)}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10">
+                            {user.avatar ? (
+                              <img className="h-10 w-10 rounded-full" src={user.avatar} alt={user.name} />
+                            ) : (
+                              <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                <UserIcon className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                            <div className="text-sm text-gray-500">{user.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeBadgeColor(user.type)}`}>
+                          {user.type}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(user.status)}`}>
+                          {user.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {user.email_verified ? (
+                          <span className="text-green-600 font-medium">Yes</span>
+                        ) : (
+                          <span className="text-gray-400">No</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {new Date(user.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 rounded-lg shadow sm:px-6">
+                <div className="flex flex-1 justify-between sm:hidden">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+                <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm text-gray-700">
+                      Showing <span className="font-medium">{startItem}</span> to{' '}
+                      <span className="font-medium">{endItem}</span> of{' '}
+                      <span className="font-medium">{total}</span> results
+                    </p>
                   </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">
-                        {card.label}
-                      </dt>
-                      <dd className="text-2xl font-semibold text-gray-900">
-                        {card.value}
-                      </dd>
-                    </dl>
+                  <div>
+                    <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                      <button
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                        className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ArrowLeftIcon className="w-5 h-5" />
+                      </button>
+                      {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
+                        let pageNum: number
+                        if (totalPages <= 10) {
+                          pageNum = i + 1
+                        } else if (page <= 5) {
+                          pageNum = i + 1
+                        } else if (page >= totalPages - 4) {
+                          pageNum = totalPages - 9 + i
+                        } else {
+                          pageNum = page - 5 + i
+                        }
+                        
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setPage(pageNum)}
+                            className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
+                              pageNum === page
+                                ? 'z-10 bg-primary-600 text-white focus:z-20'
+                                : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        )
+                      })}
+                      <button
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page === totalPages}
+                        className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ArrowRightIcon className="w-5 h-5" />
+                      </button>
+                    </nav>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            )}
+          </>
+        )}
 
-      <div className="mt-8">
-        <a
-          href="/dashboard/users"
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
-        >
-          Manage Users →
-        </a>
+        {/* User Preview Modal */}
+        {selectedUser && (
+          <Modal
+            isOpen={!!selectedUser}
+            onClose={() => setSelectedUser(null)}
+            title="User Preview"
+            size="md"
+          >
+            <div className="space-y-4">
+              {/* User Avatar and Basic Info */}
+              <div className="flex items-start space-x-4">
+                <div className="flex-shrink-0">
+                  {selectedUser.avatar ? (
+                    <img 
+                      className="h-16 w-16 rounded-full" 
+                      src={selectedUser.avatar} 
+                      alt={selectedUser.name} 
+                    />
+                  ) : (
+                    <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
+                      <UserIcon className="h-8 w-8 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900">{selectedUser.name}</h3>
+                  <p className="text-sm text-gray-600">{selectedUser.email}</p>
+                  <div className="mt-2 flex gap-2">
+                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getTypeBadgeColor(selectedUser.type)}`}>
+                      {selectedUser.type}
+                    </span>
+                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(selectedUser.status)}`}>
+                      {selectedUser.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Stats */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                <div>
+                  <p className="text-xs text-gray-500">Email Verified</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {selectedUser.email_verified ? (
+                      <span className="text-green-600">Yes</span>
+                    ) : (
+                      <span className="text-gray-400">No</span>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Created</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {new Date(selectedUser.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+
+              {/* Conditional Stats - Will be replaced with API data later */}
+              {selectedUser.type === 'creator' && (
+                <div className="pt-4 border-t">
+                  <div>
+                    <p className="text-xs text-gray-500">Social Media Platforms</p>
+                    <p className="text-sm font-medium text-gray-900">-</p>
+                  </div>
+                </div>
+              )}
+              {selectedUser.type === 'hotel' && (
+                <div className="pt-4 border-t">
+                  <div>
+                    <p className="text-xs text-gray-500">Listings</p>
+                    <p className="text-sm font-medium text-gray-900">-</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4 border-t">
+                <Button
+                  variant="primary"
+                  className="flex-1"
+                  onClick={() => {
+                    router.push(`/dashboard/users/${selectedUser.id}`)
+                    setSelectedUser(null)
+                  }}
+                >
+                  View Full Details
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedUser(null)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </div>
     </div>
   )

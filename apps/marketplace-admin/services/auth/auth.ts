@@ -77,7 +77,38 @@ function getToken(): string | null {
   return token
 }
 
+export interface RegisterRequest {
+  name: string
+  email: string
+  password: string
+}
+
+export interface RegisterResponse {
+  message: string
+  id: string
+  email: string
+  name: string
+}
+
 export const authService = {
+  /**
+   * Register a new admin user
+   */
+  register: async (data: RegisterRequest): Promise<RegisterResponse> => {
+    try {
+      const response = await apiClient.post<RegisterResponse>('/auth/register', {
+        ...data,
+        type: 'admin',
+      })
+      return response
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        throw error
+      }
+      throw error
+    }
+  },
+
   /**
    * Login user (admin)
    */
