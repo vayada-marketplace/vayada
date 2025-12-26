@@ -100,4 +100,13 @@ export const usersService = {
     const response = await apiClient.post<any>(`/admin/users/${hotelUserId}/listings`, data)
     return transformSnakeToCamel(response)
   },
+
+  /**
+   * Delete a user permanently
+   * ⚠️ Warning: This action cannot be undone!
+   */
+  deleteUser: async (userId: string): Promise<{ message: string; deleted_user: User }> => {
+    const response = await apiClient.delete<any>(`/admin/users/${userId}`)
+    return transformSnakeToCamel(response)
+  },
 }

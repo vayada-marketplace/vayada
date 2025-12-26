@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
-import { UserIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { UserIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { usersService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
 import type { UserDetailResponse, CreatorProfileDetail, HotelProfileDetail, PlatformResponse, ListingResponse, CollaborationOffering, CreatorRequirements } from '@/lib/types'
@@ -20,6 +20,9 @@ export default function UserDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedListing, setSelectedListing] = useState<ListingResponse | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     loadUserDetail()
@@ -109,19 +112,30 @@ export default function UserDetailPage() {
       <header className="bg-white shadow">
         <div className="px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center space-x-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/dashboard')}
+                >
+                  <ArrowLeftIcon className="w-4 h-4 mr-2" />
+                  Back to Users
+                </Button>
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">User Details</h1>
+                  <p className="text-sm text-gray-600">View and manage user information</p>
+                </div>
+              </div>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/dashboard')}
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-red-600 border-red-300 hover:bg-red-50"
               >
-                <ArrowLeftIcon className="w-4 h-4 mr-2" />
-                Back to Users
+                <TrashIcon className="w-4 h-4 mr-2" />
+                Delete User
               </Button>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">User Details</h1>
-                <p className="text-sm text-gray-600">View and manage user information</p>
-              </div>
             </div>
           </div>
         </div>
@@ -825,6 +839,71 @@ export default function UserDetailPage() {
                   onClick={() => setSelectedListing(null)}
                 >
                   Close
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && userDetail && (
+          <Modal
+            isOpen={showDeleteConfirm}
+            onClose={() => {
+              setShowDeleteConfirm(false)
+              setDeleteError('')
+            }}
+            title="Delete User"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-red-800">
+                  ⚠️ Warning: This action cannot be undone!
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to delete this user? This will permanently delete:
+                </p>
+                <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-4">
+                  <li>User account: <strong>{userDetail.name}</strong> ({userDetail.email})</li>
+                  {userDetail.type === 'creator' && (
+                    <li>Creator profile and all social media platforms</li>
+                  )}
+                  {userDetail.type === 'hotel' && (
+                    <li>Hotel profile and all listings with their offerings and requirements</li>
+                  )}
+                  <li>All associated S3 images (profile pictures, listing images, thumbnails)</li>
+                  <li>All related records</li>
+                </ul>
+              </div>
+
+              {deleteError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-800">{deleteError}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteConfirm(false)
+                    setDeleteError('')
+                  }}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleDeleteUser}
+                  disabled={deleting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {deleting ? 'Deleting...' : 'Delete User'}
                 </Button>
               </div>
             </div>

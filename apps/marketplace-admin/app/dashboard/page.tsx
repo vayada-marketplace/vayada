@@ -13,6 +13,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   PlusIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline'
 import { Modal } from '@/components/ui/Modal'
 
@@ -33,6 +34,10 @@ export default function DashboardPage() {
   
   // Modal state
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
 
   useEffect(() => {
     if (!authService.isLoggedIn() || !authService.isAdmin()) {
@@ -97,6 +102,48 @@ export default function DashboardPage() {
     e.preventDefault()
     setPage(1)
     loadUsers()
+  }
+
+  const handleDeleteUser = async () => {
+    if (!deleteConfirmUser) return
+
+    try {
+      setDeleting(true)
+      setDeleteError('')
+      setSuccessMessage('')
+
+      await usersService.deleteUser(deleteConfirmUser.id)
+
+      // Remove user from list
+      setUsers(prev => prev.filter(u => u.id !== deleteConfirmUser.id))
+      setTotal(prev => prev - 1)
+      
+      // Close modals
+      setDeleteConfirmUser(null)
+      setSelectedUser(null)
+      
+      // Show success message
+      setSuccessMessage(`User "${deleteConfirmUser.name}" has been deleted successfully.`)
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccessMessage(''), 5000)
+    } catch (err) {
+      if (err instanceof ApiErrorResponse) {
+        if (err.status === 400) {
+          setDeleteError('Cannot delete your own account.')
+        } else if (err.status === 404) {
+          setDeleteError('User not found.')
+        } else if (err.status === 403) {
+          setDeleteError('Access denied. Admin privileges required.')
+        } else {
+          setDeleteError(err.data.detail as string || 'Failed to delete user.')
+        }
+      } else {
+        setDeleteError('Failed to delete user. Please try again.')
+      }
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const handleLogout = () => {
@@ -218,6 +265,12 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {successMessage && (
+          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+            <p className="text-sm text-green-800">{successMessage}</p>
+          </div>
+        )}
+
         {/* Users Table */}
         {loading ? (
           <div className="text-center py-12 bg-white rounded-lg shadow">
@@ -259,7 +312,10 @@ export default function DashboardPage() {
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setSelectedUser(user)}
                     >
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td 
+                        className="px-6 py-4 whitespace-nowrap cursor-pointer"
+                        onClick={() => setSelectedUser(user)}
+                      >
                         <div className="flex items-center">
                           <div className="flex-shrink-0 h-10 w-10">
                             {user.avatar ? (
@@ -295,6 +351,18 @@ export default function DashboardPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(user.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDeleteConfirmUser(user)
+                          }}
+                          className="text-red-600 hover:text-red-900 transition-colors"
+                          title="Delete user"
+                        >
+                          <TrashIcon className="h-5 w-5" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -474,6 +542,71 @@ export default function DashboardPage() {
                   onClick={() => setSelectedUser(null)}
                 >
                   Close
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirmUser && (
+          <Modal
+            isOpen={!!deleteConfirmUser}
+            onClose={() => {
+              setDeleteConfirmUser(null)
+              setDeleteError('')
+            }}
+            title="Delete User"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-red-800">
+                  ⚠️ Warning: This action cannot be undone!
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to delete this user? This will permanently delete:
+                </p>
+                <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-4">
+                  <li>User account: <strong>{deleteConfirmUser.name}</strong> ({deleteConfirmUser.email})</li>
+                  {deleteConfirmUser.type === 'creator' && (
+                    <li>Creator profile and all social media platforms</li>
+                  )}
+                  {deleteConfirmUser.type === 'hotel' && (
+                    <li>Hotel profile and all listings with their offerings and requirements</li>
+                  )}
+                  <li>All associated S3 images (profile pictures, listing images, thumbnails)</li>
+                  <li>All related records</li>
+                </ul>
+              </div>
+
+              {deleteError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-800">{deleteError}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeleteConfirmUser(null)
+                    setDeleteError('')
+                  }}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleDeleteUser}
+                  disabled={deleting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {deleting ? 'Deleting...' : 'Delete User'}
                 </Button>
               </div>
             </div>
