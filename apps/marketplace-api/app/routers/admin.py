@@ -1183,8 +1183,8 @@ async def update_hotel_profile(
             phone=updated_hotel['phone'],
             picture=updated_hotel['picture'],
             status=updated_hotel['status'],
-            createdAt=updated_hotel['created_at'],
-            updatedAt=updated_hotel['updated_at']
+            created_at=updated_hotel['created_at'],
+            updated_at=updated_hotel['updated_at']
         )
         
     except HTTPException:
