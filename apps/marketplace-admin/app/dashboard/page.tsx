@@ -12,6 +12,7 @@ import {
   UserIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline'
 import { Modal } from '@/components/ui/Modal'
 
@@ -143,12 +144,21 @@ export default function DashboardPage() {
               <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
               <p className="text-sm text-gray-600">Manage all users in the system</p>
             </div>
-            <Button
-              variant="outline"
-              onClick={handleLogout}
-            >
-              Logout
-            </Button>
+            <div className="flex gap-3">
+              <Button
+                variant="primary"
+                onClick={() => router.push('/dashboard/users/create')}
+              >
+                <PlusIcon className="w-5 h-5 mr-2" />
+                Create User
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleLogout}
+              >
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
       </header>

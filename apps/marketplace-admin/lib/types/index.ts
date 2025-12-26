@@ -89,13 +89,36 @@ export interface LoginResponse {
 }
 
 export interface CreateUserRequest {
-  name: string
   email: string
   password: string
-  type: 'hotel' | 'creator' | 'admin'
+  name: string
+  type: 'creator' | 'hotel'
   status?: 'pending' | 'verified' | 'rejected' | 'suspended'
-  creator_profile?: Partial<CreatorProfile>
-  hotel_profile?: Partial<HotelProfile>
+  emailVerified?: boolean
+  avatar?: string
+  creatorProfile?: {
+    location?: string
+    shortDescription?: string
+    portfolioLink?: string
+    phone?: string
+    profilePicture?: string
+    platforms?: Array<{
+      name: 'Instagram' | 'TikTok' | 'YouTube' | 'Facebook'
+      handle: string
+      followers: number
+      engagementRate: number
+      topCountries?: Array<{country: string, percentage: number}>
+      topAgeGroups?: Array<{ageRange: string, percentage: number}>
+      genderSplit?: {male: number, female: number, other?: number}
+    }>
+  }
+  hotelProfile?: {
+    name?: string
+    location?: string
+    about?: string
+    website?: string
+    phone?: string
+  }
 }
 
 export interface UpdateUserRequest {
@@ -165,7 +188,7 @@ export interface PlatformResponse {
   followers: number
   engagementRate: number
   topCountries: Array<{ country: string; percentage: number }> | null
-  topAgeGroups: Array<{ ageRange: string; percentage: number }> | null
+  topAgeGroups: Array<{ ageRange: string; percentage?: number }> | null
   genderSplit: { male: number; female: number } | null
   createdAt: string
   updatedAt: string

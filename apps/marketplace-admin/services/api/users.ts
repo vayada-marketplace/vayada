@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './client'
-import type { User, UserDetailResponse } from '@/lib/types'
+import type { User, UserDetailResponse, CreateUserRequest } from '@/lib/types'
 
 export interface UsersListResponse {
   users: User[]
@@ -61,5 +61,12 @@ export const usersService = {
     const response = await apiClient.get<any>(`/admin/users/${userId}`)
     // Transform snake_case to camelCase to match TypeScript interfaces
     return transformSnakeToCamel(response) as UserDetailResponse
+  },
+
+  /**
+   * Create a new user (creator or hotel)
+   */
+  createUser: async (data: CreateUserRequest): Promise<User> => {
+    return apiClient.post<User>('/admin/users', data)
   },
 }

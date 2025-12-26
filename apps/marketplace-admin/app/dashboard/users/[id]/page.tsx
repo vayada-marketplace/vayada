@@ -494,7 +494,8 @@ export default function UserDetailPage() {
                                 <div className="flex flex-wrap gap-2">
                                   {platform.topAgeGroups.slice(0, 5).map((age, idx) => (
                                     <span key={idx} className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">
-                                      {age.ageRange} ({age.percentage.toFixed(1)}%)
+                                      {age.ageRange}
+                                      {age.percentage != null && typeof age.percentage === 'number' && ` (${age.percentage.toFixed(1)}%)`}
                                     </span>
                                   ))}
                                 </div>
