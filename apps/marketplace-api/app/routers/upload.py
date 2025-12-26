@@ -1,7 +1,7 @@
 """
 File upload routes for images
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -43,7 +43,8 @@ class MultipleImageUploadResponse(BaseModel):
 async def upload_image(
     file: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id),
-    prefix: str = "images"
+    prefix: str = "images",
+    target_user_id: Optional[str] = None
 ):
     """
     Upload a single image file
@@ -99,7 +100,10 @@ async def upload_image(
             image_info = get_image_info(processed_content)
         
         # Generate file key
-        file_key = generate_file_key(prefix, file.filename or "image.jpg", user_id)
+        # Use target_user_id if provided (for admin creating users), otherwise use authenticated user_id
+        # If target_user_id is None explicitly, don't organize by user_id (for admin creating new users)
+        upload_user_id = target_user_id if target_user_id is not None else user_id
+        file_key = generate_file_key(prefix, file.filename or "image.jpg", upload_user_id)
         
         # Upload to S3
         content_type = file.content_type or "image/jpeg"
@@ -324,14 +328,25 @@ async def upload_listing_images(
 @router.post("/image/creator-profile", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_creator_profile_image(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    target_user_id: Optional[str] = Query(None, description="Target creator user_id (for admin uploading on behalf of a creator). When creating a new user, first create the user to get their user_id, then upload using that user_id here.")
 ):
     """
     Upload a creator profile picture
     
     Convenience endpoint that uploads to the 'creators' prefix.
-    Note: The creators table doesn't currently have a picture field.
-    You can store the returned URL for future use when the schema is updated.
+    
+    - For regular creators: Uses authenticated user's ID → `creators/{user_id}/filename.jpg`
+    - For admin uploading for a creator: Use `target_user_id` query param → `creators/{target_user_id}/filename.jpg`
+    
+    **Important for admin creating new users:**
+    1. First create the user via `POST /admin/users` (without profilePicture) to get the creator's user_id
+    2. Then upload the image using `?target_user_id={creator_user_id}` 
+    3. Finally update the profile with the image URL via `PUT /admin/users/{user_id}/profile/creator`
+    
+    This ensures images are organized by the creator's user_id, not the admin's.
     """
-    return await upload_image(file, user_id, prefix="creators")
+    # Use target_user_id if provided (for admin), otherwise use authenticated user_id
+    upload_user_id = target_user_id if target_user_id else user_id
+    return await upload_image(file, user_id, prefix="creators", target_user_id=upload_user_id)
 
