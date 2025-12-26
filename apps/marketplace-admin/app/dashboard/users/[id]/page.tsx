@@ -51,6 +51,36 @@ export default function UserDetailPage() {
     }
   }
 
+  const handleDeleteUser = async () => {
+    if (!userDetail) return
+
+    try {
+      setDeleting(true)
+      setDeleteError('')
+
+      await usersService.deleteUser(userDetail.id)
+
+      // Redirect to dashboard after successful deletion
+      router.push('/dashboard')
+    } catch (err) {
+      if (err instanceof ApiErrorResponse) {
+        if (err.status === 400) {
+          setDeleteError('Cannot delete your own account.')
+        } else if (err.status === 404) {
+          setDeleteError('User not found.')
+        } else if (err.status === 403) {
+          setDeleteError('Access denied. Admin privileges required.')
+        } else {
+          setDeleteError(err.data.detail as string || 'Failed to delete user.')
+        }
+      } else {
+        setDeleteError('Failed to delete user. Please try again.')
+      }
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
       case 'verified':
