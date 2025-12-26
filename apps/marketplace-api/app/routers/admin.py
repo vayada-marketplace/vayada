@@ -2,12 +2,13 @@
 Admin routes for user management
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Union
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator
+from typing import List, Optional, Union, Literal
 from datetime import datetime
 from decimal import Decimal
 import logging
 import json
+import bcrypt
 
 from app.database import Database
 from app.dependencies import get_current_user_id
@@ -66,6 +67,68 @@ class UserListResponse(BaseModel):
     """User list response"""
     users: List[UserResponse]
     total: int
+
+
+# Request models for creating users
+class PlatformRequest(BaseModel):
+    """Platform request model for creating platforms"""
+    name: Literal["Instagram", "TikTok", "YouTube", "Facebook"]
+    handle: str
+    followers: int
+    engagementRate: float = Field(alias="engagement_rate")
+    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
+    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
+    genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CreateCreatorProfileRequest(BaseModel):
+    """Creator profile data for admin user creation"""
+    location: Optional[str] = None
+    shortDescription: Optional[str] = Field(None, alias="short_description")
+    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
+    phone: Optional[str] = None
+    profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    platforms: Optional[List[PlatformRequest]] = None
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CreateHotelProfileRequest(BaseModel):
+    """Hotel profile data for admin user creation"""
+    name: Optional[str] = None
+    location: Optional[str] = None
+    about: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    # Note: picture is not included - hotels don't have profile pictures, only listings have images
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CreateUserRequest(BaseModel):
+    """Request model for admin to create a user"""
+    email: EmailStr
+    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+    name: str
+    type: Literal["creator", "hotel"]
+    status: Literal["pending", "verified", "rejected", "suspended"] = "pending"
+    emailVerified: bool = Field(False, alias="email_verified")
+    avatar: Optional[str] = None
+    creatorProfile: Optional[CreateCreatorProfileRequest] = Field(None, alias="creator_profile")
+    hotelProfile: Optional[CreateHotelProfileRequest] = Field(None, alias="hotel_profile")
+    
+    @model_validator(mode='after')
+    def validate_profile_type(self):
+        """Validate that profile matches user type"""
+        if self.type == "creator" and self.hotelProfile:
+            raise ValueError("Cannot provide hotel_profile for creator user")
+        if self.type == "hotel" and self.creatorProfile:
+            raise ValueError("Cannot provide creator_profile for hotel user")
+        return self
+    
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # Detail response models
@@ -547,4 +610,157 @@ async def get_user_details(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch user details: {str(e)}"
+        )
+
+
+@router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    request: CreateUserRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Create a new user (creator or hotel) as admin.
+    
+    - **email**: User's email address (must be unique)
+    - **password**: Password (minimum 8 characters)
+    - **name**: User's name
+    - **type**: User type - either "creator" or "hotel"
+    - **status**: User status (default: "pending")
+    - **emailVerified**: Whether email is verified (default: false)
+    - **avatar**: Optional avatar URL
+    - **creatorProfile**: Optional creator profile data (only for creator type)
+    - **hotelProfile**: Optional hotel profile data (only for hotel type)
+    """
+    try:
+        # Check if email already exists
+        existing_user = await Database.fetchrow(
+            "SELECT id FROM users WHERE email = $1",
+            request.email
+        )
+        
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        
+        # Hash password
+        password_hash = bcrypt.hashpw(
+            request.password.encode('utf-8'),
+            bcrypt.gensalt()
+        ).decode('utf-8')
+        
+        # Insert user into database
+        user = await Database.fetchrow(
+            """
+            INSERT INTO users (email, password_hash, name, type, status, email_verified, avatar)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, email, name, type, status, email_verified, avatar, created_at, updated_at
+            """,
+            request.email,
+            password_hash,
+            request.name,
+            request.type,
+            request.status,
+            request.emailVerified,
+            request.avatar
+        )
+        
+        user_id = user['id']
+        
+        # Create profile based on user type
+        if request.type == "creator":
+            # Create creator profile
+            profile_data = request.creatorProfile or CreateCreatorProfileRequest()
+            
+            creator = await Database.fetchrow(
+                """
+                INSERT INTO creators (user_id, location, short_description, portfolio_link, phone, profile_picture)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
+                """,
+                user_id,
+                profile_data.location,
+                profile_data.shortDescription,
+                profile_data.portfolioLink,
+                profile_data.phone,
+                profile_data.profilePicture
+            )
+            
+            creator_id = creator['id']
+            
+            # Create platforms if provided
+            if profile_data.platforms:
+                for platform in profile_data.platforms:
+                    # Convert top_countries and top_age_groups to JSONB format
+                    top_countries_json = json.dumps(platform.topCountries) if platform.topCountries else None
+                    top_age_groups_json = json.dumps(platform.topAgeGroups) if platform.topAgeGroups else None
+                    gender_split_json = json.dumps(platform.genderSplit) if platform.genderSplit else None
+                    
+                    await Database.execute(
+                        """
+                        INSERT INTO creator_platforms 
+                            (creator_id, name, handle, followers, engagement_rate,
+                             top_countries, top_age_groups, gender_split)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        """,
+                        creator_id,
+                        platform.name,
+                        platform.handle,
+                        platform.followers,
+                        Decimal(str(platform.engagementRate)),
+                        top_countries_json,
+                        top_age_groups_json,
+                        gender_split_json
+                    )
+            
+            logger.info(f"Admin {admin_id} created creator user {user_id} with {len(profile_data.platforms or [])} platforms")
+        
+        elif request.type == "hotel":
+            # Create hotel profile
+            profile_data = request.hotelProfile or CreateHotelProfileRequest()
+            
+            # Use request.name if hotel profile name is not provided
+            hotel_name = profile_data.name or request.name
+            hotel_location = profile_data.location or "Not specified"
+            
+            await Database.execute(
+                """
+                INSERT INTO hotel_profiles (user_id, name, location, about, website, phone)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                user_id,
+                hotel_name,
+                hotel_location,
+                profile_data.about,
+                profile_data.website,
+                profile_data.phone
+            )
+            
+            logger.info(f"Admin {admin_id} created hotel user {user_id}")
+        
+        return UserResponse(
+            id=str(user['id']),
+            email=user['email'],
+            name=user['name'],
+            type=user['type'],
+            status=user['status'],
+            email_verified=user['email_verified'],
+            avatar=user['avatar'],
+            created_at=user['created_at'],
+            updated_at=user['updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
         )
