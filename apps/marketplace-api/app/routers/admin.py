@@ -15,11 +15,14 @@ from app.dependencies import get_current_user_id
 from app.routers.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.routers.hotels import (
     CreateListingRequest,
+    UpdateListingRequest,
     CollaborationOfferingRequest,
     CreatorRequirementsRequest,
     ListingResponse,
     UpdateHotelProfileRequest,
-    HotelProfileResponse
+    HotelProfileResponse,
+    CollaborationOfferingResponse,
+    CreatorRequirementsResponse
 )
 from app.s3_service import delete_all_objects_in_prefix
 
@@ -1529,6 +1532,274 @@ async def create_hotel_listing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create listing: {str(e)}"
+        )
+
+
+async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str) -> dict:
+    """Helper function to fetch a listing with its offerings and requirements (admin version)"""
+    # Verify listing belongs to hotel
+    listing = await Database.fetchrow(
+        """
+        SELECT id, hotel_profile_id, name, location, description, accommodation_type,
+               images, status, created_at, updated_at
+        FROM hotel_listings
+        WHERE id = $1 AND hotel_profile_id = $2
+        """,
+        listing_id,
+        hotel_profile_id
+    )
+    
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+    
+    # Get collaboration offerings
+    offerings_data = await Database.fetch(
+        """
+        SELECT id, listing_id, collaboration_type, availability_months, platforms,
+               free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
+               created_at, updated_at
+        FROM listing_collaboration_offerings
+        WHERE listing_id = $1
+        ORDER BY created_at DESC
+        """,
+        listing_id
+    )
+    
+    offerings_response = [
+        CollaborationOfferingResponse.model_validate({
+            "id": str(o['id']),
+            "listing_id": str(o['listing_id']),
+            "collaboration_type": o['collaboration_type'],
+            "availability_months": o['availability_months'],
+            "platforms": o['platforms'],
+            "free_stay_min_nights": o['free_stay_min_nights'],
+            "free_stay_max_nights": o['free_stay_max_nights'],
+            "paid_max_amount": o['paid_max_amount'],
+            "discount_percentage": o['discount_percentage'],
+            "created_at": o['created_at'],
+            "updated_at": o['updated_at']
+        })
+        for o in offerings_data
+    ]
+    
+    # Get creator requirements
+    requirements = await Database.fetchrow(
+        """
+        SELECT id, listing_id, platforms, min_followers, target_countries,
+               target_age_min, target_age_max, created_at, updated_at
+        FROM listing_creator_requirements
+        WHERE listing_id = $1
+        """,
+        listing_id
+    )
+    
+    requirements_response = None
+    if requirements:
+        requirements_response = CreatorRequirementsResponse.model_validate({
+            "id": str(requirements['id']),
+            "listing_id": str(listing['id']),
+            "platforms": requirements['platforms'],
+            "min_followers": requirements['min_followers'],
+            "target_countries": requirements['target_countries'],
+            "target_age_min": requirements['target_age_min'],
+            "target_age_max": requirements['target_age_max'],
+            "created_at": requirements['created_at'],
+            "updated_at": requirements['updated_at']
+        })
+    
+    return {
+        "listing": listing,
+        "offerings": offerings_response,
+        "requirements": requirements_response
+    }
+
+
+@router.put("/users/{user_id}/listings/{listing_id}", response_model=ListingResponse, status_code=status.HTTP_200_OK)
+async def update_hotel_listing(
+    user_id: str,
+    listing_id: str,
+    request: UpdateListingRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Update a hotel listing (admin endpoint).
+    Supports partial updates - only provided fields will be updated.
+    
+    If collaborationOfferings or creatorRequirements are provided, all existing ones will be replaced.
+    If not provided, existing ones remain unchanged.
+    """
+    try:
+        # Verify user exists and is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a hotel"
+            )
+        
+        # Get hotel profile
+        hotel_profile = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        hotel_profile_id = hotel_profile['id']
+        
+        # Get current listing data
+        listing_data = await _get_listing_with_details_admin(listing_id, hotel_profile_id)
+        current_listing = listing_data["listing"]
+        
+        # Use transaction to ensure atomicity
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Build dynamic UPDATE query for listing
+                update_fields = []
+                update_values = []
+                param_counter = 1
+                
+                if request.name is not None:
+                    update_fields.append(f"name = ${param_counter}")
+                    update_values.append(request.name)
+                    param_counter += 1
+                
+                if request.location is not None:
+                    update_fields.append(f"location = ${param_counter}")
+                    update_values.append(request.location)
+                    param_counter += 1
+                
+                if request.description is not None:
+                    update_fields.append(f"description = ${param_counter}")
+                    update_values.append(request.description)
+                    param_counter += 1
+                
+                if request.accommodationType is not None:
+                    update_fields.append(f"accommodation_type = ${param_counter}")
+                    update_values.append(request.accommodationType)
+                    param_counter += 1
+                
+                if request.images is not None:
+                    update_fields.append(f"images = ${param_counter}")
+                    update_values.append(request.images)
+                    param_counter += 1
+                
+                # Update listing if there are fields to update
+                if update_fields:
+                    update_fields.append("updated_at = now()")
+                    update_values.append(listing_id)  # WHERE clause parameter
+                    
+                    update_query = f"""
+                        UPDATE hotel_listings 
+                        SET {', '.join(update_fields)}
+                        WHERE id = ${param_counter}
+                    """
+                    await conn.execute(update_query, *update_values)
+                
+                # Update collaboration offerings if provided (replace strategy)
+                if request.collaborationOfferings is not None:
+                    # Delete existing offerings
+                    await conn.execute(
+                        "DELETE FROM listing_collaboration_offerings WHERE listing_id = $1",
+                        listing_id
+                    )
+                    
+                    # Insert new offerings
+                    for offering in request.collaborationOfferings:
+                        await conn.execute(
+                            """
+                            INSERT INTO listing_collaboration_offerings
+                            (listing_id, collaboration_type, availability_months, platforms,
+                             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            listing_id,
+                            offering.collaborationType,
+                            offering.availabilityMonths,
+                            offering.platforms,
+                            offering.freeStayMinNights,
+                            offering.freeStayMaxNights,
+                            offering.paidMaxAmount,
+                            offering.discountPercentage
+                        )
+                
+                # Update creator requirements if provided
+                if request.creatorRequirements is not None:
+                    # Delete existing requirements
+                    await conn.execute(
+                        "DELETE FROM listing_creator_requirements WHERE listing_id = $1",
+                        listing_id
+                    )
+                    
+                    # Insert new requirements
+                    await conn.execute(
+                        """
+                        INSERT INTO listing_creator_requirements
+                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        """,
+                        listing_id,
+                        request.creatorRequirements.platforms,
+                        request.creatorRequirements.minFollowers,
+                        request.creatorRequirements.targetCountries,
+                        request.creatorRequirements.targetAgeMin,
+                        request.creatorRequirements.targetAgeMax
+                    )
+        
+        # Fetch updated listing with details
+        updated_data = await _get_listing_with_details_admin(listing_id, hotel_profile_id)
+        updated_listing = updated_data["listing"]
+        updated_offerings = updated_data["offerings"]
+        updated_requirements = updated_data["requirements"]
+        
+        logger.info(f"Admin {admin_id} updated listing {listing_id} for hotel user {user_id}")
+        
+        return ListingResponse.model_validate({
+            "id": str(updated_listing['id']),
+            "hotel_profile_id": str(updated_listing['hotel_profile_id']),
+            "name": updated_listing['name'],
+            "location": updated_listing['location'],
+            "description": updated_listing['description'],
+            "accommodation_type": updated_listing['accommodation_type'],
+            "images": updated_listing['images'] or [],
+            "status": updated_listing['status'],
+            "created_at": updated_listing['created_at'],
+            "updated_at": updated_listing['updated_at'],
+            "collaboration_offerings": updated_offerings,
+            "creator_requirements": updated_requirements
+        })
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Value error updating listing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error updating listing: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update listing: {str(e)}"
         )
 
 
