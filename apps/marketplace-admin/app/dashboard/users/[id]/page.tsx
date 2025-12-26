@@ -276,9 +276,9 @@ export default function UserDetailPage() {
               }
 
               if (p.topCountries && p.topCountries.length > 0) {
-                const validCountries = p.topCountries.filter(tc => tc.country && (tc.percentage || tc.percentage === '0'))
+                const validCountries = p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country && (tc.percentage || tc.percentage === '0'))
                 if (validCountries.length > 0) {
-                  platformData.topCountries = validCountries.map(tc => ({
+                  platformData.topCountries = validCountries.map((tc: { country: string; percentage: string }) => ({
                     country: tc.country,
                     percentage: parseFloat(tc.percentage) || 0,
                   }))
@@ -286,7 +286,7 @@ export default function UserDetailPage() {
               }
 
               if (p.topAgeGroups && p.topAgeGroups.length > 0) {
-                const validAgeGroups = p.topAgeGroups.filter(ag => ag.ageRange)
+                const validAgeGroups = p.topAgeGroups.filter((ag: { ageRange: string }) => ag.ageRange)
                 if (validAgeGroups.length > 0) {
                   platformData.topAgeGroups = validAgeGroups.map(ag => ({
                     ageRange: ag.ageRange,
