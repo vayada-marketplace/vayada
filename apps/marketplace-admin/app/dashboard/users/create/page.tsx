@@ -460,8 +460,8 @@ export default function CreateUserPage() {
                     onChange={handleBasicChange}
                     required
                     placeholder="Minimum 8 characters"
-                    helperText="Password must be at least 8 characters"
                   />
+                  <p className="mt-1 text-xs text-gray-500">Password must be at least 8 characters</p>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                     <select
