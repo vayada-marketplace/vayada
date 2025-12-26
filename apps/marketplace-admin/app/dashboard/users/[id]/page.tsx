@@ -288,7 +288,7 @@ export default function UserDetailPage() {
               if (p.topAgeGroups && p.topAgeGroups.length > 0) {
                 const validAgeGroups = p.topAgeGroups.filter((ag: { ageRange: string }) => ag.ageRange)
                 if (validAgeGroups.length > 0) {
-                  platformData.topAgeGroups = validAgeGroups.map(ag => ({
+                  platformData.topAgeGroups = validAgeGroups.map((ag: { ageRange: string }) => ({
                     ageRange: ag.ageRange,
                   }))
                 }
