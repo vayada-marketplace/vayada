@@ -4,11 +4,17 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button, Input } from '@/components/ui'
 import { Textarea } from '@/components/ui/Textarea'
-import { ArrowLeftIcon, PlusIcon, TrashIcon, PhotoIcon, ChevronDownIcon, ChevronUpIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, PlusIcon, TrashIcon, PhotoIcon, ChevronDownIcon, ChevronUpIcon, XMarkIcon, GiftIcon, CurrencyDollarIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { usersService, uploadService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
 
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55+'] as const
+
+const ACCOMMODATION_TYPES = ['Hotel', 'Boutiques Hotel', 'City Hotel', 'Luxury Hotel', 'Apartment', 'Villa', 'Lodge'] as const
+const COLLABORATION_TYPES = ['Free Stay', 'Paid', 'Discount'] as const
+const PLATFORMS = ['Instagram', 'TikTok', 'YouTube', 'Facebook'] as const
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
 // Common countries list
 const COUNTRIES = [
@@ -71,6 +77,49 @@ export default function CreateUserPage() {
   const [countryDropdownOpen, setCountryDropdownOpen] = useState<{ [platformIndex: number]: boolean }>({})
   const countryDropdownRefs = useRef<{ [platformIndex: number]: HTMLDivElement | null }>({})
 
+  // Hotel profile fields
+  const [hotelProfile, setHotelProfile] = useState({
+    name: '',
+    location: '',
+    about: '',
+    website: '',
+    phone: '',
+  })
+
+  // Listings for hotel
+  interface CollaborationOffering {
+    collaborationType: 'Free Stay' | 'Paid' | 'Discount'
+    availabilityMonths: string[]
+    platforms: string[]
+    freeStayMinNights?: string
+    freeStayMaxNights?: string
+    paidMaxAmount?: string
+    discountPercentage?: string
+  }
+
+  interface CreatorRequirement {
+    platforms: string[]
+    minFollowers?: string
+    targetCountries: string[]
+    targetAgeGroups: string[]
+  }
+
+  interface ListingForm {
+    name: string
+    location: string
+    description: string
+    accommodationType: string
+    images: string[]
+    collaborationOfferings: CollaborationOffering[]
+    creatorRequirements: CreatorRequirement
+  }
+
+  const [listings, setListings] = useState<ListingForm[]>([])
+  const [listingImageFiles, setListingImageFiles] = useState<{ [listingIndex: number]: File[] }>({})
+  const [targetCountrySearch, setTargetCountrySearch] = useState<{ [listingIndex: number]: string }>({})
+  const [targetCountryDropdownOpen, setTargetCountryDropdownOpen] = useState<{ [listingIndex: number]: boolean }>({})
+  const targetCountryDropdownRefs = useRef<{ [listingIndex: number]: HTMLDivElement | null }>({})
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -78,6 +127,12 @@ export default function CreateUserPage() {
         const ref = countryDropdownRefs.current[parseInt(key)]
         if (ref && !ref.contains(event.target as Node)) {
           setCountryDropdownOpen(prev => ({ ...prev, [parseInt(key)]: false }))
+        }
+      })
+      Object.keys(targetCountryDropdownRefs.current).forEach((key) => {
+        const ref = targetCountryDropdownRefs.current[parseInt(key)]
+        if (ref && !ref.contains(event.target as Node)) {
+          setTargetCountryDropdownOpen(prev => ({ ...prev, [parseInt(key)]: false }))
         }
       })
     }
@@ -98,6 +153,198 @@ export default function CreateUserPage() {
   const handleCreatorProfileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setCreatorProfile(prev => ({ ...prev, [name]: value }))
+  }
+
+  const handleHotelProfileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target
+    setHotelProfile(prev => ({ ...prev, [name]: value }))
+  }
+
+  const handleAddListing = () => {
+    setListings(prev => [...prev, {
+      name: '',
+      location: '',
+      description: '',
+      accommodationType: '',
+      images: [],
+      collaborationOfferings: [],
+      creatorRequirements: {
+        platforms: [],
+        targetCountries: [],
+        targetAgeGroups: [],
+      },
+    }])
+  }
+
+  const handleRemoveListing = (index: number) => {
+    setListings(prev => prev.filter((_, i) => i !== index))
+    setListingImageFiles(prev => {
+      const newFiles = { ...prev }
+      delete newFiles[index]
+      return newFiles
+    })
+  }
+
+  const handleListingImageChange = (listingIndex: number, files: FileList | null) => {
+    if (!files) return
+    
+    const fileArray = Array.from(files)
+    const imageFiles = fileArray.filter(file => file.type.startsWith('image/'))
+    
+    setListingImageFiles(prev => ({
+      ...prev,
+      [listingIndex]: [...(prev[listingIndex] || []), ...imageFiles]
+    }))
+  }
+
+  const handleRemoveListingImage = (listingIndex: number, imageIndex: number) => {
+    setListingImageFiles(prev => {
+      const newFiles = { ...prev }
+      if (newFiles[listingIndex]) {
+        newFiles[listingIndex] = newFiles[listingIndex].filter((_, i) => i !== imageIndex)
+      }
+      return newFiles
+    })
+  }
+
+
+  const handleListingChange = (index: number, field: keyof ListingForm, value: any) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === index ? { ...listing, [field]: value } : listing
+    ))
+  }
+
+  const handleAddCollaborationOffering = (listingIndex: number) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            collaborationOfferings: [...listing.collaborationOfferings, {
+              collaborationType: 'Free Stay',
+              availabilityMonths: [],
+              platforms: [],
+            }]
+          }
+        : listing
+    ))
+  }
+
+  const handleRemoveCollaborationOffering = (listingIndex: number, offeringIndex: number) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            collaborationOfferings: listing.collaborationOfferings.filter((_, oi) => oi !== offeringIndex)
+          }
+        : listing
+    ))
+  }
+
+  const handleCollaborationOfferingChange = (
+    listingIndex: number, 
+    offeringIndex: number, 
+    field: keyof CollaborationOffering, 
+    value: any
+  ) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            collaborationOfferings: listing.collaborationOfferings.map((offering, oi) => 
+              oi === offeringIndex ? { ...offering, [field]: value } : offering
+            )
+          }
+        : listing
+    ))
+  }
+
+  const handleCreatorRequirementChange = (
+    listingIndex: number,
+    field: keyof CreatorRequirement,
+    value: any
+  ) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            creatorRequirements: { ...listing.creatorRequirements, [field]: value }
+          }
+        : listing
+    ))
+  }
+
+  const handleTargetCountrySearchChange = (listingIndex: number, value: string) => {
+    setTargetCountrySearch(prev => ({ ...prev, [listingIndex]: value }))
+    setTargetCountryDropdownOpen(prev => ({ ...prev, [listingIndex]: true }))
+  }
+
+  const handleSelectTargetCountry = (listingIndex: number, country: string) => {
+    const listing = listings[listingIndex]
+    // Check if country is already selected or if we've reached the limit
+    if (listing.creatorRequirements.targetCountries.includes(country) || listing.creatorRequirements.targetCountries.length >= 3) {
+      return
+    }
+
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            creatorRequirements: { 
+              ...listing.creatorRequirements, 
+              targetCountries: [...listing.creatorRequirements.targetCountries, country] 
+            }
+          }
+        : listing
+    ))
+    
+    // Clear search and close dropdown
+    setTargetCountrySearch(prev => ({ ...prev, [listingIndex]: '' }))
+    setTargetCountryDropdownOpen(prev => ({ ...prev, [listingIndex]: false }))
+  }
+
+  const handleRemoveTargetCountry = (listingIndex: number, country: string) => {
+    setListings(prev => prev.map((listing, i) => 
+      i === listingIndex 
+        ? { 
+            ...listing, 
+            creatorRequirements: { 
+              ...listing.creatorRequirements, 
+              targetCountries: listing.creatorRequirements.targetCountries.filter(c => c !== country) 
+            }
+          }
+        : listing
+    ))
+  }
+
+  const handleToggleTargetAgeGroup = (listingIndex: number, ageRange: string) => {
+    setListings(prev => prev.map((listing, i) => {
+      if (i !== listingIndex) return listing
+      
+      const existingIndex = listing.creatorRequirements.targetAgeGroups.indexOf(ageRange)
+      
+      if (existingIndex >= 0) {
+        // Remove if already selected
+        return {
+          ...listing,
+          creatorRequirements: {
+            ...listing.creatorRequirements,
+            targetAgeGroups: listing.creatorRequirements.targetAgeGroups.filter((_, ai) => ai !== existingIndex)
+          }
+        }
+      } else {
+        // Add if not selected and less than 3
+        if (listing.creatorRequirements.targetAgeGroups.length < 3) {
+          return {
+            ...listing,
+            creatorRequirements: {
+              ...listing.creatorRequirements,
+              targetAgeGroups: [...listing.creatorRequirements.targetAgeGroups, ageRange]
+            }
+          }
+        }
+        return listing
+      }
+    }))
   }
 
   const handleAddPlatform = () => {
@@ -327,10 +574,21 @@ export default function CreateUserPage() {
         }
       }
 
-      // Step 1: Create user first (without profilePicture) to get the user_id
+      if (userType === 'hotel') {
+        requestData.hotelProfile = {
+          ...(hotelProfile.name && { name: hotelProfile.name }),
+          ...(hotelProfile.location && { location: hotelProfile.location }),
+          ...(hotelProfile.about && { about: hotelProfile.about }),
+          ...(hotelProfile.website && { website: hotelProfile.website }),
+          ...(hotelProfile.phone && { phone: hotelProfile.phone }),
+        }
+        // Note: NO listings here - they will be created separately in Step 3
+      }
+
+      // Step 1: Create user first (without profilePicture for creators, without listings for hotels)
       const createdUser = await usersService.createUser(requestData)
       
-      // Step 2 & 3: If there's a profile picture file, upload it and update the profile
+      // Step 2 & 3: Handle creator profile picture
       if (userType === 'creator' && profilePictureFile) {
         try {
           // Step 2: Upload image using the creator's user_id
@@ -347,6 +605,104 @@ export default function CreateUserPage() {
           // If upload fails, still redirect but log the error
           console.error('Failed to upload profile picture:', uploadError)
           setError('User created successfully, but profile picture upload failed. You can update it later.')
+        }
+      }
+
+      // Step 2 & 3: Handle hotel listings (if any)
+      if (userType === 'hotel' && listings.length > 0) {
+        // Process each listing with its original index
+        for (let listingIndex = 0; listingIndex < listings.length; listingIndex++) {
+          const listing = listings[listingIndex]
+          
+          // Skip invalid listings
+          if (!listing.name || !listing.location || !listing.description || listing.description.length < 10) {
+            continue
+          }
+
+          try {
+            let imageUrls: string[] = []
+
+            // Step 2: Upload listing images if there are any files
+            const imageFiles = listingImageFiles[listingIndex] || []
+            
+            if (imageFiles.length > 0) {
+              try {
+                const uploadResponse = await uploadService.uploadListingImages(
+                  imageFiles,
+                  createdUser.id
+                )
+                imageUrls = uploadResponse.images.map(img => img.url)
+              } catch (uploadError) {
+                console.error('Failed to upload listing images:', uploadError)
+                // Continue without images - user can add them later
+              }
+            }
+
+            // Step 3: Create listing with uploaded image URLs
+            const listingData: any = {
+              name: listing.name,
+              location: listing.location,
+              description: listing.description,
+              ...(listing.accommodationType && { accommodationType: listing.accommodationType }),
+              ...(imageUrls.length > 0 && { images: imageUrls }),
+              collaborationOfferings: listing.collaborationOfferings
+                .filter(co => co.platforms.length > 0 && co.availabilityMonths.length > 0)
+                .map(co => {
+                  const offering: any = {
+                    collaborationType: co.collaborationType,
+                    availabilityMonths: co.availabilityMonths,
+                    platforms: co.platforms,
+                  }
+
+                  if (co.collaborationType === 'Free Stay') {
+                    if (co.freeStayMinNights && co.freeStayMaxNights) {
+                      offering.freeStayMinNights = parseInt(co.freeStayMinNights)
+                      offering.freeStayMaxNights = parseInt(co.freeStayMaxNights)
+                    }
+                  } else if (co.collaborationType === 'Paid') {
+                    if (co.paidMaxAmount) {
+                      offering.paidMaxAmount = parseFloat(co.paidMaxAmount)
+                    }
+                  } else if (co.collaborationType === 'Discount') {
+                    if (co.discountPercentage) {
+                      offering.discountPercentage = parseInt(co.discountPercentage)
+                    }
+                  }
+
+                  return offering
+                }),
+              creatorRequirements: {
+                platforms: listing.creatorRequirements.platforms,
+                ...(listing.creatorRequirements.minFollowers && { 
+                  minFollowers: parseInt(listing.creatorRequirements.minFollowers) 
+                }),
+                targetCountries: listing.creatorRequirements.targetCountries,
+                ...(listing.creatorRequirements.targetAgeGroups.length > 0 && (() => {
+                  // Convert age groups to min/max
+                  const ageValues: number[] = []
+                  listing.creatorRequirements.targetAgeGroups.forEach(ageGroup => {
+                    if (ageGroup === '55+') {
+                      ageValues.push(55)
+                    } else {
+                      const [min, max] = ageGroup.split('-').map(Number)
+                      ageValues.push(min, max)
+                    }
+                  })
+                  const minAge = Math.min(...ageValues)
+                  const maxAge = ageValues.some(v => v >= 55) ? 100 : Math.max(...ageValues)
+                  return {
+                    targetAgeMin: minAge,
+                    targetAgeMax: maxAge
+                  }
+                })()),
+              },
+            }
+
+            await usersService.createListing(createdUser.id, listingData)
+          } catch (listingError) {
+            console.error('Failed to create listing:', listingError)
+            // Continue with other listings even if one fails
+          }
         }
       }
       
@@ -851,6 +1207,537 @@ export default function CreateUserPage() {
                                 </div>
                               </div>
                             )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Hotel Profile Section */}
+              {userType === 'hotel' && (
+                <>
+                  <div className="border-t pt-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Hotel Profile</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <Input
+                        label="Hotel Name"
+                        name="name"
+                        value={hotelProfile.name}
+                        onChange={handleHotelProfileChange}
+                        placeholder="Grand Hotel"
+                      />
+                      <Input
+                        label="Location"
+                        name="location"
+                        value={hotelProfile.location}
+                        onChange={handleHotelProfileChange}
+                        placeholder="Paris, France"
+                      />
+                      <Input
+                        label="Phone"
+                        name="phone"
+                        value={hotelProfile.phone}
+                        onChange={handleHotelProfileChange}
+                        placeholder="+33-1-23-45-67-89"
+                      />
+                      <Input
+                        label="Website"
+                        name="website"
+                        type="url"
+                        value={hotelProfile.website}
+                        onChange={handleHotelProfileChange}
+                        placeholder="https://hotel.com"
+                      />
+                      <div className="md:col-span-2">
+                        <Textarea
+                          label="About"
+                          name="about"
+                          value={hotelProfile.about}
+                          onChange={handleHotelProfileChange}
+                          rows={4}
+                          placeholder="Description of the hotel"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Listings Section */}
+                  <div className="border-t pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Listings (Optional)</h3>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddListing}
+                      >
+                        <PlusIcon className="w-4 h-4 mr-1" />
+                        Add Listing
+                      </Button>
+                    </div>
+                    
+                    {listings.length === 0 ? (
+                      <p className="text-sm text-gray-500">No listings added. Click "Add Listing" to add one.</p>
+                    ) : (
+                      <div className="space-y-6">
+                        {listings.map((listing, listingIndex) => (
+                          <div key={listingIndex} className="border rounded-lg p-6 bg-gray-50">
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="font-medium text-gray-900">Listing {listingIndex + 1}</h4>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveListing(listingIndex)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                <TrashIcon className="w-5 h-5" />
+                              </button>
+                            </div>
+
+                            {/* Basic Listing Info */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                              <Input
+                                label="Name"
+                                value={listing.name}
+                                onChange={(e) => handleListingChange(listingIndex, 'name', e.target.value)}
+                                placeholder="Beachfront Villa"
+                                required
+                              />
+                              <Input
+                                label="Location"
+                                value={listing.location}
+                                onChange={(e) => handleListingChange(listingIndex, 'location', e.target.value)}
+                                placeholder="Maldives"
+                                required
+                              />
+                              <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Type</label>
+                                <select
+                                  value={listing.accommodationType}
+                                  onChange={(e) => handleListingChange(listingIndex, 'accommodationType', e.target.value)}
+                                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900"
+                                >
+                                  <option value="">Select type</option>
+                                  {ACCOMMODATION_TYPES.map(type => (
+                                    <option key={type} value={type}>{type}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="md:col-span-2">
+                                <Textarea
+                                  label="Description"
+                                  value={listing.description}
+                                  onChange={(e) => handleListingChange(listingIndex, 'description', e.target.value)}
+                                  rows={3}
+                                  placeholder="Detailed description of the listing (min 10 characters)"
+                                  required
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Property Photos
+                                </label>
+                                <p className="text-sm text-gray-500 mb-3">Upload images of the property (you can select multiple)</p>
+                                
+                                {/* File Upload */}
+                                <div className="mb-4">
+                                  <label
+                                    htmlFor={`listing-images-${listingIndex}`}
+                                    className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors"
+                                  >
+                                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                      <PhotoIcon className="w-10 h-10 mb-2 text-gray-400" />
+                                      <p className="mb-2 text-sm text-gray-500">
+                                        <span className="font-semibold">Click to upload</span> or drag and drop
+                                      </p>
+                                      <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB each</p>
+                                    </div>
+                                    <input
+                                      id={`listing-images-${listingIndex}`}
+                                      type="file"
+                                      className="hidden"
+                                      multiple
+                                      accept="image/*"
+                                      onChange={(e) => handleListingImageChange(listingIndex, e.target.files)}
+                                    />
+                                  </label>
+                                </div>
+
+                                {/* Image Previews */}
+                                {listingImageFiles[listingIndex]?.length > 0 && (
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {/* Preview uploaded files */}
+                                    {listingImageFiles[listingIndex]?.map((file, imageIndex) => {
+                                      const previewUrl = URL.createObjectURL(file)
+                                      return (
+                                        <div key={imageIndex} className="relative group">
+                                          <img
+                                            src={previewUrl}
+                                            alt={`Preview ${imageIndex + 1}`}
+                                            className="w-full h-32 object-cover rounded-lg border border-gray-300"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveListingImage(listingIndex, imageIndex)}
+                                            className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          >
+                                            <XMarkIcon className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      )
+                                    })}
+                                    
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Collaboration Offerings */}
+                            <div className="border-t pt-4 mb-4">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1 h-6 bg-blue-500 rounded"></div>
+                                  <h3 className="text-lg font-semibold text-gray-900">Offerings</h3>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleAddCollaborationOffering(listingIndex)}
+                                >
+                                  <PlusIcon className="w-4 h-4 mr-1" />
+                                  Add Offering
+                                </Button>
+                              </div>
+                              {listing.collaborationOfferings.length === 0 ? (
+                                <p className="text-sm text-gray-500">No collaboration offerings added</p>
+                              ) : (
+                                <div className="space-y-4">
+                                  {listing.collaborationOfferings.map((offering, offeringIndex) => (
+                                    <div key={offeringIndex} className="border rounded-lg p-4 bg-white">
+                                      <div className="flex items-center justify-between mb-3">
+                                        <h5 className="font-medium text-gray-900">Offering {offeringIndex + 1}</h5>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveCollaborationOffering(listingIndex, offeringIndex)}
+                                          className="text-red-600 hover:text-red-800"
+                                        >
+                                          <TrashIcon className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                      <div className="space-y-6 mt-4">
+                                        {/* Collaboration Types */}
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-3">
+                                            Collaboration Types <span className="text-red-500">*</span>
+                                          </label>
+                                          <div className="flex gap-4">
+                                            {COLLABORATION_TYPES.map(type => {
+                                              const isSelected = offering.collaborationType === type
+                                              const getIcon = () => {
+                                                if (type === 'Free Stay') return <GiftIcon className="w-8 h-8" />
+                                                if (type === 'Paid') return <CurrencyDollarIcon className="w-8 h-8" />
+                                                if (type === 'Discount') return <TagIcon className="w-8 h-8" />
+                                              }
+                                              
+                                              return (
+                                                <button
+                                                  key={type}
+                                                  type="button"
+                                                  onClick={() => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'collaborationType', type)}
+                                                  className={`
+                                                    flex flex-col items-center justify-center p-6 border-2 rounded-lg transition-all
+                                                    ${isSelected 
+                                                      ? 'border-blue-500 bg-blue-50' 
+                                                      : 'border-gray-300 bg-white hover:border-gray-400'
+                                                    }
+                                                  `}
+                                                >
+                                                  <div className={`mb-2 ${isSelected ? 'text-blue-600' : 'text-gray-400'}`}>
+                                                    {getIcon()}
+                                                  </div>
+                                                  <span className={`text-sm font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                                                    {type}
+                                                  </span>
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        </div>
+                                        {/* Type-specific fields */}
+                                        {offering.collaborationType === 'Free Stay' && (
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <Input
+                                              label="Min Nights"
+                                              type="number"
+                                              value={offering.freeStayMinNights || ''}
+                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'freeStayMinNights', e.target.value)}
+                                              placeholder="2"
+                                              required
+                                            />
+                                            <Input
+                                              label="Max Nights"
+                                              type="number"
+                                              value={offering.freeStayMaxNights || ''}
+                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'freeStayMaxNights', e.target.value)}
+                                              placeholder="5"
+                                              required
+                                            />
+                                          </div>
+                                        )}
+                                        {offering.collaborationType === 'Paid' && (
+                                          <div>
+                                            <Input
+                                              label="Max Amount"
+                                              type="number"
+                                              value={offering.paidMaxAmount || ''}
+                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'paidMaxAmount', e.target.value)}
+                                              placeholder="1000"
+                                              required
+                                            />
+                                          </div>
+                                        )}
+                                        {offering.collaborationType === 'Discount' && (
+                                          <div>
+                                            <Input
+                                              label="Discount Percentage"
+                                              type="number"
+                                              min="1"
+                                              max="100"
+                                              value={offering.discountPercentage || ''}
+                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'discountPercentage', e.target.value)}
+                                              placeholder="30"
+                                              required
+                                            />
+                                          </div>
+                                        )}
+                                        {/* Property Posting Platforms */}
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Property posting platforms
+                                          </label>
+                                          <p className="text-sm text-gray-600 mb-3">On which platforms is your property active?</p>
+                                          <div className="flex gap-4">
+                                            {PLATFORMS.map(platform => {
+                                              const isSelected = offering.platforms.includes(platform)
+                                              return (
+                                                <label key={platform} className="flex items-center cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={(e) => {
+                                                      const newPlatforms = e.target.checked
+                                                        ? [...offering.platforms, platform]
+                                                        : offering.platforms.filter(p => p !== platform)
+                                                      handleCollaborationOfferingChange(listingIndex, offeringIndex, 'platforms', newPlatforms)
+                                                    }}
+                                                    className="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                                  />
+                                                  <span className="text-sm text-gray-700">{platform}</span>
+                                                </label>
+                                              )
+                                            })}
+                                          </div>
+                                        </div>
+                                        {/* Availability */}
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-3">
+                                            <CalendarIcon className="w-4 h-4 inline mr-1" />
+                                            Availability <span className="text-red-500">*</span>
+                                          </label>
+                                          <div className="grid grid-cols-6 gap-2">
+                                            {MONTHS.map((month, idx) => {
+                                              const isSelected = offering.availabilityMonths.includes(month)
+                                              return (
+                                                <button
+                                                  key={month}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    const newMonths = isSelected
+                                                      ? offering.availabilityMonths.filter(m => m !== month)
+                                                      : [...offering.availabilityMonths, month]
+                                                    handleCollaborationOfferingChange(listingIndex, offeringIndex, 'availabilityMonths', newMonths)
+                                                  }}
+                                                  className={`
+                                                    px-3 py-2 text-sm font-medium rounded-lg border-2 transition-all
+                                                    ${isSelected 
+                                                      ? 'bg-blue-100 text-blue-700 border-blue-300' 
+                                                      : 'bg-gray-50 text-gray-700 border-gray-300 hover:border-gray-400'
+                                                    }
+                                                  `}
+                                                >
+                                                  {MONTHS_SHORT[idx]}
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Creator Requirements */}
+                            <div className="border-t pt-4">
+                              <label className="block text-sm font-medium text-gray-700 mb-3">Creator Requirements</label>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">Required Platforms</label>
+                                  <div className="flex flex-wrap gap-2">
+                                    {PLATFORMS.map(platform => (
+                                      <label key={platform} className="flex items-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={listing.creatorRequirements.platforms.includes(platform)}
+                                          onChange={(e) => {
+                                            const newPlatforms = e.target.checked
+                                              ? [...listing.creatorRequirements.platforms, platform]
+                                              : listing.creatorRequirements.platforms.filter(p => p !== platform)
+                                            handleCreatorRequirementChange(listingIndex, 'platforms', newPlatforms)
+                                          }}
+                                          className="mr-2"
+                                        />
+                                        <span className="text-sm text-gray-700">{platform}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                                <Input
+                                  label="Min Followers"
+                                  type="number"
+                                  value={listing.creatorRequirements.minFollowers || ''}
+                                  onChange={(e) => handleCreatorRequirementChange(listingIndex, 'minFollowers', e.target.value)}
+                                  placeholder="10000"
+                                />
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">Target Countries</label>
+                                  <p className="text-sm text-gray-500 mb-3">Select up to 3 countries your target audience is from</p>
+                                  
+                                  {/* Target Country Search Input */}
+                                  <div 
+                                    ref={(el) => { targetCountryDropdownRefs.current[listingIndex] = el }}
+                                    className="relative mb-4"
+                                  >
+                                    <input
+                                      type="text"
+                                      value={targetCountrySearch[listingIndex] || ''}
+                                      onChange={(e) => handleTargetCountrySearchChange(listingIndex, e.target.value)}
+                                      onFocus={() => setTargetCountryDropdownOpen(prev => ({ ...prev, [listingIndex]: true }))}
+                                      placeholder="Search countries..."
+                                      disabled={listing.creatorRequirements.targetCountries.length >= 3}
+                                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    />
+                                    
+                                    {/* Dropdown with filtered countries */}
+                                    {targetCountryDropdownOpen[listingIndex] && (targetCountrySearch[listingIndex] || '').length > 0 && (
+                                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto">
+                                        {COUNTRIES
+                                          .filter(country => 
+                                            country.toLowerCase().includes((targetCountrySearch[listingIndex] || '').toLowerCase()) &&
+                                            !listing.creatorRequirements.targetCountries.includes(country)
+                                          )
+                                          .slice(0, 10)
+                                          .map((country) => (
+                                            <button
+                                              key={country}
+                                              type="button"
+                                              onClick={() => handleSelectTargetCountry(listingIndex, country)}
+                                              className="w-full px-4 py-2 text-left hover:bg-gray-100 focus:bg-gray-100 focus:outline-none text-gray-900"
+                                            >
+                                              {country}
+                                            </button>
+                                          ))}
+                                        {COUNTRIES.filter(country => 
+                                          country.toLowerCase().includes((targetCountrySearch[listingIndex] || '').toLowerCase()) &&
+                                          !listing.creatorRequirements.targetCountries.includes(country)
+                                        ).length === 0 && (
+                                          <div className="px-4 py-2 text-sm text-gray-500">No countries found</div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Selected Target Countries */}
+                                  {listing.creatorRequirements.targetCountries.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                      {listing.creatorRequirements.targetCountries.map((country) => (
+                                        <div
+                                          key={country}
+                                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
+                                        >
+                                          <span>{country}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveTargetCountry(listingIndex, country)}
+                                            className="text-blue-700 hover:text-red-600 transition-colors"
+                                          >
+                                            <XMarkIcon className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">Age Groups</label>
+                                  <p className="text-sm text-gray-500 mb-3">Select up to 3 age groups you want to target</p>
+                                  
+                                  {/* Age Group Selection Buttons */}
+                                  <div className="flex flex-wrap gap-2 mb-4">
+                                    {AGE_GROUPS.map((ageRange) => {
+                                      const isSelected = listing.creatorRequirements.targetAgeGroups.includes(ageRange)
+                                      const isDisabled = !isSelected && listing.creatorRequirements.targetAgeGroups.length >= 3
+                                      
+                                      return (
+                                        <button
+                                          key={ageRange}
+                                          type="button"
+                                          onClick={() => handleToggleTargetAgeGroup(listingIndex, ageRange)}
+                                          disabled={isDisabled}
+                                          className={`
+                                            px-4 py-2 rounded-full text-sm font-medium transition-colors
+                                            ${isSelected 
+                                              ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                              : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
+                                            }
+                                            ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                                          `}
+                                        >
+                                          {ageRange}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {/* Selected Age Groups Display */}
+                                  {listing.creatorRequirements.targetAgeGroups.length > 0 && (
+                                    <div className="mt-3">
+                                      <p className="text-sm text-gray-600 mb-2">Selected age groups:</p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {listing.creatorRequirements.targetAgeGroups.map((ageGroup) => (
+                                          <div
+                                            key={ageGroup}
+                                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
+                                          >
+                                            <span>{ageGroup}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleToggleTargetAgeGroup(listingIndex, ageGroup)}
+                                              className="text-blue-700 hover:text-red-600 transition-colors"
+                                            >
+                                              <XMarkIcon className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
