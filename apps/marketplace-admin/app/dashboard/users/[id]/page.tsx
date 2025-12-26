@@ -1836,21 +1836,23 @@ export default function UserDetailPage() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-2">
                                   <h4 className="text-lg font-semibold text-gray-900">{platform.name}</h4>
-                                  <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                                    @{platform.handle}
-                                  </span>
+                                  {platform.handle && (
+                                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                      @{platform.handle}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                                   <div>
                                     <p className="text-xs text-gray-500">Followers</p>
                                     <p className="text-sm font-medium text-gray-900">
-                                      {platform.followers.toLocaleString()}
+                                      {platform.followers != null ? platform.followers.toLocaleString() : '-'}
                                     </p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-500">Engagement Rate</p>
                                     <p className="text-sm font-medium text-gray-900">
-                                      {platform.engagementRate.toFixed(2)}%
+                                      {platform.engagementRate != null ? `${platform.engagementRate.toFixed(2)}%` : '-'}
                                     </p>
                                   </div>
                                   {platform.genderSplit && (
@@ -1858,13 +1860,13 @@ export default function UserDetailPage() {
                                       <div>
                                         <p className="text-xs text-gray-500">Male</p>
                                         <p className="text-sm font-medium text-gray-900">
-                                          {platform.genderSplit.male.toFixed(1)}%
+                                          {platform.genderSplit.male != null ? `${platform.genderSplit.male.toFixed(1)}%` : '-'}
                                         </p>
                                       </div>
                                       <div>
                                         <p className="text-xs text-gray-500">Female</p>
                                         <p className="text-sm font-medium text-gray-900">
-                                          {platform.genderSplit.female.toFixed(1)}%
+                                          {platform.genderSplit.female != null ? `${platform.genderSplit.female.toFixed(1)}%` : '-'}
                                         </p>
                                       </div>
                                     </>
@@ -1876,7 +1878,7 @@ export default function UserDetailPage() {
                                     <div className="flex flex-wrap gap-2">
                                       {platform.topCountries.slice(0, 5).map((country, idx) => (
                                         <span key={idx} className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">
-                                          {country.country} ({country.percentage.toFixed(1)}%)
+                                          {country.country} {country.percentage != null ? `(${country.percentage.toFixed(1)}%)` : ''}
                                         </span>
                                       ))}
                                     </div>
