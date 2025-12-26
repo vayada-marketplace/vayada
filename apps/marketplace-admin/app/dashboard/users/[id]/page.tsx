@@ -116,6 +116,12 @@ export default function UserDetailPage() {
   const [listingTargetCountrySearch, setListingTargetCountrySearch] = useState<string>('')
   const [listingTargetCountryDropdownOpen, setListingTargetCountryDropdownOpen] = useState(false)
   const listingTargetCountryDropdownRef = useRef<HTMLDivElement | null>(null)
+  
+  // Listing image edit state
+  const [listingImageFiles, setListingImageFiles] = useState<File[]>([])
+  const [listingImagePreviews, setListingImagePreviews] = useState<string[]>([])
+  const [listingExistingImages, setListingExistingImages] = useState<string[]>([])
+  const [uploadingListingImages, setUploadingListingImages] = useState(false)
 
   useEffect(() => {
     loadUserDetail()
@@ -474,6 +480,10 @@ export default function UserDetailPage() {
         targetAgeGroups: [],
       },
     })
+    // Initialize image state
+    setListingExistingImages(listing.images || [])
+    setListingImageFiles([])
+    setListingImagePreviews([])
     setListingSaveError('')
     setListingSaveSuccess('')
   }
@@ -493,6 +503,9 @@ export default function UserDetailPage() {
         targetAgeGroups: [],
       },
     })
+    setListingExistingImages([])
+    setListingImageFiles([])
+    setListingImagePreviews([])
     setListingSaveError('')
     setListingSaveSuccess('')
     setListingTargetCountrySearch('')
@@ -576,6 +589,33 @@ export default function UserDetailPage() {
         updateData.creatorRequirements.id = editListingData.creatorRequirements.id
       }
 
+      // Handle image uploads if there are new images
+      if (listingImageFiles.length > 0) {
+        setUploadingListingImages(true)
+        try {
+          const uploadResponse = await uploadService.uploadListingImages(listingImageFiles, userDetail.id)
+          const newImageUrls = uploadResponse.images.map(img => img.url)
+          // Combine existing images (that weren't removed) with new images
+          updateData.images = [...listingExistingImages, ...newImageUrls]
+        } catch (uploadError) {
+          if (uploadError instanceof ApiErrorResponse) {
+            setListingSaveError(`Failed to upload images: ${uploadError.data.detail as string || 'Upload failed'}`)
+          } else {
+            setListingSaveError('Failed to upload images. Please try again.')
+          }
+          setSavingListing(false)
+          setUploadingListingImages(false)
+          return
+        } finally {
+          setUploadingListingImages(false)
+        }
+      } else {
+        // Only update images if existing images were removed
+        if (listingExistingImages.length !== (selectedListing.images?.length || 0)) {
+          updateData.images = listingExistingImages
+        }
+      }
+
       await usersService.updateListing(userDetail.id, editingListingId, updateData)
 
       // Reload user details to get updated listing
@@ -591,7 +631,11 @@ export default function UserDetailPage() {
         }
       }
 
+      // Exit edit mode and clear image state
       setEditingListingId(null)
+      setListingExistingImages([])
+      setListingImageFiles([])
+      setListingImagePreviews([])
       setListingSaveSuccess('Listing updated successfully!')
       setTimeout(() => setListingSaveSuccess(''), 5000)
     } catch (err) {
@@ -764,6 +808,33 @@ export default function UserDetailPage() {
         return prev
       }
     })
+  }
+
+  // Listing image handlers
+  const handleListingImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    const newFiles = Array.from(files)
+    setListingImageFiles(prev => [...prev, ...newFiles])
+    
+    // Create previews
+    newFiles.forEach(file => {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setListingImagePreviews(prev => [...prev, reader.result as string])
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleRemoveListingImageFile = (index: number) => {
+    setListingImageFiles(prev => prev.filter((_, i) => i !== index))
+    setListingImagePreviews(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleRemoveListingExistingImage = (imageUrl: string) => {
+    setListingExistingImages(prev => prev.filter(img => img !== imageUrl))
   }
 
   const handleAddPlatform = () => {
@@ -1950,26 +2021,115 @@ export default function UserDetailPage() {
                 </div>
               )}
               {/* Listing Images */}
-              {selectedListing.images && selectedListing.images.length > 0 && (
-                <div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {selectedListing.images.slice(0, 4).map((image, idx) => (
-                      <div key={idx} className="aspect-video bg-gray-200 rounded-lg overflow-hidden">
-                        <img 
-                          src={image} 
-                          alt={`${selectedListing.name} ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                        />
+              <div className="border-t pt-6">
+                <label className="block text-sm font-medium text-gray-700 mb-4">
+                  Property Photos
+                </label>
+                {editingListingId === selectedListing.id ? (
+                  <div className="space-y-4">
+                    {/* Existing Images */}
+                    {listingExistingImages.length > 0 && (
+                      <div>
+                        <p className="text-sm text-gray-600 mb-3">Existing Images (click X to remove)</p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {listingExistingImages.map((imageUrl, idx) => (
+                            <div key={idx} className="relative group">
+                              <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
+                                <img 
+                                  src={imageUrl} 
+                                  alt={`Existing ${idx + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveListingExistingImage(imageUrl)}
+                                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <XMarkIcon className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    ))}
+                    )}
+                    
+                    {/* New Image Upload */}
+                    <div>
+                      <p className="text-sm text-gray-600 mb-3">Upload New Images</p>
+                      <div className="mb-4">
+                        <label
+                          htmlFor="listing-images-edit"
+                          className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <PhotoIcon className="w-10 h-10 mb-2 text-gray-400" />
+                            <p className="mb-2 text-sm text-gray-500">
+                              <span className="font-semibold">Click to upload</span> or drag and drop
+                            </p>
+                            <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB each</p>
+                          </div>
+                          <input
+                            id="listing-images-edit"
+                            type="file"
+                            className="hidden"
+                            multiple
+                            accept="image/*"
+                            onChange={handleListingImageChange}
+                          />
+                        </label>
+                      </div>
+                      
+                      {/* New Image Previews */}
+                      {listingImagePreviews.length > 0 && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {listingImagePreviews.map((preview, idx) => (
+                            <div key={idx} className="relative group">
+                              <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
+                                <img 
+                                  src={preview} 
+                                  alt={`New ${idx + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveListingImageFile(idx)}
+                                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <XMarkIcon className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  {selectedListing.images.length > 4 && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      +{selectedListing.images.length - 4} more images
-                    </p>
-                  )}
-                </div>
-              )}
+                ) : (
+                  selectedListing.images && selectedListing.images.length > 0 ? (
+                    <div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {selectedListing.images.slice(0, 4).map((image, idx) => (
+                          <div key={idx} className="aspect-video bg-gray-200 rounded-lg overflow-hidden">
+                            <img 
+                              src={image} 
+                              alt={`${selectedListing.name} ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {selectedListing.images.length > 4 && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          +{selectedListing.images.length - 4} more images
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No images uploaded</p>
+                  )
+                )}
+              </div>
 
               {/* Basic Information */}
               <div>
@@ -2563,9 +2723,9 @@ export default function UserDetailPage() {
                     <Button
                       variant="primary"
                       onClick={handleSaveListing}
-                      disabled={savingListing}
+                      disabled={savingListing || uploadingListingImages}
                     >
-                      {savingListing ? 'Saving...' : 'Save Changes'}
+                      {uploadingListingImages ? 'Uploading Images...' : savingListing ? 'Saving...' : 'Save Changes'}
                     </Button>
                   </>
                 ) : (
