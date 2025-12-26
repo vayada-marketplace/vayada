@@ -19,6 +19,7 @@ from app.routers.hotels import (
     CreatorRequirementsRequest,
     ListingResponse
 )
+from app.s3_service import delete_all_objects_in_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -1037,6 +1038,43 @@ async def update_creator_profile(
         )
 
 
+async def delete_user_images(user_id: str, user_type: str) -> dict:
+    """
+    Delete all images associated with a user from S3 by deleting the entire user folder.
+    
+    Args:
+        user_id: The user's ID
+        user_type: The user's type ('creator' or 'hotel')
+    
+    Returns:
+        Dictionary with deletion statistics:
+        {
+            "deleted_count": int,
+            "failed_count": int,
+            "total_objects": int
+        }
+    """
+    # Determine the folder prefix based on user type
+    if user_type == 'creator':
+        prefix = f"creators/{user_id}/"
+    elif user_type == 'hotel':
+        prefix = f"listings/{user_id}/"
+    else:
+        logger.warning(f"Unknown user type {user_type}, skipping image deletion")
+        return {
+            "deleted_count": 0,
+            "failed_count": 0,
+            "total_objects": 0
+        }
+    
+    # Delete all objects in the user's folder (includes all images and thumbnails)
+    stats = await delete_all_objects_in_prefix(prefix)
+    
+    logger.info(f"Deleted images from S3 folder {prefix} for user {user_id}: {stats['deleted_count']} deleted, {stats['failed_count']} failed, {stats['total_objects']} total")
+    
+    return stats
+
+
 @router.post("/users/{user_id}/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
 async def create_hotel_listing(
     user_id: str,
@@ -1203,4 +1241,76 @@ async def create_hotel_listing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create listing: {str(e)}"
+        )
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)
+async def delete_user(
+    user_id: str,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Delete a user and all associated data (admin endpoint).
+    
+    This will permanently delete:
+    - User account
+    - Creator profile (if creator) - including all platforms
+    - Hotel profile (if hotel) - including all listings, offerings, and requirements
+    - All associated S3 images (profile pictures, listing images, and their thumbnails)
+    - All related records (cascade delete)
+    
+    **Warning**: This action cannot be undone!
+    """
+    try:
+        # Prevent self-deletion
+        if user_id == admin_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete your own account"
+            )
+        
+        # Verify user exists and get user info
+        user = await Database.fetchrow(
+            """
+            SELECT id, email, name, type, status
+            FROM users
+            WHERE id = $1
+            """,
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Delete all images associated with this user from S3
+        image_deletion_stats = await delete_user_images(user_id, user['type'])
+        
+        # Delete user (CASCADE will handle related records)
+        await Database.execute(
+            "DELETE FROM users WHERE id = $1",
+            user_id
+        )
+        
+        logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']}, email: {user['email']})")
+        
+        return {
+            "message": "User deleted successfully",
+            "deleted_user": {
+                "id": user_id,
+                "email": user['email'],
+                "name": user['name'],
+                "type": user['type']
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(e)}"
         )
