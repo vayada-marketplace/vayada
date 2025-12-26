@@ -420,7 +420,7 @@ export default function UserDetailPage() {
     setEditPlatforms(prev => prev.map((p, i) => {
       if (i !== platformIndex) return p
       
-      const existingIndex = p.topAgeGroups.findIndex(ag => ag.ageRange === ageRange)
+      const existingIndex = p.topAgeGroups.findIndex((ag: { ageRange: string }) => ag.ageRange === ageRange)
       
       if (existingIndex >= 0) {
         return {
