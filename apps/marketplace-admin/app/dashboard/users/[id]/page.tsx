@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
-import { UserIcon, ArrowLeftIcon, TrashIcon, PencilIcon, XMarkIcon, PhotoIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { UserIcon, ArrowLeftIcon, TrashIcon, PencilIcon, XMarkIcon, PhotoIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon, GiftIcon, CurrencyDollarIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { usersService, uploadService } from '@/services/api'
 import { Input } from '@/components/ui'
 import { Textarea } from '@/components/ui/Textarea'
@@ -13,6 +13,10 @@ import type { UserDetailResponse, CreatorProfileDetail, HotelProfileDetail, Plat
 
 const PLATFORMS = ['Instagram', 'TikTok', 'YouTube', 'Facebook'] as const
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55+'] as const
+const ACCOMMODATION_TYPES = ['Hotel', 'Boutiques Hotel', 'City Hotel', 'Luxury Hotel', 'Apartment', 'Villa', 'Lodge'] as const
+const COLLABORATION_TYPES = ['Free Stay', 'Paid', 'Discount'] as const
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 const COUNTRIES = [
   'Afghanistan', 'Albania', 'Algeria', 'Argentina', 'Australia', 'Austria',
   'Bangladesh', 'Belgium', 'Brazil', 'Bulgaria', 'Canada', 'Chile', 'China',
@@ -66,6 +70,52 @@ export default function UserDetailPage() {
   const [platformCountrySearch, setPlatformCountrySearch] = useState<{ [platformIndex: number]: string }>({})
   const [platformCountryDropdownOpen, setPlatformCountryDropdownOpen] = useState<{ [platformIndex: number]: boolean }>({})
   const platformCountryDropdownRefs = useRef<{ [platformIndex: number]: HTMLDivElement | null }>({})
+
+  // Listing edit state
+  const [editingListingId, setEditingListingId] = useState<string | null>(null)
+  const [editListingData, setEditListingData] = useState<{
+    name: string
+    location: string
+    description: string
+    accommodationType: string
+    collaborationOfferings: Array<{
+      id?: string
+      collaborationType: 'Free Stay' | 'Paid' | 'Discount'
+      availabilityMonths: string[]
+      platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
+      freeStayMinNights?: number | null
+      freeStayMaxNights?: number | null
+      paidMaxAmount?: number | null
+      discountPercentage?: number | null
+    }>
+    creatorRequirements: {
+      id?: string
+      platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
+      minFollowers: number | null
+      targetCountries: string[]
+      targetAgeGroups: string[]
+    }
+  }>({
+    name: '',
+    location: '',
+    description: '',
+    accommodationType: '',
+    collaborationOfferings: [],
+    creatorRequirements: {
+      platforms: [],
+      minFollowers: null,
+      targetCountries: [],
+      targetAgeGroups: [],
+    },
+  })
+  const [savingListing, setSavingListing] = useState(false)
+  const [listingSaveError, setListingSaveError] = useState('')
+  const [listingSaveSuccess, setListingSaveSuccess] = useState('')
+  
+  // Listing edit state for dropdowns
+  const [listingTargetCountrySearch, setListingTargetCountrySearch] = useState<string>('')
+  const [listingTargetCountryDropdownOpen, setListingTargetCountryDropdownOpen] = useState(false)
+  const listingTargetCountryDropdownRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     loadUserDetail()
@@ -388,6 +438,334 @@ export default function UserDetailPage() {
     setSaveSuccess('')
   }
 
+  const handleStartEditListing = (listing: ListingResponse) => {
+    setEditingListingId(listing.id)
+    setEditListingData({
+      name: listing.name || '',
+      location: listing.location || '',
+      description: listing.description || '',
+      accommodationType: listing.accommodationType || '',
+      collaborationOfferings: (listing.collaborationOfferings || []).map(offering => ({
+        id: offering.id,
+        collaborationType: offering.collaborationType,
+        availabilityMonths: offering.availabilityMonths || [],
+        platforms: offering.platforms || [],
+        freeStayMinNights: offering.freeStayMinNights,
+        freeStayMaxNights: offering.freeStayMaxNights,
+        paidMaxAmount: offering.paidMaxAmount,
+        discountPercentage: offering.discountPercentage,
+      })),
+      creatorRequirements: listing.creatorRequirements ? {
+        id: listing.creatorRequirements.id,
+        platforms: listing.creatorRequirements.platforms || [],
+        minFollowers: listing.creatorRequirements.minFollowers,
+        targetCountries: listing.creatorRequirements.targetCountries || [],
+        // Convert targetAgeMin/targetAgeMax to targetAgeGroups array
+        targetAgeGroups: listing.creatorRequirements.targetAgeMin !== null && listing.creatorRequirements.targetAgeMax !== null
+          ? AGE_GROUPS.filter(ageRange => {
+              const [min, max] = ageRange === '55+' ? [55, 100] : ageRange.split('-').map(Number)
+              return listing.creatorRequirements!.targetAgeMin! <= max && listing.creatorRequirements!.targetAgeMax! >= min
+            })
+          : [],
+      } : {
+        platforms: [],
+        minFollowers: null,
+        targetCountries: [],
+        targetAgeGroups: [],
+      },
+    })
+    setListingSaveError('')
+    setListingSaveSuccess('')
+  }
+
+  const handleCancelEditListing = () => {
+    setEditingListingId(null)
+    setEditListingData({
+      name: '',
+      location: '',
+      description: '',
+      accommodationType: '',
+      collaborationOfferings: [],
+      creatorRequirements: {
+        platforms: [],
+        minFollowers: null,
+        targetCountries: [],
+        targetAgeGroups: [],
+      },
+    })
+    setListingSaveError('')
+    setListingSaveSuccess('')
+    setListingTargetCountrySearch('')
+    setListingTargetCountryDropdownOpen(false)
+  }
+
+  const handleSaveListing = async () => {
+    if (!userDetail || !editingListingId || !selectedListing) return
+
+    try {
+      setSavingListing(true)
+      setListingSaveError('')
+      setListingSaveSuccess('')
+
+      const updateData: any = {}
+
+      if (editListingData.name !== selectedListing.name) {
+        updateData.name = editListingData.name
+      }
+      if (editListingData.location !== selectedListing.location) {
+        updateData.location = editListingData.location
+      }
+      if (editListingData.description !== selectedListing.description) {
+        updateData.description = editListingData.description
+      }
+      if (editListingData.accommodationType !== selectedListing.accommodationType) {
+        updateData.accommodationType = editListingData.accommodationType || null
+      }
+
+      // Always include collaborationOfferings and creatorRequirements when editing
+      updateData.collaborationOfferings = editListingData.collaborationOfferings.map(offering => {
+        const offeringData: any = {
+          collaborationType: offering.collaborationType,
+          availabilityMonths: offering.availabilityMonths,
+          platforms: offering.platforms,
+        }
+        
+        if (offering.collaborationType === 'Free Stay') {
+          offeringData.freeStayMinNights = offering.freeStayMinNights ? parseInt(offering.freeStayMinNights.toString()) : null
+          offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
+        } else if (offering.collaborationType === 'Paid') {
+          offeringData.paidMaxAmount = offering.paidMaxAmount ? parseFloat(offering.paidMaxAmount.toString()) : null
+        } else if (offering.collaborationType === 'Discount') {
+          offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
+        }
+        
+        if (offering.id) {
+          offeringData.id = offering.id
+        }
+        
+        return offeringData
+      })
+
+      // Convert targetAgeGroups to targetAgeMin/targetAgeMax
+      let targetAgeMin: number | null = null
+      let targetAgeMax: number | null = null
+      
+      if (editListingData.creatorRequirements.targetAgeGroups.length > 0) {
+        const ageValues: number[] = []
+        editListingData.creatorRequirements.targetAgeGroups.forEach(ageRange => {
+          if (ageRange === '55+') {
+            ageValues.push(55, 100)
+          } else {
+            const [min, max] = ageRange.split('-').map(Number)
+            ageValues.push(min, max)
+          }
+        })
+        targetAgeMin = Math.min(...ageValues)
+        targetAgeMax = Math.max(...ageValues)
+      }
+      
+      updateData.creatorRequirements = {
+        platforms: editListingData.creatorRequirements.platforms,
+        minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
+        targetCountries: editListingData.creatorRequirements.targetCountries,
+        targetAgeMin,
+        targetAgeMax,
+      }
+      
+      if (editListingData.creatorRequirements.id) {
+        updateData.creatorRequirements.id = editListingData.creatorRequirements.id
+      }
+
+      await usersService.updateListing(userDetail.id, editingListingId, updateData)
+
+      // Reload user details to get updated listing
+      const updatedUserDetail = await usersService.getUserById(userDetail.id)
+      setUserDetail(updatedUserDetail)
+
+      // Update selected listing in modal
+      if (updatedUserDetail.profile && updatedUserDetail.type === 'hotel') {
+        const updatedProfile = updatedUserDetail.profile as HotelProfileDetail
+        const updatedListing = updatedProfile.listings?.find(l => l.id === editingListingId)
+        if (updatedListing) {
+          setSelectedListing(updatedListing)
+        }
+      }
+
+      setEditingListingId(null)
+      setListingSaveSuccess('Listing updated successfully!')
+      setTimeout(() => setListingSaveSuccess(''), 5000)
+    } catch (err) {
+      if (err instanceof ApiErrorResponse) {
+        if (err.status === 400) {
+          setListingSaveError(err.data.detail as string || 'Validation error')
+        } else if (err.status === 404) {
+          setListingSaveError('Listing not found')
+        } else if (err.status === 403) {
+          setListingSaveError('Access denied. Admin privileges required.')
+        } else {
+          setListingSaveError(err.data.detail as string || 'Failed to update listing')
+        }
+      } else {
+        setListingSaveError('Failed to update listing. Please try again.')
+      }
+    } finally {
+      setSavingListing(false)
+    }
+  }
+
+  // Collaboration Offerings handlers
+  const handleAddCollaborationOffering = () => {
+    setEditListingData(prev => ({
+      ...prev,
+      collaborationOfferings: [...prev.collaborationOfferings, {
+        collaborationType: 'Free Stay',
+        availabilityMonths: [],
+        platforms: [],
+      }]
+    }))
+  }
+
+  const handleRemoveCollaborationOffering = (offeringIndex: number) => {
+    setEditListingData(prev => ({
+      ...prev,
+      collaborationOfferings: prev.collaborationOfferings.filter((_, i) => i !== offeringIndex)
+    }))
+  }
+
+  const handleCollaborationOfferingChange = (
+    offeringIndex: number,
+    field: string,
+    value: any
+  ) => {
+    setEditListingData(prev => ({
+      ...prev,
+      collaborationOfferings: prev.collaborationOfferings.map((offering, i) =>
+        i === offeringIndex ? { ...offering, [field]: value } : offering
+      )
+    }))
+  }
+
+  const handleToggleOfferingMonth = (offeringIndex: number, month: string) => {
+    setEditListingData(prev => ({
+      ...prev,
+      collaborationOfferings: prev.collaborationOfferings.map((offering, i) => {
+        if (i !== offeringIndex) return offering
+        const monthIndex = offering.availabilityMonths.indexOf(month)
+        if (monthIndex >= 0) {
+          return {
+            ...offering,
+            availabilityMonths: offering.availabilityMonths.filter((_, mi) => mi !== monthIndex)
+          }
+        } else {
+          return {
+            ...offering,
+            availabilityMonths: [...offering.availabilityMonths, month]
+          }
+        }
+      })
+    }))
+  }
+
+  const handleToggleOfferingPlatform = (offeringIndex: number, platform: string) => {
+    setEditListingData(prev => ({
+      ...prev,
+      collaborationOfferings: prev.collaborationOfferings.map((offering, i) => {
+        if (i !== offeringIndex) return offering
+        const platformIndex = offering.platforms.indexOf(platform as any)
+        if (platformIndex >= 0) {
+          return {
+            ...offering,
+            platforms: offering.platforms.filter((_, pi) => pi !== platformIndex)
+          }
+        } else {
+          return {
+            ...offering,
+            platforms: [...offering.platforms, platform as any]
+          }
+        }
+      })
+    }))
+  }
+
+  // Creator Requirements handlers
+  const handleCreatorRequirementChange = (field: string, value: any) => {
+    setEditListingData(prev => ({
+      ...prev,
+      creatorRequirements: { ...prev.creatorRequirements, [field]: value }
+    }))
+  }
+
+  const handleToggleCreatorRequirementPlatform = (platform: string) => {
+    setEditListingData(prev => {
+      const platforms = prev.creatorRequirements.platforms
+      const platformIndex = platforms.indexOf(platform as any)
+      const newPlatforms = platformIndex >= 0
+        ? platforms.filter((_, i) => i !== platformIndex)
+        : [...platforms, platform as any]
+      
+      return {
+        ...prev,
+        creatorRequirements: { ...prev.creatorRequirements, platforms: newPlatforms }
+      }
+    })
+  }
+
+  const handleSelectListingTargetCountry = (country: string) => {
+    const requirements = editListingData.creatorRequirements
+    if (requirements.targetCountries.includes(country) || requirements.targetCountries.length >= 3) {
+      return
+    }
+    
+    setEditListingData(prev => ({
+      ...prev,
+      creatorRequirements: {
+        ...prev.creatorRequirements,
+        targetCountries: [...prev.creatorRequirements.targetCountries, country]
+      }
+    }))
+    
+    setListingTargetCountrySearch('')
+    setListingTargetCountryDropdownOpen(false)
+  }
+
+  const handleRemoveListingTargetCountry = (country: string) => {
+    setEditListingData(prev => ({
+      ...prev,
+      creatorRequirements: {
+        ...prev.creatorRequirements,
+        targetCountries: prev.creatorRequirements.targetCountries.filter(c => c !== country)
+      }
+    }))
+  }
+
+  const handleToggleListingTargetAgeGroup = (ageRange: string) => {
+    setEditListingData(prev => {
+      const ageGroups = prev.creatorRequirements.targetAgeGroups
+      const existingIndex = ageGroups.indexOf(ageRange)
+      
+      if (existingIndex >= 0) {
+        return {
+          ...prev,
+          creatorRequirements: {
+            ...prev.creatorRequirements,
+            targetAgeGroups: ageGroups.filter((_, ai) => ai !== existingIndex)
+          }
+        }
+      } else {
+        if (ageGroups.length < 3) {
+          return {
+            ...prev,
+            creatorRequirements: {
+              ...prev.creatorRequirements,
+              targetAgeGroups: [...ageGroups, ageRange]
+            }
+          }
+        }
+        return prev
+      }
+    })
+  }
+
   const handleAddPlatform = () => {
     setEditPlatforms(prev => [...prev, {
       name: 'Instagram',
@@ -493,6 +871,23 @@ export default function UserDetailPage() {
         : p
     ))
   }
+
+  // Close listing target country dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (listingTargetCountryDropdownRef.current && !listingTargetCountryDropdownRef.current.contains(event.target as Node)) {
+        setListingTargetCountryDropdownOpen(false)
+      }
+    }
+
+    if (listingTargetCountryDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [listingTargetCountryDropdownOpen])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1521,11 +1916,39 @@ export default function UserDetailPage() {
         {selectedListing && (
           <Modal
             isOpen={!!selectedListing}
-            onClose={() => setSelectedListing(null)}
+            onClose={() => {
+              setSelectedListing(null)
+              handleCancelEditListing()
+            }}
             title="Listing Details"
             size="xl"
           >
             <div className="space-y-6">
+              {/* Edit Button - Prominent */}
+              {editingListingId !== selectedListing.id && (
+                <div className="flex justify-end pb-4 border-b">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => handleStartEditListing(selectedListing)}
+                    className="flex items-center gap-2"
+                  >
+                    <PencilIcon className="w-5 h-5" />
+                    Edit Listing
+                  </Button>
+                </div>
+              )}
+
+              {listingSaveError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-800">{listingSaveError}</p>
+                </div>
+              )}
+              {listingSaveSuccess && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <p className="text-sm text-green-800">{listingSaveSuccess}</p>
+                </div>
+              )}
               {/* Listing Images */}
               {selectedListing.images && selectedListing.images.length > 0 && (
                 <div>
@@ -1553,18 +1976,47 @@ export default function UserDetailPage() {
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Listing Name</label>
-                    <p className="mt-1 text-sm text-gray-900">{selectedListing.name}</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Listing Name</label>
+                    {editingListingId === selectedListing.id ? (
+                      <Input
+                        value={editListingData.name}
+                        onChange={(e) => setEditListingData(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Listing name"
+                      />
+                    ) : (
+                      <p className="mt-1 text-sm text-gray-900">{selectedListing.name}</p>
+                    )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Location</label>
-                    <p className="mt-1 text-sm text-gray-900">{selectedListing.location}</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
+                    {editingListingId === selectedListing.id ? (
+                      <Input
+                        value={editListingData.location}
+                        onChange={(e) => setEditListingData(prev => ({ ...prev, location: e.target.value }))}
+                        placeholder="Location"
+                      />
+                    ) : (
+                      <p className="mt-1 text-sm text-gray-900">{selectedListing.location}</p>
+                    )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Accommodation Type</label>
-                    <p className="mt-1 text-sm text-gray-900">
-                      {selectedListing.accommodationType || '-'}
-                    </p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Type</label>
+                    {editingListingId === selectedListing.id ? (
+                      <select
+                        value={editListingData.accommodationType}
+                        onChange={(e) => setEditListingData(prev => ({ ...prev, accommodationType: e.target.value }))}
+                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900"
+                      >
+                        <option value="">Select type</option>
+                        {ACCOMMODATION_TYPES.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="mt-1 text-sm text-gray-900">
+                        {selectedListing.accommodationType || '-'}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Status</label>
@@ -1590,178 +2042,492 @@ export default function UserDetailPage() {
               </div>
 
               {/* Description */}
-              {selectedListing.description && (
-                <div className="border-t pt-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                  <p className="text-sm text-gray-900 whitespace-pre-wrap">{selectedListing.description}</p>
-                </div>
-              )}
+              <div className="border-t pt-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                {editingListingId === selectedListing.id ? (
+                  <Textarea
+                    value={editListingData.description}
+                    onChange={(e) => setEditListingData(prev => ({ ...prev, description: e.target.value }))}
+                    rows={4}
+                    placeholder="Description"
+                  />
+                ) : (
+                  <p className="text-sm text-gray-900 whitespace-pre-wrap">{selectedListing.description || '-'}</p>
+                )}
+              </div>
 
               {/* Collaboration Offerings */}
               <div className="border-t pt-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Collaboration Offerings</h3>
-                {selectedListing.collaborationOfferings && selectedListing.collaborationOfferings.length > 0 ? (
-                  <div className="space-y-4">
-                    {selectedListing.collaborationOfferings.map((offering) => (
-                      <div key={offering.id} className="border rounded-lg p-4 bg-gray-50">
-                        <div className="flex items-center gap-2 mb-4">
-                          <span className={`px-3 py-1 text-sm font-semibold rounded-full ${
-                            offering.collaborationType === 'Free Stay' ? 'bg-green-100 text-green-800' :
-                            offering.collaborationType === 'Paid' ? 'bg-blue-100 text-blue-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {offering.collaborationType}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Platforms */}
-                          {offering.platforms && offering.platforms.length > 0 && (
-                            <div className="md:col-span-2">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Platforms</label>
-                              <div className="flex flex-wrap gap-2">
-                                {offering.platforms.map((platform, idx) => (
-                                  <span key={idx} className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
-                                    {platform}
-                                  </span>
-                                ))}
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Collaboration Offerings</h3>
+                  {editingListingId === selectedListing.id && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddCollaborationOffering}
+                    >
+                      <PlusIcon className="w-4 h-4 mr-1" />
+                      Add Offering
+                    </Button>
+                  )}
+                </div>
+                {editingListingId === selectedListing.id ? (
+                  editListingData.collaborationOfferings.length === 0 ? (
+                    <p className="text-sm text-gray-500">No collaboration offerings added. Click "Add Offering" to add one.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {editListingData.collaborationOfferings.map((offering, offeringIndex) => (
+                        <div key={offeringIndex} className="border rounded-lg p-4 bg-gray-50">
+                          <div className="flex items-center justify-between mb-4">
+                            <h5 className="font-medium text-gray-900">Offering {offeringIndex + 1}</h5>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCollaborationOffering(offeringIndex)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <TrashIcon className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <div className="space-y-6">
+                            {/* Collaboration Types */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-3">
+                                Collaboration Type <span className="text-red-500">*</span>
+                              </label>
+                              <div className="flex gap-4">
+                                {COLLABORATION_TYPES.map(type => {
+                                  const isSelected = offering.collaborationType === type
+                                  const getIcon = () => {
+                                    if (type === 'Free Stay') return <GiftIcon className="w-8 h-8" />
+                                    if (type === 'Paid') return <CurrencyDollarIcon className="w-8 h-8" />
+                                    if (type === 'Discount') return <TagIcon className="w-8 h-8" />
+                                  }
+                                  
+                                  return (
+                                    <button
+                                      key={type}
+                                      type="button"
+                                      onClick={() => handleCollaborationOfferingChange(offeringIndex, 'collaborationType', type)}
+                                      className={`
+                                        flex flex-col items-center justify-center p-6 border-2 rounded-lg transition-all
+                                        ${isSelected 
+                                          ? 'border-blue-500 bg-blue-50' 
+                                          : 'border-gray-300 bg-white hover:border-gray-400'
+                                        }
+                                      `}
+                                    >
+                                      <div className={`mb-2 ${isSelected ? 'text-blue-600' : 'text-gray-400'}`}>
+                                        {getIcon()}
+                                      </div>
+                                      <span className={`text-sm font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                                        {type}
+                                      </span>
+                                    </button>
+                                  )
+                                })}
                               </div>
                             </div>
-                          )}
-                          
-                          {/* Availability Months */}
-                          {offering.availabilityMonths && offering.availabilityMonths.length > 0 && (
-                            <div className="md:col-span-2">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Availability Months</label>
-                              <div className="flex flex-wrap gap-2">
-                                {offering.availabilityMonths.map((month, idx) => (
-                                  <span key={idx} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-full">
-                                    {month}
-                                  </span>
-                                ))}
+                            
+                            {/* Type-specific fields */}
+                            {offering.collaborationType === 'Free Stay' && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <Input
+                                  label="Min Nights"
+                                  type="number"
+                                  value={offering.freeStayMinNights?.toString() || ''}
+                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'freeStayMinNights', e.target.value ? parseInt(e.target.value) : null)}
+                                  placeholder="2"
+                                />
+                                <Input
+                                  label="Max Nights"
+                                  type="number"
+                                  value={offering.freeStayMaxNights?.toString() || ''}
+                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'freeStayMaxNights', e.target.value ? parseInt(e.target.value) : null)}
+                                  placeholder="5"
+                                />
+                              </div>
+                            )}
+                            {offering.collaborationType === 'Paid' && (
+                              <div>
+                                <Input
+                                  label="Max Amount"
+                                  type="number"
+                                  value={offering.paidMaxAmount?.toString() || ''}
+                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'paidMaxAmount', e.target.value ? parseFloat(e.target.value) : null)}
+                                  placeholder="1000"
+                                />
+                              </div>
+                            )}
+                            {offering.collaborationType === 'Discount' && (
+                              <div>
+                                <Input
+                                  label="Discount Percentage"
+                                  type="number"
+                                  min="1"
+                                  max="100"
+                                  value={offering.discountPercentage?.toString() || ''}
+                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'discountPercentage', e.target.value ? parseInt(e.target.value) : null)}
+                                  placeholder="30"
+                                />
+                              </div>
+                            )}
+                            
+                            {/* Platforms */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Property posting platforms
+                              </label>
+                              <p className="text-sm text-gray-600 mb-3">On which platforms is your property active?</p>
+                              <div className="flex gap-4">
+                                {PLATFORMS.map(platform => {
+                                  const isSelected = offering.platforms.includes(platform)
+                                  return (
+                                    <label key={platform} className="flex items-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => handleToggleOfferingPlatform(offeringIndex, platform)}
+                                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                                      />
+                                      <span className="ml-2 text-sm text-gray-700">{platform}</span>
+                                    </label>
+                                  )
+                                })}
                               </div>
                             </div>
-                          )}
-
-                          {/* Type-specific fields */}
-                          {offering.collaborationType === 'Free Stay' && (
-                            <>
-                              {offering.freeStayMinNights !== null && (
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700">Minimum Nights</label>
-                                  <p className="mt-1 text-sm text-gray-900">{offering.freeStayMinNights} nights</p>
-                                </div>
-                              )}
-                              {offering.freeStayMaxNights !== null && (
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700">Maximum Nights</label>
-                                  <p className="mt-1 text-sm text-gray-900">{offering.freeStayMaxNights} nights</p>
-                                </div>
-                              )}
-                            </>
-                          )}
-
-                          {offering.collaborationType === 'Paid' && offering.paidMaxAmount !== null && (
+                            
+                            {/* Availability Months */}
                             <div>
-                              <label className="block text-sm font-medium text-gray-700">Maximum Amount</label>
-                              <p className="mt-1 text-sm text-gray-900">${offering.paidMaxAmount.toLocaleString()}</p>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Availability Months
+                              </label>
+                              <p className="text-sm text-gray-600 mb-3">Select months when this offering is available</p>
+                              <div className="grid grid-cols-6 gap-2">
+                                {MONTHS.map(month => {
+                                  const isSelected = offering.availabilityMonths.includes(month)
+                                  return (
+                                    <button
+                                      key={month}
+                                      type="button"
+                                      onClick={() => handleToggleOfferingMonth(offeringIndex, month)}
+                                      className={`
+                                        px-3 py-2 text-sm font-medium rounded-lg transition-colors
+                                        ${isSelected 
+                                          ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                          : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
+                                        }
+                                      `}
+                                    >
+                                      {MONTHS_SHORT[MONTHS.indexOf(month)]}
+                                    </button>
+                                  )
+                                })}
+                              </div>
                             </div>
-                          )}
-
-                          {offering.collaborationType === 'Discount' && offering.discountPercentage !== null && (
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700">Discount Percentage</label>
-                              <p className="mt-1 text-sm text-gray-900">{offering.discountPercentage}%</p>
-                            </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )
                 ) : (
-                  <p className="text-sm text-gray-500">No collaboration offerings available</p>
+                  selectedListing.collaborationOfferings && selectedListing.collaborationOfferings.length > 0 ? (
+                    <div className="space-y-4">
+                      {selectedListing.collaborationOfferings.map((offering) => (
+                        <div key={offering.id} className="border rounded-lg p-4 bg-gray-50">
+                          <div className="flex items-center gap-2 mb-4">
+                            <span className={`px-3 py-1 text-sm font-semibold rounded-full ${
+                              offering.collaborationType === 'Free Stay' ? 'bg-green-100 text-green-800' :
+                              offering.collaborationType === 'Paid' ? 'bg-blue-100 text-blue-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {offering.collaborationType}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Platforms */}
+                            {offering.platforms && offering.platforms.length > 0 && (
+                              <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Platforms</label>
+                                <div className="flex flex-wrap gap-2">
+                                  {offering.platforms.map((platform, idx) => (
+                                    <span key={idx} className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
+                                      {platform}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Availability Months */}
+                            {offering.availabilityMonths && offering.availabilityMonths.length > 0 && (
+                              <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Availability Months</label>
+                                <div className="flex flex-wrap gap-2">
+                                  {offering.availabilityMonths.map((month, idx) => (
+                                    <span key={idx} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-full">
+                                      {month}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Type-specific fields */}
+                            {offering.collaborationType === 'Free Stay' && (
+                              <>
+                                {offering.freeStayMinNights !== null && (
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700">Minimum Nights</label>
+                                    <p className="mt-1 text-sm text-gray-900">{offering.freeStayMinNights} nights</p>
+                                  </div>
+                                )}
+                                {offering.freeStayMaxNights !== null && (
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700">Maximum Nights</label>
+                                    <p className="mt-1 text-sm text-gray-900">{offering.freeStayMaxNights} nights</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {offering.collaborationType === 'Paid' && offering.paidMaxAmount !== null && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">Maximum Amount</label>
+                                <p className="mt-1 text-sm text-gray-900">${offering.paidMaxAmount.toLocaleString()}</p>
+                              </div>
+                            )}
+
+                            {offering.collaborationType === 'Discount' && offering.discountPercentage !== null && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">Discount Percentage</label>
+                                <p className="mt-1 text-sm text-gray-900">{offering.discountPercentage}%</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No collaboration offerings available</p>
+                  )
                 )}
               </div>
 
               {/* Creator Requirements */}
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Creator Requirements</h3>
-                {selectedListing.creatorRequirements ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Platforms */}
-                    {selectedListing.creatorRequirements.platforms && selectedListing.creatorRequirements.platforms.length > 0 && (
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Required Platforms</label>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedListing.creatorRequirements.platforms.map((platform, idx) => (
-                            <span key={idx} className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
-                              {platform}
-                            </span>
-                          ))}
-                        </div>
+                {editingListingId === selectedListing.id ? (
+                  <div className="space-y-6">
+                    {/* Required Platforms */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Required Platforms <span className="text-red-500">*</span>
+                      </label>
+                      <p className="text-sm text-gray-600 mb-3">Select platforms creators must have</p>
+                      <div className="flex gap-4">
+                        {PLATFORMS.map(platform => {
+                          const isSelected = editListingData.creatorRequirements.platforms.includes(platform)
+                          return (
+                            <label key={platform} className="flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleCreatorRequirementPlatform(platform)}
+                                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                              />
+                              <span className="ml-2 text-sm text-gray-700">{platform}</span>
+                            </label>
+                          )
+                        })}
                       </div>
-                    )}
+                    </div>
                     
-                    {/* Minimum Followers */}
-                    {selectedListing.creatorRequirements.minFollowers !== null && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Minimum Followers</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {selectedListing.creatorRequirements.minFollowers.toLocaleString()}
-                        </p>
-                      </div>
-                    )}
-                    
-                    {/* Age Range */}
-                    {selectedListing.creatorRequirements.targetAgeMin !== null && selectedListing.creatorRequirements.targetAgeMax !== null ? (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Target Age Range</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {selectedListing.creatorRequirements.targetAgeMin} - {selectedListing.creatorRequirements.targetAgeMax} years
-                        </p>
-                      </div>
-                    ) : selectedListing.creatorRequirements.targetAgeMin !== null ? (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Minimum Age</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {selectedListing.creatorRequirements.targetAgeMin} years
-                        </p>
-                      </div>
-                    ) : selectedListing.creatorRequirements.targetAgeMax !== null ? (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Maximum Age</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {selectedListing.creatorRequirements.targetAgeMax} years
-                        </p>
-                      </div>
-                    ) : null}
+                    {/* Min Followers */}
+                    <div>
+                      <Input
+                        label="Min Followers"
+                        type="number"
+                        value={editListingData.creatorRequirements.minFollowers?.toString() || ''}
+                        onChange={(e) => handleCreatorRequirementChange('minFollowers', e.target.value ? parseInt(e.target.value) : null)}
+                        placeholder="10000"
+                      />
+                    </div>
                     
                     {/* Target Countries */}
-                    {selectedListing.creatorRequirements.targetCountries && selectedListing.creatorRequirements.targetCountries.length > 0 && (
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Target Countries</label>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedListing.creatorRequirements.targetCountries.map((country, idx) => (
-                            <span key={idx} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-full">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Target Countries
+                      </label>
+                      <p className="text-sm text-gray-600 mb-3">Select up to 3 countries (optional)</p>
+                      
+                      {/* Selected Countries */}
+                      {editListingData.creatorRequirements.targetCountries.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {editListingData.creatorRequirements.targetCountries.map((country) => (
+                            <span
+                              key={country}
+                              className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
+                            >
                               {country}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveListingTargetCountry(country)}
+                                className="text-blue-700 hover:text-red-600 transition-colors"
+                              >
+                                <XMarkIcon className="w-4 h-4" />
+                              </button>
                             </span>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      )}
+                      
+                      {/* Search Input */}
+                      {editListingData.creatorRequirements.targetCountries.length < 3 && (
+                        <div className="relative" ref={listingTargetCountryDropdownRef}>
+                          <Input
+                            value={listingTargetCountrySearch}
+                            onChange={(e) => {
+                              setListingTargetCountrySearch(e.target.value)
+                              setListingTargetCountryDropdownOpen(true)
+                            }}
+                            onFocus={() => setListingTargetCountryDropdownOpen(true)}
+                            placeholder="Search countries..."
+                          />
+                          
+                          {/* Dropdown */}
+                          {listingTargetCountryDropdownOpen && listingTargetCountrySearch && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {COUNTRIES.filter(country =>
+                                country.toLowerCase().includes(listingTargetCountrySearch.toLowerCase()) &&
+                                !editListingData.creatorRequirements.targetCountries.includes(country)
+                              ).slice(0, 10).map((country) => (
+                                <button
+                                  key={country}
+                                  type="button"
+                                  onClick={() => handleSelectListingTargetCountry(country)}
+                                  className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                                >
+                                  {country}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     
-                    {/* Show message if no requirements are set */}
-                    {(!selectedListing.creatorRequirements.platforms || selectedListing.creatorRequirements.platforms.length === 0) && 
-                     selectedListing.creatorRequirements.minFollowers === null && 
-                     selectedListing.creatorRequirements.targetAgeMin === null && 
-                     selectedListing.creatorRequirements.targetAgeMax === null &&
-                     (!selectedListing.creatorRequirements.targetCountries || selectedListing.creatorRequirements.targetCountries.length === 0) && (
-                      <div className="md:col-span-2">
-                        <p className="text-sm text-gray-500">No specific requirements set</p>
+                    {/* Age Groups */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Age Groups
+                      </label>
+                      <p className="text-sm text-gray-600 mb-3">Select up to 3 age groups (optional)</p>
+                      <div className="flex flex-wrap gap-2">
+                        {AGE_GROUPS.map((ageRange) => {
+                          const isSelected = editListingData.creatorRequirements.targetAgeGroups.includes(ageRange)
+                          const isDisabled = !isSelected && editListingData.creatorRequirements.targetAgeGroups.length >= 3
+                          
+                          return (
+                            <button
+                              key={ageRange}
+                              type="button"
+                              onClick={() => handleToggleListingTargetAgeGroup(ageRange)}
+                              disabled={isDisabled}
+                              className={`
+                                px-4 py-2 rounded-full text-sm font-medium transition-colors
+                                ${isSelected 
+                                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                  : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
+                                }
+                                ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                              `}
+                            >
+                              {ageRange}
+                            </button>
+                          )
+                        })}
                       </div>
-                    )}
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">No creator requirements specified</p>
+                  selectedListing.creatorRequirements ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Platforms */}
+                      {selectedListing.creatorRequirements.platforms && selectedListing.creatorRequirements.platforms.length > 0 && (
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Required Platforms</label>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedListing.creatorRequirements.platforms.map((platform, idx) => (
+                              <span key={idx} className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full">
+                                {platform}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Minimum Followers */}
+                      {selectedListing.creatorRequirements.minFollowers !== null && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Minimum Followers</label>
+                          <p className="mt-1 text-sm text-gray-900">
+                            {selectedListing.creatorRequirements.minFollowers.toLocaleString()}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* Age Range */}
+                      {selectedListing.creatorRequirements.targetAgeMin !== null && selectedListing.creatorRequirements.targetAgeMax !== null ? (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Target Age Range</label>
+                          <p className="mt-1 text-sm text-gray-900">
+                            {selectedListing.creatorRequirements.targetAgeMin} - {selectedListing.creatorRequirements.targetAgeMax} years
+                          </p>
+                        </div>
+                      ) : selectedListing.creatorRequirements.targetAgeMin !== null ? (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Minimum Age</label>
+                          <p className="mt-1 text-sm text-gray-900">
+                            {selectedListing.creatorRequirements.targetAgeMin} years
+                          </p>
+                        </div>
+                      ) : selectedListing.creatorRequirements.targetAgeMax !== null ? (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Maximum Age</label>
+                          <p className="mt-1 text-sm text-gray-900">
+                            {selectedListing.creatorRequirements.targetAgeMax} years
+                          </p>
+                        </div>
+                      ) : null}
+                      
+                      {/* Target Countries */}
+                      {selectedListing.creatorRequirements.targetCountries && selectedListing.creatorRequirements.targetCountries.length > 0 && (
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Target Countries</label>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedListing.creatorRequirements.targetCountries.map((country, idx) => (
+                              <span key={idx} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-full">
+                                {country}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Show message if no requirements are set */}
+                      {(!selectedListing.creatorRequirements.platforms || selectedListing.creatorRequirements.platforms.length === 0) && 
+                       selectedListing.creatorRequirements.minFollowers === null && 
+                       selectedListing.creatorRequirements.targetAgeMin === null && 
+                       selectedListing.creatorRequirements.targetAgeMax === null &&
+                       (!selectedListing.creatorRequirements.targetCountries || selectedListing.creatorRequirements.targetCountries.length === 0) && (
+                        <div className="md:col-span-2">
+                          <p className="text-sm text-gray-500">No specific requirements set</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No creator requirements specified</p>
+                  )
                 )}
               </div>
 
@@ -1785,12 +2551,34 @@ export default function UserDetailPage() {
 
               {/* Actions */}
               <div className="flex justify-end gap-3 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedListing(null)}
-                >
-                  Close
-                </Button>
+                {editingListingId === selectedListing.id ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={handleCancelEditListing}
+                      disabled={savingListing}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleSaveListing}
+                      disabled={savingListing}
+                    >
+                      {savingListing ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedListing(null)
+                      handleCancelEditListing()
+                    }}
+                  >
+                    Close
+                  </Button>
+                )}
               </div>
             </div>
           </Modal>

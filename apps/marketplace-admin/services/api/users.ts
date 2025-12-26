@@ -141,6 +141,22 @@ export const usersService = {
   },
 
   /**
+   * Update a listing
+   */
+  updateListing: async (hotelUserId: string, listingId: string, data: {
+    name?: string
+    location?: string
+    description?: string
+    accommodationType?: string
+    images?: string[]
+    collaborationOfferings?: any[]
+    creatorRequirements?: any
+  }): Promise<any> => {
+    const response = await apiClient.put<any>(`/admin/users/${hotelUserId}/listings/${listingId}`, data)
+    return transformSnakeToCamel(response)
+  },
+
+  /**
    * Delete a user permanently
    * ⚠️ Warning: This action cannot be undone!
    */

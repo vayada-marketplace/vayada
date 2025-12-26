@@ -418,8 +418,423 @@ export default function CreateUserPage() {
             topCountries: platform.topCountries.map(tc => 
               tc.country === country ? { ...tc, percentage } : tc
             )
-          }
-        : platform
+            # Admin Update Hotel Profile Endpoint
+
+            ## Endpoint
+            ```
+            PUT /admin/users/{user_id}/profile/hotel
+            ```
+            
+            ## Description
+            Allows admins to update a hotel's profile. Supports partial updates - only provided fields will be updated.
+            
+            ## Authentication
+            Requires admin authentication (Bearer token in Authorization header).
+            
+            ## Request
+            
+            ### Path Parameters
+            - `user_id` (string, required): The UUID of the hotel user to update
+            
+            ### Request Body
+            ```typescript
+            {
+              name?: string  // Hotel name (defaults to user name if not provided)
+              location?: string
+              email?: string  // Valid email address (updates users table)
+              about?: string
+              website?: string  // URL
+              phone?: string
+              picture?: string  // S3 URL (upload via /upload/images?target_user_id={user_id}&prefix=hotels first)
+            }
+            ```
+            
+            **Important Notes:**
+            - All fields are optional (partial updates supported)
+            - `email` updates the email in the `users` table
+            - `picture` is for hotel profile picture (if supported by your schema)
+            - For `picture`: Upload image first, then include the returned URL
+            
+            ### Example Request
+            ```typescript
+            PUT /admin/users/9f73f9a8-2c20-4a44-9d39-718014d83e76/profile/hotel
+            Authorization: Bearer <admin_token>
+            Content-Type: application/json
+            
+            {
+              "name": "Grand Hotel Paris",
+              "location": "Paris, France",
+              "email": "contact@grandhotel.com",
+              "about": "Luxury hotel in the heart of Paris",
+              "website": "https://grandhotel.com",
+              "phone": "+33-1-23-45-67-89",
+              "picture": "https://bucket.s3.region.amazonaws.com/hotels/user-id/image.jpg"
+            }
+            ```
+            
+            ## Response
+            
+            ### Success Response (200 OK)
+            ```typescript
+            {
+              "id": "hotel-profile-id",
+              "user_id": "user-id",
+              "name": "Grand Hotel Paris",
+              "location": "Paris, France",
+              "email": "contact@grandhotel.com",
+              "about": "Luxury hotel in the heart of Paris",
+              "website": "https://grandhotel.com",
+              "phone": "+33-1-23-45-67-89",
+              "picture": "https://bucket.s3.region.amazonaws.com/hotels/user-id/image.jpg",
+              "status": "verified",
+              "createdAt": "2024-01-01T00:00:00Z",
+              "updatedAt": "2024-01-01T00:00:00Z"
+            }
+            ```
+            
+            ### Error Responses
+            
+            #### 400 Bad Request - User is not a hotel
+            ```typescript
+            {
+              "detail": "User is not a hotel"
+            }
+            ```
+            
+            #### 400 Bad Request - Email already registered (if changing email)
+            ```typescript
+            {
+              "detail": "Email already registered"
+            }
+            ```
+            
+            #### 404 Not Found
+            ```typescript
+            {
+              "detail": "User not found"
+            }
+            // or
+            {
+              "detail": "Hotel profile not found"
+            }
+            ```
+            
+            #### 401 Unauthorized
+            ```typescript
+            {
+              "detail": "Not authenticated"
+            }
+            ```
+            
+            #### 403 Forbidden
+            ```typescript
+            {
+              "detail": "Admin access required"
+            }
+            ```
+            
+            ## Profile Picture Upload Workflow
+            
+            If updating the profile picture, use a **two-step process**:
+            
+            **Step 1: Upload image**
+            ```typescript
+            POST /upload/images?target_user_id={hotel_user_id}&prefix=hotels
+            Content-Type: multipart/form-data
+            Authorization: Bearer <admin_token>
+            
+            Body: FormData with 'files' field containing the image file(s)
+            ```
+            
+            **Response:**
+            ```typescript
+            {
+              images: [
+                {
+                  url: "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image.jpg",
+                  thumbnail_url: "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image_thumb.jpg",
+                  key: "hotels/{hotel_user_id}/image.jpg",
+                  width: 1920,
+                  height: 1080,
+                  size_bytes: 245678,
+                  format: "JPEG"
+                }
+              ],
+              total: 1
+            }
+            ```
+            
+            **Step 2: Update profile with image URL**
+            ```typescript
+            PUT /admin/users/{hotel_user_id}/profile/hotel
+            {
+              "picture": "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image.jpg"
+            }
+            ```
+            
+            ## Frontend Implementation Notes
+            
+            1. **Partial Updates**: Only send fields that have changed. Omit unchanged fields from the request.
+            
+            2. **Email Updates**: When updating `email`, the backend will:
+               - Validate email uniqueness
+               - Update the email in the `users` table
+               - Return the updated email in the response
+            
+            3. **Image Upload**: Always upload images first using the upload endpoint, then include the returned URL in the profile update request.
+            
+            4. **Form Validation**: 
+               - `website` must be a valid URL
+               - `email` must be a valid email address
+               - `phone` should follow phone number format
+               - `about` should be between 10-5000 characters (if validation is applied)
+            
+            5. **Error Handling**: Handle all error cases and display user-friendly error messages.
+            
+            6. **Note on Hotel Pictures**: Check your database schema - some implementations may not have a `picture` field for hotel profiles (only listings have images). If `picture` is not supported, omit it from the request.
+            
+            ## Example Implementation
+            
+            ```typescript
+            async function updateHotelProfile(
+              userId: string, 
+              updates: Partial<{
+                name: string
+                location: string
+                email: string
+                about: string
+                website: string
+                phone: string
+                picture: string
+              }>
+            ): Promise<HotelProfile> {
+              const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/profile/hotel`, {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Bearer ${getAuthToken()}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(updates),
+              });
+            
+              if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to update hotel profile');
+              }
+            
+              return await response.json();
+            }
+            ```
+            
+# Admin Update Hotel Profile Endpoint
+
+## Endpoint
+```
+PUT /admin/users/{user_id}/profile/hotel
+```
+
+## Description
+Allows admins to update a hotel's profile. Supports partial updates - only provided fields will be updated.
+
+## Authentication
+Requires admin authentication (Bearer token in Authorization header).
+
+## Request
+
+### Path Parameters
+- `user_id` (string, required): The UUID of the hotel user to update
+
+### Request Body
+```typescript
+{
+  name?: string  // Hotel name (defaults to user name if not provided)
+  location?: string
+  email?: string  // Valid email address (updates users table)
+  about?: string
+  website?: string  // URL
+  phone?: string
+  picture?: string  // S3 URL (upload via /upload/images?target_user_id={user_id}&prefix=hotels first)
+}
+```
+
+**Important Notes:**
+- All fields are optional (partial updates supported)
+- `email` updates the email in the `users` table
+- `picture` is for hotel profile picture (if supported by your schema)
+- For `picture`: Upload image first, then include the returned URL
+
+### Example Request
+```typescript
+PUT /admin/users/9f73f9a8-2c20-4a44-9d39-718014d83e76/profile/hotel
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "name": "Grand Hotel Paris",
+  "location": "Paris, France",
+  "email": "contact@grandhotel.com",
+  "about": "Luxury hotel in the heart of Paris",
+  "website": "https://grandhotel.com",
+  "phone": "+33-1-23-45-67-89",
+  "picture": "https://bucket.s3.region.amazonaws.com/hotels/user-id/image.jpg"
+}
+```
+
+## Response
+
+### Success Response (200 OK)
+```typescript
+{
+  "id": "hotel-profile-id",
+  "user_id": "user-id",
+  "name": "Grand Hotel Paris",
+  "location": "Paris, France",
+  "email": "contact@grandhotel.com",
+  "about": "Luxury hotel in the heart of Paris",
+  "website": "https://grandhotel.com",
+  "phone": "+33-1-23-45-67-89",
+  "picture": "https://bucket.s3.region.amazonaws.com/hotels/user-id/image.jpg",
+  "status": "verified",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Error Responses
+
+#### 400 Bad Request - User is not a hotel
+```typescript
+{
+  "detail": "User is not a hotel"
+}
+```
+
+#### 400 Bad Request - Email already registered (if changing email)
+```typescript
+{
+  "detail": "Email already registered"
+}
+```
+
+#### 404 Not Found
+```typescript
+{
+  "detail": "User not found"
+}
+// or
+{
+  "detail": "Hotel profile not found"
+}
+```
+
+#### 401 Unauthorized
+```typescript
+{
+  "detail": "Not authenticated"
+}
+```
+
+#### 403 Forbidden
+```typescript
+{
+  "detail": "Admin access required"
+}
+```
+
+## Profile Picture Upload Workflow
+
+If updating the profile picture, use a **two-step process**:
+
+**Step 1: Upload image**
+```typescript
+POST /upload/images?target_user_id={hotel_user_id}&prefix=hotels
+Content-Type: multipart/form-data
+Authorization: Bearer <admin_token>
+
+Body: FormData with 'files' field containing the image file(s)
+```
+
+**Response:**
+```typescript
+{
+  images: [
+    {
+      url: "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image.jpg",
+      thumbnail_url: "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image_thumb.jpg",
+      key: "hotels/{hotel_user_id}/image.jpg",
+      width: 1920,
+      height: 1080,
+      size_bytes: 245678,
+      format: "JPEG"
+    }
+  ],
+  total: 1
+}
+```
+
+**Step 2: Update profile with image URL**
+```typescript
+PUT /admin/users/{hotel_user_id}/profile/hotel
+{
+  "picture": "https://bucket.s3.region.amazonaws.com/hotels/{hotel_user_id}/image.jpg"
+}
+```
+
+## Frontend Implementation Notes
+
+1. **Partial Updates**: Only send fields that have changed. Omit unchanged fields from the request.
+
+2. **Email Updates**: When updating `email`, the backend will:
+   - Validate email uniqueness
+   - Update the email in the `users` table
+   - Return the updated email in the response
+
+3. **Image Upload**: Always upload images first using the upload endpoint, then include the returned URL in the profile update request.
+
+4. **Form Validation**: 
+   - `website` must be a valid URL
+   - `email` must be a valid email address
+   - `phone` should follow phone number format
+   - `about` should be between 10-5000 characters (if validation is applied)
+
+5. **Error Handling**: Handle all error cases and display user-friendly error messages.
+
+6. **Note on Hotel Pictures**: Check your database schema - some implementations may not have a `picture` field for hotel profiles (only listings have images). If `picture` is not supported, omit it from the request.
+
+## Example Implementation
+
+```typescript
+async function updateHotelProfile(
+  userId: string, 
+  updates: Partial<{
+    name: string
+    location: string
+    email: string
+    about: string
+    website: string
+    phone: string
+    picture: string
+  }>
+): Promise<HotelProfile> {
+  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/profile/hotel`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to update hotel profile');
+  }
+
+  return await response.json();
+}
+```
+
+             platform
     ))
   }
 
