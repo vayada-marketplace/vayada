@@ -1156,7 +1156,7 @@ export default function UserDetailPage() {
                                   {/* Selected Countries */}
                                   {platform.topCountries.length > 0 && (
                                     <div className="space-y-3">
-                                      {platform.topCountries.map((countryData) => (
+                                      {platform.topCountries.map((countryData: { country: string; percentage: string }) => (
                                         <div key={countryData.country} className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                           <div className="flex items-center justify-between">
                                             <div className="flex-1">
