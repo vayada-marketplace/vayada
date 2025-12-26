@@ -17,7 +17,9 @@ from app.routers.hotels import (
     CreateListingRequest,
     CollaborationOfferingRequest,
     CreatorRequirementsRequest,
-    ListingResponse
+    ListingResponse,
+    UpdateHotelProfileRequest,
+    HotelProfileResponse
 )
 from app.s3_service import delete_all_objects_in_prefix
 
@@ -134,6 +136,17 @@ class CreateUserRequest(BaseModel):
         if self.type == "hotel" and self.creatorProfile:
             raise ValueError("Cannot provide creator_profile for hotel user")
         return self
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UpdateUserRequest(BaseModel):
+    """Request model for updating user fields (status, emailVerified, name, email)"""
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = None
+    emailVerified: Optional[bool] = Field(None, alias="email_verified")
+    avatar: Optional[str] = None
     
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1035,6 +1048,281 @@ async def update_creator_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update creator profile: {str(e)}"
+        )
+
+
+@router.put("/users/{user_id}/profile/hotel", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
+async def update_hotel_profile(
+    user_id: str,
+    request: UpdateHotelProfileRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Update a hotel's profile (admin endpoint).
+    Supports partial updates - only provided fields will be updated.
+    
+    For picture:
+    - Option 1: Upload image first using POST /upload/images?target_user_id={user_id}&prefix=hotels, then include the returned URL in picture field
+    - Option 2: Provide an existing S3 URL directly in picture field
+    """
+    try:
+        # Verify user exists and is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type, name FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a hotel"
+            )
+        
+        # Get hotel profile
+        hotel = await Database.fetchrow(
+            "SELECT id, profile_complete FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        hotel_id = hotel['id']
+        
+        # Build dynamic UPDATE query for hotel_profiles table
+        update_fields = []
+        update_values = []
+        param_counter = 1
+        
+        if request.name is not None:
+            update_fields.append(f"name = ${param_counter}")
+            update_values.append(request.name)
+            param_counter += 1
+        
+        if request.location is not None:
+            update_fields.append(f"location = ${param_counter}")
+            update_values.append(request.location)
+            param_counter += 1
+        
+        if request.about is not None:
+            update_fields.append(f"about = ${param_counter}")
+            update_values.append(request.about)
+            param_counter += 1
+        
+        if request.website is not None:
+            update_fields.append(f"website = ${param_counter}")
+            update_values.append(str(request.website))
+            param_counter += 1
+        
+        if request.phone is not None:
+            update_fields.append(f"phone = ${param_counter}")
+            update_values.append(request.phone)
+            param_counter += 1
+        
+        if request.picture is not None:
+            update_fields.append(f"picture = ${param_counter}")
+            update_values.append(str(request.picture))
+            param_counter += 1
+        
+        # Update hotel profile if there are fields to update
+        if update_fields:
+            update_fields.append("updated_at = now()")
+            update_values.append(hotel_id)  # WHERE clause parameter
+            
+            update_query = f"""
+                UPDATE hotel_profiles 
+                SET {', '.join(update_fields)}
+                WHERE id = ${param_counter}
+            """
+            await Database.execute(update_query, *update_values)
+        
+        # Update email in users table if provided
+        if request.email is not None:
+            await Database.execute(
+                """
+                UPDATE users 
+                SET email = $1, updated_at = now()
+                WHERE id = $2
+                """,
+                request.email,
+                user_id
+            )
+        
+        # Fetch updated profile with email from users table
+        updated_hotel = await Database.fetchrow(
+            """
+            SELECT hp.id, hp.user_id, hp.name, hp.location, hp.about, hp.website, hp.phone, hp.picture, 
+                   hp.status, hp.created_at, hp.updated_at, hp.profile_complete,
+                   u.email, u.name as user_name
+            FROM hotel_profiles hp
+            JOIN users u ON hp.user_id = u.id
+            WHERE hp.id = $1
+            """,
+            hotel_id
+        )
+        
+        logger.info(f"Admin {admin_id} updated hotel profile for user {user_id}")
+        
+        return HotelProfileResponse(
+            id=str(updated_hotel['id']),
+            user_id=str(updated_hotel['user_id']),
+            name=updated_hotel['name'],
+            location=updated_hotel['location'] or "",
+            email=updated_hotel['email'],
+            about=updated_hotel['about'] or "",
+            website=updated_hotel['website'],
+            phone=updated_hotel['phone'],
+            picture=updated_hotel['picture'],
+            status=updated_hotel['status'],
+            createdAt=updated_hotel['created_at'],
+            updatedAt=updated_hotel['updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating hotel profile: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update hotel profile: {str(e)}"
+        )
+
+
+@router.put("/users/{user_id}", response_model=UserResponse, status_code=status.HTTP_200_OK)
+async def update_user(
+    user_id: str,
+    request: UpdateUserRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Update user fields (admin endpoint).
+    Supports partial updates - only provided fields will be updated.
+    
+    Can update:
+    - name: User's name
+    - email: User's email (must be unique)
+    - status: User status (pending, verified, rejected, suspended)
+    - emailVerified: Whether email is verified
+    - avatar: Avatar URL
+    """
+    try:
+        # Prevent self-modification of critical fields
+        if user_id == admin_id:
+            # Allow admins to update their own name and avatar, but not status or emailVerified
+            if request.status is not None or request.emailVerified is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot modify your own status or email verification status"
+                )
+        
+        # Verify user exists
+        user = await Database.fetchrow(
+            "SELECT id, email, name, type, status, email_verified, avatar FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Check if email is being changed and if it's already taken
+        if request.email is not None and request.email != user['email']:
+            existing_user = await Database.fetchrow(
+                "SELECT id FROM users WHERE email = $1 AND id != $2",
+                request.email,
+                user_id
+            )
+            
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered"
+                )
+        
+        # Build dynamic UPDATE query
+        update_fields = []
+        update_values = []
+        param_counter = 1
+        
+        if request.name is not None:
+            update_fields.append(f"name = ${param_counter}")
+            update_values.append(request.name)
+            param_counter += 1
+        
+        if request.email is not None:
+            update_fields.append(f"email = ${param_counter}")
+            update_values.append(request.email)
+            param_counter += 1
+        
+        if request.status is not None:
+            update_fields.append(f"status = ${param_counter}")
+            update_values.append(request.status)
+            param_counter += 1
+        
+        if request.emailVerified is not None:
+            update_fields.append(f"email_verified = ${param_counter}")
+            update_values.append(request.emailVerified)
+            param_counter += 1
+        
+        if request.avatar is not None:
+            update_fields.append(f"avatar = ${param_counter}")
+            update_values.append(request.avatar)
+            param_counter += 1
+        
+        # Update user if there are fields to update
+        if update_fields:
+            update_fields.append("updated_at = now()")
+            update_values.append(user_id)  # WHERE clause parameter
+            
+            update_query = f"""
+                UPDATE users 
+                SET {', '.join(update_fields)}
+                WHERE id = ${param_counter}
+            """
+            await Database.execute(update_query, *update_values)
+        
+        # Fetch updated user
+        updated_user = await Database.fetchrow(
+            """
+            SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
+            FROM users
+            WHERE id = $1
+            """,
+            user_id
+        )
+        
+        logger.info(f"Admin {admin_id} updated user {user_id} (fields: {list(request.model_dump(exclude_unset=True).keys())})")
+        
+        return UserResponse(
+            id=str(updated_user['id']),
+            email=updated_user['email'],
+            name=updated_user['name'],
+            type=updated_user['type'],
+            status=updated_user['status'],
+            email_verified=updated_user['email_verified'],
+            avatar=updated_user['avatar'],
+            created_at=updated_user['created_at'],
+            updated_at=updated_user['updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
         )
 
 
