@@ -12,6 +12,7 @@ import bcrypt
 
 from app.database import Database
 from app.dependencies import get_current_user_id
+from app.routers.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -102,18 +103,17 @@ class CreateHotelProfileRequest(BaseModel):
     about: Optional[str] = None
     website: Optional[str] = None
     phone: Optional[str] = None
-    # Note: picture is not included - hotels don't have profile pictures, only listings have images
     
     model_config = ConfigDict(populate_by_name=True)
 
 
 class CreateUserRequest(BaseModel):
-    """Request model for admin to create a user"""
+    """Request model for creating a user"""
     email: EmailStr
-    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
+    password: str = Field(..., min_length=8)
     name: str
     type: Literal["creator", "hotel"]
-    status: Literal["pending", "verified", "rejected", "suspended"] = "pending"
+    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = "pending"
     emailVerified: bool = Field(False, alias="email_verified")
     avatar: Optional[str] = None
     creatorProfile: Optional[CreateCreatorProfileRequest] = Field(None, alias="creator_profile")
@@ -121,7 +121,6 @@ class CreateUserRequest(BaseModel):
     
     @model_validator(mode='after')
     def validate_profile_type(self):
-        """Validate that profile matches user type"""
         if self.type == "creator" and self.hotelProfile:
             raise ValueError("Cannot provide hotel_profile for creator user")
         if self.type == "hotel" and self.creatorProfile:
@@ -131,7 +130,7 @@ class CreateUserRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-# Detail response models
+# Response models for user details
 class PlatformResponse(BaseModel):
     """Platform response model for creator platforms"""
     id: str
@@ -169,57 +168,51 @@ class CreatorProfileDetail(BaseModel):
 class CollaborationOfferingResponse(BaseModel):
     """Collaboration offering response model"""
     id: str
-    listingId: str = Field(alias="listing_id")
-    collaborationType: str = Field(alias="collaboration_type")
-    availabilityMonths: List[str] = Field(alias="availability_months")
+    listing_id: str
+    collaboration_type: str
+    availability_months: List[str]
     platforms: List[str]
-    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
-    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
-    paidMaxAmount: Optional[Decimal] = Field(None, alias="paid_max_amount")
-    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+    free_stay_min_nights: Optional[int] = None
+    free_stay_max_nights: Optional[int] = None
+    paid_max_amount: Optional[Decimal] = None
+    discount_percentage: Optional[Decimal] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CreatorRequirementsResponse(BaseModel):
     """Creator requirements response model"""
     id: str
-    listingId: str = Field(alias="listing_id")
+    listing_id: str
     platforms: List[str]
-    minFollowers: Optional[int] = Field(None, alias="min_followers")
-    targetCountries: List[str] = Field(alias="target_countries")
-    targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
-    targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+    min_followers: Optional[int] = None
+    target_countries: Optional[List[str]] = None
+    target_age_min: Optional[int] = None
+    target_age_max: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ListingResponse(BaseModel):
-    """Listing response model for hotel listings"""
+    """Listing response model"""
     id: str
-    hotelProfileId: str = Field(alias="hotel_profile_id")
+    hotel_profile_id: str
     name: str
     location: str
-    description: str
-    accommodationType: Optional[str] = Field(None, alias="accommodation_type")
-    images: List[str]
+    description: Optional[str] = None
+    accommodation_type: str
+    images: List[str] = Field(default_factory=list)
     status: str
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings", default_factory=list)
-    creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+    created_at: datetime
+    updated_at: datetime
+    collaboration_offerings: List[CollaborationOfferingResponse] = Field(default_factory=list)
+    creator_requirements: Optional[CreatorRequirementsResponse] = None
 
 
 class HotelProfileDetail(BaseModel):
     """Hotel profile detail"""
     id: str
-    userId: str = Field(alias="user_id")
+    user_id: str
     name: str
     location: str
     picture: Optional[str] = None
@@ -228,101 +221,86 @@ class HotelProfileDetail(BaseModel):
     email: str
     phone: Optional[str] = None
     status: str
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
+    created_at: datetime
+    updated_at: datetime
     listings: List[ListingResponse] = Field(default_factory=list)
-    
-    model_config = ConfigDict(populate_by_name=True)
 
 
 class UserDetailResponse(BaseModel):
-    """Complete user detail response with profile, platforms, and listings"""
-    # User info
+    """User detail response"""
     id: str
     email: str
     name: str
     type: str
     status: str
-    emailVerified: bool = Field(alias="email_verified")
+    email_verified: bool
     avatar: Optional[str] = None
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    
-    # Profile (creator or hotel)
+    created_at: datetime
+    updated_at: datetime
     profile: Optional[Union[CreatorProfileDetail, HotelProfileDetail]] = None
-    
-    model_config = ConfigDict(populate_by_name=True)
 
 
 @router.get("/users", response_model=UserListResponse, status_code=status.HTTP_200_OK)
-async def get_all_users(
-    page: int = Query(1, ge=1, description="Page number (starts at 1)"),
-    page_size: int = Query(10, ge=1, le=100, description="Number of items per page (max 100)"),
-    type: Optional[str] = Query(None, description="Filter by user type (creator, hotel, admin)"),
-    status_filter: Optional[str] = Query(None, alias="status", description="Filter by user status (pending, verified, rejected, suspended)"),
-    search: Optional[str] = Query(None, description="Search by name or email (case-insensitive)"),
+async def get_users(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    type: Optional[Literal["creator", "hotel", "admin"]] = Query(None, description="Filter by user type"),
+    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search by name or email"),
     admin_id: str = Depends(get_admin_user)
 ):
     """
-    Get all users with optional filtering and pagination.
+    Get all users with pagination and filtering.
     
     - **page**: Page number (starts at 1)
-    - **page_size**: Number of items per page (max 100)
+    - **page_size**: Number of items per page (1-100)
     - **type**: Filter by user type (creator, hotel, admin)
-    - **status**: Filter by user status (pending, verified, rejected, suspended)
-    - **search**: Search by name or email (case-insensitive)
+    - **status**: Filter by status (pending, verified, rejected, suspended)
+    - **search**: Search by name or email
     """
     try:
         # Build WHERE clause
         where_conditions = []
         params = []
-        param_count = 0
+        param_counter = 1
         
         if type:
-            param_count += 1
-            where_conditions.append(f"type = ${param_count}")
+            where_conditions.append(f"type = ${param_counter}")
             params.append(type)
+            param_counter += 1
         
-        if status_filter:
-            param_count += 1
-            where_conditions.append(f"status = ${param_count}")
-            params.append(status_filter)
+        if status:
+            where_conditions.append(f"status = ${param_counter}")
+            params.append(status)
+            param_counter += 1
         
         if search:
-            param_count += 1
-            where_conditions.append(f"(LOWER(name) LIKE ${param_count} OR LOWER(email) LIKE ${param_count + 1})")
-            search_pattern = f"%{search.lower()}%"
+            where_conditions.append(f"(name ILIKE ${param_counter} OR email ILIKE ${param_counter})")
+            search_pattern = f"%{search}%"
             params.append(search_pattern)
+            param_counter += 1
             params.append(search_pattern)
-            param_count += 1  # Increment for the second search parameter
+            param_counter += 1
         
-        where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
         
         # Get total count
-        count_query = f"SELECT COUNT(*) FROM users {where_clause}"
-        if params:
-            total = await Database.fetchval(count_query, *params)
-        else:
-            total = await Database.fetchval(count_query)
-        
-        # Calculate offset
-        offset = (page - 1) * page_size
-        
-        # Build pagination parameters
-        limit_param = param_count + 1
-        offset_param = param_count + 2
+        count_query = f"SELECT COUNT(*) as total FROM users WHERE {where_clause}"
+        total_result = await Database.fetchrow(count_query, *params)
+        total = total_result['total'] if total_result else 0
         
         # Get users with pagination
-        query = f"""
+        offset = (page - 1) * page_size
+        users_query = f"""
             SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
             FROM users
-            {where_clause}
+            WHERE {where_clause}
             ORDER BY created_at DESC
-            LIMIT ${limit_param} OFFSET ${offset_param}
+            LIMIT ${param_counter} OFFSET ${param_counter + 1}
         """
-        pagination_params = list(params) + [page_size, offset]
+        params.extend([page_size, offset])
         
-        users_data = await Database.fetch(query, *pagination_params)
+        users_data = await Database.fetch(users_query, *params)
         
         users = [
             UserResponse(
@@ -339,15 +317,10 @@ async def get_all_users(
             for u in users_data
         ]
         
-        logger.info(f"Admin {admin_id} fetched {len(users)} users (page {page}, total: {total})")
+        logger.info(f"Admin {admin_id} fetched users list (page {page}, total: {total})")
         
-        return UserListResponse(
-            users=users,
-            total=total
-        )
+        return UserListResponse(users=users, total=total)
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error fetching users: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -460,16 +433,16 @@ async def get_user_details(
                 
                 profile = CreatorProfileDetail(
                     id=str(creator_profile['id']),
-                    user_id=str(creator_profile['user_id']),
+                    userId=str(creator_profile['user_id']),
                     location=creator_profile['location'],
-                    short_description=creator_profile['short_description'],
-                    portfolio_link=creator_profile['portfolio_link'],
+                    shortDescription=creator_profile['short_description'],
+                    portfolioLink=creator_profile['portfolio_link'],
                     phone=creator_profile['phone'],
-                    profile_picture=creator_profile['profile_picture'],
-                    profile_complete=creator_profile['profile_complete'],
-                    profile_completed_at=creator_profile['profile_completed_at'],
-                    created_at=creator_profile['created_at'],
-                    updated_at=creator_profile['updated_at'],
+                    profilePicture=creator_profile['profile_picture'],
+                    profileComplete=creator_profile['profile_complete'],
+                    profileCompletedAt=creator_profile['profile_completed_at'],
+                    createdAt=creator_profile['created_at'],
+                    updatedAt=creator_profile['updated_at'],
                     platforms=platforms
                 )
         
@@ -692,16 +665,23 @@ async def create_user(
             # Create platforms if provided
             if profile_data.platforms:
                 for platform in profile_data.platforms:
-                    # Convert top_countries and top_age_groups to JSONB format
-                    top_countries_json = json.dumps(platform.topCountries) if platform.topCountries else None
-                    top_age_groups_json = json.dumps(platform.topAgeGroups) if platform.topAgeGroups else None
-                    gender_split_json = json.dumps(platform.genderSplit) if platform.genderSplit else None
+                    # Prepare analytics data as JSONB
+                    top_countries_data = None
+                    if platform.topCountries:
+                        top_countries_data = json.dumps(platform.topCountries)
+                    
+                    top_age_groups_data = None
+                    if platform.topAgeGroups:
+                        top_age_groups_data = json.dumps(platform.topAgeGroups)
+                    
+                    gender_split_data = None
+                    if platform.genderSplit:
+                        gender_split_data = json.dumps(platform.genderSplit)
                     
                     await Database.execute(
                         """
                         INSERT INTO creator_platforms 
-                            (creator_id, name, handle, followers, engagement_rate,
-                             top_countries, top_age_groups, gender_split)
+                        (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         """,
                         creator_id,
@@ -709,20 +689,14 @@ async def create_user(
                         platform.handle,
                         platform.followers,
                         Decimal(str(platform.engagementRate)),
-                        top_countries_json,
-                        top_age_groups_json,
-                        gender_split_json
+                        top_countries_data,
+                        top_age_groups_data,
+                        gender_split_data
                     )
-            
-            logger.info(f"Admin {admin_id} created creator user {user_id} with {len(profile_data.platforms or [])} platforms")
         
         elif request.type == "hotel":
             # Create hotel profile
             profile_data = request.hotelProfile or CreateHotelProfileRequest()
-            
-            # Use request.name if hotel profile name is not provided
-            hotel_name = profile_data.name or request.name
-            hotel_location = profile_data.location or "Not specified"
             
             await Database.execute(
                 """
@@ -730,14 +704,14 @@ async def create_user(
                 VALUES ($1, $2, $3, $4, $5, $6)
                 """,
                 user_id,
-                hotel_name,
-                hotel_location,
+                profile_data.name or request.name,
+                profile_data.location or "Not specified",
                 profile_data.about,
                 profile_data.website,
                 profile_data.phone
             )
-            
-            logger.info(f"Admin {admin_id} created hotel user {user_id}")
+        
+        logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
         
         return UserResponse(
             id=str(user['id']),
@@ -763,4 +737,226 @@ async def create_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create user: {str(e)}"
+        )
+
+
+@router.put("/users/{user_id}/profile/creator", response_model=CreatorProfileResponse, status_code=status.HTTP_200_OK)
+async def update_creator_profile(
+    user_id: str,
+    request: UpdateCreatorProfileRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Update a creator's profile (admin endpoint).
+    Supports partial updates - only provided fields will be updated.
+    
+    If platforms are provided, all existing platforms will be replaced with the new ones.
+    If platforms are not provided, existing platforms remain unchanged.
+    
+    For profile picture:
+    - Option 1: Upload image first using POST /upload/image/creator-profile?target_user_id={user_id}, then include the returned URL in profilePicture field
+    - Option 2: Provide an existing S3 URL directly in profilePicture field
+    """
+    try:
+        # Verify user exists and is a creator
+        user = await Database.fetchrow(
+            "SELECT id, type, name FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'creator':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a creator"
+            )
+        
+        # Get creator profile
+        creator = await Database.fetchrow(
+            "SELECT id, profile_complete FROM creators WHERE user_id = $1",
+            user_id
+        )
+        
+        if not creator:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Creator profile not found"
+            )
+        
+        creator_id = creator['id']
+        
+        # Start transaction - update user name, creator profile, and platforms
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Update user name if provided
+                if request.name is not None:
+                    await conn.execute(
+                        "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
+                        request.name,
+                        user_id
+                    )
+                
+                # Build dynamic UPDATE query for creator profile
+                update_fields = []
+                update_values = []
+                param_counter = 1
+                
+                if request.location is not None:
+                    update_fields.append(f"location = ${param_counter}")
+                    update_values.append(request.location)
+                    param_counter += 1
+                
+                if request.shortDescription is not None:
+                    update_fields.append(f"short_description = ${param_counter}")
+                    update_values.append(request.shortDescription)
+                    param_counter += 1
+                
+                if request.portfolioLink is not None:
+                    update_fields.append(f"portfolio_link = ${param_counter}")
+                    update_values.append(str(request.portfolioLink))
+                    param_counter += 1
+                
+                if request.phone is not None:
+                    update_fields.append(f"phone = ${param_counter}")
+                    update_values.append(request.phone)
+                    param_counter += 1
+                
+                if request.profilePicture is not None:
+                    update_fields.append(f"profile_picture = ${param_counter}")
+                    update_values.append(request.profilePicture)
+                    param_counter += 1
+                
+                # Update creator profile if there are fields to update
+                if update_fields:
+                    update_fields.append("updated_at = now()")
+                    update_values.append(creator_id)  # WHERE clause parameter
+                    
+                    update_query = f"""
+                        UPDATE creators 
+                        SET {', '.join(update_fields)}
+                        WHERE id = ${param_counter}
+                    """
+                    await conn.execute(update_query, *update_values)
+                
+                # Update platforms only if provided (replace strategy)
+                if request.platforms is not None:
+                    # Delete existing platforms
+                    await conn.execute(
+                        "DELETE FROM creator_platforms WHERE creator_id = $1",
+                        creator_id
+                    )
+                    
+                    # Insert new platforms
+                    for platform in request.platforms:
+                        # Prepare analytics data as JSONB
+                        top_countries_data = None
+                        if platform.topCountries:
+                            # Convert list of dicts to JSON string
+                            top_countries_data = json.dumps([tc if isinstance(tc, dict) else tc.model_dump() for tc in platform.topCountries])
+                        
+                        top_age_groups_data = None
+                        if platform.topAgeGroups:
+                            top_age_groups_data = json.dumps([tag if isinstance(tag, dict) else tag.model_dump() for tag in platform.topAgeGroups])
+                        
+                        gender_split_data = None
+                        if platform.genderSplit:
+                            gender_split_data = json.dumps(platform.genderSplit if isinstance(platform.genderSplit, dict) else platform.genderSplit.model_dump())
+                        
+                        await conn.execute(
+                            """
+                            INSERT INTO creator_platforms 
+                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            creator_id,
+                            platform.name,
+                            platform.handle,
+                            platform.followers,
+                            Decimal(str(platform.engagementRate)),
+                            top_countries_data,
+                            top_age_groups_data,
+                            gender_split_data
+                        )
+        
+        # Fetch updated profile with platforms
+        creator_data = await Database.fetchrow(
+            """
+            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
+                   c.profile_picture, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name
+            FROM creators c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.id = $1
+            """,
+            creator_id
+        )
+        
+        # Get platforms
+        platforms_data = await Database.fetch(
+            """
+            SELECT id, name, handle, followers, engagement_rate,
+                   top_countries, top_age_groups, gender_split,
+                   created_at, updated_at
+            FROM creator_platforms
+            WHERE creator_id = $1
+            ORDER BY created_at DESC
+            """,
+            creator_id
+        )
+        
+        platforms = []
+        for p in platforms_data:
+            # Parse JSONB fields
+            def parse_jsonb(value):
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    return json.loads(value)
+                return value
+            
+            platforms.append(PlatformResponse(
+                id=str(p['id']),
+                name=p['name'],
+                handle=p['handle'],
+                followers=p['followers'],
+                engagement_rate=float(p['engagement_rate']),
+                top_countries=parse_jsonb(p['top_countries']),
+                top_age_groups=parse_jsonb(p['top_age_groups']),
+                gender_split=parse_jsonb(p['gender_split']),
+                created_at=p['created_at'],
+                updated_at=p['updated_at']
+            ))
+        
+        # Calculate audience size
+        audience_size = sum(p['followers'] for p in platforms_data) if platforms_data else 0
+        
+        logger.info(f"Admin {admin_id} updated creator profile for user {user_id}")
+        
+        return CreatorProfileResponse(
+            id=str(creator_data['id']),
+            name=request.name if request.name is not None else creator_data['user_name'],
+            location=creator_data['location'] or "",
+            shortDescription=creator_data['short_description'] or "",
+            portfolioLink=creator_data['portfolio_link'],
+            phone=creator_data['phone'],
+            profilePicture=creator_data['profile_picture'],
+            platforms=platforms,
+            audienceSize=audience_size,
+            status=creator_data['status'],
+            createdAt=creator_data['created_at'],
+            updatedAt=creator_data['updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating creator profile: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update creator profile: {str(e)}"
         )
