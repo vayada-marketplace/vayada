@@ -2,7 +2,7 @@
 Admin routes for user management
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator, ValidationError
 from typing import List, Optional, Union, Literal
 from datetime import datetime
 from decimal import Decimal
@@ -13,6 +13,12 @@ import bcrypt
 from app.database import Database
 from app.dependencies import get_current_user_id
 from app.routers.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
+from app.routers.hotels import (
+    CreateListingRequest,
+    CollaborationOfferingRequest,
+    CreatorRequirementsRequest,
+    ListingResponse
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +109,7 @@ class CreateHotelProfileRequest(BaseModel):
     about: Optional[str] = None
     website: Optional[str] = None
     phone: Optional[str] = None
+    listings: Optional[List[CreateListingRequest]] = None
     
     model_config = ConfigDict(populate_by_name=True)
 
@@ -698,10 +705,11 @@ async def create_user(
             # Create hotel profile
             profile_data = request.hotelProfile or CreateHotelProfileRequest()
             
-            await Database.execute(
+            hotel_profile = await Database.fetchrow(
                 """
                 INSERT INTO hotel_profiles (user_id, name, location, about, website, phone)
                 VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
                 """,
                 user_id,
                 profile_data.name or request.name,
@@ -710,6 +718,66 @@ async def create_user(
                 profile_data.website,
                 profile_data.phone
             )
+            
+            hotel_profile_id = hotel_profile['id']
+            
+            # Create listings if provided
+            if profile_data.listings:
+                pool = await Database.get_pool()
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        for listing_request in profile_data.listings:
+                            # Create listing
+                            listing = await conn.fetchrow(
+                                """
+                                INSERT INTO hotel_listings 
+                                (hotel_profile_id, name, location, description, accommodation_type, images)
+                                VALUES ($1, $2, $3, $4, $5, $6)
+                                RETURNING id
+                                """,
+                                hotel_profile_id,
+                                listing_request.name,
+                                listing_request.location,
+                                listing_request.description,
+                                listing_request.accommodationType,
+                                listing_request.images
+                            )
+                            
+                            listing_id = listing['id']
+                            
+                            # Create collaboration offerings
+                            for offering in listing_request.collaborationOfferings:
+                                await conn.execute(
+                                    """
+                                    INSERT INTO listing_collaboration_offerings
+                                    (listing_id, collaboration_type, availability_months, platforms,
+                                     free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                    """,
+                                    listing_id,
+                                    offering.collaborationType,
+                                    offering.availabilityMonths,
+                                    offering.platforms,
+                                    offering.freeStayMinNights,
+                                    offering.freeStayMaxNights,
+                                    offering.paidMaxAmount,
+                                    offering.discountPercentage
+                                )
+                            
+                            # Create creator requirements
+                            await conn.execute(
+                                """
+                                INSERT INTO listing_creator_requirements
+                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
+                                VALUES ($1, $2, $3, $4, $5, $6)
+                                """,
+                                listing_id,
+                                listing_request.creatorRequirements.platforms,
+                                listing_request.creatorRequirements.minFollowers,
+                                listing_request.creatorRequirements.targetCountries,
+                                listing_request.creatorRequirements.targetAgeMin,
+                                listing_request.creatorRequirements.targetAgeMax
+                            )
         
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
         
@@ -727,7 +795,14 @@ async def create_user(
         
     except HTTPException:
         raise
+    except ValidationError as e:
+        logger.error(f"Validation error creating user: {e.errors()}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.errors()
+        )
     except ValueError as e:
+        logger.error(f"Value error creating user: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -959,4 +1034,173 @@ async def update_creator_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update creator profile: {str(e)}"
+        )
+
+
+@router.post("/users/{user_id}/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
+async def create_hotel_listing(
+    user_id: str,
+    request: CreateListingRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Create a listing for an existing hotel user (admin endpoint).
+    
+    This endpoint allows admins to create listings for hotels after the hotel user has been created.
+    Use this after uploading listing images via POST /upload/images/listing?target_user_id={user_id}
+    """
+    try:
+        logger.info(f"Admin {admin_id} creating listing for hotel user {user_id}")
+        logger.debug(f"Request data: {request.model_dump()}")
+        # Verify user exists and is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a hotel"
+            )
+        
+        # Get hotel profile
+        hotel_profile = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        hotel_profile_id = hotel_profile['id']
+        
+        # Use transaction to ensure atomicity
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Create listing
+                listing = await conn.fetchrow(
+                    """
+                    INSERT INTO hotel_listings 
+                    (hotel_profile_id, name, location, description, accommodation_type, images)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, name, location, description, accommodation_type, images, 
+                              status, created_at, updated_at
+                    """,
+                    hotel_profile_id,
+                    request.name,
+                    request.location,
+                    request.description,
+                    request.accommodationType,
+                    request.images
+                )
+                
+                listing_id = listing['id']
+                
+                # Create collaboration offerings
+                offerings_response = []
+                for offering in request.collaborationOfferings:
+                    offering_record = await conn.fetchrow(
+                        """
+                        INSERT INTO listing_collaboration_offerings
+                        (listing_id, collaboration_type, availability_months, platforms,
+                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        RETURNING id, collaboration_type, availability_months, platforms,
+                                  free_stay_min_nights, free_stay_max_nights, paid_max_amount, 
+                                  discount_percentage, created_at, updated_at
+                        """,
+                        listing_id,
+                        offering.collaborationType,
+                        offering.availabilityMonths,
+                        offering.platforms,
+                        offering.freeStayMinNights,
+                        offering.freeStayMaxNights,
+                        offering.paidMaxAmount,
+                        offering.discountPercentage
+                    )
+                    
+                    offerings_response.append(CollaborationOfferingResponse(
+                        id=str(offering_record['id']),
+                        listing_id=str(listing_id),
+                        collaboration_type=offering_record['collaboration_type'],
+                        availability_months=offering_record['availability_months'],
+                        platforms=offering_record['platforms'],
+                        free_stay_min_nights=offering_record['free_stay_min_nights'],
+                        free_stay_max_nights=offering_record['free_stay_max_nights'],
+                        paid_max_amount=offering_record['paid_max_amount'],
+                        discount_percentage=offering_record['discount_percentage'],
+                        created_at=offering_record['created_at'],
+                        updated_at=offering_record['updated_at']
+                    ))
+                
+                # Create creator requirements
+                requirements = await conn.fetchrow(
+                    """
+                    INSERT INTO listing_creator_requirements
+                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, platforms, min_followers, target_countries, 
+                              target_age_min, target_age_max, created_at, updated_at
+                    """,
+                    listing_id,
+                    request.creatorRequirements.platforms,
+                    request.creatorRequirements.minFollowers,
+                    request.creatorRequirements.targetCountries,
+                    request.creatorRequirements.targetAgeMin,
+                    request.creatorRequirements.targetAgeMax
+                )
+                
+                requirements_response = CreatorRequirementsResponse(
+                    id=str(requirements['id']),
+                    listing_id=str(listing_id),
+                    platforms=requirements['platforms'],
+                    min_followers=requirements['min_followers'],
+                    target_countries=requirements['target_countries'],
+                    target_age_min=requirements['target_age_min'],
+                    target_age_max=requirements['target_age_max'],
+                    created_at=requirements['created_at'],
+                    updated_at=requirements['updated_at']
+                )
+        
+        logger.info(f"Admin {admin_id} created listing for hotel user {user_id}")
+        
+        return ListingResponse(
+            id=str(listing_id),
+            hotel_profile_id=str(hotel_profile_id),
+            name=listing['name'],
+            location=listing['location'],
+            description=listing['description'],
+            accommodation_type=listing['accommodation_type'],
+            images=listing['images'],
+            status=listing['status'],
+            created_at=listing['created_at'],
+            updated_at=listing['updated_at'],
+            collaboration_offerings=offerings_response,
+            creator_requirements=requirements_response
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Value error creating listing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error creating listing: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create listing: {str(e)}"
         )

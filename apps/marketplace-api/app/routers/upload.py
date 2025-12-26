@@ -158,7 +158,8 @@ async def upload_image(
 async def upload_multiple_images(
     files: List[UploadFile] = File(...),
     user_id: str = Depends(get_current_user_id),
-    prefix: str = "images"
+    prefix: str = "images",
+    target_user_id: Optional[str] = None
 ):
     """
     Upload multiple image files
@@ -220,7 +221,9 @@ async def upload_multiple_images(
                     image_info = get_image_info(processed_content)
                 
                 # Generate file key
-                file_key = generate_file_key(prefix, file.filename or "image.jpg", user_id)
+                # Use target_user_id if provided (for admin creating users), otherwise use authenticated user_id
+                upload_user_id = target_user_id if target_user_id is not None else user_id
+                file_key = generate_file_key(prefix, file.filename or "image.jpg", upload_user_id)
                 
                 # Upload to S3
                 content_type = file.content_type or "image/jpeg"
@@ -315,14 +318,25 @@ async def upload_listing_image(
 @router.post("/images/listing", response_model=MultipleImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_listing_images(
     files: List[UploadFile] = File(...),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    target_user_id: Optional[str] = Query(None, description="Target hotel user_id (for admin uploading on behalf of a hotel). When creating a new hotel, first create the hotel to get their user_id, then upload using that user_id here.")
 ):
     """
     Upload multiple listing images
     
     Convenience endpoint that uploads to the 'listings' prefix.
+    
+    - For regular hotels: Uses authenticated user's ID → `listings/{user_id}/filename.jpg`
+    - For admin uploading for a hotel: Use `target_user_id` query param → `listings/{target_user_id}/filename.jpg`
+    
+    **Important for admin creating new hotels:**
+    1. First create the hotel via `POST /admin/users` (without listings) to get the hotel's user_id
+    2. Then upload listing images using `?target_user_id={hotel_user_id}` 
+    3. Finally create listings with the image URLs via `POST /admin/users/{hotel_user_id}/listings` or include in hotel creation
     """
-    return await upload_multiple_images(files, user_id, prefix="listings")
+    # Use target_user_id if provided (for admin), otherwise use authenticated user_id
+    upload_user_id = target_user_id if target_user_id else user_id
+    return await upload_multiple_images(files, user_id, prefix="listings", target_user_id=upload_user_id)
 
 
 @router.post("/image/creator-profile", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
