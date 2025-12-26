@@ -100,11 +100,11 @@ export default function UserDetailPage() {
           handle: p.handle,
           followers: p.followers.toString(),
           engagementRate: p.engagementRate.toString(),
-          topCountries: (p.topCountries || []).map(tc => ({
+          topCountries: (p.topCountries || []).map((tc: { country: string; percentage: number }) => ({
             country: tc.country,
             percentage: tc.percentage ? tc.percentage.toString() : '',
           })),
-          topAgeGroups: (p.topAgeGroups || []).map(ag => ({
+          topAgeGroups: (p.topAgeGroups || []).map((ag: { ageRange: string; percentage?: number | null }) => ({
             ageRange: ag.ageRange,
           })),
           genderSplit: p.genderSplit ? {
@@ -377,7 +377,7 @@ export default function UserDetailPage() {
     if (!platform) return
 
     if (platform.topCountries.length >= 3) return
-    if (platform.topCountries.some(tc => tc.country === country)) return
+    if (platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)) return
 
     setEditPlatforms(prev => prev.map((p, i) => 
       i === platformIndex 
@@ -397,7 +397,7 @@ export default function UserDetailPage() {
       i === platformIndex 
         ? { 
             ...p, 
-            topCountries: p.topCountries.filter(tc => tc.country !== country) 
+            topCountries: p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country !== country) 
           }
         : p
     ))
@@ -408,7 +408,7 @@ export default function UserDetailPage() {
       i === platformIndex 
         ? { 
             ...p, 
-            topCountries: p.topCountries.map(tc => 
+            topCountries: p.topCountries.map((tc: { country: string; percentage: string }) => 
               tc.country === country ? { ...tc, percentage } : tc
             )
           }
@@ -1130,7 +1130,7 @@ export default function UserDetailPage() {
                                         {COUNTRIES
                                           .filter(country => 
                                             country.toLowerCase().includes((platformCountrySearch[index] || '').toLowerCase()) &&
-                                            !platform.topCountries.some(tc => tc.country === country)
+                                            !platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)
                                           )
                                           .slice(0, 10)
                                           .map((country) => (
@@ -1145,7 +1145,7 @@ export default function UserDetailPage() {
                                           ))}
                                         {COUNTRIES.filter(country => 
                                           country.toLowerCase().includes((platformCountrySearch[index] || '').toLowerCase()) &&
-                                          !platform.topCountries.some(tc => tc.country === country)
+                                          !platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)
                                         ).length === 0 && (
                                           <div className="px-4 py-2 text-sm text-gray-500">No countries found</div>
                                         )}
@@ -1198,7 +1198,7 @@ export default function UserDetailPage() {
                                   {/* Age Group Selection Buttons */}
                                   <div className="flex flex-wrap gap-2 mb-4">
                                     {AGE_GROUPS.map((ageRange) => {
-                                      const isSelected = platform.topAgeGroups.some(ag => ag.ageRange === ageRange)
+                                      const isSelected = platform.topAgeGroups.some((ag: { ageRange: string }) => ag.ageRange === ageRange)
                                       const isDisabled = !isSelected && platform.topAgeGroups.length >= 3
                                       
                                       return (
