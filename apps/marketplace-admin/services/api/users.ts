@@ -72,14 +72,37 @@ export const usersService = {
   },
 
   /**
+   * Update user account fields (status, emailVerified, email, name, etc.)
+   */
+  updateUser: async (userId: string, data: {
+    status?: 'pending' | 'verified' | 'rejected' | 'suspended'
+    emailVerified?: boolean
+    email?: string
+    name?: string
+  }): Promise<any> => {
+    const response = await apiClient.put<any>(`/admin/users/${userId}`, data)
+    return transformSnakeToCamel(response)
+  },
+
+  /**
    * Update creator profile
    */
   updateCreatorProfile: async (userId: string, data: {
+    name?: string
     profilePicture?: string
     location?: string
     shortDescription?: string
     portfolioLink?: string
     phone?: string
+    platforms?: Array<{
+      name: 'Instagram' | 'TikTok' | 'YouTube' | 'Facebook'
+      handle: string
+      followers: number
+      engagementRate: number
+      topCountries?: Array<{country: string, percentage: number}>
+      topAgeGroups?: Array<{ageRange: string, percentage: number}>
+      genderSplit?: {male: number, female: number, other?: number}
+    }>
   }): Promise<any> => {
     const response = await apiClient.put<any>(`/admin/users/${userId}/profile/creator`, data)
     return transformSnakeToCamel(response)
