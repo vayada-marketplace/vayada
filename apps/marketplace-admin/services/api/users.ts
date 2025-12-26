@@ -109,6 +109,22 @@ export const usersService = {
   },
 
   /**
+   * Update hotel profile
+   */
+  updateHotelProfile: async (userId: string, data: {
+    name?: string
+    location?: string
+    email?: string
+    about?: string
+    website?: string
+    phone?: string
+    picture?: string
+  }): Promise<any> => {
+    const response = await apiClient.put<any>(`/admin/users/${userId}/profile/hotel`, data)
+    return transformSnakeToCamel(response)
+  },
+
+  /**
    * Create a listing for a hotel user
    */
   createListing: async (hotelUserId: string, data: {

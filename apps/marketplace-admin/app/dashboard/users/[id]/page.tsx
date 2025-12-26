@@ -50,6 +50,8 @@ export default function UserDetailPage() {
     shortDescription: '',
     portfolioLink: '',
     phone: '',
+    about: '',
+    website: '',
     status: 'pending' as 'pending' | 'verified' | 'rejected' | 'suspended',
     emailVerified: false,
   })
@@ -82,9 +84,11 @@ export default function UserDetailPage() {
         shortDescription: '',
         portfolioLink: '',
         phone: '',
+        about: '',
+        website: '',
       }
 
-      // Initialize profile fields (only for creators)
+      // Initialize profile fields based on user type
       if (userDetail.type === 'creator' && userDetail.profile) {
         const profile = userDetail.profile as CreatorProfileDetail
         setEditFormData({
@@ -114,8 +118,21 @@ export default function UserDetailPage() {
           showAdvanced: false,
         })) : [])
         setProfilePicturePreview(profile.profilePicture || null)
+      } else if (userDetail.type === 'hotel' && userDetail.profile) {
+        const profile = userDetail.profile as HotelProfileDetail
+        setEditFormData({
+          ...baseFormData,
+          name: profile.name || baseFormData.name,
+          location: profile.location || '',
+          email: profile.email || baseFormData.email,
+          about: profile.about || '',
+          website: profile.website || '',
+          phone: profile.phone || '',
+        })
+        setEditPlatforms([])
+        setProfilePicturePreview(null)
       } else {
-        // For non-creators, just set the base form data
+        // For other types, just set the base form data
         setEditFormData(baseFormData)
         setEditPlatforms([])
         setProfilePicturePreview(null)
@@ -305,6 +322,33 @@ export default function UserDetailPage() {
             })
 
         await usersService.updateCreatorProfile(userDetail.id, profileUpdateData)
+      }
+
+      // Update hotel profile fields (only for hotels)
+      if (userDetail.type === 'hotel' && userDetail.profile) {
+        const profileUpdateData: any = {}
+        const hotelProfile = userDetail.profile as HotelProfileDetail
+
+        if (editFormData.name !== hotelProfile.name) {
+          profileUpdateData.name = editFormData.name
+        }
+        if (editFormData.location !== hotelProfile.location) {
+          profileUpdateData.location = editFormData.location || null
+        }
+        if (editFormData.email !== hotelProfile.email) {
+          profileUpdateData.email = editFormData.email
+        }
+        if (editFormData.about !== hotelProfile.about) {
+          profileUpdateData.about = editFormData.about || null
+        }
+        if (editFormData.website !== hotelProfile.website) {
+          profileUpdateData.website = editFormData.website || null
+        }
+        if (editFormData.phone !== hotelProfile.phone) {
+          profileUpdateData.phone = editFormData.phone || null
+        }
+
+        await usersService.updateHotelProfile(userDetail.id, profileUpdateData)
       }
 
       // Reload user details
@@ -934,67 +978,131 @@ export default function UserDetailPage() {
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Hotel Business Information</h3>
                     <p className="text-sm text-gray-600 mb-4">Hotel-specific business details and contact information</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Hotel Name</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).name || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Category</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).category || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Location</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).location || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Business Email</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).email || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Phone</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).phone || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Website</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).website ? (
-                            <a 
-                              href={(profile as HotelProfileDetail).website!} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {(profile as HotelProfileDetail).website}
-                            </a>
-                          ) : (
-                            '-'
-                          )}
-                        </p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700">About</label>
-                        <p className="mt-1 text-sm text-gray-900">
-                          {(profile as HotelProfileDetail).about || '-'}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Profile Status</label>
-                        <p className="mt-1">
-                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor((profile as HotelProfileDetail).status)}`}>
-                            {(profile as HotelProfileDetail).status}
-                          </span>
-                        </p>
-                      </div>
+                      {isEditing ? (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Hotel Name</label>
+                            <Input
+                              value={editFormData.name}
+                              onChange={(e) => handleEditFormChange('name', e.target.value)}
+                              placeholder="Hotel name"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Category</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).category || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
+                            <Input
+                              value={editFormData.location}
+                              onChange={(e) => handleEditFormChange('location', e.target.value)}
+                              placeholder="Location"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Business Email</label>
+                            <Input
+                              type="email"
+                              value={editFormData.email}
+                              onChange={(e) => handleEditFormChange('email', e.target.value)}
+                              placeholder="business@hotel.com"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                            <Input
+                              value={editFormData.phone}
+                              onChange={(e) => handleEditFormChange('phone', e.target.value)}
+                              placeholder="Phone number"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
+                            <Input
+                              type="url"
+                              value={editFormData.website}
+                              onChange={(e) => handleEditFormChange('website', e.target.value)}
+                              placeholder="https://hotel.com"
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">About</label>
+                            <Textarea
+                              value={editFormData.about}
+                              onChange={(e) => handleEditFormChange('about', e.target.value)}
+                              rows={4}
+                              placeholder="About the hotel"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Hotel Name</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).name || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Category</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).category || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Location</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).location || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Business Email</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).email || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Phone</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).phone || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Website</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).website ? (
+                                <a 
+                                  href={(profile as HotelProfileDetail).website!} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {(profile as HotelProfileDetail).website}
+                                </a>
+                              ) : (
+                                '-'
+                              )}
+                            </p>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700">About</label>
+                            <p className="mt-1 text-sm text-gray-900">
+                              {(profile as HotelProfileDetail).about || '-'}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Profile Status</label>
+                            <p className="mt-1">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor((profile as HotelProfileDetail).status)}`}>
+                                {(profile as HotelProfileDetail).status}
+                              </span>
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1389,7 +1497,7 @@ export default function UserDetailPage() {
           </div>
 
           {/* Edit Mode Save/Cancel Buttons - Fixed at bottom */}
-          {isEditing && isCreator && (
+          {isEditing && (isCreator || isHotel) && (
             <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
               <Button
                 variant="outline"
