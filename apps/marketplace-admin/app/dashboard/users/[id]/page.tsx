@@ -425,7 +425,7 @@ export default function UserDetailPage() {
       if (existingIndex >= 0) {
         return {
           ...p,
-          topAgeGroups: p.topAgeGroups.filter((_, ai) => ai !== existingIndex)
+          topAgeGroups: p.topAgeGroups.filter((_: { ageRange: string }, ai: number) => ai !== existingIndex)
         }
       } else {
         if (p.topAgeGroups.length < 3) {
