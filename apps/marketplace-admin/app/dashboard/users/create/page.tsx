@@ -63,7 +63,6 @@ export default function CreateUserPage() {
   // Profile picture upload state
   const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null)
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null)
-  const [uploadingImage, setUploadingImage] = useState(false)
   const [uploadError, setUploadError] = useState('')
   
   // Platforms for creator
@@ -203,7 +202,7 @@ export default function CreateUserPage() {
   }
 
 
-  const handleProfilePictureChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -222,35 +221,17 @@ export default function CreateUserPage() {
     setUploadError('')
     setProfilePictureFile(file)
 
-    // Create preview
+    // Create preview only (no upload yet - will upload after user creation)
     const reader = new FileReader()
     reader.onloadend = () => {
       setProfilePicturePreview(reader.result as string)
     }
     reader.readAsDataURL(file)
-
-    // Upload image
-    setUploadingImage(true)
-    try {
-      const imageUrl = await uploadService.uploadImage(file)
-      setCreatorProfile(prev => ({ ...prev, profilePicture: imageUrl }))
-    } catch (err) {
-      if (err instanceof ApiErrorResponse) {
-        setUploadError(err.data.detail as string || 'Failed to upload image')
-      } else {
-        setUploadError('Failed to upload image. Please try again.')
-      }
-      setProfilePictureFile(null)
-      setProfilePicturePreview(null)
-    } finally {
-      setUploadingImage(false)
-    }
   }
 
   const handleRemoveProfilePicture = () => {
     setProfilePictureFile(null)
     setProfilePicturePreview(null)
-    setCreatorProfile(prev => ({ ...prev, profilePicture: '' }))
     setUploadError('')
   }
 
@@ -299,7 +280,7 @@ export default function CreateUserPage() {
           ...(creatorProfile.shortDescription && { shortDescription: creatorProfile.shortDescription }),
           ...(creatorProfile.portfolioLink && { portfolioLink: creatorProfile.portfolioLink }),
           ...(creatorProfile.phone && { phone: creatorProfile.phone }),
-          ...(creatorProfile.profilePicture && { profilePicture: creatorProfile.profilePicture }),
+          // Note: profilePicture is NOT included here - we'll add it in step 3
         }
 
         // Add platforms if any
@@ -346,7 +327,28 @@ export default function CreateUserPage() {
         }
       }
 
+      // Step 1: Create user first (without profilePicture) to get the user_id
       const createdUser = await usersService.createUser(requestData)
+      
+      // Step 2 & 3: If there's a profile picture file, upload it and update the profile
+      if (userType === 'creator' && profilePictureFile) {
+        try {
+          // Step 2: Upload image using the creator's user_id
+          const uploadResponse = await uploadService.uploadCreatorProfileImage(
+            profilePictureFile,
+            createdUser.id
+          )
+          
+          // Step 3: Update creator profile with the image URL
+          await usersService.updateCreatorProfile(createdUser.id, {
+            profilePicture: uploadResponse.url
+          })
+        } catch (uploadError) {
+          // If upload fails, still redirect but log the error
+          console.error('Failed to upload profile picture:', uploadError)
+          setError('User created successfully, but profile picture upload failed. You can update it later.')
+        }
+      }
       
       // Redirect to user detail page
       router.push(`/dashboard/users/${createdUser.id}`)
@@ -551,11 +553,6 @@ export default function CreateUserPage() {
                                 <TrashIcon className="w-4 h-4" />
                               </button>
                             </div>
-                            {creatorProfile.profilePicture && (
-                              <p className="mt-2 text-xs text-gray-500">
-                                Image uploaded successfully
-                              </p>
-                            )}
                           </div>
                         ) : (
                           <div className="mt-2">
@@ -576,14 +573,15 @@ export default function CreateUserPage() {
                                 className="hidden"
                                 accept="image/*"
                                 onChange={handleProfilePictureChange}
-                                disabled={uploadingImage}
                               />
                             </label>
-                            {uploadingImage && (
-                              <p className="mt-2 text-sm text-gray-600">Uploading image...</p>
-                            )}
                             {uploadError && (
                               <p className="mt-2 text-sm text-red-600">{uploadError}</p>
+                            )}
+                            {profilePictureFile && (
+                              <p className="mt-2 text-xs text-gray-500">
+                                Image will be uploaded after user creation
+                              </p>
                             )}
                           </div>
                         )}

@@ -6,15 +6,22 @@ import { apiClient, ApiErrorResponse } from './client'
 
 export interface UploadImageResponse {
   url: string
+  thumbnail_url?: string
+  key?: string
+  width?: number
+  height?: number
+  size_bytes?: number
+  format?: string
 }
 
 export const uploadService = {
   /**
-   * Upload an image file
+   * Upload an image file for creator profile
    * @param file - The image file to upload
-   * @returns The S3 URL of the uploaded image
+   * @param targetUserId - The user ID of the creator (required for proper organization)
+   * @returns The upload response with URL and metadata
    */
-  uploadImage: async (file: File): Promise<string> => {
+  uploadCreatorProfileImage: async (file: File, targetUserId: string): Promise<UploadImageResponse> => {
     const formData = new FormData()
     formData.append('file', file)
 
@@ -37,7 +44,7 @@ export const uploadService = {
     // Don't set Content-Type for FormData - browser will set it with boundary
 
     try {
-      const response = await fetch(`${API_BASE_URL}/upload/image/creator-profile`, {
+      const response = await fetch(`${API_BASE_URL}/upload/image/creator-profile?target_user_id=${targetUserId}`, {
         method: 'POST',
         headers,
         body: formData,
@@ -58,7 +65,7 @@ export const uploadService = {
       }
 
       const data: UploadImageResponse = await response.json()
-      return data.url
+      return data
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         throw error

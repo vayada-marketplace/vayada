@@ -30,38 +30,6 @@ export default function UserDetailPage() {
       setLoading(true)
       setError('')
       const data = await usersService.getUserById(userId)
-      
-      // Log the full response from backend
-      console.log('=== Backend Response (User Detail) ===')
-      console.log('Full response:', JSON.stringify(data, null, 2))
-      console.log('User type:', data.type)
-      
-      if (data.profile) {
-        console.log('Profile exists:', data.profile)
-        
-        if (data.type === 'hotel' && (data.profile as HotelProfileDetail).listings) {
-          const listings = (data.profile as HotelProfileDetail).listings
-          console.log('Number of listings:', listings.length)
-          
-          listings.forEach((listing, idx) => {
-            console.log(`\n--- Listing ${idx + 1}: ${listing.name} ---`)
-            console.log('Listing keys:', Object.keys(listing))
-            console.log('Has collaborationOfferings:', !!listing.collaborationOfferings)
-            console.log('Has creatorRequirements:', !!listing.creatorRequirements)
-            
-            if (listing.collaborationOfferings) {
-              console.log('Collaboration Offerings:', JSON.stringify(listing.collaborationOfferings, null, 2))
-              console.log('Offerings count:', listing.collaborationOfferings.length)
-            }
-            
-            if (listing.creatorRequirements) {
-              console.log('Creator Requirements:', JSON.stringify(listing.creatorRequirements, null, 2))
-            }
-          })
-        }
-      }
-      console.log('=== End Backend Response ===\n')
-      
       setUserDetail(data)
     } catch (err) {
       if (err instanceof ApiErrorResponse) {
@@ -165,17 +133,24 @@ export default function UserDetailPage() {
           <div className="px-6 py-6 border-b border-gray-200">
             <div className="flex items-start space-x-4">
               <div className="flex-shrink-0">
-                {userDetail.avatar ? (
-                  <img 
-                    className="h-20 w-20 rounded-full" 
-                    src={userDetail.avatar} 
-                    alt={userDetail.name} 
-                  />
-                ) : (
-                  <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center">
-                    <UserIcon className="h-10 w-10 text-gray-400" />
-                  </div>
-                )}
+                {(() => {
+                  // For creators, prefer profile.profilePicture, otherwise use avatar
+                  const imageUrl = userDetail.type === 'creator' && userDetail.profile 
+                    ? (userDetail.profile as CreatorProfileDetail).profilePicture 
+                    : userDetail.avatar
+                  
+                  return imageUrl ? (
+                    <img 
+                      className="h-20 w-20 rounded-full object-cover" 
+                      src={imageUrl} 
+                      alt={userDetail.name} 
+                    />
+                  ) : (
+                    <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center">
+                      <UserIcon className="h-10 w-10 text-gray-400" />
+                    </div>
+                  )
+                })()}
               </div>
               <div className="flex-1">
                 <h2 className="text-2xl font-bold text-gray-900">{userDetail.name}</h2>
@@ -338,6 +313,16 @@ export default function UserDetailPage() {
                           )}
                         </p>
                       </div>
+                      {(profile as CreatorProfileDetail).profilePicture && (
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Profile Picture</label>
+                          <img 
+                            src={(profile as CreatorProfileDetail).profilePicture!} 
+                            alt="Profile" 
+                            className="h-32 w-32 rounded-lg object-cover border border-gray-300"
+                          />
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Profile Complete</label>
                         <p className="mt-1 text-sm text-gray-900">

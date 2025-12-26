@@ -67,6 +67,21 @@ export const usersService = {
    * Create a new user (creator or hotel)
    */
   createUser: async (data: CreateUserRequest): Promise<User> => {
-    return apiClient.post<User>('/admin/users', data)
+    const response = await apiClient.post<any>('/admin/users', data)
+    return transformSnakeToCamel(response) as User
+  },
+
+  /**
+   * Update creator profile
+   */
+  updateCreatorProfile: async (userId: string, data: {
+    profilePicture?: string
+    location?: string
+    shortDescription?: string
+    portfolioLink?: string
+    phone?: string
+  }): Promise<any> => {
+    const response = await apiClient.put<any>(`/admin/users/${userId}/profile/creator`, data)
+    return transformSnakeToCamel(response)
   },
 }
