@@ -147,8 +147,32 @@ async def create_test_users():
                         "images": [
                             "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800",
                             "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800",
+                            "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=800",
+                            "https://images.unsplash.com/photo-1602343168117-bb8ffe3e2e9f?w=800",
                         ],
                         "status": "verified",
+                        "collaboration_offerings": [
+                            {
+                                "collaboration_type": "Free Stay",
+                                "availability_months": ["January", "February", "March", "April", "May", "September", "October", "November"],
+                                "platforms": ["Instagram", "TikTok"],
+                                "free_stay_min_nights": 2,
+                                "free_stay_max_nights": 5,
+                            },
+                            {
+                                "collaboration_type": "Paid",
+                                "availability_months": ["June", "July", "August", "December"],
+                                "platforms": ["Instagram", "YouTube"],
+                                "paid_max_amount": Decimal("1500.00"),
+                            },
+                        ],
+                        "creator_requirements": {
+                            "platforms": ["Instagram", "TikTok", "YouTube"],
+                            "min_followers": 10000,
+                            "target_countries": ["USA", "UK", "Germany", "France"],
+                            "target_age_min": 25,
+                            "target_age_max": 45,
+                        },
                     },
                     {
                         "name": "Luxury Suite",
@@ -157,8 +181,26 @@ async def create_test_users():
                         "accommodation_type": "Hotel",
                         "images": [
                             "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=800",
+                            "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=800",
+                            "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800",
+                            "https://images.unsplash.com/photo-1595576508898-0a8bcea5a5d2?w=800",
                         ],
                         "status": "pending",
+                        "collaboration_offerings": [
+                            {
+                                "collaboration_type": "Discount",
+                                "availability_months": ["January", "February", "March", "November", "December"],
+                                "platforms": ["Instagram", "Facebook"],
+                                "discount_percentage": 30,
+                            },
+                        ],
+                        "creator_requirements": {
+                            "platforms": ["Instagram"],
+                            "min_followers": 5000,
+                            "target_countries": ["USA", "Canada"],
+                            "target_age_min": 18,
+                            "target_age_max": 35,
+                        },
                     },
                 ]
             },
@@ -187,8 +229,38 @@ async def create_test_users():
                         "images": [
                             "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=800",
                             "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
+                            "https://images.unsplash.com/photo-1551884170-09fb70a3a2ed?w=800",
+                            "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800",
                         ],
                         "status": "verified",
+                        "collaboration_offerings": [
+                            {
+                                "collaboration_type": "Free Stay",
+                                "availability_months": ["December", "January", "February", "March"],
+                                "platforms": ["Instagram", "TikTok", "YouTube"],
+                                "free_stay_min_nights": 3,
+                                "free_stay_max_nights": 7,
+                            },
+                            {
+                                "collaboration_type": "Paid",
+                                "availability_months": ["April", "May", "June", "July", "August", "September"],
+                                "platforms": ["Instagram", "YouTube"],
+                                "paid_max_amount": Decimal("2000.00"),
+                            },
+                            {
+                                "collaboration_type": "Discount",
+                                "availability_months": ["October", "November"],
+                                "platforms": ["Instagram", "Facebook"],
+                                "discount_percentage": 25,
+                            },
+                        ],
+                        "creator_requirements": {
+                            "platforms": ["Instagram", "TikTok", "YouTube"],
+                            "min_followers": 20000,
+                            "target_countries": ["Switzerland", "Germany", "Austria", "France"],
+                            "target_age_min": 28,
+                            "target_age_max": 50,
+                        },
                     },
                 ]
             },
@@ -329,11 +401,12 @@ async def create_test_users():
                 
                 # Create listings
                 for listing_data in user_data.get("listings", []):
-                    await conn.execute(
+                    listing = await conn.fetchrow(
                         """
                         INSERT INTO hotel_listings 
                             (hotel_profile_id, name, location, description, accommodation_type, images, status)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        RETURNING id
                         """,
                         hotel_id,
                         listing_data["name"],
@@ -343,7 +416,49 @@ async def create_test_users():
                         listing_data.get("images", []),
                         listing_data.get("status", "pending"),
                     )
-                print(f"   ✅ Created hotel profile with {len(user_data.get('listings', []))} listings")
+                    listing_id = listing['id']
+                    
+                    # Create collaboration offerings
+                    for offering_data in listing_data.get("collaboration_offerings", []):
+                        await conn.execute(
+                            """
+                            INSERT INTO listing_collaboration_offerings
+                                (listing_id, collaboration_type, availability_months, platforms,
+                                 free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            listing_id,
+                            offering_data["collaboration_type"],
+                            offering_data["availability_months"],
+                            offering_data["platforms"],
+                            offering_data.get("free_stay_min_nights"),
+                            offering_data.get("free_stay_max_nights"),
+                            offering_data.get("paid_max_amount"),
+                            offering_data.get("discount_percentage"),
+                        )
+                    
+                    # Create creator requirements
+                    if listing_data.get("creator_requirements"):
+                        req_data = listing_data["creator_requirements"]
+                        await conn.execute(
+                            """
+                            INSERT INTO listing_creator_requirements
+                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            """,
+                            listing_id,
+                            req_data["platforms"],
+                            req_data.get("min_followers"),
+                            req_data["target_countries"],
+                            req_data.get("target_age_min"),
+                            req_data.get("target_age_max"),
+                        )
+                
+                total_offerings = sum(
+                    len(listing.get("collaboration_offerings", []))
+                    for listing in user_data.get("listings", [])
+                )
+                print(f"   ✅ Created hotel profile with {len(user_data.get('listings', []))} listings and {total_offerings} collaboration offerings")
             
             elif user_data["type"] == "creator":
                 # Create empty creator profile
