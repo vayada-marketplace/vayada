@@ -1,10 +1,10 @@
 """
 Hotel profile routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Request, Query
 from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator, ValidationError, ConfigDict
 from typing import List, Optional, Literal
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
@@ -14,6 +14,7 @@ from app.image_processing import validate_image, process_image, generate_thumbna
 from app.config import settings
 from app.auth import create_email_verification_token
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -1306,5 +1307,142 @@ async def delete_hotel_listing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete listing: {str(e)}"
+        )
+
+
+@router.get("/me/collaborations", response_model=List[dict])
+async def get_hotel_collaborations(
+    listing_id: Optional[str] = Query(None, description="Filter by listing ID"),
+    status: Optional[Literal["pending", "accepted", "declined", "completed", "cancelled"]] = Query(None, description="Filter by status"),
+    initiated_by: Optional[Literal["creator", "hotel"]] = Query(None, description="Filter by who initiated"),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get all collaborations for the currently authenticated hotel.
+    
+    Returns collaborations for all listings owned by the hotel, whether initiated
+    by the hotel or by creators applying to the hotel's listings.
+    """
+    try:
+        # Verify user is a hotel and get hotel profile
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user or user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only available for hotels"
+            )
+        
+        hotel_profile = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        hotel_id = str(hotel_profile['id'])
+        
+        # Build query with filters
+        query = """
+            SELECT 
+                c.id, c.initiator_type, c.status, c.creator_id, c.hotel_id, c.listing_id,
+                c.why_great_fit, c.collaboration_type,
+                c.free_stay_min_nights, c.free_stay_max_nights,
+                c.paid_amount, c.discount_percentage,
+                c.travel_date_from, c.travel_date_to,
+                c.preferred_date_from, c.preferred_date_to,
+                c.preferred_months, c.platform_deliverables, c.consent,
+                c.created_at, c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
+                cr_user.name as creator_name,
+                cr.profile_picture as creator_profile_picture,
+                hp.name as hotel_name,
+                hl.name as listing_name,
+                hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.hotel_id = $1
+        """
+        
+        params = [hotel_id]
+        param_counter = 2
+        
+        if listing_id:
+            query += f" AND c.listing_id = ${param_counter}"
+            params.append(listing_id)
+            param_counter += 1
+        
+        if status:
+            query += f" AND c.status = ${param_counter}"
+            params.append(status)
+            param_counter += 1
+        
+        if initiated_by:
+            query += f" AND c.initiator_type = ${param_counter}"
+            params.append(initiated_by)
+            param_counter += 1
+        
+        query += " ORDER BY c.created_at DESC"
+        
+        collaborations_data = await Database.fetch(query, *params)
+        
+        if not collaborations_data:
+            return []
+        
+        # Parse platform_deliverables and build response
+        response = []
+        for collab in collaborations_data:
+            platform_deliverables_data = json.loads(collab['platform_deliverables']) if collab['platform_deliverables'] else []
+            
+            response.append({
+                "id": str(collab['id']),
+                "initiator_type": collab['initiator_type'],
+                "status": collab['status'],
+                "creator_id": str(collab['creator_id']),
+                "creator_name": collab['creator_name'],
+                "creator_profile_picture": collab['creator_profile_picture'],
+                "hotel_id": str(collab['hotel_id']),
+                "hotel_name": collab['hotel_name'],
+                "listing_id": str(collab['listing_id']),
+                "listing_name": collab['listing_name'],
+                "listing_location": collab['listing_location'],
+                "collaboration_type": collab['collaboration_type'],
+                "free_stay_min_nights": collab['free_stay_min_nights'],
+                "free_stay_max_nights": collab['free_stay_max_nights'],
+                "paid_amount": float(collab['paid_amount']) if collab['paid_amount'] else None,
+                "discount_percentage": collab['discount_percentage'],
+                "travel_date_from": collab['travel_date_from'].isoformat() if collab['travel_date_from'] else None,
+                "travel_date_to": collab['travel_date_to'].isoformat() if collab['travel_date_to'] else None,
+                "preferred_date_from": collab['preferred_date_from'].isoformat() if collab['preferred_date_from'] else None,
+                "preferred_date_to": collab['preferred_date_to'].isoformat() if collab['preferred_date_to'] else None,
+                "preferred_months": collab['preferred_months'],
+                "why_great_fit": collab['why_great_fit'],
+                "platform_deliverables": platform_deliverables_data,
+                "consent": collab['consent'],
+                "created_at": collab['created_at'].isoformat() if collab['created_at'] else None,
+                "updated_at": collab['updated_at'].isoformat() if collab['updated_at'] else None,
+                "responded_at": collab['responded_at'].isoformat() if collab['responded_at'] else None,
+                "cancelled_at": collab['cancelled_at'].isoformat() if collab['cancelled_at'] else None,
+                "completed_at": collab['completed_at'].isoformat() if collab['completed_at'] else None
+            })
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching hotel collaborations: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch collaborations: {str(e)}"
         )
 
