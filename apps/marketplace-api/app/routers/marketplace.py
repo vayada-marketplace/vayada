@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from app.database import Database
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,37 @@ class ListingMarketplaceResponse(BaseModel):
     status: str
     collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
     creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
+    createdAt: datetime = Field(alias="created_at")
+    
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class PlatformMarketplaceResponse(BaseModel):
+    """Platform response model for marketplace"""
+    id: str
+    name: str
+    handle: str
+    followers: int
+    engagementRate: float = Field(alias="engagement_rate")
+    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
+    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
+    genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class CreatorMarketplaceResponse(BaseModel):
+    """Creator response model for marketplace"""
+    id: str
+    name: str
+    location: str
+    shortDescription: str = Field(alias="short_description")
+    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
+    profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    platforms: List[PlatformMarketplaceResponse]
+    audienceSize: int = Field(alias="audience_size")
+    averageRating: float = Field(alias="average_rating")
+    totalReviews: int = Field(alias="total_reviews")
     createdAt: datetime = Field(alias="created_at")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
@@ -198,5 +230,133 @@ async def get_all_listings():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch listings: {str(e)}"
+        )
+
+
+@router.get("/creators", response_model=List[CreatorMarketplaceResponse])
+async def get_all_creators():
+    """
+    Get all creators for the marketplace page.
+    Returns only creators with complete profiles (profile_complete = true) and verified status.
+    Includes platforms, audience size, and ratings information.
+    """
+    try:
+        # Get all creators with complete profiles, platforms, and ratings in one query
+        creators_data = await Database.fetch(
+            """
+            SELECT 
+                c.id,
+                c.location,
+                c.short_description,
+                c.portfolio_link,
+                c.profile_picture,
+                c.created_at,
+                u.name,
+                u.status,
+                COALESCE(rating_stats.average_rating, 0.0) as average_rating,
+                COALESCE(rating_stats.total_reviews, 0) as total_reviews
+            FROM creators c
+            JOIN users u ON u.id = c.user_id
+            LEFT JOIN (
+                SELECT 
+                    creator_id,
+                    AVG(rating)::float as average_rating,
+                    COUNT(*)::int as total_reviews
+                FROM creator_ratings
+                GROUP BY creator_id
+            ) rating_stats ON rating_stats.creator_id = c.id
+            WHERE c.profile_complete = true
+            AND u.status = 'verified'
+            ORDER BY c.created_at DESC
+            """
+        )
+        
+        if not creators_data:
+            return []
+        
+        # Get all creator IDs
+        creator_ids = [c['id'] for c in creators_data]
+        
+        # Get all platforms for these creators
+        if creator_ids:
+            placeholders = ','.join([f'${i+1}' for i in range(len(creator_ids))])
+            platforms_query = f"""
+                SELECT id, creator_id, name, handle, followers, engagement_rate,
+                       top_countries, top_age_groups, gender_split
+                FROM creator_platforms
+                WHERE creator_id IN ({placeholders})
+                ORDER BY creator_id, name
+            """
+            platforms_data = await Database.fetch(platforms_query, *creator_ids)
+        else:
+            platforms_data = []
+        
+        # Create a map of creator_id -> platforms
+        platforms_map = {}
+        for p in platforms_data:
+            creator_id_str = str(p['creator_id'])
+            if creator_id_str not in platforms_map:
+                platforms_map[creator_id_str] = []
+            
+            # Parse JSON data and convert dict to list format if needed
+            top_countries = None
+            if p['top_countries']:
+                parsed = json.loads(p['top_countries'])
+                # Convert dict to list format: [{"country": "USA", "percentage": 45}, ...]
+                if isinstance(parsed, dict):
+                    top_countries = [{"country": k, "percentage": v} for k, v in parsed.items()]
+                else:
+                    top_countries = parsed
+            
+            top_age_groups = None
+            if p['top_age_groups']:
+                parsed = json.loads(p['top_age_groups'])
+                # Convert dict to list format: [{"ageRange": "25-34", "percentage": 40}, ...]
+                if isinstance(parsed, dict):
+                    top_age_groups = [{"ageRange": k, "percentage": v} for k, v in parsed.items()]
+                else:
+                    top_age_groups = parsed
+            
+            gender_split = json.loads(p['gender_split']) if p['gender_split'] else None
+            
+            platforms_map[creator_id_str].append(PlatformMarketplaceResponse(
+                id=str(p['id']),
+                name=p['name'],
+                handle=p['handle'],
+                followers=p['followers'],
+                engagement_rate=float(p['engagement_rate']),
+                top_countries=top_countries,
+                top_age_groups=top_age_groups,
+                gender_split=gender_split
+            ))
+        
+        # Build response
+        response = []
+        for creator in creators_data:
+            creator_id_str = str(creator['id'])
+            platforms = platforms_map.get(creator_id_str, [])
+            audience_size = sum(p.followers for p in platforms)
+            
+            response.append(CreatorMarketplaceResponse(
+                id=creator_id_str,
+                name=creator['name'],
+                location=creator['location'] or "",
+                short_description=creator['short_description'] or "",
+                portfolio_link=creator['portfolio_link'],
+                profile_picture=creator['profile_picture'],
+                platforms=platforms,
+                audience_size=audience_size,
+                average_rating=round(float(creator['average_rating']), 2),
+                total_reviews=creator['total_reviews'],
+                created_at=creator['created_at']
+            ))
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error fetching creators for marketplace: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch creators: {str(e)}"
         )
 
