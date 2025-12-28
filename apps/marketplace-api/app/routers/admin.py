@@ -24,7 +24,7 @@ from app.routers.hotels import (
     CollaborationOfferingResponse,
     CreatorRequirementsResponse
 )
-from app.s3_service import delete_all_objects_in_prefix
+from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -1800,6 +1800,140 @@ async def update_hotel_listing(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update listing: {str(e)}"
+        )
+
+
+@router.delete("/users/{user_id}/listings/{listing_id}", status_code=status.HTTP_200_OK)
+async def delete_hotel_listing(
+    user_id: str,
+    listing_id: str,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Delete a hotel listing and all associated data (admin endpoint).
+    
+    This will permanently delete:
+    - Listing record
+    - All collaboration offerings for this listing
+    - All creator requirements for this listing
+    - All listing images from S3 (including thumbnails)
+    
+    **Warning**: This action cannot be undone!
+    """
+    try:
+        # Verify user exists and is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        if user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a hotel"
+            )
+        
+        # Get hotel profile
+        hotel_profile = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+        
+        if not hotel_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+        
+        hotel_profile_id = hotel_profile['id']
+        
+        # Verify listing exists and belongs to hotel
+        listing = await Database.fetchrow(
+            """
+            SELECT id, name, images FROM hotel_listings
+            WHERE id = $1 AND hotel_profile_id = $2
+            """,
+            listing_id,
+            hotel_profile_id
+        )
+        
+        if not listing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Listing not found"
+            )
+        
+        # Delete listing images from S3
+        deleted_images = 0
+        failed_images = 0
+        if listing['images']:
+            for image_url in listing['images']:
+                if image_url:
+                    # Extract S3 key from URL
+                    s3_key = extract_key_from_url(image_url)
+                    if s3_key:
+                        # Delete main image
+                        if await delete_file_from_s3(s3_key):
+                            deleted_images += 1
+                        else:
+                            failed_images += 1
+                        
+                        # Delete thumbnail if it exists (thumbnail key is the same but with _thumb before extension)
+                        # e.g., listings/user_id/file.jpg -> listings/user_id/file_thumb.jpg
+                        if '.' in s3_key:
+                            parts = s3_key.rsplit('.', 1)
+                            thumbnail_key = f"{parts[0]}_thumb.{parts[1]}"
+                            if await delete_file_from_s3(thumbnail_key):
+                                deleted_images += 1
+                            # Don't count thumbnail failures as critical
+        
+        # Use transaction to ensure atomicity
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Delete collaboration offerings (cascade should handle this, but being explicit)
+                await conn.execute(
+                    "DELETE FROM listing_collaboration_offerings WHERE listing_id = $1",
+                    listing_id
+                )
+                
+                # Delete creator requirements (cascade should handle this, but being explicit)
+                await conn.execute(
+                    "DELETE FROM listing_creator_requirements WHERE listing_id = $1",
+                    listing_id
+                )
+                
+                # Delete the listing itself
+                await conn.execute(
+                    "DELETE FROM hotel_listings WHERE id = $1",
+                    listing_id
+                )
+        
+        logger.info(f"Admin {admin_id} deleted listing {listing_id} for hotel user {user_id} (deleted {deleted_images} images, {failed_images} failed)")
+        
+        return {
+            "message": "Listing deleted successfully",
+            "deleted_listing": {
+                "id": listing_id,
+                "name": listing['name']
+            },
+            "images_deleted": deleted_images,
+            "images_failed": failed_images
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting listing: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete listing: {str(e)}"
         )
 
 
