@@ -1364,7 +1364,9 @@ async def get_hotel_collaborations(
                 cr.profile_picture as creator_profile_picture,
                 hp.name as hotel_name,
                 hl.name as listing_name,
-                hl.location as listing_location
+                hl.location as listing_location,
+                (SELECT SUM(followers) FROM creator_platforms WHERE creator_id = c.creator_id) as total_followers,
+                (SELECT AVG(engagement_rate) FROM creator_platforms WHERE creator_id = c.creator_id) as avg_engagement_rate
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
             JOIN users cr_user ON cr_user.id = cr.user_id
@@ -1410,6 +1412,8 @@ async def get_hotel_collaborations(
                 "creator_id": str(collab['creator_id']),
                 "creator_name": collab['creator_name'],
                 "creator_profile_picture": collab['creator_profile_picture'],
+                "total_followers": collab['total_followers'],
+                "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] else None,
                 "hotel_id": str(collab['hotel_id']),
                 "hotel_name": collab['hotel_name'],
                 "listing_id": str(collab['listing_id']),

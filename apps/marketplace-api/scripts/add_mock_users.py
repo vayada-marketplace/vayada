@@ -10,7 +10,7 @@ import sys
 import json
 from pathlib import Path
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -560,6 +560,21 @@ async def add_mock_users():
                 
                 # Create platforms
                 for platform_data in user_data.get("platforms", []):
+                    # Transform top_countries and top_age_groups to match Pydantic models
+                    top_countries_data = None
+                    if platform_data.get("top_countries"):
+                        top_countries_data = [
+                            {"country": k, "percentage": v} 
+                            for k, v in platform_data["top_countries"].items()
+                        ]
+
+                    top_age_groups_data = None
+                    if platform_data.get("top_age_groups"):
+                        top_age_groups_data = [
+                            {"ageRange": k, "percentage": v} 
+                            for k, v in platform_data["top_age_groups"].items()
+                        ]
+
                     await conn.execute(
                         """
                         INSERT INTO creator_platforms 
@@ -572,8 +587,8 @@ async def add_mock_users():
                         platform_data["handle"],
                         platform_data["followers"],
                         platform_data["engagement_rate"],
-                        json.dumps(platform_data.get("top_countries")) if platform_data.get("top_countries") else None,
-                        json.dumps(platform_data.get("top_age_groups")) if platform_data.get("top_age_groups") else None,
+                        json.dumps(top_countries_data) if top_countries_data else None,
+                        json.dumps(top_age_groups_data) if top_age_groups_data else None,
                         json.dumps(platform_data.get("gender_split")) if platform_data.get("gender_split") else None,
                     )
                 print(f"   ✅ Created creator profile with {len(user_data.get('platforms', []))} platforms")
@@ -992,6 +1007,14 @@ async def add_mock_users():
                 print(f"   ⏭️  Skipping collaboration: Already exists between creator and listing")
                 continue
             
+            # Convert date strings to date objects
+            for date_field in ["travel_date_from", "travel_date_to", "preferred_date_from", "preferred_date_to"]:
+                if collab_req.get(date_field) and isinstance(collab_req[date_field], str):
+                    try:
+                        collab_req[date_field] = datetime.strptime(collab_req[date_field], "%Y-%m-%d").date()
+                    except ValueError:
+                        print(f"   ⚠️  Warning: Invalid date format for {date_field}: {collab_req[date_field]}")
+
             # Prepare platform_deliverables JSON
             platform_deliverables_json = json.dumps(collab_req["platform_deliverables"])
             

@@ -687,7 +687,9 @@ async def get_creator_collaborations(
                 c.created_at, c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
                 cr_user.name as creator_name,
                 cr.profile_picture as creator_profile_picture,
+                cr.profile_picture as creator_profile_picture,
                 hp.name as hotel_name,
+                hp.picture as hotel_profile_picture,
                 hl.name as listing_name,
                 hl.location as listing_location
             FROM collaborations c
@@ -732,6 +734,7 @@ async def get_creator_collaborations(
                 "creator_profile_picture": collab['creator_profile_picture'],
                 "hotel_id": str(collab['hotel_id']),
                 "hotel_name": collab['hotel_name'],
+                "hotel_profile_picture": collab['hotel_profile_picture'],
                 "listing_id": str(collab['listing_id']),
                 "listing_name": collab['listing_name'],
                 "listing_location": collab['listing_location'],
