@@ -34,6 +34,7 @@ services:
       DATABASE_URL: postgresql://vayada_user:vayada_password@postgres:5432/vayada_db
     volumes:
       - ./app:/app/app
+      - ./scripts:/app/scripts
     restart: unless-stopped
 
   frontend:
