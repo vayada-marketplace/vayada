@@ -44,6 +44,9 @@ export default function UserDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [listingToDelete, setListingToDelete] = useState<ListingResponse | null>(null)
+  const [deletingListing, setDeletingListing] = useState(false)
+  const [listingDeleteError, setListingDeleteError] = useState('')
   
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false)
@@ -512,8 +515,224 @@ export default function UserDetailPage() {
     setListingTargetCountryDropdownOpen(false)
   }
 
+  const handleStartCreateListing = () => {
+    setEditingListingId('new')
+    setEditListingData({
+      name: '',
+      location: '',
+      description: '',
+      accommodationType: '',
+      collaborationOfferings: [],
+      creatorRequirements: {
+        platforms: [],
+        minFollowers: null,
+        targetCountries: [],
+        targetAgeGroups: [],
+      },
+    })
+    setListingExistingImages([])
+    setListingImageFiles([])
+    setListingImagePreviews([])
+    setListingSaveError('')
+    setListingSaveSuccess('')
+    setListingTargetCountrySearch('')
+    setListingTargetCountryDropdownOpen(false)
+    // Create a temporary listing object for the modal
+    setSelectedListing({
+      id: 'new',
+      hotelProfileId: userDetail?.id || '',
+      name: '',
+      location: '',
+      description: '',
+      accommodationType: null,
+      images: [],
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as ListingResponse)
+  }
+
+  const handleCreateListing = async () => {
+    if (!userDetail || editingListingId !== 'new') return
+
+    try {
+      setSavingListing(true)
+      setListingSaveError('')
+      setListingSaveSuccess('')
+
+      // Validate required fields
+      if (!editListingData.name.trim()) {
+        setListingSaveError('Listing name is required')
+        setSavingListing(false)
+        return
+      }
+      if (!editListingData.location.trim()) {
+        setListingSaveError('Location is required')
+        setSavingListing(false)
+        return
+      }
+      if (!editListingData.description.trim()) {
+        setListingSaveError('Description is required')
+        setSavingListing(false)
+        return
+      }
+
+      const createData: any = {
+        name: editListingData.name,
+        location: editListingData.location,
+        description: editListingData.description,
+        accommodationType: editListingData.accommodationType || null,
+      }
+
+      // Handle collaboration offerings
+      createData.collaborationOfferings = editListingData.collaborationOfferings.map(offering => {
+        const offeringData: any = {
+          collaborationType: offering.collaborationType,
+          availabilityMonths: offering.availabilityMonths,
+          platforms: offering.platforms,
+        }
+        
+        if (offering.collaborationType === 'Free Stay') {
+          offeringData.freeStayMinNights = offering.freeStayMinNights ? parseInt(offering.freeStayMinNights.toString()) : null
+          offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
+        } else if (offering.collaborationType === 'Paid') {
+          offeringData.paidMaxAmount = offering.paidMaxAmount ? parseFloat(offering.paidMaxAmount.toString()) : null
+        } else if (offering.collaborationType === 'Discount') {
+          offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
+        }
+        
+        return offeringData
+      })
+
+      // Convert targetAgeGroups to targetAgeMin/targetAgeMax
+      let targetAgeMin: number | null = null
+      let targetAgeMax: number | null = null
+      
+      if (editListingData.creatorRequirements.targetAgeGroups.length > 0) {
+        const ageValues: number[] = []
+        editListingData.creatorRequirements.targetAgeGroups.forEach(ageRange => {
+          if (ageRange === '55+') {
+            ageValues.push(55, 100)
+          } else {
+            const [min, max] = ageRange.split('-').map(Number)
+            ageValues.push(min, max)
+          }
+        })
+        targetAgeMin = Math.min(...ageValues)
+        targetAgeMax = Math.max(...ageValues)
+      }
+      
+      createData.creatorRequirements = {
+        platforms: editListingData.creatorRequirements.platforms,
+        minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
+        targetCountries: editListingData.creatorRequirements.targetCountries,
+        targetAgeMin,
+        targetAgeMax,
+      }
+
+      // Handle image uploads if there are new images
+      if (listingImageFiles.length > 0) {
+        setUploadingListingImages(true)
+        try {
+          const uploadResponse = await uploadService.uploadListingImages(listingImageFiles, userDetail.id)
+          const newImageUrls = uploadResponse.images.map(img => img.url)
+          createData.images = newImageUrls
+        } catch (uploadError) {
+          if (uploadError instanceof ApiErrorResponse) {
+            setListingSaveError(`Failed to upload images: ${uploadError.data.detail as string || 'Upload failed'}`)
+          } else {
+            setListingSaveError('Failed to upload images. Please try again.')
+          }
+          setSavingListing(false)
+          setUploadingListingImages(false)
+          return
+        } finally {
+          setUploadingListingImages(false)
+        }
+      }
+
+      await usersService.createListing(userDetail.id, createData)
+
+      // Reload user details to get new listing
+      const updatedUserDetail = await usersService.getUserById(userDetail.id)
+      setUserDetail(updatedUserDetail)
+
+      // Exit create mode and clear state
+      setEditingListingId(null)
+      setSelectedListing(null)
+      setListingExistingImages([])
+      setListingImageFiles([])
+      setListingImagePreviews([])
+      setListingSaveSuccess('Listing created successfully!')
+      
+      setTimeout(() => setListingSaveSuccess(''), 5000)
+    } catch (err) {
+      if (err instanceof ApiErrorResponse) {
+        setListingSaveError(err.data.detail as string || 'Failed to create listing')
+      } else {
+        setListingSaveError('Failed to create listing. Please try again.')
+      }
+    } finally {
+      setSavingListing(false)
+    }
+  }
+
+  const handleDeleteListing = async () => {
+    if (!userDetail || !listingToDelete) return
+
+    try {
+      setDeletingListing(true)
+      setListingDeleteError('')
+
+      const response = await usersService.deleteListing(userDetail.id, listingToDelete.id)
+
+      // Reload user details to get updated listings
+      const updatedUserDetail = await usersService.getUserById(userDetail.id)
+      setUserDetail(updatedUserDetail)
+
+      // Close modals
+      setListingToDelete(null)
+      setSelectedListing(null)
+
+      // Show success message with details
+      let successMessage = `Listing "${listingToDelete.name}" has been deleted successfully.`
+      if (response.imagesDeleted !== undefined) {
+        successMessage += ` ${response.imagesDeleted} image(s) deleted.`
+        if (response.imagesFailed && response.imagesFailed > 0) {
+          successMessage += ` ${response.imagesFailed} image(s) failed to delete.`
+        }
+      }
+      setListingSaveSuccess(successMessage)
+      setTimeout(() => setListingSaveSuccess(''), 5000)
+    } catch (err) {
+      if (err instanceof ApiErrorResponse) {
+        if (err.status === 404) {
+          setListingDeleteError('Listing not found.')
+        } else if (err.status === 400) {
+          setListingDeleteError('User is not a hotel.')
+        } else if (err.status === 403) {
+          setListingDeleteError('Access denied. Admin privileges required.')
+        } else {
+          setListingDeleteError(err.data.detail as string || 'Failed to delete listing.')
+        }
+      } else {
+        setListingDeleteError('Failed to delete listing. Please try again.')
+      }
+    } finally {
+      setDeletingListing(false)
+    }
+  }
+
   const handleSaveListing = async () => {
-    if (!userDetail || !editingListingId || !selectedListing) return
+    if (!userDetail || !editingListingId) return
+
+    // Handle create mode
+    if (editingListingId === 'new') {
+      return handleCreateListing()
+    }
+
+    // Handle update mode
+    if (!selectedListing) return
 
     try {
       setSavingListing(true)
@@ -1915,43 +2134,67 @@ export default function UserDetailPage() {
             {/* Listings Tab */}
             {activeTab === 'listings' && isHotel && profile && (
               <div className="space-y-4">
+                <div className="flex justify-end">
+                  <Button
+                    variant="primary"
+                    onClick={handleStartCreateListing}
+                    className="flex items-center gap-2"
+                  >
+                    <PlusIcon className="w-5 h-5" />
+                    Create New Listing
+                  </Button>
+                </div>
                 {(profile as HotelProfileDetail).listings && (profile as HotelProfileDetail).listings.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {(profile as HotelProfileDetail).listings.map((listing: ListingResponse) => (
                       <div 
                         key={listing.id} 
-                        className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
-                        onClick={() => setSelectedListing(listing)}
+                        className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow relative group"
                       >
-                        {listing.images && listing.images.length > 0 && (
-                          <div className="aspect-video bg-gray-200 relative">
-                            <img 
-                              src={listing.images[0]} 
-                              alt={listing.name}
-                              className="w-full h-full object-cover"
-                            />
-                            {listing.images.length > 1 && (
-                              <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                                +{listing.images.length - 1} more
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <div className="p-4">
-                          <h4 className="font-semibold text-gray-900 mb-1">{listing.name}</h4>
-                          <p className="text-sm text-gray-600 mb-2">{listing.location}</p>
-                          {listing.description && (
-                            <p className="text-sm text-gray-500 mb-2 line-clamp-2">{listing.description}</p>
+                        <div 
+                          className="cursor-pointer"
+                          onClick={() => setSelectedListing(listing)}
+                        >
+                          {listing.images && listing.images.length > 0 && (
+                            <div className="aspect-video bg-gray-200 relative">
+                              <img 
+                                src={listing.images[0]} 
+                                alt={listing.name}
+                                className="w-full h-full object-cover"
+                              />
+                              {listing.images.length > 1 && (
+                                <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                                  +{listing.images.length - 1} more
+                                </div>
+                              )}
+                            </div>
                           )}
-                          <div className="flex items-center justify-between mt-3">
-                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(listing.status)}`}>
-                              {listing.status}
-                            </span>
-                            {listing.accommodationType && (
-                              <span className="text-xs text-gray-500">{listing.accommodationType}</span>
+                          <div className="p-4">
+                            <h4 className="font-semibold text-gray-900 mb-1">{listing.name}</h4>
+                            <p className="text-sm text-gray-600 mb-2">{listing.location}</p>
+                            {listing.description && (
+                              <p className="text-sm text-gray-500 mb-2 line-clamp-2">{listing.description}</p>
                             )}
+                            <div className="flex items-center justify-between mt-3">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(listing.status)}`}>
+                                {listing.status}
+                              </span>
+                              {listing.accommodationType && (
+                                <span className="text-xs text-gray-500">{listing.accommodationType}</span>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setListingToDelete(listing)
+                          }}
+                          className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                          title="Delete listing"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1993,12 +2236,12 @@ export default function UserDetailPage() {
               setSelectedListing(null)
               handleCancelEditListing()
             }}
-            title="Listing Details"
+            title={editingListingId === 'new' ? 'Create New Listing' : 'Listing Details'}
             size="xl"
           >
             <div className="space-y-6">
               {/* Edit Button - Prominent */}
-              {editingListingId !== selectedListing.id && (
+              {editingListingId !== selectedListing.id && editingListingId !== 'new' && (
                 <div className="flex justify-end pb-4 border-b">
                   <Button
                     variant="primary"
@@ -2027,7 +2270,7 @@ export default function UserDetailPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-4">
                   Property Photos
                 </label>
-                {editingListingId === selectedListing.id ? (
+                {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                   <div className="space-y-4">
                     {/* Existing Images */}
                     {listingExistingImages.length > 0 && (
@@ -2139,7 +2382,7 @@ export default function UserDetailPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Listing Name</label>
-                    {editingListingId === selectedListing.id ? (
+                    {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                       <Input
                         value={editListingData.name}
                         onChange={(e) => setEditListingData(prev => ({ ...prev, name: e.target.value }))}
@@ -2151,7 +2394,7 @@ export default function UserDetailPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                    {editingListingId === selectedListing.id ? (
+                    {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                       <Input
                         value={editListingData.location}
                         onChange={(e) => setEditListingData(prev => ({ ...prev, location: e.target.value }))}
@@ -2163,7 +2406,7 @@ export default function UserDetailPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Type</label>
-                    {editingListingId === selectedListing.id ? (
+                    {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                       <select
                         value={editListingData.accommodationType}
                         onChange={(e) => setEditListingData(prev => ({ ...prev, accommodationType: e.target.value }))}
@@ -2206,7 +2449,7 @@ export default function UserDetailPage() {
               {/* Description */}
               <div className="border-t pt-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                {editingListingId === selectedListing.id ? (
+                {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                   <Textarea
                     value={editListingData.description}
                     onChange={(e) => setEditListingData(prev => ({ ...prev, description: e.target.value }))}
@@ -2222,7 +2465,7 @@ export default function UserDetailPage() {
               <div className="border-t pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Collaboration Offerings</h3>
-                  {editingListingId === selectedListing.id && (
+                  {(editingListingId === selectedListing.id || editingListingId === 'new') && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -2233,7 +2476,7 @@ export default function UserDetailPage() {
                     </Button>
                   )}
                 </div>
-                {editingListingId === selectedListing.id ? (
+                {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                   editListingData.collaborationOfferings.length === 0 ? (
                     <p className="text-sm text-gray-500">No collaboration offerings added. Click "Add Offering" to add one.</p>
                   ) : (
@@ -2478,7 +2721,7 @@ export default function UserDetailPage() {
               {/* Creator Requirements */}
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Creator Requirements</h3>
-                {editingListingId === selectedListing.id ? (
+                {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                   <div className="space-y-6">
                     {/* Required Platforms */}
                     <div>
@@ -2713,7 +2956,7 @@ export default function UserDetailPage() {
 
               {/* Actions */}
               <div className="flex justify-end gap-3 pt-4 border-t">
-                {editingListingId === selectedListing.id ? (
+                {(editingListingId === selectedListing.id || editingListingId === 'new') ? (
                   <>
                     <Button
                       variant="outline"
@@ -2727,7 +2970,7 @@ export default function UserDetailPage() {
                       onClick={handleSaveListing}
                       disabled={savingListing || uploadingListingImages}
                     >
-                      {uploadingListingImages ? 'Uploading Images...' : savingListing ? 'Saving...' : 'Save Changes'}
+                      {uploadingListingImages ? 'Uploading Images...' : savingListing ? (editingListingId === 'new' ? 'Creating...' : 'Saving...') : (editingListingId === 'new' ? 'Create Listing' : 'Save Changes')}
                     </Button>
                   </>
                 ) : (
@@ -2805,6 +3048,66 @@ export default function UserDetailPage() {
                   className="bg-red-600 hover:bg-red-700"
                 >
                   {deleting ? 'Deleting...' : 'Delete User'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Delete Listing Confirmation Modal */}
+        {listingToDelete && (
+          <Modal
+            isOpen={!!listingToDelete}
+            onClose={() => {
+              setListingToDelete(null)
+              setListingDeleteError('')
+            }}
+            title="Delete Listing"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-red-800">
+                  ⚠️ Warning: This action cannot be undone!
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to delete this listing? This will permanently delete:
+                </p>
+                <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-4">
+                  <li>Listing: <strong>{listingToDelete.name}</strong></li>
+                  <li>All collaboration offerings and creator requirements</li>
+                  <li>All associated images</li>
+                  <li>All related records</li>
+                </ul>
+              </div>
+
+              {listingDeleteError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-800">{listingDeleteError}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setListingToDelete(null)
+                    setListingDeleteError('')
+                  }}
+                  disabled={deletingListing}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleDeleteListing}
+                  disabled={deletingListing}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {deletingListing ? 'Deleting...' : 'Delete Listing'}
                 </Button>
               </div>
             </div>

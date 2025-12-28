@@ -157,6 +157,24 @@ export const usersService = {
   },
 
   /**
+   * Delete a listing
+   * ⚠️ Warning: This action cannot be undone!
+   * Permanently removes the listing, all collaboration offerings, creator requirements, and all images from S3.
+   */
+  deleteListing: async (hotelUserId: string, listingId: string): Promise<{
+    message: string
+    deletedListing: {
+      id: string
+      name: string
+    }
+    imagesDeleted: number
+    imagesFailed: number
+  }> => {
+    const response = await apiClient.delete<any>(`/admin/users/${hotelUserId}/listings/${listingId}`)
+    return transformSnakeToCamel(response)
+  },
+
+  /**
    * Delete a user permanently
    * ⚠️ Warning: This action cannot be undone!
    */
