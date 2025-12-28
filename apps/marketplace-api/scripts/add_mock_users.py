@@ -1058,6 +1058,93 @@ async def add_mock_users():
             print(f"   ✅ Created {collab_req['initiator_type']}-initiated collaboration: {collab_req['status']}")
         
         print(f"   ✨ Created {collaboration_count} collaborations\n")
+
+        # Create Mock Reviews
+        print("📝 Creating mock reviews...")
+        
+        # Get processed collaborations for linking reviews
+        existing_collabs = await conn.fetch(
+            """
+            SELECT c.id, c.creator_id, c.hotel_id, c.status
+            FROM collaborations c 
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users u ON u.id = cr.user_id
+            WHERE u.email LIKE '%@mock.com' AND c.status IN ('completed', 'accepted')
+            """
+        )
+        
+        reviews = [
+            {
+                "rating": 5,
+                "comment": "Excellent content quality and very professional to work with. Highly recommended!",
+                "creator_email_hint": "creator1@mock.com",
+            },
+            {
+                "rating": 5,
+                "comment": "Amazing photos! Exactly what we were looking for. Delivered everything on time.",
+                "creator_email_hint": "creator2@mock.com",
+            },
+            {
+                "rating": 4,
+                "comment": "Great reach and engagement. Communication could be slightly faster but overall good experience.",
+                "creator_email_hint": "creator3@mock.com",
+            },
+            {
+                "rating": 5,
+                "comment": "Truly authentic content. Our guests loved the reel! Will definitely work again.",
+                "creator_email_hint": "creator4@mock.com",
+            },
+            {
+                "rating": 5,
+                "comment": "Super creative and professional. The video quality is top notch.",
+                "creator_email_hint": "creator1@mock.com",
+            }
+        ]
+        
+        review_count = 0
+        for i, review in enumerate(reviews):
+             # Try to find a suitable collaboration to attach the review to
+             # Just picking one that matches the creator hint if possible, or random
+             target_collab = None
+             
+             # Simple logic: try to find a collab for this creator
+             # First, get creator ID for the hint
+             creator_id_hint = creator_map.get(review["creator_email_hint"])
+             
+             if creator_id_hint:
+                 matching_collabs = [c for c in existing_collabs if c['creator_id'] == creator_id_hint]
+                 if matching_collabs:
+                     target_collab = matching_collabs[i % len(matching_collabs)] # Distribute if multiple reviews for same creator
+             
+             if not target_collab and existing_collabs:
+                 target_collab = existing_collabs[i % len(existing_collabs)]
+                 
+             if target_collab:
+                 try:
+                     # Check if review already exists for this collab
+                     exists = await conn.fetchval(
+                         "SELECT 1 FROM creator_ratings WHERE collaboration_id = $1", 
+                         target_collab['id']
+                     )
+                     
+                     if not exists:
+                         await conn.execute(
+                             """
+                             INSERT INTO creator_ratings (
+                                 creator_id, hotel_id, collaboration_id, rating, comment, created_at, updated_at
+                             ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                             """,
+                             target_collab['creator_id'],
+                             target_collab['hotel_id'],
+                             target_collab['id'],
+                             review['rating'],
+                             review['comment']
+                         )
+                         review_count += 1
+                 except Exception as e:
+                     print(f"   ⚠️  Failed to add review: {e}")
+
+        print(f"   ✨ Created {review_count} reviews\n")
         
         await conn.close()
         
@@ -1066,6 +1153,7 @@ async def add_mock_users():
         print(f"   Created: {created_count} users")
         print(f"   Skipped: {skipped_count} users (already exist)")
         print(f"   Created: {collaboration_count} collaborations")
+        print(f"   Created: {review_count} reviews")
         print()
         print("📋 Mock Users Created:")
         print("   Creators:")
