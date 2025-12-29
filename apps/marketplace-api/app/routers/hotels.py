@@ -374,6 +374,7 @@ class HotelCollaborationListResponse(BaseModel):
     location: Optional[str] = Field(None, alias="creator_location")
     totalFollowers: Optional[int] = Field(None, alias="total_followers")
     avgEngagementRate: Optional[float] = Field(None, alias="avg_engagement_rate")
+    activePlatform: Optional[str] = Field(None, alias="active_platform")
     isVerified: bool = Field(alias="is_verified")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
@@ -1461,7 +1462,14 @@ async def get_hotel_collaborations(
                     WHERE creator_id = c.creator_id 
                     ORDER BY followers DESC 
                     LIMIT 1
-                ) as primary_handle
+                ) as primary_handle,
+                (
+                    SELECT name
+                    FROM creator_platforms
+                    WHERE creator_id = c.creator_id
+                    ORDER BY followers DESC
+                    LIMIT 1
+                ) as active_platform
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
             JOIN users cr_user ON cr_user.id = cr.user_id
@@ -1510,6 +1518,7 @@ async def get_hotel_collaborations(
                 "primary_handle": collab['primary_handle'],
                 "total_followers": collab['total_followers'],
                 "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] else None,
+                "active_platform": collab['active_platform'],
                 "is_verified": collab['user_status'] == 'verified'
             })
             
