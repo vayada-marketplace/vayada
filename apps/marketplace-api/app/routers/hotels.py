@@ -376,6 +376,9 @@ class HotelCollaborationListResponse(BaseModel):
     avgEngagementRate: Optional[float] = Field(None, alias="avg_engagement_rate")
     activePlatform: Optional[str] = Field(None, alias="active_platform")
     isVerified: bool = Field(alias="is_verified")
+    platformDeliverables: List[dict] = Field(default_factory=list, alias="platform_deliverables")
+    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
+    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -387,9 +390,6 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     reputation: Optional[CreatorReputation] = None
     
     # Request Specifics
-    platformDeliverables: List[dict] = Field(alias="platform_deliverables")
-    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
-    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     
     # Other metadata (optional but useful)
@@ -1448,7 +1448,8 @@ async def get_hotel_collaborations(
         # Updated to fetch only summary fields and primary handle
         query = """
             SELECT 
-                c.id, c.status, c.created_at, c.why_great_fit,
+                c.id, c.status, c.created_at, c.why_great_fit, c.platform_deliverables,
+                c.travel_date_from, c.travel_date_to,
                 c.creator_id,
                 cr_user.name as creator_name,
                 cr.profile_picture as creator_profile_picture,
@@ -1519,7 +1520,10 @@ async def get_hotel_collaborations(
                 "total_followers": collab['total_followers'],
                 "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] else None,
                 "active_platform": collab['active_platform'],
-                "is_verified": collab['user_status'] == 'verified'
+                "is_verified": collab['user_status'] == 'verified',
+                "platform_deliverables": json.loads(collab['platform_deliverables']) if collab['platform_deliverables'] else [],
+                "travel_date_from": collab['travel_date_from'],
+                "travel_date_to": collab['travel_date_to']
             })
             
         return response
