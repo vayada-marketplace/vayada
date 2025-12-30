@@ -10,6 +10,8 @@ from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 import logging
 import json
+import uuid
+from .chat import create_system_message
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +24,11 @@ router = APIRouter(prefix="/collaborations", tags=["collaborations"])
 
 class PlatformDeliverable(BaseModel):
     """Individual deliverable item"""
+    id: Optional[str] = Field(None, description="Unique ID for the deliverable")
     type: str = Field(..., description="Deliverable type (e.g., 'Instagram Post', 'Instagram Stories')")
     quantity: int = Field(..., gt=0, description="Number of deliverables of this type")
+    completed: bool = Field(default=False, description="Whether the deliverable has been completed")
+    completed_at: Optional[datetime] = Field(None, description="When the deliverable was completed")
     
     model_config = ConfigDict(populate_by_name=True)
 
@@ -186,6 +191,22 @@ class RespondToCollaborationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class UpdateCollaborationTermsRequest(BaseModel):
+    """Request model for suggesting changes (Negotiation)"""
+    travel_date_from: Optional[date] = None
+    travel_date_to: Optional[date] = None
+    platform_deliverables: Optional[List[PlatformDeliverablesItem]] = None
+    
+    # Validation logic to ensure at least one field is provided
+    @model_validator(mode='after')
+    def check_at_least_one_update(self):
+        if not self.travel_date_from and not self.travel_date_to and not self.platform_deliverables:
+            raise ValueError("At least one term (dates or deliverables) must be updated")
+        return self
+        
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ============================================
 # RESPONSE MODELS
 # ============================================
@@ -234,6 +255,11 @@ class CollaborationResponse(BaseModel):
     cancelled_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
+    # Negotiation
+    hotel_agreed_at: Optional[datetime] = None
+    creator_agreed_at: Optional[datetime] = None
+    term_last_updated_at: Optional[datetime] = None
+    
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
@@ -248,12 +274,6 @@ async def create_collaboration(
 ):
     """
     Create a new collaboration application or invitation.
-    
-    Supports two flows:
-    1. Creator → Hotel: Creator applies for a collaboration with a hotel listing
-    2. Hotel → Creator: Hotel invites a creator for a collaboration
-    
-    The initiator_type field determines which validation rules apply.
     """
     try:
         # Validate based on initiator_type
@@ -264,13 +284,7 @@ async def create_collaboration(
                 user_id
             )
             
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-            
-            if user['type'] != 'creator':
+            if not user or user['type'] != 'creator':
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only creators can create creator-initiated collaborations"
@@ -285,16 +299,10 @@ async def create_collaboration(
             if not creator:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Creator profile not found. Please complete your profile first."
+                    detail="Creator profile not found."
                 )
             
-            # For creator-initiated collaborations, automatically use authenticated creator's ID
-            # Ignore creator_id in request (if provided, it should match, but we'll use authenticated one)
             creator_id = str(creator['id'])
-            
-            # Optional: Warn if request.creator_id was provided and doesn't match (but don't fail)
-            if request.creator_id and str(creator['id']) != request.creator_id:
-                logger.warning(f"creator_id in request ({request.creator_id}) doesn't match authenticated creator ({creator_id}), using authenticated creator_id")
             
         elif request.initiator_type == "hotel":
             # Verify user is a hotel
@@ -303,13 +311,7 @@ async def create_collaboration(
                 user_id
             )
             
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-            
-            if user['type'] != 'hotel':
+            if not user or user['type'] != 'hotel':
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only hotels can create hotel-initiated collaborations"
@@ -324,12 +326,12 @@ async def create_collaboration(
             if not hotel_profile:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Hotel profile not found. Please create your profile first."
+                    detail="Hotel profile not found."
                 )
             
             authenticated_hotel_id = str(hotel_profile['id'])
         
-        # Verify listing exists and get hotel_id from it
+        # Verify listing exists
         listing = await Database.fetchrow(
             """
             SELECT hl.id, hl.hotel_profile_id, hl.name, hl.location, hl.status,
@@ -342,34 +344,16 @@ async def create_collaboration(
         )
         
         if not listing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Listing not found"
-            )
-        
-        # If hotel-initiated, verify listing belongs to authenticated hotel
-        if request.initiator_type == "hotel":
-            if str(listing['hotel_profile_id']) != authenticated_hotel_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Listing does not belong to the authenticated hotel"
-                )
-        
-        # Verify listing is verified (optional - you might want to allow pending listings)
-        # if listing['status'] != 'verified':
-        #     raise HTTPException(
-        #         status_code=status.HTTP_400_BAD_REQUEST,
-        #         detail="Listing must be verified to accept collaborations"
-        #     )
+            raise HTTPException(status_code=404, detail="Listing not found")
         
         hotel_id = str(listing['hotel_profile_id'])
         
-        # For hotel-initiated, get creator_id from request
-        # For creator-initiated, creator_id was already set above
         if request.initiator_type == "hotel":
             creator_id = request.creator_id
+            if str(listing['hotel_profile_id']) != authenticated_hotel_id:
+                raise HTTPException(status_code=403, detail="Listing ownership mismatch")
         
-        # Verify creator exists and is verified
+        # Verify creator exists
         creator_user = await Database.fetchrow(
             """
             SELECT c.id, u.status, u.name, c.profile_picture
@@ -381,49 +365,27 @@ async def create_collaboration(
         )
         
         if not creator_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Creator not found"
-            )
-        
-        # Optional: Check if creator is verified
-        # if creator_user['status'] != 'verified':
-        #     raise HTTPException(
-        #         status_code=status.HTTP_400_BAD_REQUEST,
-        #         detail="Creator must be verified to receive collaborations"
-        #     )
-        
-        # Check for duplicate active collaboration
-        existing = await Database.fetchrow(
-            """
-            SELECT id FROM collaborations
-            WHERE listing_id = $1 
-            AND creator_id = $2 
-            AND status IN ('pending', 'accepted')
-            """,
-            request.listing_id,
-            creator_id
-        )
-        
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An active collaboration already exists between this creator and listing"
-            )
+            raise HTTPException(status_code=404, detail="Creator not found")
         
         # Prepare platform_deliverables as JSONB
         platform_deliverables_json = json.dumps([
             {
                 "platform": item.platform,
                 "deliverables": [
-                    {"type": d.type, "quantity": d.quantity}
+                    {
+                        "id": d.id or str(uuid.uuid4()),
+                        "type": d.type, 
+                        "quantity": d.quantity,
+                        "completed": d.completed,
+                        "completed_at": d.completed_at.isoformat() if d.completed_at else None
+                    }
                     for d in item.deliverables
                 ]
             }
             for item in request.platform_deliverables
         ])
         
-        # Create collaboration in transaction
+        # Create collaboration
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -438,50 +400,28 @@ async def create_collaboration(
                         preferred_date_from, preferred_date_to,
                         preferred_months, platform_deliverables, consent
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-                    RETURNING id, initiator_type, status, creator_id, hotel_id, listing_id,
-                              why_great_fit, collaboration_type,
-                              free_stay_min_nights, free_stay_max_nights,
-                              paid_amount, discount_percentage,
-                              travel_date_from, travel_date_to,
-                              preferred_date_from, preferred_date_to,
-                              preferred_months, platform_deliverables, consent,
-                              created_at, updated_at, responded_at, cancelled_at, completed_at
+                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                    RETURNING *
                     """,
-                    request.initiator_type,
-                    creator_id,
-                    hotel_id,
-                    request.listing_id,
-                    'pending',
-                    request.why_great_fit,
-                    request.collaboration_type,
-                    request.free_stay_min_nights,
-                    request.free_stay_max_nights,
-                    request.paid_amount,
-                    request.discount_percentage,
-                    request.travel_date_from,
-                    request.travel_date_to,
-                    request.preferred_date_from,
-                    request.preferred_date_to,
-                    request.preferred_months,
-                    platform_deliverables_json,
-                    request.consent
+                    request.initiator_type, creator_id, hotel_id, request.listing_id,
+                    request.why_great_fit, request.collaboration_type,
+                    request.free_stay_min_nights, request.free_stay_max_nights,
+                    request.paid_amount, request.discount_percentage,
+                    request.travel_date_from, request.travel_date_to,
+                    request.preferred_date_from, request.preferred_date_to,
+                    request.preferred_months, platform_deliverables_json, request.consent
                 )
         
-        # Parse platform_deliverables back to model
+        # Parse platform_deliverables back
         platform_deliverables_data = json.loads(collaboration['platform_deliverables'])
         platform_deliverables_response = [
             PlatformDeliverablesItem(
                 platform=item['platform'],
-                deliverables=[
-                    PlatformDeliverable(type=d['type'], quantity=d['quantity'])
-                    for d in item['deliverables']
-                ]
+                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
             )
             for item in platform_deliverables_data
         ]
         
-        # Build response with related data
         return CollaborationResponse(
             id=str(collaboration['id']),
             initiator_type=collaboration['initiator_type'],
@@ -514,17 +454,393 @@ async def create_collaboration(
             completed_at=collaboration['completed_at']
         )
         
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         logger.error(f"Error creating collaboration: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create collaboration: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.put("/{collaboration_id}/terms", response_model=CollaborationResponse)
+async def update_collaboration_terms(
+    collaboration_id: str,
+    request: UpdateCollaborationTermsRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Suggest changes to the terms (Negotiation).
+    """
+    try:
+        current_collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        if not current_collab:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+            
+        is_creator = False
+        is_hotel = False
+        sender_name = "User"
+        
+        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        if creator_profile and str(creator_profile['id']) == str(current_collab['creator_id']):
+            is_creator = True
+            sender_name = "Creator"
+            
+        if not is_creator:
+            hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            if hotel_profile and str(hotel_profile['id']) == str(current_collab['hotel_id']):
+                is_hotel = True
+                sender_name = "Hotel"
+        
+        if not is_creator and not is_hotel:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        updates = []
+        update_params = []
+        param_idx = 2
+        diff_summary = []
+        
+        if request.travel_date_from:
+            updates.append(f"travel_date_from = ${param_idx}")
+            update_params.append(request.travel_date_from)
+            param_idx += 1
+            diff_summary.append(f"Check-in: {request.travel_date_from}")
+            
+        if request.travel_date_to:
+            updates.append(f"travel_date_to = ${param_idx}")
+            update_params.append(request.travel_date_to)
+            param_idx += 1
+            diff_summary.append(f"Check-out: {request.travel_date_to}")
+            
+        if request.platform_deliverables:
+            deliverables_json = json.dumps([
+                {
+                    "platform": item.platform,
+                    "deliverables": [
+                        {
+                            "id": d.id or str(uuid.uuid4()),
+                            "type": d.type, 
+                            "quantity": d.quantity,
+                            "completed": False,  # Reset status during negotiation
+                            "completed_at": None # Reset timestamp during negotiation
+                        } 
+                        for d in item.deliverables
+                    ]
+                }
+                for item in request.platform_deliverables
+            ])
+            updates.append(f"platform_deliverables = ${param_idx}")
+            update_params.append(deliverables_json)
+            param_idx += 1
+            diff_summary.append("Deliverables updated")
+            
+        if not updates:
+             raise HTTPException(status_code=400, detail="No changes provided")
+
+        updates.append("status = 'negotiating'")
+        updates.append("term_last_updated_at = now()")
+        updates.append("updated_at = now()")
+        
+        if is_hotel:
+            updates.append("hotel_agreed_at = NOW()")
+            updates.append("creator_agreed_at = NULL")
+        else:
+            updates.append("creator_agreed_at = NOW()")
+            updates.append("hotel_agreed_at = NULL")
+        
+        update_query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = $1"
+        update_params.insert(0, collaboration_id)
+        
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(update_query, *update_params)
+                sys_msg = f"📝 {sender_name} has suggested a counter-offer: " + " • ".join(diff_summary)
+                await create_system_message(collaboration_id, sys_msg, conn=conn)
+
+        # Return updated
+        updated = await Database.fetchrow(
+            """
+            SELECT c.*, cr_user.name as creator_name, cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1
+            """,
+            collaboration_id
+        )
+        
+        plat_delivs = json.loads(updated['platform_deliverables'])
+        plat_delivs_resp = [
+            PlatformDeliverablesItem(
+                platform=item['platform'],
+                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
+            ) for item in plat_delivs
+        ]
+
+        return CollaborationResponse(
+            id=str(updated['id']),
+            initiator_type=updated['initiator_type'],
+            status=updated['status'],
+            creator_id=str(updated['creator_id']),
+            creator_name=updated['creator_name'],
+            creator_profile_picture=updated['creator_profile_picture'],
+            hotel_id=str(updated['hotel_id']),
+            hotel_name=updated['hotel_name'],
+            listing_id=str(updated['listing_id']),
+            listing_name=updated['listing_name'],
+            listing_location=updated['listing_location'],
+            collaboration_type=updated['collaboration_type'],
+            free_stay_min_nights=updated['free_stay_min_nights'],
+            free_stay_max_nights=updated['free_stay_max_nights'],
+            paid_amount=updated['paid_amount'],
+            discount_percentage=updated['discount_percentage'],
+            travel_date_from=updated['travel_date_from'],
+            travel_date_to=updated['travel_date_to'],
+            preferred_date_from=updated['preferred_date_from'],
+            preferred_date_to=updated['preferred_date_to'],
+            preferred_months=updated['preferred_months'],
+            why_great_fit=updated['why_great_fit'],
+            platform_deliverables=plat_delivs_resp,
+            consent=updated['consent'],
+            created_at=updated['created_at'],
+            updated_at=updated['updated_at'],
+            responded_at=updated['responded_at'],
+            cancelled_at=updated['cancelled_at'],
+            completed_at=updated['completed_at'],
+            hotel_agreed_at=updated['hotel_agreed_at'],
+            creator_agreed_at=updated['creator_agreed_at'],
+            term_last_updated_at=updated['term_last_updated_at']
+        )
+    except Exception as e:
+        logger.error(f"Error updating terms: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{collaboration_id}/approve", response_model=CollaborationResponse)
+async def approve_collaboration_terms(
+    collaboration_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Approve terms (Double Confirmation).
+    """
+    try:
+        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        if not collab:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+            
+        is_creator = False
+        is_hotel = False
+        sender_name = "User"
+        
+        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        if creator_profile and str(creator_profile['id']) == str(collab['creator_id']):
+            is_creator = True
+            sender_name = "Creator"
+            
+        if not is_creator:
+            hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            if hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id']):
+                is_hotel = True
+                sender_name = "Hotel"
+                
+        if not is_creator and not is_hotel:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        updates = []
+        if is_creator:
+            updates.append("creator_agreed_at = NOW()")
+            other_agreed = collab['hotel_agreed_at'] is not None
+        else:
+            updates.append("hotel_agreed_at = NOW()")
+            other_agreed = collab['creator_agreed_at'] is not None
+            
+        new_status = None
+        if other_agreed:
+            updates.append("status = 'accepted'")
+            updates.append("responded_at = NOW()")
+            new_status = 'accepted'
+        
+        query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = $1"
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(query, collaboration_id)
+                await create_system_message(collaboration_id, f"✅ {sender_name} approved the terms.", conn=conn)
+                if new_status == 'accepted':
+                    await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
+
+        # Return Updated
+        updated = await Database.fetchrow(
+            """
+            SELECT c.*, cr_user.name as creator_name, cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1
+            """,
+            collaboration_id
+        )
+        
+        plat_delivs = json.loads(updated['platform_deliverables'])
+        plat_delivs_resp = [
+            PlatformDeliverablesItem(
+                platform=item['platform'],
+                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
+            ) for item in plat_delivs
+        ]
+        
+        return CollaborationResponse(
+            id=str(updated['id']),
+            initiator_type=updated['initiator_type'],
+            status=updated['status'],
+            creator_id=str(updated['creator_id']),
+            creator_name=updated['creator_name'],
+            creator_profile_picture=updated['creator_profile_picture'],
+            hotel_id=str(updated['hotel_id']),
+            hotel_name=updated['hotel_name'],
+            listing_id=str(updated['listing_id']),
+            listing_name=updated['listing_name'],
+            listing_location=updated['listing_location'],
+            collaboration_type=updated['collaboration_type'],
+            free_stay_min_nights=updated['free_stay_min_nights'],
+            free_stay_max_nights=updated['free_stay_max_nights'],
+            paid_amount=updated['paid_amount'],
+            discount_percentage=updated['discount_percentage'],
+            travel_date_from=updated['travel_date_from'],
+            travel_date_to=updated['travel_date_to'],
+            preferred_date_from=updated['preferred_date_from'],
+            preferred_date_to=updated['preferred_date_to'],
+            preferred_months=updated['preferred_months'],
+            why_great_fit=updated['why_great_fit'],
+            platform_deliverables=plat_delivs_resp,
+            consent=updated['consent'],
+            created_at=updated['created_at'],
+            updated_at=updated['updated_at'],
+            responded_at=updated['responded_at'],
+            cancelled_at=updated['cancelled_at'],
+            completed_at=updated['completed_at'],
+            hotel_agreed_at=updated['hotel_agreed_at'],
+            creator_agreed_at=updated['creator_agreed_at'],
+            term_last_updated_at=updated['term_last_updated_at']
+        )
+    except Exception as e:
+        logger.error(f"Error approving: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{collaboration_id}/deliverables/{deliverable_id}/toggle", response_model=CollaborationResponse)
+async def toggle_deliverable(
+    collaboration_id: str,
+    deliverable_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Toggle completion status of a deliverable.
+    """
+    try:
+        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        if not collab:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+            
+        # Auth (simplified for restoration)
+        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        is_creator = creator_profile and str(creator_profile['id']) == str(collab['creator_id'])
+        hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+        is_hotel = hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id'])
+        
+        if not is_creator and not is_hotel:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        platform_deliverables = json.loads(collab['platform_deliverables'])
+        found = False
+        new_status = False
+        deliverable_name = ""
+        
+        for platform_item in platform_deliverables:
+            for d in platform_item['deliverables']:
+                if d.get('id') == deliverable_id:
+                    d['completed'] = not d.get('completed', False)
+                    new_status = d['completed']
+                    d['completed_at'] = datetime.now().isoformat() if d['completed'] else None
+                    deliverable_name = d['type']
+                    found = True
+                    break
+            if found: break
+            
+        if not found:
+            raise HTTPException(status_code=404, detail="Deliverable not found")
+            
+        await Database.execute(
+            "UPDATE collaborations SET platform_deliverables = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(platform_deliverables), collaboration_id
+        )
+        
+        status_text = "completed" if new_status else "incomplete"
+        await create_system_message(collaboration_id, f"{'✅' if new_status else '🔄'} Deliverable '{deliverable_name}' marked as {status_text}.")
+        
+        # Return Updated
+        updated = await Database.fetchrow(
+            """
+            SELECT c.*, cr_user.name as creator_name, cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1
+            """,
+            collaboration_id
+        )
+        
+        plat_delivs = json.loads(updated['platform_deliverables'])
+        plat_delivs_resp = [
+            PlatformDeliverablesItem(
+                platform=item['platform'],
+                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
+            ) for item in plat_delivs
+        ]
+        
+        return CollaborationResponse(
+            id=str(updated['id']),
+            initiator_type=updated['initiator_type'],
+            status=updated['status'],
+            creator_id=str(updated['creator_id']),
+            creator_name=updated['creator_name'],
+            creator_profile_picture=updated['creator_profile_picture'],
+            hotel_id=str(updated['hotel_id']),
+            hotel_name=updated['hotel_name'],
+            listing_id=str(updated['listing_id']),
+            listing_name=updated['listing_name'],
+            listing_location=updated['listing_location'],
+            collaboration_type=updated['collaboration_type'],
+            free_stay_min_nights=updated['free_stay_min_nights'],
+            free_stay_max_nights=updated['free_stay_max_nights'],
+            paid_amount=updated['paid_amount'],
+            discount_percentage=updated['discount_percentage'],
+            travel_date_from=updated['travel_date_from'],
+            travel_date_to=updated['travel_date_to'],
+            preferred_date_from=updated['preferred_date_from'],
+            preferred_date_to=updated['preferred_date_to'],
+            preferred_months=updated['preferred_months'],
+            why_great_fit=updated['why_great_fit'],
+            platform_deliverables=plat_delivs_resp,
+            consent=updated['consent'],
+            created_at=updated['created_at'],
+            updated_at=updated['updated_at'],
+            responded_at=updated['responded_at'],
+            cancelled_at=updated['cancelled_at'],
+            completed_at=updated['completed_at'],
+            hotel_agreed_at=updated['hotel_agreed_at'],
+            creator_agreed_at=updated['creator_agreed_at'],
+            term_last_updated_at=updated['term_last_updated_at']
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

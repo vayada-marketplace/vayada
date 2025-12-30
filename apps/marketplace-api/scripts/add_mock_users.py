@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from decimal import Decimal
 from datetime import datetime, date
+import uuid
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,6 +25,17 @@ async def add_mock_users():
         print("🔗 Connecting to database...")
         conn = await asyncpg.connect(settings.DATABASE_URL)
         print("✅ Connected to database\n")
+        
+        # 0. Clean up existing data to ensure a fresh start
+        print("🧹 Cleaning up existing mock data...")
+        await conn.execute("DELETE FROM chat_messages")
+        await conn.execute("DELETE FROM collaborations")
+        # Optional: Clean up other tables if you want a complete reset
+        # await conn.execute("DELETE FROM hotel_listings")
+        # await conn.execute("DELETE FROM hotel_profiles")
+        # await conn.execute("DELETE FROM creators")
+        # await conn.execute("DELETE FROM users")
+        print("✅ Cleanup complete\n")
         
         # Hash password for all test users
         password_hash = bcrypt.hashpw("Test1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -971,6 +983,31 @@ async def add_mock_users():
                 ],
                 "responded_at": datetime(2024, 1, 11, 15, 30, 0)
             },
+            # Negotiating collaboration (Workflow Showcase)
+            {
+                "creator_email": "creator1@mock.com",
+                "hotel_email": "hotel1@mock.com",
+                "listing_name": "Ocean View Villa",
+                "initiator_type": "creator",
+                "status": "negotiating",
+                "why_great_fit": "I'd love to visit! Let's discuss the dates.",
+                "travel_date_from": "2024-07-10",
+                "travel_date_to": "2024-07-15",
+                "preferred_months": ["Jul"],
+                "consent": True,
+                "platform_deliverables": [
+                    {
+                        "platform": "Instagram",
+                        "deliverables": [
+                            {"type": "Instagram Post", "quantity": 3},
+                            {"type": "Instagram Stories", "quantity": 10}
+                        ]
+                    }
+                ],
+                "hotel_agreed_at": datetime(2024, 1, 15, 10, 0, 0),
+                "creator_agreed_at": None, # Creator hasn't agreed to the hotel's counter-offer yet
+                "term_last_updated_at": datetime(2024, 1, 15, 10, 0, 0)
+            },
         ]
         
         for collab_req in collaboration_requests:
@@ -1003,10 +1040,6 @@ async def add_mock_users():
                 creator_id, listing_id
             )
             
-            if existing:
-                print(f"   ⏭️  Skipping collaboration: Already exists between creator and listing")
-                continue
-            
             # Convert date strings to date objects
             for date_field in ["travel_date_from", "travel_date_to", "preferred_date_from", "preferred_date_to"]:
                 if collab_req.get(date_field) and isinstance(collab_req[date_field], str):
@@ -1015,8 +1048,24 @@ async def add_mock_users():
                     except ValueError:
                         print(f"   ⚠️  Warning: Invalid date format for {date_field}: {collab_req[date_field]}")
 
-            # Prepare platform_deliverables JSON
-            platform_deliverables_json = json.dumps(collab_req["platform_deliverables"])
+            # Prepare platform_deliverables JSON with IDs and completion status
+            platform_deliverables_data = []
+            for item in collab_req["platform_deliverables"]:
+                platform_item = {
+                    "platform": item["platform"],
+                    "deliverables": []
+                }
+                for d in item["deliverables"]:
+                    platform_item["deliverables"].append({
+                        "id": str(uuid.uuid4()),
+                        "type": d["type"],
+                        "quantity": d["quantity"],
+                        "completed": False,
+                        "completed_at": None
+                    })
+                platform_deliverables_data.append(platform_item)
+            
+            platform_deliverables_json = json.dumps(platform_deliverables_data)
             
             # Insert collaboration
             await conn.execute(
@@ -1029,9 +1078,10 @@ async def add_mock_users():
                     travel_date_from, travel_date_to,
                     preferred_date_from, preferred_date_to,
                     preferred_months, platform_deliverables, consent,
-                    responded_at, completed_at
+                    responded_at, completed_at,
+                    hotel_agreed_at, creator_agreed_at, term_last_updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
                 """,
                 collab_req["initiator_type"],
                 creator_id,
@@ -1053,11 +1103,67 @@ async def add_mock_users():
                 collab_req.get("consent"),
                 collab_req.get("responded_at"),
                 collab_req.get("completed_at"),
+                collab_req.get("hotel_agreed_at"),
+                collab_req.get("creator_agreed_at"),
+                collab_req.get("term_last_updated_at", datetime.now())
             )
             collaboration_count += 1
             print(f"   ✅ Created {collab_req['initiator_type']}-initiated collaboration: {collab_req['status']}")
         
         print(f"   ✨ Created {collaboration_count} collaborations\n")
+        
+        # Create Chat Messages
+        print("💬 Creating mock chat messages...")
+        
+        # Get all collaborations to add some chats
+        all_created_collabs = await conn.fetch(
+            """
+            SELECT c.id, c.creator_id, c.hotel_id, c.status, 
+                   cr_u.id as creator_user_id, hot_u.id as hotel_user_id
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_u ON cr_u.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN users hot_u ON hot_u.id = hp.user_id
+            WHERE cr_u.email LIKE '%@mock.com'
+            """
+        )
+        
+        chat_count = 0
+        for collab in all_created_collabs:
+            collab_id = collab['id']
+            creator_user_id = collab['creator_user_id']
+            hotel_user_id = collab['hotel_user_id']
+            
+            # Add basic chat messages for non-pending collaborations
+            messages = []
+            
+            if collab['status'] == 'negotiating':
+                messages = [
+                    {"sender": creator_user_id, "content": "Hi! Can we adjust the check-in date to July 10th?", "type": "text"},
+                    {"sender": None, "content": "📝 Creator has suggested a counter-offer with updated terms: Check-in: 2024-07-10. Please review the new terms.", "type": "system"},
+                    {"sender": hotel_user_id, "content": "Sure, that works for us! I've updated the terms on my end.", "type": "text"},
+                    {"sender": None, "content": "📝 Hotel has suggested a counter-offer - Deliverables updated. Please review.", "type": "system"},
+                    {"sender": None, "content": "✅ Hotel approved the terms.", "type": "system"},
+                ]
+            elif collab['status'] == 'accepted':
+                messages = [
+                    {"sender": creator_user_id, "content": "Looking forward to our stay!", "type": "text"},
+                    {"sender": hotel_user_id, "content": "We are excited to host you!", "type": "text"},
+                    {"sender": None, "content": "🎉 Collaboration Accepted! Both parties have agreed to the terms.", "type": "system"},
+                ]
+                
+            for msg in messages:
+                await conn.execute(
+                    """
+                    INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, created_at)
+                    VALUES ($1, $2, $3, $4, now() - interval '1 day')
+                    """,
+                    collab_id, msg["sender"], msg["content"], msg["type"]
+                )
+                chat_count += 1
+                
+        print(f"   ✨ Created {chat_count} chat messages\n")
 
         # Create Mock Reviews
         print("📝 Creating mock reviews...")
