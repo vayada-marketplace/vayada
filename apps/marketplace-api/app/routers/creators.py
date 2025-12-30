@@ -728,6 +728,7 @@ async def get_creator_collaborations(
             response.append({
                 "id": str(collab['id']),
                 "initiator_type": collab['initiator_type'],
+                "is_initiator": collab['initiator_type'] == 'creator',
                 "status": collab['status'],
                 "creator_id": str(collab['creator_id']),
                 "creator_name": collab['creator_name'],

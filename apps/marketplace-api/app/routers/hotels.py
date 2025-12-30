@@ -362,6 +362,8 @@ class CreatorReputation(BaseModel):
 class HotelCollaborationListResponse(BaseModel):
     """Slim response for collaboration list view"""
     id: str
+    initiator_type: str = Field(alias="initiator_type")
+    is_initiator: bool = Field(alias="is_initiator")
     status: str
     createdAt: datetime = Field(alias="created_at")
     whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
@@ -1448,7 +1450,7 @@ async def get_hotel_collaborations(
         # Updated to fetch only summary fields and primary handle
         query = """
             SELECT 
-                c.id, c.status, c.created_at, c.why_great_fit, c.platform_deliverables,
+                c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit, c.platform_deliverables,
                 c.travel_date_from, c.travel_date_to,
                 c.creator_id,
                 cr_user.name as creator_name,
@@ -1507,6 +1509,8 @@ async def get_hotel_collaborations(
         for collab in collaborations_data:
             response.append({
                 "id": str(collab['id']),
+                "initiator_type": collab['initiator_type'],
+                "is_initiator": collab['initiator_type'] == 'hotel',
                 "status": collab['status'],
                 "created_at": collab['created_at'].isoformat() if collab['created_at'] else None,
                 "why_great_fit": collab['why_great_fit'],
