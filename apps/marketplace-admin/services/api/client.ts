@@ -2,7 +2,7 @@
  * API client configuration
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.vayada.com'
 
 export interface ApiError {
   detail: string | Array<{
@@ -67,11 +67,11 @@ export class ApiClient {
    */
   private handleUnauthorized(error: ApiErrorResponse): void {
     this.clearToken()
-    
+
     if (typeof window !== 'undefined') {
       const errorMessage = error.data.detail as string || ''
       const isExpired = errorMessage.includes('expired') || errorMessage.includes('Expired')
-      
+
       if (isExpired) {
         window.location.href = '/login?expired=true'
       } else {
@@ -85,10 +85,10 @@ export class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
-    
+
     // Get token for authenticated requests (skip for auth endpoints)
     const token = !endpoint.startsWith('/auth/') ? this.getToken() : null
-    
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
@@ -98,7 +98,7 @@ export class ApiClient {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
-    
+
     const config: RequestInit = {
       ...options,
       headers,
@@ -106,7 +106,7 @@ export class ApiClient {
 
     try {
       const response = await fetch(url, config)
-      
+
       // Handle 204 No Content responses (no body to parse)
       if (response.status === 204) {
         if (!response.ok) {
@@ -114,11 +114,11 @@ export class ApiClient {
         }
         return undefined as T
       }
-      
+
       // Check if response has content to parse
       const contentType = response.headers.get('content-type')
       const hasJsonContent = contentType && contentType.includes('application/json')
-      
+
       let data: any
       if (hasJsonContent) {
         const text = await response.text()
@@ -127,15 +127,15 @@ export class ApiClient {
         const text = await response.text()
         data = text || null
       }
-      
+
       if (!response.ok) {
         const error = new ApiErrorResponse(response.status, data as ApiError)
-        
+
         // Handle 401 errors (token expired/invalid)
         if (response.status === 401 && !endpoint.startsWith('/auth/')) {
           this.handleUnauthorized(error)
         }
-        
+
         throw error
       }
 
