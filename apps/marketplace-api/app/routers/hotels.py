@@ -1712,6 +1712,7 @@ async def get_hotel_collaboration_detail(
             portfolio_link=collab['creator_portfolio_link'],
             
             initiator_type=collab['initiator_type'],
+            is_initiator=collab['initiator_type'] == 'hotel',
             hotel_id=str(collab['hotel_id']),
             hotel_name=collab['hotel_name'],
             listing_id=str(collab['listing_id']),
