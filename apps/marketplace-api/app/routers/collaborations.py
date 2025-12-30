@@ -459,6 +459,157 @@ async def create_collaboration(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{collaboration_id}/respond", response_model=CollaborationResponse)
+async def respond_to_collaboration_request(
+    collaboration_id: str,
+    request: RespondToCollaborationRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Accept or decline a collaboration request (initial invitation or application).
+    """
+    try:
+        # Fetch collaboration
+        collab = await Database.fetchrow(
+            "SELECT * FROM collaborations WHERE id = $1",
+            collaboration_id
+        )
+        
+        if not collab:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+            
+        if collab['status'] != 'pending':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot respond to collaboration with status '{collab['status']}'. Only 'pending' requests can be accepted/declined."
+            )
+
+        # Determine if the user is the recipient
+        is_recipient = False
+        recipient_role = ""
+        
+        if collab['initiator_type'] == "creator":
+            # Initiated by creator -> recipient is the hotel
+            hotel_profile = await Database.fetchrow(
+                "SELECT id FROM hotel_profiles WHERE user_id = $1",
+                user_id
+            )
+            if hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id']):
+                is_recipient = True
+                recipient_role = "Hotel"
+        elif collab['initiator_type'] == "hotel":
+            # Initiated by hotel -> recipient is the creator
+            creator_profile = await Database.fetchrow(
+                "SELECT id FROM creators WHERE user_id = $1",
+                user_id
+            )
+            if creator_profile and str(creator_profile['id']) == str(collab['creator_id']):
+                is_recipient = True
+                recipient_role = "Creator"
+        
+        if not is_recipient:
+            raise HTTPException(status_code=403, detail="Not authorized to respond to this collaboration request")
+
+        # Update status
+        new_status = request.status
+        updates = [
+            "status = $1",
+            "responded_at = NOW()",
+            "updated_at = NOW()"
+        ]
+        params = [new_status, collaboration_id]
+        
+        if new_status == "accepted":
+            # If accepted, both parties agree to initial terms
+            updates.append("hotel_agreed_at = NOW()")
+            updates.append("creator_agreed_at = NOW()")
+        
+        query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = ${len(params)} RETURNING *"
+        
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(query, *params)
+                
+                # Create system messages
+                status_icon = "✅" if new_status == "accepted" else "❌"
+                action_text = "accepted" if new_status == "accepted" else "declined"
+                msg = f"{status_icon} {recipient_role} has {action_text} the collaboration request."
+                if request.response_message:
+                    msg += f"\n\nMessage: {request.response_message}"
+                
+                await create_system_message(collaboration_id, msg, conn=conn)
+                
+                if new_status == "accepted":
+                    await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
+
+        # Fetch full data for response
+        updated = await Database.fetchrow(
+            """
+            SELECT c.*, cr_user.name as creator_name, cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1
+            """,
+            collaboration_id
+        )
+        
+        plat_delivs = json.loads(updated['platform_deliverables'])
+        plat_delivs_resp = [
+            PlatformDeliverablesItem(
+                platform=item['platform'],
+                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
+            ) for item in plat_delivs
+        ]
+        
+        return CollaborationResponse(
+            id=str(updated['id']),
+            initiator_type=updated['initiator_type'],
+            status=updated['status'],
+            creator_id=str(updated['creator_id']),
+            creator_name=updated['creator_name'],
+            creator_profile_picture=updated['creator_profile_picture'],
+            hotel_id=str(updated['hotel_id']),
+            hotel_name=updated['hotel_name'],
+            listing_id=str(updated['listing_id']),
+            listing_name=updated['listing_name'],
+            listing_location=updated['listing_location'],
+            collaboration_type=updated['collaboration_type'],
+            free_stay_min_nights=updated['free_stay_min_nights'],
+            free_stay_max_nights=updated['free_stay_max_nights'],
+            paid_amount=updated['paid_amount'],
+            discount_percentage=updated['discount_percentage'],
+            travel_date_from=updated['travel_date_from'],
+            travel_date_to=updated['travel_date_to'],
+            preferred_date_from=updated['preferred_date_from'],
+            preferred_date_to=updated['preferred_date_to'],
+            preferred_months=updated['preferred_months'],
+            why_great_fit=updated['why_great_fit'],
+            platform_deliverables=plat_delivs_resp,
+            consent=updated['consent'],
+            created_at=updated['created_at'],
+            updated_at=updated['updated_at'],
+            responded_at=updated['responded_at'],
+            cancelled_at=updated['cancelled_at'],
+            completed_at=updated['completed_at'],
+            hotel_agreed_at=updated['hotel_agreed_at'],
+            creator_agreed_at=updated['creator_agreed_at'],
+            term_last_updated_at=updated['term_last_updated_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error responding to collaboration: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 @router.put("/{collaboration_id}/terms", response_model=CollaborationResponse)
 async def update_collaboration_terms(
     collaboration_id: str,
