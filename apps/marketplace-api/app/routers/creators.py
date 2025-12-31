@@ -156,6 +156,59 @@ class CreatorProfileResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
+class CreatorCollaborationListResponse(BaseModel):
+    """Slim response for collaboration list view (creator perspective)"""
+    id: str
+    initiatorType: str = Field(alias="initiator_type")
+    isInitiator: bool = Field(alias="is_initiator")
+    status: str
+    createdAt: datetime = Field(alias="created_at")
+    whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
+    
+    # Hotel/Listing Summary
+    hotelId: str = Field(alias="hotel_id")
+    hotelName: str = Field(alias="hotel_name")
+    hotelProfilePicture: Optional[str] = Field(None, alias="hotel_profile_picture")
+    listingId: str = Field(alias="listing_id")
+    listingName: str = Field(alias="listing_name")
+    listingLocation: str = Field(alias="listing_location")
+    
+    collaborationType: Optional[str] = Field(None, alias="collaboration_type")
+    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
+    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
+
+    # Term specifics
+    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
+    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
+    paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
+    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
+    
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class CreatorCollaborationDetailResponse(CreatorCollaborationListResponse):
+    """Detailed response for modal view (creator perspective)"""
+    # Extended Hotel Details
+    hotelLocation: str = Field(alias="hotel_location")
+    hotelWebsite: Optional[str] = Field(None, alias="hotel_website")
+    hotelAbout: Optional[str] = Field(None, alias="hotel_about")
+    hotelPhone: Optional[str] = Field(None, alias="hotel_phone")
+    
+    # Collaboration terms
+    preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")
+    preferredDateTo: Optional[date] = Field(None, alias="preferred_date_to")
+    preferredMonths: Optional[List[str]] = Field(None, alias="preferred_months")
+    platformDeliverables: List[dict] = Field(default_factory=list, alias="platform_deliverables")
+    consent: Optional[bool] = None
+    
+    updatedAt: datetime = Field(alias="updated_at")
+    respondedAt: Optional[datetime] = Field(None, alias="responded_at")
+    cancelledAt: Optional[datetime] = Field(None, alias="cancelled_at")
+    completedAt: Optional[datetime] = Field(None, alias="completed_at")
+    
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
 @router.get("/me/profile-status", response_model=CreatorProfileStatusResponse)
 async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)):
     """
@@ -636,7 +689,7 @@ async def update_creator_profile(
         )
 
 
-@router.get("/me/collaborations", response_model=List[dict])
+@router.get("/me/collaborations", response_model=List[CreatorCollaborationListResponse])
 async def get_creator_collaborations(
     collab_status: Optional[Literal["pending", "accepted", "declined", "completed", "cancelled"]] = Query(None, alias="status", description="Filter by status"),
     initiated_by: Optional[Literal["creator", "hotel"]] = Query(None, description="Filter by who initiated"),
@@ -677,24 +730,17 @@ async def get_creator_collaborations(
         # Build query with filters
         query = """
             SELECT 
-                c.id, c.initiator_type, c.status, c.creator_id, c.hotel_id, c.listing_id,
+                c.id, c.initiator_type, c.status, c.created_at,
                 c.why_great_fit, c.collaboration_type,
+                c.travel_date_from, c.travel_date_to,
                 c.free_stay_min_nights, c.free_stay_max_nights,
                 c.paid_amount, c.discount_percentage,
-                c.travel_date_from, c.travel_date_to,
-                c.preferred_date_from, c.preferred_date_to,
-                c.preferred_months, c.platform_deliverables, c.consent,
-                c.created_at, c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
-                cr_user.name as creator_name,
-                cr.profile_picture as creator_profile_picture,
-                cr.profile_picture as creator_profile_picture,
+                c.hotel_id, c.listing_id,
                 hp.name as hotel_name,
                 hp.picture as hotel_profile_picture,
                 hl.name as listing_name,
                 hl.location as listing_location
             FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN users cr_user ON cr_user.id = cr.user_id
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             JOIN hotel_listings hl ON hl.id = c.listing_id
             WHERE c.creator_id = $1
@@ -720,44 +766,30 @@ async def get_creator_collaborations(
         if not collaborations_data:
             return []
         
-        # Parse platform_deliverables and build response
+        # Build response using the model
         response = []
         for collab in collaborations_data:
-            platform_deliverables_data = json.loads(collab['platform_deliverables']) if collab['platform_deliverables'] else []
-            
-            response.append({
-                "id": str(collab['id']),
-                "initiatorType": collab['initiator_type'],
-                "isInitiator": collab['initiator_type'] == 'creator',
-                "status": collab['status'],
-                "creatorId": str(collab['creator_id']),
-                "creatorName": collab['creator_name'],
-                "creatorProfilePicture": collab['creator_profile_picture'],
-                "hotelId": str(collab['hotel_id']),
-                "hotelName": collab['hotel_name'],
-                "hotelProfilePicture": collab['hotel_profile_picture'],
-                "listingId": str(collab['listing_id']),
-                "listingName": collab['listing_name'],
-                "listingLocation": collab['listing_location'],
-                "collaborationType": collab['collaboration_type'],
-                "freeStayMinNights": collab['free_stay_min_nights'],
-                "freeStayMaxNights": collab['free_stay_max_nights'],
-                "paidAmount": float(collab['paid_amount']) if collab['paid_amount'] else None,
-                "discountPercentage": collab['discount_percentage'],
-                "travelDateFrom": collab['travel_date_from'].isoformat() if collab['travel_date_from'] else None,
-                "travelDateTo": collab['travel_date_to'].isoformat() if collab['travel_date_to'] else None,
-                "preferredDateFrom": collab['preferred_date_from'].isoformat() if collab['preferred_date_from'] else None,
-                "preferredDateTo": collab['preferred_date_to'].isoformat() if collab['preferred_date_to'] else None,
-                "preferredMonths": collab['preferred_months'],
-                "whyGreatFit": collab['why_great_fit'],
-                "platformDeliverables": platform_deliverables_data,
-                "consent": collab['consent'],
-                "createdAt": collab['created_at'].isoformat() if collab['created_at'] else None,
-                "updatedAt": collab['updated_at'].isoformat() if collab['updated_at'] else None,
-                "respondedAt": collab['responded_at'].isoformat() if collab['responded_at'] else None,
-                "cancelledAt": collab['cancelled_at'].isoformat() if collab['cancelled_at'] else None,
-                "completedAt": collab['completed_at'].isoformat() if collab['completed_at'] else None
-            })
+            response.append(CreatorCollaborationListResponse(
+                id=str(collab['id']),
+                initiator_type=collab['initiator_type'],
+                is_initiator=collab['initiator_type'] == 'creator',
+                status=collab['status'],
+                created_at=collab['created_at'],
+                why_great_fit=collab['why_great_fit'],
+                hotel_id=str(collab['hotel_id']),
+                hotel_name=collab['hotel_name'],
+                hotel_profile_picture=collab['hotel_profile_picture'],
+                listing_id=str(collab['listing_id']),
+                listing_name=collab['listing_name'],
+                listing_location=collab['listing_location'],
+                collaboration_type=collab['collaboration_type'],
+                travel_date_from=collab['travel_date_from'],
+                travel_date_to=collab['travel_date_to'],
+                free_stay_min_nights=collab['free_stay_min_nights'],
+                free_stay_max_nights=collab['free_stay_max_nights'],
+                paid_amount=collab['paid_amount'],
+                discount_percentage=collab['discount_percentage']
+            ))
         
         return response
         
@@ -768,5 +800,137 @@ async def get_creator_collaborations(
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
+        )
+
+
+@router.get("/me/collaborations/{collaboration_id}", response_model=CreatorCollaborationDetailResponse)
+async def get_creator_collaboration_detail(
+    collaboration_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Get detailed information about a specific collaboration from the creator's perspective,
+    including full hotel and listing details.
+    """
+    try:
+        # Verify user is a creator
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+        
+        if not user or user['type'] != 'creator':
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only available for creators"
+            )
+        
+        creator_profile = await Database.fetchrow(
+            "SELECT id FROM creators WHERE user_id = $1",
+            user_id
+        )
+        
+        if not creator_profile:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Creator profile not found"
+            )
+        
+        creator_id = str(creator_profile['id'])
+        
+        # Fetch collaboration details with full hotel and listing info
+        collab = await Database.fetchrow(
+            """
+            SELECT 
+                c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit,
+                c.collaboration_type, c.free_stay_min_nights, c.free_stay_max_nights,
+                c.paid_amount, c.discount_percentage,
+                c.travel_date_from, c.travel_date_to,
+                c.preferred_date_from, c.preferred_date_to,
+                c.preferred_months, c.platform_deliverables, c.consent,
+                c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
+                c.hotel_id, c.listing_id,
+                hp.name as hotel_name,
+                hp.location as hotel_location,
+                hp.picture as hotel_profile_picture,
+                hp.website as hotel_website,
+                hp.about as hotel_about,
+                hp.phone as hotel_phone,
+                hl.name as listing_name,
+                hl.location as listing_location
+            FROM collaborations c
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1 AND c.creator_id = $2
+            """,
+            collaboration_id,
+            creator_id
+        )
+        
+        if not collab:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Collaboration not found"
+            )
+            
+        # Parse platform_deliverables (stored as jsonb)
+        deliverables = collab['platform_deliverables']
+        if deliverables and isinstance(deliverables, str):
+            try:
+                deliverables = json.loads(deliverables)
+            except:
+                deliverables = []
+        elif not deliverables:
+            deliverables = []
+
+        return CreatorCollaborationDetailResponse(
+            id=str(collab['id']),
+            initiator_type=collab['initiator_type'],
+            is_initiator=collab['initiator_type'] == 'creator',
+            status=collab['status'],
+            created_at=collab['created_at'],
+            why_great_fit=collab['why_great_fit'],
+            
+            # Hotel/Listing Summary
+            hotel_id=str(collab['hotel_id']),
+            hotel_name=collab['hotel_name'],
+            hotel_profile_picture=collab['hotel_profile_picture'],
+            listing_id=str(collab['listing_id']),
+            listing_name=collab['listing_name'],
+            listing_location=collab['listing_location'],
+            
+            # Extended Hotel Details
+            hotel_location=collab['hotel_location'],
+            hotel_website=collab['hotel_website'],
+            hotel_about=collab['hotel_about'],
+            hotel_phone=collab['hotel_phone'],
+            
+            # Collaboration terms
+            collaboration_type=collab['collaboration_type'],
+            free_stay_min_nights=collab['free_stay_min_nights'],
+            free_stay_max_nights=collab['free_stay_max_nights'],
+            paid_amount=collab['paid_amount'],
+            discount_percentage=collab['discount_percentage'],
+            travel_date_from=collab['travel_date_from'],
+            travel_date_to=collab['travel_date_to'],
+            preferred_date_from=collab['preferred_date_from'],
+            preferred_date_to=collab['preferred_date_to'],
+            preferred_months=collab['preferred_months'],
+            platform_deliverables=deliverables,
+            consent=collab['consent'],
+            
+            updated_at=collab['updated_at'],
+            responded_at=collab['responded_at'],
+            cancelled_at=collab['cancelled_at'],
+            completed_at=collab['completed_at']
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching collaboration detail: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch collaboration details: {str(e)}"
         )
 
