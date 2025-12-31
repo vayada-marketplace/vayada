@@ -1,7 +1,7 @@
 """
 Chat routes for collaborations
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -29,33 +29,32 @@ class CreateChatMessageRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     """Response model for a chat message"""
     id: str
-    collaboration_id: str
-    sender_id: Optional[str] = None # Null for system messages
+    collaborationId: str = Field(alias="collaboration_id")
+    senderId: Optional[str] = Field(None, alias="sender_id") # Null for system messages
     content: str
-    message_type: str
+    messageType: str = Field(alias="message_type")
     metadata: Optional[dict] = None
-    created_at: datetime
-    read_at: Optional[datetime] = None
+    createdAt: datetime = Field(alias="created_at")
+    readAt: Optional[datetime] = Field(None, alias="read_at")
     
     # Sender info (joined)
-    sender_name: Optional[str] = None
-    sender_avatar: Optional[str] = None
-    
+    senderName: Optional[str] = Field(None, alias="sender_name")
+    senderAvatar: Optional[str] = Field(None, alias="sender_avatar")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class ConversationResponse(BaseModel):
     """Inbox thread / Conversation summary"""
-    collaboration_id: str
-    collaboration_status: str
-    partner_name: str
-    partner_avatar: Optional[str] = None
-    last_message_content: Optional[str] = None
-    last_message_at: Optional[datetime] = None
-    last_message_type: Optional[str] = None
-    unread_count: int = 0
-    my_role: str # 'creator' or 'hotel'
+    collaborationId: str = Field(alias="collaboration_id")
+    collaborationStatus: str = Field(alias="collaboration_status")
+    partnerName: str = Field(alias="partner_name")
+    partnerAvatar: Optional[str] = Field(None, alias="partner_avatar")
+    lastMessageContent: Optional[str] = Field(None, alias="last_message_content")
+    lastMessageAt: Optional[datetime] = Field(None, alias="last_message_at")
+    lastMessageType: Optional[str] = Field(None, alias="last_message_type")
+    unreadCount: int = Field(0, alias="unread_count")
+    myRole: str = Field(alias="my_role") # 'creator' or 'hotel'
     
     model_config = ConfigDict(populate_by_name=True)
 

@@ -1,7 +1,7 @@
 """
 Creator profile routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime, date
@@ -176,13 +176,13 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'creator':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
         
@@ -198,7 +198,7 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)
         
         if not creator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
         
@@ -260,7 +260,7 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile status: {str(e)}"
         )
 
@@ -279,13 +279,13 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'creator':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
         
@@ -302,7 +302,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
         
         if not creator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
         
@@ -389,12 +389,12 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile: {str(e)}"
         )
 
 
-@router.put("/me", response_model=CreatorProfileResponse, status_code=status.HTTP_200_OK)
+@router.put("/me", response_model=CreatorProfileResponse, status_code=http_status.HTTP_200_OK)
 async def update_creator_profile(
     request: UpdateCreatorProfileRequest,
     user_id: str = Depends(get_current_user_id)
@@ -419,13 +419,13 @@ async def update_creator_profile(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'creator':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
         
@@ -437,7 +437,7 @@ async def update_creator_profile(
         
         if not creator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
         
@@ -631,14 +631,14 @@ async def update_creator_profile(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update profile: {str(e)}"
         )
 
 
 @router.get("/me/collaborations", response_model=List[dict])
 async def get_creator_collaborations(
-    status: Optional[Literal["pending", "accepted", "declined", "completed", "cancelled"]] = Query(None, description="Filter by status"),
+    collab_status: Optional[Literal["pending", "accepted", "declined", "completed", "cancelled"]] = Query(None, alias="status", description="Filter by status"),
     initiated_by: Optional[Literal["creator", "hotel"]] = Query(None, description="Filter by who initiated"),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -657,7 +657,7 @@ async def get_creator_collaborations(
         
         if not user or user['type'] != 'creator':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
         
@@ -668,7 +668,7 @@ async def get_creator_collaborations(
         
         if not creator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
         
@@ -703,9 +703,9 @@ async def get_creator_collaborations(
         params = [creator_id]
         param_counter = 2
         
-        if status:
+        if collab_status:
             query += f" AND c.status = ${param_counter}"
-            params.append(status)
+            params.append(collab_status)
             param_counter += 1
         
         if initiated_by:
@@ -727,36 +727,36 @@ async def get_creator_collaborations(
             
             response.append({
                 "id": str(collab['id']),
-                "initiator_type": collab['initiator_type'],
-                "is_initiator": collab['initiator_type'] == 'creator',
+                "initiatorType": collab['initiator_type'],
+                "isInitiator": collab['initiator_type'] == 'creator',
                 "status": collab['status'],
-                "creator_id": str(collab['creator_id']),
-                "creator_name": collab['creator_name'],
-                "creator_profile_picture": collab['creator_profile_picture'],
-                "hotel_id": str(collab['hotel_id']),
-                "hotel_name": collab['hotel_name'],
-                "hotel_profile_picture": collab['hotel_profile_picture'],
-                "listing_id": str(collab['listing_id']),
-                "listing_name": collab['listing_name'],
-                "listing_location": collab['listing_location'],
-                "collaboration_type": collab['collaboration_type'],
-                "free_stay_min_nights": collab['free_stay_min_nights'],
-                "free_stay_max_nights": collab['free_stay_max_nights'],
-                "paid_amount": float(collab['paid_amount']) if collab['paid_amount'] else None,
-                "discount_percentage": collab['discount_percentage'],
-                "travel_date_from": collab['travel_date_from'].isoformat() if collab['travel_date_from'] else None,
-                "travel_date_to": collab['travel_date_to'].isoformat() if collab['travel_date_to'] else None,
-                "preferred_date_from": collab['preferred_date_from'].isoformat() if collab['preferred_date_from'] else None,
-                "preferred_date_to": collab['preferred_date_to'].isoformat() if collab['preferred_date_to'] else None,
-                "preferred_months": collab['preferred_months'],
-                "why_great_fit": collab['why_great_fit'],
-                "platform_deliverables": platform_deliverables_data,
+                "creatorId": str(collab['creator_id']),
+                "creatorName": collab['creator_name'],
+                "creatorProfilePicture": collab['creator_profile_picture'],
+                "hotelId": str(collab['hotel_id']),
+                "hotelName": collab['hotel_name'],
+                "hotelProfilePicture": collab['hotel_profile_picture'],
+                "listingId": str(collab['listing_id']),
+                "listingName": collab['listing_name'],
+                "listingLocation": collab['listing_location'],
+                "collaborationType": collab['collaboration_type'],
+                "freeStayMinNights": collab['free_stay_min_nights'],
+                "freeStayMaxNights": collab['free_stay_max_nights'],
+                "paidAmount": float(collab['paid_amount']) if collab['paid_amount'] else None,
+                "discountPercentage": collab['discount_percentage'],
+                "travelDateFrom": collab['travel_date_from'].isoformat() if collab['travel_date_from'] else None,
+                "travelDateTo": collab['travel_date_to'].isoformat() if collab['travel_date_to'] else None,
+                "preferredDateFrom": collab['preferred_date_from'].isoformat() if collab['preferred_date_from'] else None,
+                "preferredDateTo": collab['preferred_date_to'].isoformat() if collab['preferred_date_to'] else None,
+                "preferredMonths": collab['preferred_months'],
+                "whyGreatFit": collab['why_great_fit'],
+                "platformDeliverables": platform_deliverables_data,
                 "consent": collab['consent'],
-                "created_at": collab['created_at'].isoformat() if collab['created_at'] else None,
-                "updated_at": collab['updated_at'].isoformat() if collab['updated_at'] else None,
-                "responded_at": collab['responded_at'].isoformat() if collab['responded_at'] else None,
-                "cancelled_at": collab['cancelled_at'].isoformat() if collab['cancelled_at'] else None,
-                "completed_at": collab['completed_at'].isoformat() if collab['completed_at'] else None
+                "createdAt": collab['created_at'].isoformat() if collab['created_at'] else None,
+                "updatedAt": collab['updated_at'].isoformat() if collab['updated_at'] else None,
+                "respondedAt": collab['responded_at'].isoformat() if collab['responded_at'] else None,
+                "cancelledAt": collab['cancelled_at'].isoformat() if collab['cancelled_at'] else None,
+                "completedAt": collab['completed_at'].isoformat() if collab['completed_at'] else None
             })
         
         return response
@@ -766,7 +766,7 @@ async def get_creator_collaborations(
     except Exception as e:
         logger.error(f"Error fetching creator collaborations: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
         )
 

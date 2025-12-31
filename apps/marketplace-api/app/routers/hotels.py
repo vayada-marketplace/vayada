@@ -1,7 +1,7 @@
 """
 Hotel profile routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Request, Query
+from fastapi import APIRouter, HTTPException, status as http_status, Depends, UploadFile, File, Form, Request, Query
 from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator, ValidationError, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime, date
@@ -56,13 +56,13 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
         
@@ -80,7 +80,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         
         if not hotel:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -156,7 +156,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile status: {str(e)}"
         )
 
@@ -362,25 +362,25 @@ class CreatorReputation(BaseModel):
 class HotelCollaborationListResponse(BaseModel):
     """Slim response for collaboration list view"""
     id: str
-    initiator_type: str
-    is_initiator: bool
+    initiatorType: str = Field(alias="initiator_type")
+    isInitiator: bool = Field(alias="is_initiator")
     status: str
-    created_at: datetime
-    why_great_fit: Optional[str] = None
+    createdAt: datetime = Field(alias="created_at")
+    whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
     
     # Creator Summary
-    creator_id: str
-    creator_name: str
-    creator_profile_picture: Optional[str] = None
-    primary_handle: Optional[str] = None
-    creator_location: Optional[str] = None
-    total_followers: int = 0
-    avg_engagement_rate: float = 0.0
-    active_platform: Optional[str] = None
-    is_verified: bool = False
-    platform_deliverables: List[dict] = Field(default_factory=list)
-    travel_date_from: Optional[date] = None
-    travel_date_to: Optional[date] = None
+    creatorId: str = Field(alias="creator_id")
+    name: str = Field(alias="creator_name")
+    profilePicture: Optional[str] = Field(None, alias="creator_profile_picture")
+    handle: Optional[str] = Field(None, alias="primary_handle", description="Primary handle (highest followers)")
+    location: Optional[str] = Field(None, alias="creator_location")
+    totalFollowers: int = Field(0, alias="total_followers")
+    avgEngagementRate: float = Field(0.0, alias="avg_engagement_rate")
+    activePlatform: Optional[str] = Field(None, alias="active_platform")
+    isVerified: bool = Field(False, alias="is_verified")
+    platformDeliverables: List[dict] = Field(default_factory=list, alias="platform_deliverables")
+    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
+    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -392,35 +392,35 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     reputation: Optional[CreatorReputation] = None
     
     # Request Specifics
-    portfolio_link: Optional[str] = None
+    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     
     # Other metadata (optional but useful)
-    hotel_id: str
-    hotel_name: str
-    listing_id: str
-    listing_name: str
-    listing_location: str
+    hotelId: str = Field(alias="hotel_id")
+    hotelName: str = Field(alias="hotel_name")
+    listingId: str = Field(alias="listing_id")
+    listingName: str = Field(alias="listing_name")
+    listingLocation: str = Field(alias="listing_location")
     
     # Collaboration terms
-    collaboration_type: Optional[str] = None
-    discount_percentage: Optional[int] = None
-    paid_amount: Optional[Decimal] = None
-    free_stay_min_nights: Optional[int] = None
-    free_stay_max_nights: Optional[int] = None
-    preferred_date_from: Optional[date] = None
-    preferred_date_to: Optional[date] = None
-    preferred_months: Optional[List[str]] = None
+    collaborationType: Optional[str] = Field(None, alias="collaboration_type")
+    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
+    paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
+    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
+    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
+    preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")
+    preferredDateTo: Optional[date] = Field(None, alias="preferred_date_to")
+    preferredMonths: Optional[List[str]] = Field(None, alias="preferred_months")
     consent: Optional[bool] = None
     
-    updated_at: datetime
-    responded_at: Optional[datetime] = None
-    cancelled_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    updatedAt: datetime = Field(alias="updated_at")
+    respondedAt: Optional[datetime] = Field(None, alias="responded_at")
+    cancelledAt: Optional[datetime] = Field(None, alias="cancelled_at")
+    completedAt: Optional[datetime] = Field(None, alias="completed_at")
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
-@router.get("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
+@router.get("/me", response_model=HotelProfileResponse, status_code=http_status.HTTP_200_OK)
 async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
     """
     Get the complete profile data for the currently authenticated hotel user.
@@ -432,12 +432,12 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
         )
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         if user["type"] != "hotel":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
 
@@ -452,7 +452,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
         )
         if not hotel:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
 
@@ -562,12 +562,12 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get profile: {str(e)}"
         )
 
 
-@router.put("/me", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
+@router.put("/me", response_model=HotelProfileResponse, status_code=http_status.HTTP_200_OK)
 async def update_hotel_profile(
     http_request: Request,
     name: Optional[str] = Form(default=None),
@@ -638,7 +638,7 @@ async def update_hotel_profile(
                                 serializable_error[key] = str(value)
                     errors.append(serializable_error)
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=errors
                 )
             except Exception as e:
@@ -653,13 +653,13 @@ async def update_hotel_profile(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
         
@@ -676,7 +676,7 @@ async def update_hotel_profile(
         
         if not hotel:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -699,7 +699,7 @@ async def update_hotel_profile(
                     
                     if not is_valid:
                         raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
+                            status_code=http_status.HTTP_400_BAD_REQUEST,
                             detail=error_message or "Invalid image file"
                         )
                     
@@ -747,7 +747,7 @@ async def update_hotel_profile(
             except Exception as e:
                 logger.error(f"Error uploading picture: {e}")
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Failed to upload picture: {str(e)}"
                 )
         
@@ -974,17 +974,17 @@ async def update_hotel_profile(
         raise
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update profile: {str(e)}"
         )
 
 
-@router.post("/me/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/me/listings", response_model=ListingResponse, status_code=http_status.HTTP_201_CREATED)
 async def create_hotel_listing(
     request: CreateListingRequest,
     user_id: str = Depends(get_current_user_id)
@@ -1104,12 +1104,12 @@ async def create_hotel_listing(
         raise
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create listing: {str(e)}"
         )
 
@@ -1130,7 +1130,7 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
     
     if not listing:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Listing not found"
         )
     
@@ -1196,7 +1196,7 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
     }
 
 
-@router.put("/me/listings/{listing_id}", response_model=ListingResponse, status_code=status.HTTP_200_OK)
+@router.put("/me/listings/{listing_id}", response_model=ListingResponse, status_code=http_status.HTTP_200_OK)
 async def update_hotel_listing(
     listing_id: str,
     request: UpdateListingRequest,
@@ -1334,17 +1334,17 @@ async def update_hotel_listing(
         raise
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update listing: {str(e)}"
         )
 
 
-@router.delete("/me/listings/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/me/listings/{listing_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 async def delete_hotel_listing(
     listing_id: str,
     user_id: str = Depends(get_current_user_id)
@@ -1368,7 +1368,7 @@ async def delete_hotel_listing(
         
         if not listing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Listing not found"
             )
         
@@ -1400,15 +1400,15 @@ async def delete_hotel_listing(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete listing: {str(e)}"
         )
 
 
-@router.get("/me/collaborations", response_model=List[HotelCollaborationListResponse], status_code=status.HTTP_200_OK)
+@router.get("/me/collaborations", response_model=List[HotelCollaborationListResponse], status_code=http_status.HTTP_200_OK)
 async def get_hotel_collaborations(
     listing_id: Optional[str] = Query(None, description="Filter by listing ID"),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    collab_status: Optional[str] = Query(None, alias="status", description="Filter by status"),
     initiated_by: Optional[str] = Query(None, description="Filter by initiator type (creator/hotel)"),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -1428,7 +1428,7 @@ async def get_hotel_collaborations(
         
         if not user or user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
         
@@ -1439,7 +1439,7 @@ async def get_hotel_collaborations(
         
         if not hotel_profile:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1479,22 +1479,16 @@ async def get_hotel_collaborations(
         """
         
         params = [hotel_id]
-        param_counter = 2
-        
+        # Apply filters
         if listing_id:
-            query += f" AND c.listing_id = ${param_counter}"
+            query += " AND c.listing_id = $" + str(len(params) + 1)
             params.append(listing_id)
-            param_counter += 1
-        
-        if status:
-            query += f" AND c.status = ${param_counter}"
-            params.append(status)
-            param_counter += 1
-        
+        if collab_status:
+            query += " AND c.status = $" + str(len(params) + 1)
+            params.append(collab_status)
         if initiated_by:
-            query += f" AND c.initiator_type = ${param_counter}"
+            query += " AND c.initiator_type = $" + str(len(params) + 1)
             params.append(initiated_by)
-            param_counter += 1
         
         query += " ORDER BY c.created_at DESC"
         
@@ -1546,7 +1540,7 @@ async def get_hotel_collaborations(
     except Exception as e:
         logger.exception("Failed to fetch hotel collaborations")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
         )
 
@@ -1569,7 +1563,7 @@ async def get_hotel_collaboration_detail(
         
         if not user or user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
         
@@ -1580,7 +1574,7 @@ async def get_hotel_collaboration_detail(
         
         if not hotel_profile:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1619,7 +1613,7 @@ async def get_hotel_collaboration_detail(
         
         if not collab:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Collaboration not found"
             )
             
@@ -1759,7 +1753,7 @@ async def get_hotel_collaboration_detail(
     except Exception as e:
         logger.error(f"Error fetching collaboration detail: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaboration details: {str(e)}"
         )
 
