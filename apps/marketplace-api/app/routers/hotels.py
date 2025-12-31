@@ -372,7 +372,7 @@ class HotelCollaborationListResponse(BaseModel):
     creatorId: str = Field(alias="creator_id")
     name: str = Field(alias="creator_name")
     profilePicture: Optional[str] = Field(None, alias="creator_profile_picture")
-    handle: Optional[str] = Field(None, description="Primary handle (highest followers)")
+    handle: Optional[str] = Field(None, alias="primary_handle", description="Primary handle (highest followers)")
     location: Optional[str] = Field(None, alias="creator_location")
     totalFollowers: Optional[int] = Field(None, alias="total_followers")
     avgEngagementRate: Optional[float] = Field(None, alias="avg_engagement_rate")
@@ -395,7 +395,6 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     
     # Other metadata (optional but useful)
-    initiatorType: str = Field(alias="initiator_type")
     hotelId: str = Field(alias="hotel_id")
     hotelName: str = Field(alias="hotel_name")
     listingId: str = Field(alias="listing_id")
