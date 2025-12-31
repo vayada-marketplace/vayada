@@ -362,25 +362,25 @@ class CreatorReputation(BaseModel):
 class HotelCollaborationListResponse(BaseModel):
     """Slim response for collaboration list view"""
     id: str
-    initiatorType: str = Field(alias="initiator_type")
-    isInitiator: bool = Field(alias="is_initiator")
+    initiator_type: str
+    is_initiator: bool
     status: str
-    createdAt: datetime = Field(alias="created_at")
-    whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
+    created_at: datetime
+    why_great_fit: Optional[str] = None
     
     # Creator Summary
-    creatorId: str = Field(alias="creator_id")
-    name: str = Field(alias="creator_name")
-    profilePicture: Optional[str] = Field(None, alias="creator_profile_picture")
-    handle: Optional[str] = Field(None, alias="primary_handle", description="Primary handle (highest followers)")
-    location: Optional[str] = Field(None, alias="creator_location")
-    totalFollowers: Optional[int] = Field(None, alias="total_followers")
-    avgEngagementRate: Optional[float] = Field(None, alias="avg_engagement_rate")
-    activePlatform: Optional[str] = Field(None, alias="active_platform")
-    isVerified: bool = Field(alias="is_verified")
-    platformDeliverables: List[dict] = Field(default_factory=list, alias="platform_deliverables")
-    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
-    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
+    creator_id: str
+    creator_name: str
+    creator_profile_picture: Optional[str] = None
+    primary_handle: Optional[str] = None
+    creator_location: Optional[str] = None
+    total_followers: int = 0
+    avg_engagement_rate: float = 0.0
+    active_platform: Optional[str] = None
+    is_verified: bool = False
+    platform_deliverables: List[dict] = Field(default_factory=list)
+    travel_date_from: Optional[date] = None
+    travel_date_to: Optional[date] = None
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -392,30 +392,30 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     reputation: Optional[CreatorReputation] = None
     
     # Request Specifics
-    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
+    portfolio_link: Optional[str] = None
     
     # Other metadata (optional but useful)
-    hotelId: str = Field(alias="hotel_id")
-    hotelName: str = Field(alias="hotel_name")
-    listingId: str = Field(alias="listing_id")
-    listingName: str = Field(alias="listing_name")
-    listingLocation: str = Field(alias="listing_location")
+    hotel_id: str
+    hotel_name: str
+    listing_id: str
+    listing_name: str
+    listing_location: str
     
     # Collaboration terms
-    collaborationType: Optional[str] = Field(None, alias="collaboration_type")
-    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
-    paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
-    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
-    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
-    preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")
-    preferredDateTo: Optional[date] = Field(None, alias="preferred_date_to")
-    preferredMonths: Optional[List[str]] = Field(None, alias="preferred_months")
+    collaboration_type: Optional[str] = None
+    discount_percentage: Optional[int] = None
+    paid_amount: Optional[Decimal] = None
+    free_stay_min_nights: Optional[int] = None
+    free_stay_max_nights: Optional[int] = None
+    preferred_date_from: Optional[date] = None
+    preferred_date_to: Optional[date] = None
+    preferred_months: Optional[List[str]] = None
     consent: Optional[bool] = None
     
-    updatedAt: datetime = Field(alias="updated_at")
-    respondedAt: Optional[datetime] = Field(None, alias="responded_at")
-    cancelledAt: Optional[datetime] = Field(None, alias="cancelled_at")
-    completedAt: Optional[datetime] = Field(None, alias="completed_at")
+    updated_at: datetime
+    responded_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -1544,7 +1544,7 @@ async def get_hotel_collaborations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching hotel collaborations: {str(e)}")
+        logger.exception("Failed to fetch hotel collaborations")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
@@ -1695,14 +1695,26 @@ async def get_hotel_collaboration_detail(
                 reviews=reviews
             )
             
-        platform_deliverables_data = json.loads(collab['platform_deliverables']) if collab['platform_deliverables'] else []
-        
+        # Safely handle platform_deliverables (might be string or already parsed jsonb)
+        deliverables = collab['platform_deliverables']
+        if deliverables and isinstance(deliverables, str):
+            try:
+                deliverables = json.loads(deliverables)
+            except:
+                deliverables = []
+        elif not deliverables:
+            deliverables = []
+
         return HotelCollaborationDetailResponse(
             # List Response Fields
             id=str(collab['id']),
+            initiator_type=collab['initiator_type'],
+            is_initiator=collab['initiator_type'] == 'hotel',
             status=collab['status'],
             created_at=collab['created_at'],
             why_great_fit=collab['why_great_fit'],
+            
+            # Creator Summary
             creator_id=str(collab['creator_id']),
             creator_name=collab['creator_name'],
             creator_profile_picture=collab['creator_profile_picture'],
@@ -1710,18 +1722,16 @@ async def get_hotel_collaboration_detail(
             total_followers=total_followers,
             avg_engagement_rate=float(avg_engagement_rate),
             is_verified=True, # You might want to fetch actual status
-            handle=primary_handle,
+            primary_handle=primary_handle,
             
             # Detail Fields
             platforms=platforms_response,
             reputation=reputation,
-            platform_deliverables=platform_deliverables_data,
+            platform_deliverables=deliverables,
             travel_date_from=collab['travel_date_from'],
             travel_date_to=collab['travel_date_to'],
             portfolio_link=collab['creator_portfolio_link'],
             
-            initiator_type=collab['initiator_type'],
-            is_initiator=collab['initiator_type'] == 'hotel',
             hotel_id=str(collab['hotel_id']),
             hotel_name=collab['hotel_name'],
             listing_id=str(collab['listing_id']),
