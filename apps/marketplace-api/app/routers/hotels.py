@@ -362,8 +362,8 @@ class CreatorReputation(BaseModel):
 class HotelCollaborationListResponse(BaseModel):
     """Slim response for collaboration list view"""
     id: str
-    initiator_type: str = Field(alias="initiator_type")
-    is_initiator: bool = Field(alias="is_initiator")
+    initiatorType: str = Field(alias="initiator_type")
+    isInitiator: bool = Field(alias="is_initiator")
     status: str
     createdAt: datetime = Field(alias="created_at")
     whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
@@ -1506,12 +1506,22 @@ async def get_hotel_collaborations(
         # Build response
         response = []
         for collab in collaborations_data:
+            # Safely handle platform_deliverables (might be string or already parsed jsonb)
+            deliverables = collab['platform_deliverables']
+            if deliverables and isinstance(deliverables, str):
+                try:
+                    deliverables = json.loads(deliverables)
+                except:
+                    deliverables = []
+            elif not deliverables:
+                deliverables = []
+
             response.append({
                 "id": str(collab['id']),
                 "initiator_type": collab['initiator_type'],
                 "is_initiator": collab['initiator_type'] == 'hotel',
                 "status": collab['status'],
-                "created_at": collab['created_at'].isoformat() if collab['created_at'] else None,
+                "created_at": collab['created_at'],
                 "why_great_fit": collab['why_great_fit'],
                 
                 # Creator Summary
@@ -1520,11 +1530,11 @@ async def get_hotel_collaborations(
                 "creator_profile_picture": collab['creator_profile_picture'],
                 "creator_location": collab['creator_location'],
                 "primary_handle": collab['primary_handle'],
-                "total_followers": collab['total_followers'],
-                "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] else None,
+                "total_followers": int(collab['total_followers']) if collab['total_followers'] is not None else 0,
+                "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] is not None else 0.0,
                 "active_platform": collab['active_platform'],
                 "is_verified": collab['user_status'] == 'verified',
-                "platform_deliverables": json.loads(collab['platform_deliverables']) if collab['platform_deliverables'] else [],
+                "platform_deliverables": deliverables,
                 "travel_date_from": collab['travel_date_from'],
                 "travel_date_to": collab['travel_date_to']
             })
