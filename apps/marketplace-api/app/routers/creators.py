@@ -172,6 +172,7 @@ class CreatorCollaborationListResponse(BaseModel):
     listingId: str = Field(alias="listing_id")
     listingName: str = Field(alias="listing_name")
     listingLocation: str = Field(alias="listing_location")
+    listingImages: List[str] = Field(default_factory=list, alias="listing_images")
     
     collaborationType: Optional[str] = Field(None, alias="collaboration_type")
     travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
@@ -186,6 +187,21 @@ class CreatorCollaborationListResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
+class CreatorRequirementsResponse(BaseModel):
+    """Creator requirements response model"""
+    id: str
+    listingId: str = Field(alias="listing_id")
+    platforms: List[str]
+    minFollowers: Optional[int] = Field(None, alias="min_followers")
+    targetCountries: List[str] = Field(alias="target_countries")
+    targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
+    targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
 class CreatorCollaborationDetailResponse(CreatorCollaborationListResponse):
     """Detailed response for modal view (creator perspective)"""
     # Extended Hotel Details
@@ -193,6 +209,9 @@ class CreatorCollaborationDetailResponse(CreatorCollaborationListResponse):
     hotelWebsite: Optional[str] = Field(None, alias="hotel_website")
     hotelAbout: Optional[str] = Field(None, alias="hotel_about")
     hotelPhone: Optional[str] = Field(None, alias="hotel_phone")
+    
+    # Listing Requirements (Looking for)
+    creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
     
     # Collaboration terms
     preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")
@@ -739,7 +758,8 @@ async def get_creator_collaborations(
                 hp.name as hotel_name,
                 hp.picture as hotel_profile_picture,
                 hl.name as listing_name,
-                hl.location as listing_location
+                hl.location as listing_location,
+                hl.images as listing_images
             FROM collaborations c
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             JOIN hotel_listings hl ON hl.id = c.listing_id
@@ -782,6 +802,7 @@ async def get_creator_collaborations(
                 listing_id=str(collab['listing_id']),
                 listing_name=collab['listing_name'],
                 listing_location=collab['listing_location'],
+                listing_images=collab['listing_images'] or [],
                 collaboration_type=collab['collaboration_type'],
                 travel_date_from=collab['travel_date_from'],
                 travel_date_to=collab['travel_date_to'],
@@ -857,10 +878,20 @@ async def get_creator_collaboration_detail(
                 hp.about as hotel_about,
                 hp.phone as hotel_phone,
                 hl.name as listing_name,
-                hl.location as listing_location
+                hl.location as listing_location,
+                hl.images as listing_images,
+                lcr.id as req_id,
+                lcr.platforms as req_platforms,
+                lcr.min_followers as req_min_followers,
+                lcr.target_countries as req_target_countries,
+                lcr.target_age_min as req_target_age_min,
+                lcr.target_age_max as req_target_age_max,
+                lcr.created_at as req_created_at,
+                lcr.updated_at as req_updated_at
             FROM collaborations c
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             JOIN hotel_listings hl ON hl.id = c.listing_id
+            LEFT JOIN listing_creator_requirements lcr ON lcr.listing_id = hl.id
             WHERE c.id = $1 AND c.creator_id = $2
             """,
             collaboration_id,
@@ -883,6 +914,21 @@ async def get_creator_collaboration_detail(
         elif not deliverables:
             deliverables = []
 
+        # Prepare creator requirements if they exist
+        creator_requirements = None
+        if collab['req_id']:
+            creator_requirements = CreatorRequirementsResponse(
+                id=str(collab['req_id']),
+                listing_id=str(collab['listing_id']),
+                platforms=collab['req_platforms'],
+                min_followers=collab['req_min_followers'],
+                target_countries=collab['req_target_countries'],
+                target_age_min=collab['req_target_age_min'],
+                target_age_max=collab['req_target_age_max'],
+                created_at=collab['req_created_at'],
+                updated_at=collab['req_updated_at']
+            )
+
         return CreatorCollaborationDetailResponse(
             id=str(collab['id']),
             initiator_type=collab['initiator_type'],
@@ -898,12 +944,16 @@ async def get_creator_collaboration_detail(
             listing_id=str(collab['listing_id']),
             listing_name=collab['listing_name'],
             listing_location=collab['listing_location'],
+            listing_images=collab['listing_images'] or [],
             
             # Extended Hotel Details
             hotel_location=collab['hotel_location'],
             hotel_website=collab['hotel_website'],
             hotel_about=collab['hotel_about'],
             hotel_phone=collab['hotel_phone'],
+            
+            # Listing Requirements (Looking for)
+            creator_requirements=creator_requirements,
             
             # Collaboration terms
             collaboration_type=collab['collaboration_type'],
