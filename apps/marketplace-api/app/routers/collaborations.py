@@ -193,6 +193,12 @@ class RespondToCollaborationRequest(BaseModel):
 
 class UpdateCollaborationTermsRequest(BaseModel):
     """Request model for suggesting changes (Negotiation)"""
+    collaboration_type: Optional[Literal["Free Stay", "Paid", "Discount"]] = None
+    free_stay_min_nights: Optional[int] = None
+    free_stay_max_nights: Optional[int] = None
+    paid_amount: Optional[Decimal] = None
+    discount_percentage: Optional[int] = None
+    stay_nights: Optional[int] = None
     travel_date_from: Optional[date] = None
     travel_date_to: Optional[date] = None
     platform_deliverables: Optional[List[PlatformDeliverablesItem]] = None
@@ -200,8 +206,18 @@ class UpdateCollaborationTermsRequest(BaseModel):
     # Validation logic to ensure at least one field is provided
     @model_validator(mode='after')
     def check_at_least_one_update(self):
-        if not self.travel_date_from and not self.travel_date_to and not self.platform_deliverables:
-            raise ValueError("At least one term (dates or deliverables) must be updated")
+        if not any([
+            self.collaboration_type,
+            self.free_stay_min_nights,
+            self.free_stay_max_nights,
+            self.paid_amount,
+            self.discount_percentage,
+            self.stay_nights,
+            self.travel_date_from,
+            self.travel_date_to,
+            self.platform_deliverables
+        ]):
+            raise ValueError("At least one term (type, amount, dates or deliverables) must be updated")
         return self
         
     model_config = ConfigDict(populate_by_name=True)
@@ -231,6 +247,7 @@ class CollaborationResponse(BaseModel):
     free_stay_max_nights: Optional[int] = None
     paid_amount: Optional[Decimal] = None
     discount_percentage: Optional[int] = None
+    stay_nights: Optional[int] = None
     
     # Dates
     travel_date_from: Optional[date] = None
@@ -667,6 +684,78 @@ async def update_collaboration_terms(
         param_idx = 2
         diff_summary = []
         
+        if request.collaboration_type:
+            updates.append(f"collaboration_type = ${param_idx}")
+            update_params.append(request.collaboration_type)
+            param_idx += 1
+            diff_summary.append(f"Type: {request.collaboration_type}")
+            
+            # Nullify fields of other types when type changes
+            if request.collaboration_type == "Free Stay":
+                updates.append("paid_amount = NULL")
+                updates.append("discount_percentage = NULL")
+            elif request.collaboration_type == "Paid":
+                updates.append("free_stay_min_nights = NULL")
+                updates.append("free_stay_max_nights = NULL")
+                updates.append("discount_percentage = NULL")
+            elif request.collaboration_type == "Discount":
+                updates.append("free_stay_min_nights = NULL")
+                updates.append("free_stay_max_nights = NULL")
+                updates.append("paid_amount = NULL")
+
+        # Handle nights consistency
+        target_min = request.free_stay_min_nights
+        target_max = request.free_stay_max_nights
+        
+        if request.stay_nights is not None:
+            target_min = request.stay_nights
+            target_max = request.stay_nights
+            
+        # If switching to Free Stay or already in it, ensure both min/max are set if one is provided
+        is_now_free_stay = (request.collaboration_type == "Free Stay") or \
+                          (not request.collaboration_type and current_collab['collaboration_type'] == "Free Stay")
+                          
+        if is_now_free_stay:
+            if target_min is not None and target_max is None and current_collab['free_stay_max_nights'] is None:
+                target_max = target_min
+            elif target_max is not None and target_min is None and current_collab['free_stay_min_nights'] is None:
+                target_min = target_max
+
+        if target_min is not None:
+            updates.append(f"free_stay_min_nights = ${param_idx}")
+            update_params.append(target_min)
+            param_idx += 1
+            diff_summary.append(f"Min Nights: {target_min}")
+
+        if target_max is not None:
+            updates.append(f"free_stay_max_nights = ${param_idx}")
+            update_params.append(target_max)
+            param_idx += 1
+            # Only add to summary if it's different from min or we didn't add stay_nights summary
+            if target_max != target_min:
+                diff_summary.append(f"Max Nights: {target_max}")
+            elif request.stay_nights is not None:
+                # If we used stay_nights, we already have a nice summary "Nights: X" logic below? 
+                # Actually let's just use stay_nights if provided
+                pass
+
+        if request.stay_nights is not None:
+            # Re-summarize if we used the convenience field
+            diff_summary = [s for s in diff_summary if not s.startswith("Min Nights") and not s.startswith("Max Nights")]
+            diff_summary.append(f"Nights: {request.stay_nights}")
+
+        if request.paid_amount is not None:
+            updates.append(f"paid_amount = ${param_idx}")
+            update_params.append(request.paid_amount)
+            param_idx += 1
+            diff_summary.append(f"Amount: {request.paid_amount}")
+
+        if request.discount_percentage is not None:
+            updates.append(f"discount_percentage = ${param_idx}")
+            update_params.append(request.discount_percentage)
+            param_idx += 1
+            diff_summary.append(f"Discount: {request.discount_percentage}%")
+
         if request.travel_date_from:
             updates.append(f"travel_date_from = ${param_idx}")
             update_params.append(request.travel_date_from)
@@ -765,6 +854,7 @@ async def update_collaboration_terms(
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
             discount_percentage=updated['discount_percentage'],
+            stay_nights=updated['free_stay_min_nights'] if updated['free_stay_min_nights'] == updated['free_stay_max_nights'] else None,
             travel_date_from=updated['travel_date_from'],
             travel_date_to=updated['travel_date_to'],
             preferred_date_from=updated['preferred_date_from'],
