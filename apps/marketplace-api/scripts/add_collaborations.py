@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -66,8 +66,10 @@ async def add_collaborations():
                 "initiator_type": "creator",
                 "status": "pending",
                 "why_great_fit": "I have a strong following in the travel niche with 150K+ Instagram followers. My content focuses on luxury destinations and would perfectly showcase your beautiful resort.",
-                "travel_date_from": "2024-06-01",
-                "travel_date_to": "2024-06-05",
+                "collaboration_type": "Paid",
+                "paid_amount": Decimal("1500.00"),
+                "travel_date_from": date(2024, 6, 1),
+                "travel_date_to": date(2024, 6, 5),
                 "preferred_months": ["Jun", "Jul"],
                 "consent": True,
                 "platform_deliverables": [
@@ -93,8 +95,8 @@ async def add_collaborations():
                 "initiator_type": "creator",
                 "status": "accepted",
                 "why_great_fit": "As a food blogger with 200K Instagram followers, I would love to showcase your restaurant and dining experiences. My audience is highly engaged with food and travel content.",
-                "travel_date_from": "2024-05-15",
-                "travel_date_to": "2024-05-20",
+                "travel_date_from": date(2024, 5, 15),
+                "travel_date_to": date(2024, 5, 20),
                 "preferred_months": ["May", "Jun"],
                 "consent": True,
                 "platform_deliverables": [
@@ -121,8 +123,8 @@ async def add_collaborations():
                 "initiator_type": "creator",
                 "status": "declined",
                 "why_great_fit": "I specialize in adventure travel content and would love to showcase your ski-in/ski-out chalet. My YouTube channel has 220K subscribers interested in outdoor activities.",
-                "travel_date_from": "2024-12-20",
-                "travel_date_to": "2024-12-27",
+                "travel_date_from": date(2024, 12, 20),
+                "travel_date_to": date(2024, 12, 27),
                 "preferred_months": ["Dec", "Jan"],
                 "consent": True,
                 "platform_deliverables": [
@@ -148,8 +150,10 @@ async def add_collaborations():
                 "initiator_type": "creator",
                 "status": "completed",
                 "why_great_fit": "Perfect match for my travel content! I've been wanting to visit Bali and your villa looks stunning. My audience would love this destination.",
-                "travel_date_from": "2024-04-10",
-                "travel_date_to": "2024-04-15",
+                "collaboration_type": "Discount",
+                "discount_percentage": 20,
+                "travel_date_from": date(2024, 4, 10),
+                "travel_date_to": date(2024, 4, 15),
                 "preferred_months": ["Apr", "May"],
                 "consent": True,
                 "platform_deliverables": [
@@ -180,8 +184,8 @@ async def add_collaborations():
                 "status": "pending",
                 "collaboration_type": "Discount",
                 "discount_percentage": 30,
-                "preferred_date_from": "2024-02-01",
-                "preferred_date_to": "2024-02-29",
+                "preferred_date_from": date(2024, 2, 1),
+                "preferred_date_to": date(2024, 2, 29),
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
@@ -207,8 +211,8 @@ async def add_collaborations():
                 "collaboration_type": "Free Stay",
                 "free_stay_min_nights": 3,
                 "free_stay_max_nights": 7,
-                "preferred_date_from": "2024-03-01",
-                "preferred_date_to": "2024-05-31",
+                "preferred_date_from": date(2024, 3, 1),
+                "preferred_date_to": date(2024, 5, 31),
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
@@ -234,8 +238,8 @@ async def add_collaborations():
                 "status": "pending",
                 "collaboration_type": "Discount",
                 "discount_percentage": 25,
-                "preferred_date_from": "2024-09-01",
-                "preferred_date_to": "2024-11-30",
+                "preferred_date_from": date(2024, 9, 1),
+                "preferred_date_to": date(2024, 11, 30),
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
@@ -260,8 +264,8 @@ async def add_collaborations():
                 "collaboration_type": "Free Stay",
                 "free_stay_min_nights": 3,
                 "free_stay_max_nights": 7,
-                "preferred_date_from": "2024-04-01",
-                "preferred_date_to": "2024-06-30",
+                "preferred_date_from": date(2024, 4, 1),
+                "preferred_date_to": date(2024, 6, 30),
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
@@ -286,8 +290,8 @@ async def add_collaborations():
                 "status": "accepted",
                 "collaboration_type": "Paid",
                 "paid_amount": Decimal("3000.00"),
-                "preferred_date_from": "2024-04-01",
-                "preferred_date_to": "2024-08-31",
+                "preferred_date_from": date(2024, 4, 1),
+                "preferred_date_to": date(2024, 8, 31),
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
@@ -305,7 +309,42 @@ async def add_collaborations():
                 ],
                 "responded_at": datetime(2024, 1, 11, 15, 30, 0)
             },
+            {
+                "creator_email": "creator1@mock.com",
+                "hotel_email": "hotel2@mock.com",
+                "listing_name": "Alpine Chalet",
+                "initiator_type": "hotel",
+                "status": "accepted",
+                "collaboration_type": "Paid",
+                "paid_amount": Decimal("2500.00"),
+                "preferred_date_from": date(2024, 5, 1),
+                "preferred_date_to": date(2024, 7, 31),
+                "platform_deliverables": [
+                    {
+                        "platform": "Instagram",
+                        "deliverables": [
+                            {"type": "Instagram Post", "quantity": 3},
+                            {"type": "Instagram Stories", "quantity": 6}
+                        ]
+                    }
+                ],
+                "responded_at": datetime(2024, 1, 15, 11, 0, 0)
+            },
         ]
+        
+        # Cleanup existing mock collaborations to ensure fresh data
+        print("🧹 Cleaning up existing mock collaborations...")
+        await conn.execute(
+            """
+            DELETE FROM collaborations 
+            WHERE creator_id IN (
+                SELECT c.id FROM creators c 
+                JOIN users u ON u.id = c.user_id 
+                WHERE u.email LIKE $1
+            )
+            """,
+            '%@mock.com'
+        )
         
         print("🤝 Creating collaboration requests...")
         collaboration_count = 0
