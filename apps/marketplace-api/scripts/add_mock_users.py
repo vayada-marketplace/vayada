@@ -735,6 +735,13 @@ async def add_mock_users():
         listing_map = {row['id']: row for row in all_listings}
         
         # Define collaboration requests
+        # Status Flow:
+        # - pending: Initial application/invitation, awaiting response
+        # - negotiating: One party accepted, chat open for bargaining (both parties discussing terms)
+        # - accepted: Both parties approved final terms (ready to execute)
+        # - declined: Rejected by recipient
+        # - completed: Collaboration finished, deliverables done
+        # - cancelled: Cancelled by either party
         collaboration_requests = [
             # Creator-initiated (applications)
             {
@@ -769,7 +776,7 @@ async def add_mock_users():
                 "hotel_email": "hotel3@mock.com",
                 "listing_name": "Oceanfront Suite",
                 "initiator_type": "creator",
-                "status": "accepted",
+                "status": "negotiating",
                 "why_great_fit": "As a food blogger with 200K Instagram followers, I would love to showcase your restaurant and dining experiences. My audience is highly engaged with food and travel content.",
                 "travel_date_from": "2024-05-15",
                 "travel_date_to": "2024-05-20",
@@ -790,7 +797,9 @@ async def add_mock_users():
                         ]
                     }
                 ],
-                "responded_at": datetime(2024, 1, 10, 12, 0, 0)
+                "responded_at": datetime(2024, 1, 10, 12, 0, 0),
+                "hotel_agreed_at": datetime(2024, 1, 10, 12, 0, 0),
+                "creator_agreed_at": datetime(2024, 1, 10, 14, 30, 0)
             },
             {
                 "creator_email": "creator4@mock.com",
@@ -902,7 +911,9 @@ async def add_mock_users():
                         ]
                     }
                 ],
-                "responded_at": datetime(2024, 1, 12, 9, 0, 0)
+                "responded_at": datetime(2024, 1, 12, 9, 0, 0),
+                "hotel_agreed_at": datetime(2024, 1, 12, 9, 0, 0),
+                "creator_agreed_at": datetime(2024, 1, 12, 10, 15, 0)
             },
             {
                 "creator_email": "creator4@mock.com",
@@ -981,7 +992,9 @@ async def add_mock_users():
                         ]
                     }
                 ],
-                "responded_at": datetime(2024, 1, 11, 15, 30, 0)
+                "responded_at": datetime(2024, 1, 11, 15, 30, 0),
+                "hotel_agreed_at": datetime(2024, 1, 11, 15, 30, 0),
+                "creator_agreed_at": datetime(2024, 1, 11, 16, 45, 0)
             },
             # Negotiating collaboration (Workflow Showcase)
             {
@@ -1035,7 +1048,7 @@ async def add_mock_users():
             existing = await conn.fetchrow(
                 """
                 SELECT id FROM collaborations 
-                WHERE creator_id = $1 AND listing_id = $2 AND status IN ('pending', 'accepted')
+                WHERE creator_id = $1 AND listing_id = $2 AND status IN ('pending', 'negotiating', 'accepted')
                 """,
                 creator_id, listing_id
             )

@@ -467,6 +467,15 @@ async def respond_to_collaboration_request(
 ):
     """
     Accept or decline a collaboration request (initial invitation or application).
+    
+    When accepting:
+    - Status changes from 'pending' to 'negotiating'
+    - Chat becomes available for both parties to discuss and bargain terms
+    - Use the /approve endpoint to finalize and mark as 'accepted' when both parties agree
+    
+    When declining:
+    - Status changes to 'declined'
+    - Collaboration is closed
     """
     try:
         # Fetch collaboration
@@ -511,7 +520,13 @@ async def respond_to_collaboration_request(
             raise HTTPException(status_code=403, detail="Not authorized to respond to this collaboration request")
 
         # Update status
-        new_status = request.status
+        # When accepting, move to 'negotiating' status to enable chat for bargaining
+        # Only the /approve endpoint should mark as 'accepted' when both parties agree
+        if request.status == "accepted":
+            new_status = "negotiating"
+        else:
+            new_status = request.status
+            
         updates = [
             "status = $1",
             "responded_at = NOW()",
@@ -519,10 +534,12 @@ async def respond_to_collaboration_request(
         ]
         params = [new_status, collaboration_id]
         
-        if new_status == "accepted":
-            # If accepted, both parties agree to initial terms
-            updates.append("hotel_agreed_at = NOW()")
-            updates.append("creator_agreed_at = NOW()")
+        if request.status == "accepted":
+            # Mark that the recipient agreed to start negotiating
+            if recipient_role == "Hotel":
+                updates.append("hotel_agreed_at = NOW()")
+            else:
+                updates.append("creator_agreed_at = NOW()")
         
         query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = ${len(params)} RETURNING *"
         
@@ -532,16 +549,19 @@ async def respond_to_collaboration_request(
                 await conn.execute(query, *params)
                 
                 # Create system messages
-                status_icon = "✅" if new_status == "accepted" else "❌"
-                action_text = "accepted" if new_status == "accepted" else "declined"
-                msg = f"{status_icon} {recipient_role} has {action_text} the collaboration request."
-                if request.response_message:
-                    msg += f"\n\nMessage: {request.response_message}"
-                
-                await create_system_message(collaboration_id, msg, conn=conn)
-                
-                if new_status == "accepted":
-                    await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
+                if request.status == "accepted":
+                    # Accepting means ready to negotiate
+                    msg = f"✅ {recipient_role} is ready to discuss the collaboration terms."
+                    if request.response_message:
+                        msg += f"\n\nMessage: {request.response_message}"
+                    await create_system_message(collaboration_id, msg, conn=conn)
+                    await create_system_message(collaboration_id, "💬 Chat is now open! Discuss and finalize the terms.", conn=conn)
+                else:
+                    # Declined
+                    msg = f"❌ {recipient_role} has declined the collaboration request."
+                    if request.response_message:
+                        msg += f"\n\nMessage: {request.response_message}"
+                    await create_system_message(collaboration_id, msg, conn=conn)
 
         # Fetch full data for response
         updated = await Database.fetchrow(
