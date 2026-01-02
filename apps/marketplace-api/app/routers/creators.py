@@ -193,7 +193,7 @@ class CreatorRequirementsResponse(BaseModel):
     listingId: str = Field(alias="listing_id")
     platforms: List[str]
     minFollowers: Optional[int] = Field(None, alias="min_followers")
-    targetCountries: List[str] = Field(alias="target_countries")
+    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
     createdAt: datetime = Field(alias="created_at")
@@ -922,7 +922,7 @@ async def get_creator_collaboration_detail(
                 listing_id=str(collab['listing_id']),
                 platforms=collab['req_platforms'],
                 min_followers=collab['req_min_followers'],
-                target_countries=collab['req_target_countries'],
+                topCountries=collab['req_target_countries'],
                 target_age_min=collab['req_target_age_min'],
                 target_age_max=collab['req_target_age_max'],
                 created_at=collab['req_created_at'],

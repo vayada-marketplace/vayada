@@ -234,7 +234,7 @@ class CreatorRequirementsRequest(BaseModel):
     """Creator requirements request model"""
     platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
     minFollowers: Optional[int] = Field(None, gt=0, alias="min_followers")
-    targetCountries: List[str] = Field(..., min_length=1, alias="target_countries")
+    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")
     
@@ -298,7 +298,7 @@ class CreatorRequirementsResponse(BaseModel):
     listingId: str = Field(alias="listing_id")
     platforms: List[str]
     minFollowers: Optional[int] = Field(None, alias="min_followers")
-    targetCountries: List[str] = Field(alias="target_countries")
+    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
     createdAt: datetime = Field(alias="created_at")
@@ -1068,7 +1068,7 @@ async def create_hotel_listing(
                     listing_id,
                     request.creatorRequirements.platforms,
                     request.creatorRequirements.minFollowers,
-                    request.creatorRequirements.targetCountries,
+                    request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
                     request.creatorRequirements.targetAgeMax
                 )
@@ -1304,7 +1304,7 @@ async def update_hotel_listing(
                         listing_id,
                         request.creatorRequirements.platforms,
                         request.creatorRequirements.minFollowers,
-                        request.creatorRequirements.targetCountries,
+                        request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
                         request.creatorRequirements.targetAgeMax
                     )

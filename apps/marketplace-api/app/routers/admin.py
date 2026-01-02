@@ -210,7 +210,7 @@ class CreatorRequirementsResponse(BaseModel):
     listing_id: str
     platforms: List[str]
     min_followers: Optional[int] = None
-    target_countries: Optional[List[str]] = None
+    top_countries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     target_age_min: Optional[int] = None
     target_age_max: Optional[int] = None
     created_at: datetime
@@ -547,7 +547,7 @@ async def get_user_details(
                             listing_id=str(requirements_data['listing_id']),
                             platforms=requirements_data['platforms'],
                             min_followers=requirements_data['min_followers'],
-                            target_countries=requirements_data['target_countries'],
+                            top_countries=requirements_data['target_countries'],
                             target_age_min=requirements_data['target_age_min'],
                             target_age_max=requirements_data['target_age_max'],
                             created_at=requirements_data['created_at'],
@@ -791,7 +791,7 @@ async def create_user(
                                 listing_id,
                                 listing_request.creatorRequirements.platforms,
                                 listing_request.creatorRequirements.minFollowers,
-                                listing_request.creatorRequirements.targetCountries,
+                                listing_request.creatorRequirements.topCountries,
                                 listing_request.creatorRequirements.targetAgeMin,
                                 listing_request.creatorRequirements.targetAgeMax
                             )
@@ -1485,7 +1485,7 @@ async def create_hotel_listing(
                     listing_id,
                     request.creatorRequirements.platforms,
                     request.creatorRequirements.minFollowers,
-                    request.creatorRequirements.targetCountries,
+                    request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
                     request.creatorRequirements.targetAgeMax
                 )
@@ -1495,7 +1495,7 @@ async def create_hotel_listing(
                     listing_id=str(listing_id),
                     platforms=requirements['platforms'],
                     min_followers=requirements['min_followers'],
-                    target_countries=requirements['target_countries'],
+                    top_countries=requirements['target_countries'],
                     target_age_min=requirements['target_age_min'],
                     target_age_max=requirements['target_age_max'],
                     created_at=requirements['created_at'],
@@ -1603,7 +1603,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
             "listing_id": str(listing['id']),
             "platforms": requirements['platforms'],
             "min_followers": requirements['min_followers'],
-            "target_countries": requirements['target_countries'],
+            "top_countries": requirements['target_countries'],
             "target_age_min": requirements['target_age_min'],
             "target_age_max": requirements['target_age_max'],
             "created_at": requirements['created_at'],
@@ -1759,7 +1759,7 @@ async def update_hotel_listing(
                         listing_id,
                         request.creatorRequirements.platforms,
                         request.creatorRequirements.minFollowers,
-                        request.creatorRequirements.targetCountries,
+                        request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
                         request.creatorRequirements.targetAgeMax
                     )

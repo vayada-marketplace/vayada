@@ -38,7 +38,7 @@ class CreatorRequirementsResponse(BaseModel):
     listingId: str = Field(alias="listing_id")
     platforms: List[str]
     minFollowers: Optional[int] = Field(None, alias="min_followers")
-    targetCountries: List[str] = Field(alias="target_countries")
+    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
     createdAt: datetime = Field(alias="created_at")
