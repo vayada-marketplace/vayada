@@ -213,6 +213,7 @@ class CreatorRequirementsResponse(BaseModel):
     top_countries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     target_age_min: Optional[int] = None
     target_age_max: Optional[int] = None
+    target_age_groups: Optional[List[str]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -533,7 +534,7 @@ async def get_user_details(
                     requirements_data = await Database.fetchrow(
                         """
                         SELECT id, listing_id, platforms, min_followers, target_countries,
-                               target_age_min, target_age_max, created_at, updated_at
+                               target_age_min, target_age_max, target_age_groups, created_at, updated_at
                         FROM listing_creator_requirements
                         WHERE listing_id = $1
                         """,
@@ -550,6 +551,7 @@ async def get_user_details(
                             top_countries=requirements_data['target_countries'],
                             target_age_min=requirements_data['target_age_min'],
                             target_age_max=requirements_data['target_age_max'],
+                            target_age_groups=requirements_data['target_age_groups'],
                             created_at=requirements_data['created_at'],
                             updated_at=requirements_data['updated_at']
                         )
@@ -785,15 +787,16 @@ async def create_user(
                             await conn.execute(
                                 """
                                 INSERT INTO listing_creator_requirements
-                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                                VALUES ($1, $2, $3, $4, $5, $6)
+                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7)
                                 """,
                                 listing_id,
                                 listing_request.creatorRequirements.platforms,
                                 listing_request.creatorRequirements.minFollowers,
                                 listing_request.creatorRequirements.topCountries,
                                 listing_request.creatorRequirements.targetAgeMin,
-                                listing_request.creatorRequirements.targetAgeMax
+                                listing_request.creatorRequirements.targetAgeMax,
+                                listing_request.creatorRequirements.targetAgeGroups
                             )
         
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
@@ -1477,17 +1480,18 @@ async def create_hotel_listing(
                 requirements = await conn.fetchrow(
                     """
                     INSERT INTO listing_creator_requirements
-                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     RETURNING id, platforms, min_followers, target_countries, 
-                              target_age_min, target_age_max, created_at, updated_at
+                              target_age_min, target_age_max, target_age_groups, created_at, updated_at
                     """,
                     listing_id,
                     request.creatorRequirements.platforms,
                     request.creatorRequirements.minFollowers,
                     request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
-                    request.creatorRequirements.targetAgeMax
+                    request.creatorRequirements.targetAgeMax,
+                    request.creatorRequirements.targetAgeGroups
                 )
                 
                 requirements_response = CreatorRequirementsResponse(
@@ -1498,6 +1502,7 @@ async def create_hotel_listing(
                     top_countries=requirements['target_countries'],
                     target_age_min=requirements['target_age_min'],
                     target_age_max=requirements['target_age_max'],
+                    target_age_groups=requirements['target_age_groups'],
                     created_at=requirements['created_at'],
                     updated_at=requirements['updated_at']
                 )
@@ -1589,7 +1594,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
     requirements = await Database.fetchrow(
         """
         SELECT id, listing_id, platforms, min_followers, target_countries,
-               target_age_min, target_age_max, created_at, updated_at
+               target_age_min, target_age_max, target_age_groups, created_at, updated_at
         FROM listing_creator_requirements
         WHERE listing_id = $1
         """,
@@ -1606,6 +1611,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
             "top_countries": requirements['target_countries'],
             "target_age_min": requirements['target_age_min'],
             "target_age_max": requirements['target_age_max'],
+            "target_age_groups": requirements['target_age_groups'],
             "created_at": requirements['created_at'],
             "updated_at": requirements['updated_at']
         })
@@ -1753,15 +1759,16 @@ async def update_hotel_listing(
                     await conn.execute(
                         """
                         INSERT INTO listing_creator_requirements
-                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         listing_id,
                         request.creatorRequirements.platforms,
                         request.creatorRequirements.minFollowers,
                         request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
-                        request.creatorRequirements.targetAgeMax
+                        request.creatorRequirements.targetAgeMax,
+                        request.creatorRequirements.targetAgeGroups
                     )
         
         # Fetch updated listing with details

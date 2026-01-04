@@ -247,6 +247,7 @@ async def add_mock_users():
                             "target_countries": ["USA", "UK", "Canada", "Australia", "Germany"],
                             "target_age_min": 25,
                             "target_age_max": 45,
+                            "target_age_groups": ["25-34", "35-44"],
                         },
                     },
                     {
@@ -273,6 +274,7 @@ async def add_mock_users():
                             "target_countries": ["USA", "UK", "France"],
                             "target_age_min": 30,
                             "target_age_max": 50,
+                            "target_age_groups": ["25-34", "35-44", "45-54"],
                         },
                     },
                     {
@@ -299,6 +301,7 @@ async def add_mock_users():
                             "target_countries": ["USA", "UK", "Canada"],
                             "target_age_min": 25,
                             "target_age_max": 40,
+                            "target_age_groups": ["25-34", "35-44"],
                         },
                     },
                 ]
@@ -351,6 +354,7 @@ async def add_mock_users():
                             "target_countries": ["Switzerland", "Germany", "France", "Austria", "UK"],
                             "target_age_min": 28,
                             "target_age_max": 45,
+                            "target_age_groups": ["25-34", "35-44"],
                         },
                     },
                     {
@@ -376,6 +380,7 @@ async def add_mock_users():
                             "target_countries": ["Switzerland", "Germany", "France"],
                             "target_age_min": 30,
                             "target_age_max": 55,
+                            "target_age_groups": ["25-34", "35-44", "45-54", "55+"],
                         },
                     },
                 ]
@@ -428,6 +433,7 @@ async def add_mock_users():
                             "target_countries": ["Australia", "USA", "UK", "Indonesia", "Singapore"],
                             "target_age_min": 25,
                             "target_age_max": 45,
+                            "target_age_groups": ["25-34", "35-44"],
                         },
                     },
                     {
@@ -454,6 +460,7 @@ async def add_mock_users():
                             "target_countries": ["Australia", "USA", "UK"],
                             "target_age_min": 28,
                             "target_age_max": 50,
+                            "target_age_groups": ["25-34", "35-44", "45-54"],
                         },
                     },
                 ]
@@ -498,6 +505,7 @@ async def add_mock_users():
                             "target_countries": ["France", "UK", "Germany", "Spain"],
                             "target_age_min": 25,
                             "target_age_max": 45,
+                            "target_age_groups": ["25-34", "35-44"],
                         },
                     },
                 ]
@@ -674,8 +682,8 @@ async def add_mock_users():
                         await conn.execute(
                             """
                             INSERT INTO listing_creator_requirements
-                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                            VALUES ($1, $2, $3, $4, $5, $6)
+                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
                             """,
                             listing_id,
                             req_data["platforms"],
@@ -683,6 +691,7 @@ async def add_mock_users():
                             req_data["target_countries"],
                             req_data.get("target_age_min"),
                             req_data.get("target_age_max"),
+                            req_data.get("target_age_groups"),
                         )
                 
                 total_offerings = sum(len(l.get("collaboration_offerings", [])) for l in user_data.get("listings", []))
@@ -1079,9 +1088,8 @@ async def add_mock_users():
                 platform_deliverables_data.append(platform_item)
             
             platform_deliverables_json = json.dumps(platform_deliverables_data)
-            
             # Insert collaboration
-            await conn.execute(
+            collaboration = await conn.fetchrow(
                 """
                 INSERT INTO collaborations (
                     initiator_type, creator_id, hotel_id, listing_id, status,
@@ -1090,11 +1098,12 @@ async def add_mock_users():
                     paid_amount, discount_percentage,
                     travel_date_from, travel_date_to,
                     preferred_date_from, preferred_date_to,
-                    preferred_months, platform_deliverables, consent,
+                    preferred_months, consent,
                     responded_at, completed_at,
                     hotel_agreed_at, creator_agreed_at, term_last_updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                RETURNING id
                 """,
                 collab_req["initiator_type"],
                 creator_id,
@@ -1112,7 +1121,6 @@ async def add_mock_users():
                 collab_req.get("preferred_date_from"),
                 collab_req.get("preferred_date_to"),
                 collab_req.get("preferred_months"),
-                platform_deliverables_json,
                 collab_req.get("consent"),
                 collab_req.get("responded_at"),
                 collab_req.get("completed_at"),
@@ -1120,6 +1128,24 @@ async def add_mock_users():
                 collab_req.get("creator_agreed_at"),
                 collab_req.get("term_last_updated_at", datetime.now())
             )
+            
+            collaboration_id = collaboration['id']
+
+            # Insert deliverables into new table
+            for platform_item in collab_req["platform_deliverables"]:
+                for deliverable in platform_item["deliverables"]:
+                    await conn.execute(
+                        """
+                        INSERT INTO collaboration_deliverables (
+                            collaboration_id, platform, type, quantity, status
+                        ) VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        collaboration_id,
+                        platform_item["platform"],
+                        deliverable["type"],
+                        deliverable["quantity"],
+                        "completed" if collab_req["status"] == "completed" else "pending"
+                    )
             collaboration_count += 1
             print(f"   ✅ Created {collab_req['initiator_type']}-initiated collaboration: {collab_req['status']}")
         

@@ -196,6 +196,7 @@ class CreatorRequirementsResponse(BaseModel):
     topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
+    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
@@ -783,14 +784,40 @@ async def get_creator_collaborations(
         
         collaborations_data = await Database.fetch(query, *params)
         
-        if not collaborations_data:
-            return []
+        # Fetch all deliverables for these collaborations in one go
+        collab_ids = [str(c['id']) for c in collaborations_data]
+        all_deliverables_rows = await Database.fetch(
+            "SELECT id, collaboration_id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = ANY($1::uuid[])",
+            collab_ids
+        )
         
+        # Group deliverables by collaboration_id
+        collab_deliverables_map = {}
+        for row in all_deliverables_rows:
+            c_id = str(row['collaboration_id'])
+            if c_id not in collab_deliverables_map:
+                collab_deliverables_map[c_id] = {}
+            
+            p = row['platform']
+            if p not in collab_deliverables_map[c_id]:
+                collab_deliverables_map[c_id][p] = []
+                
+            collab_deliverables_map[c_id][p].append({
+                "id": str(row['id']),
+                "type": row['type'],
+                "quantity": row['quantity'],
+                "status": row['status']
+            })
+
         # Build response using the model
         response = []
         for collab in collaborations_data:
+            c_id = str(collab['id'])
+            collab_dils = collab_deliverables_map.get(c_id, {})
+            deliverables = [{"platform": p, "deliverables": dils} for p, dils in collab_dils.items()]
+
             response.append(CreatorCollaborationListResponse(
-                id=str(collab['id']),
+                id=c_id,
                 initiator_type=collab['initiator_type'],
                 is_initiator=collab['initiator_type'] == 'creator',
                 status=collab['status'],
@@ -809,9 +836,9 @@ async def get_creator_collaborations(
                 free_stay_min_nights=collab['free_stay_min_nights'],
                 free_stay_max_nights=collab['free_stay_max_nights'],
                 paid_amount=collab['paid_amount'],
-                discount_percentage=collab['discount_percentage']
+                discount_percentage=collab['discount_percentage'],
+                platform_deliverables=deliverables
             ))
-        
         return response
         
     except HTTPException:
@@ -868,7 +895,7 @@ async def get_creator_collaboration_detail(
                 c.paid_amount, c.discount_percentage,
                 c.travel_date_from, c.travel_date_to,
                 c.preferred_date_from, c.preferred_date_to,
-                c.preferred_months, c.platform_deliverables, c.consent,
+                c.preferred_months, c.consent,
                 c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
                 c.hotel_id, c.listing_id,
                 hp.name as hotel_name,
@@ -886,6 +913,7 @@ async def get_creator_collaboration_detail(
                 lcr.target_countries as req_target_countries,
                 lcr.target_age_min as req_target_age_min,
                 lcr.target_age_max as req_target_age_max,
+                lcr.target_age_groups as req_target_age_groups,
                 lcr.created_at as req_created_at,
                 lcr.updated_at as req_updated_at
             FROM collaborations c
@@ -904,15 +932,26 @@ async def get_creator_collaboration_detail(
                 detail="Collaboration not found"
             )
             
-        # Parse platform_deliverables (stored as jsonb)
-        deliverables = collab['platform_deliverables']
-        if deliverables and isinstance(deliverables, str):
-            try:
-                deliverables = json.loads(deliverables)
-            except:
-                deliverables = []
-        elif not deliverables:
-            deliverables = []
+        # Fetch deliverables from the new table
+        deliverables_rows = await Database.fetch(
+            "SELECT id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = $1 ORDER BY platform, type",
+            collaboration_id
+        )
+        
+        deliverables = []
+        platform_map = {}
+        for row in deliverables_rows:
+            p = row['platform']
+            if p not in platform_map:
+                platform_map[p] = []
+            platform_map[p].append({
+                "id": str(row['id']),
+                "type": row['type'],
+                "quantity": row['quantity'],
+                "status": row['status']
+            })
+            
+        deliverables = [{"platform": p, "deliverables": dils} for p, dils in platform_map.items()]
 
         # Prepare creator requirements if they exist
         creator_requirements = None
@@ -925,6 +964,7 @@ async def get_creator_collaboration_detail(
                 topCountries=collab['req_target_countries'],
                 target_age_min=collab['req_target_age_min'],
                 target_age_max=collab['req_target_age_max'],
+                target_age_groups=collab['req_target_age_groups'],
                 created_at=collab['req_created_at'],
                 updated_at=collab['req_updated_at']
             )

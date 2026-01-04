@@ -27,17 +27,16 @@ class PlatformDeliverable(BaseModel):
     id: Optional[str] = Field(None, description="Unique ID for the deliverable")
     type: str = Field(..., description="Deliverable type (e.g., 'Instagram Post', 'Instagram Stories')")
     quantity: int = Field(..., gt=0, description="Number of deliverables of this type")
-    completed: bool = Field(default=False, description="Whether the deliverable has been completed")
-    completed_at: Optional[datetime] = Field(None, description="When the deliverable was completed")
+    status: Literal["pending", "completed"] = Field(default="pending", description="Status of the deliverable")
     
     model_config = ConfigDict(populate_by_name=True)
 
 
 class PlatformDeliverablesItem(BaseModel):
     """Platform with its deliverables"""
-    platform: Literal["Instagram", "TikTok", "YouTube", "Facebook"] = Field(
+    platform: Literal["Instagram", "TikTok", "YouTube", "Facebook", "Content Package", "Custom"] = Field(
         ..., 
-        description="Social media platform"
+        description="Social media platform or content type"
     )
     deliverables: List[PlatformDeliverable] = Field(
         ..., 
@@ -281,6 +280,48 @@ class CollaborationResponse(BaseModel):
 
 
 # ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+async def get_collaboration_deliverables(collaboration_id: str) -> List[PlatformDeliverablesItem]:
+    """
+    Fetch deliverables for a collaboration from the collaboration_deliverables table
+    and format them into the PlatformDeliverablesItem structure.
+    """
+    rows = await Database.fetch(
+        """
+        SELECT id, platform, type, quantity, status
+        FROM collaboration_deliverables
+        WHERE collaboration_id = $1
+        ORDER BY platform, type
+        """,
+        collaboration_id
+    )
+    
+    if not rows:
+        return []
+        
+    # Group by platform
+    platform_map = {}
+    for row in rows:
+        platform = row['platform']
+        if platform not in platform_map:
+            platform_map[platform] = []
+            
+        platform_map[platform].append(PlatformDeliverable(
+            id=str(row['id']),
+            type=row['type'],
+            quantity=row['quantity'],
+            status=row['status']
+        ))
+        
+    return [
+        PlatformDeliverablesItem(platform=platform, deliverables=deliverables)
+        for platform, deliverables in platform_map.items()
+    ]
+
+
+# ============================================
 # ENDPOINTS
 # ============================================
 
@@ -384,23 +425,6 @@ async def create_collaboration(
         if not creator_user:
             raise HTTPException(status_code=404, detail="Creator not found")
         
-        # Prepare platform_deliverables as JSONB
-        platform_deliverables_json = json.dumps([
-            {
-                "platform": item.platform,
-                "deliverables": [
-                    {
-                        "id": d.id or str(uuid.uuid4()),
-                        "type": d.type, 
-                        "quantity": d.quantity,
-                        "completed": d.completed,
-                        "completed_at": d.completed_at.isoformat() if d.completed_at else None
-                    }
-                    for d in item.deliverables
-                ]
-            }
-            for item in request.platform_deliverables
-        ])
         
         # Create collaboration
         pool = await Database.get_pool()
@@ -415,9 +439,9 @@ async def create_collaboration(
                         paid_amount, discount_percentage,
                         travel_date_from, travel_date_to,
                         preferred_date_from, preferred_date_to,
-                        preferred_months, platform_deliverables, consent
+                        preferred_months, consent
                     )
-                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     RETURNING *
                     """,
                     request.initiator_type, creator_id, hotel_id, request.listing_id,
@@ -426,18 +450,29 @@ async def create_collaboration(
                     request.paid_amount, request.discount_percentage,
                     request.travel_date_from, request.travel_date_to,
                     request.preferred_date_from, request.preferred_date_to,
-                    request.preferred_months, platform_deliverables_json, request.consent
+                    request.preferred_months, request.consent
                 )
+                
+                collaboration_id = collaboration['id']
+                
+                # Insert deliverables into the new table
+                for platform_item in request.platform_deliverables:
+                    for d in platform_item.deliverables:
+                        await conn.execute(
+                            """
+                            INSERT INTO collaboration_deliverables (
+                                collaboration_id, platform, type, quantity, status
+                            ) VALUES ($1, $2, $3, $4, $5)
+                            """,
+                            collaboration_id,
+                            platform_item.platform,
+                            d.type,
+                            d.quantity,
+                            d.status
+                        )
         
-        # Parse platform_deliverables back
-        platform_deliverables_data = json.loads(collaboration['platform_deliverables'])
-        platform_deliverables_response = [
-            PlatformDeliverablesItem(
-                platform=item['platform'],
-                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
-            )
-            for item in platform_deliverables_data
-        ]
+        # Fetch deliverables from the new table for the response
+        platform_deliverables_response = await get_collaboration_deliverables(str(collaboration['id']))
         
         return CollaborationResponse(
             id=str(collaboration['id']),
@@ -595,13 +630,7 @@ async def respond_to_collaboration_request(
             collaboration_id
         )
         
-        plat_delivs = json.loads(updated['platform_deliverables'])
-        plat_delivs_resp = [
-            PlatformDeliverablesItem(
-                platform=item['platform'],
-                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
-            ) for item in plat_delivs
-        ]
+        plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
         
         return CollaborationResponse(
             id=str(updated['id']),
@@ -769,28 +798,10 @@ async def update_collaboration_terms(
             diff_summary.append(f"Check-out: {request.travel_date_to}")
             
         if request.platform_deliverables:
-            deliverables_json = json.dumps([
-                {
-                    "platform": item.platform,
-                    "deliverables": [
-                        {
-                            "id": d.id or str(uuid.uuid4()),
-                            "type": d.type, 
-                            "quantity": d.quantity,
-                            "completed": False,  # Reset status during negotiation
-                            "completed_at": None # Reset timestamp during negotiation
-                        } 
-                        for d in item.deliverables
-                    ]
-                }
-                for item in request.platform_deliverables
-            ])
-            updates.append(f"platform_deliverables = ${param_idx}")
-            update_params.append(deliverables_json)
-            param_idx += 1
+            # We'll handle deliverables update inside the transaction below
             diff_summary.append("Deliverables updated")
             
-        if not updates:
+        if not updates and not request.platform_deliverables:
              raise HTTPException(status_code=400, detail="No changes provided")
 
         updates.append("status = 'negotiating'")
@@ -811,6 +822,30 @@ async def update_collaboration_terms(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(update_query, *update_params)
+                
+                # Update deliverables if provided
+                if request.platform_deliverables:
+                    # Delete old deliverables
+                    await conn.execute(
+                        "DELETE FROM collaboration_deliverables WHERE collaboration_id = $1",
+                        collaboration_id
+                    )
+                    # Insert new ones
+                    for platform_item in request.platform_deliverables:
+                        for d in platform_item.deliverables:
+                            await conn.execute(
+                                """
+                                INSERT INTO collaboration_deliverables (
+                                    collaboration_id, platform, type, quantity, status
+                                ) VALUES ($1, $2, $3, $4, $5)
+                                """,
+                                collaboration_id,
+                                platform_item.platform,
+                                d.type,
+                                d.quantity,
+                                "pending" # Reset to pending during negotiation
+                            )
+
                 sys_msg = f"📝 {sender_name} has suggested a counter-offer: " + " • ".join(diff_summary)
                 await create_system_message(collaboration_id, sys_msg, conn=conn)
 
@@ -829,13 +864,7 @@ async def update_collaboration_terms(
             collaboration_id
         )
         
-        plat_delivs = json.loads(updated['platform_deliverables'])
-        plat_delivs_resp = [
-            PlatformDeliverablesItem(
-                platform=item['platform'],
-                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
-            ) for item in plat_delivs
-        ]
+        plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
         return CollaborationResponse(
             id=str(updated['id']),
@@ -946,13 +975,7 @@ async def approve_collaboration_terms(
             collaboration_id
         )
         
-        plat_delivs = json.loads(updated['platform_deliverables'])
-        plat_delivs_resp = [
-            PlatformDeliverablesItem(
-                platform=item['platform'],
-                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
-            ) for item in plat_delivs
-        ]
+        plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
         
         return CollaborationResponse(
             id=str(updated['id']),
@@ -1016,32 +1039,26 @@ async def toggle_deliverable(
         if not is_creator and not is_hotel:
             raise HTTPException(status_code=403, detail="Not authorized")
             
-        platform_deliverables = json.loads(collab['platform_deliverables'])
-        found = False
-        new_status = False
-        deliverable_name = ""
-        
-        for platform_item in platform_deliverables:
-            for d in platform_item['deliverables']:
-                if d.get('id') == deliverable_id:
-                    d['completed'] = not d.get('completed', False)
-                    new_status = d['completed']
-                    d['completed_at'] = datetime.now().isoformat() if d['completed'] else None
-                    deliverable_name = d['type']
-                    found = True
-                    break
-            if found: break
-            
-        if not found:
-            raise HTTPException(status_code=404, detail="Deliverable not found")
-            
-        await Database.execute(
-            "UPDATE collaborations SET platform_deliverables = $1, updated_at = NOW() WHERE id = $2",
-            json.dumps(platform_deliverables), collaboration_id
+        # Toggle in the new table
+        row = await Database.fetchrow(
+            "SELECT type, status FROM collaboration_deliverables WHERE id = $1 AND collaboration_id = $2",
+            deliverable_id, collaboration_id
         )
         
-        status_text = "completed" if new_status else "incomplete"
-        await create_system_message(collaboration_id, f"{'✅' if new_status else '🔄'} Deliverable '{deliverable_name}' marked as {status_text}.")
+        if not row:
+            raise HTTPException(status_code=404, detail="Deliverable not found")
+            
+        new_status = "completed" if row['status'] == "pending" else "pending"
+        deliverable_name = row['type']
+        
+        await Database.execute(
+            "UPDATE collaboration_deliverables SET status = $1, updated_at = NOW() WHERE id = $2",
+            new_status, deliverable_id
+        )
+        
+
+        status_text = "completed" if new_status == "completed" else "incomplete"
+        await create_system_message(collaboration_id, f"{'✅' if new_status == 'completed' else '🔄'} Deliverable '{deliverable_name}' marked as {status_text}.")
         
         # Return Updated
         updated = await Database.fetchrow(
@@ -1058,13 +1075,7 @@ async def toggle_deliverable(
             collaboration_id
         )
         
-        plat_delivs = json.loads(updated['platform_deliverables'])
-        plat_delivs_resp = [
-            PlatformDeliverablesItem(
-                platform=item['platform'],
-                deliverables=[PlatformDeliverable(**d) for d in item['deliverables']]
-            ) for item in plat_delivs
-        ]
+        plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
         
         return CollaborationResponse(
             id=str(updated['id']),

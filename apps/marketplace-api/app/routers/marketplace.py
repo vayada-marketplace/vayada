@@ -41,6 +41,7 @@ class CreatorRequirementsResponse(BaseModel):
     topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
+    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
@@ -176,7 +177,7 @@ async def get_all_listings():
             placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
             requirements_query = f"""
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id IN ({placeholders})
             """
@@ -196,6 +197,7 @@ async def get_all_listings():
                 target_countries=r['target_countries'],
                 target_age_min=r['target_age_min'],
                 target_age_max=r['target_age_max'],
+                target_age_groups=r['target_age_groups'],
                 created_at=r['created_at'],
                 updated_at=r['updated_at']
             )

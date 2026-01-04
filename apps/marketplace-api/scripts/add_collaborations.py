@@ -379,11 +379,8 @@ async def add_collaborations():
                 print(f"   ⏭️  Skipping collaboration: Already exists between creator and listing")
                 continue
             
-            # Prepare platform_deliverables JSON
-            platform_deliverables_json = json.dumps(collab_req["platform_deliverables"])
-            
             # Insert collaboration
-            await conn.execute(
+            collaboration = await conn.fetchrow(
                 """
                 INSERT INTO collaborations (
                     initiator_type, creator_id, hotel_id, listing_id, status,
@@ -392,10 +389,11 @@ async def add_collaborations():
                     paid_amount, discount_percentage,
                     travel_date_from, travel_date_to,
                     preferred_date_from, preferred_date_to,
-                    preferred_months, platform_deliverables, consent,
+                    preferred_months, consent,
                     responded_at, completed_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                RETURNING id
                 """,
                 collab_req["initiator_type"],
                 creator_id,
@@ -413,11 +411,28 @@ async def add_collaborations():
                 collab_req.get("preferred_date_from"),
                 collab_req.get("preferred_date_to"),
                 collab_req.get("preferred_months"),
-                platform_deliverables_json,
                 collab_req.get("consent"),
                 collab_req.get("responded_at"),
                 collab_req.get("completed_at"),
             )
+            collaboration_id = collaboration['id']
+
+            # Insert deliverables into the new table
+            for platform_item in collab_req["platform_deliverables"]:
+                for d in platform_item["deliverables"]:
+                    await conn.execute(
+                        """
+                        INSERT INTO collaboration_deliverables (
+                            collaboration_id, platform, type, quantity, status
+                        ) VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        collaboration_id,
+                        platform_item["platform"],
+                        d["type"],
+                        d["quantity"],
+                        "completed" if collab_req["status"] == "completed" else "pending"
+                    )
+
             collaboration_count += 1
             print(f"   ✅ Created {collab_req['initiator_type']}-initiated collaboration: {collab_req['status']}")
         

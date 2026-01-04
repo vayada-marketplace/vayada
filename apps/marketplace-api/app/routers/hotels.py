@@ -237,10 +237,44 @@ class CreatorRequirementsRequest(BaseModel):
     topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")
+    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
     
     @model_validator(mode='after')
     def validate_age_range(self):
-        """Validate age range if both are provided"""
+        """Validate age range and derive min/max from groups if provided"""
+        if self.targetAgeGroups:
+            min_age = None
+            max_age = None
+            
+            # Map standard buckets to numerical ranges
+            # Buckets: '18-24', '25-34', '35-44', '45-54', '55+'
+            for group in self.targetAgeGroups:
+                low = None
+                high = None
+                
+                if group == "55+":
+                    low, high = 55, 100
+                elif "-" in group:
+                    try:
+                        pts = group.split("-")
+                        low = int(pts[0])
+                        high = int(pts[1])
+                    except (ValueError, IndexError):
+                        continue
+                
+                if low is not None and high is not None:
+                    if min_age is None or low < min_age:
+                        min_age = low
+                    if max_age is None or high > max_age:
+                        max_age = high
+            
+            # Auto-calculate min/max if not manually provided
+            # This ensures numerical fields are populated for search efficiency
+            if self.targetAgeMin is None and min_age is not None:
+                self.targetAgeMin = min_age
+            if self.targetAgeMax is None and max_age is not None:
+                self.targetAgeMax = max_age
+
         if self.targetAgeMin is not None and self.targetAgeMax is not None:
             if self.targetAgeMax < self.targetAgeMin:
                 raise ValueError("target_age_max must be >= target_age_min")
@@ -301,6 +335,7 @@ class CreatorRequirementsResponse(BaseModel):
     topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
+    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
     
@@ -502,7 +537,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
             requirements = await Database.fetchrow(
                 """
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id = $1
                 """,
@@ -519,6 +554,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
                         "target_countries": requirements["target_countries"],
                         "target_age_min": requirements["target_age_min"],
                         "target_age_max": requirements["target_age_max"],
+                        "target_age_groups": requirements["target_age_groups"],
                         "created_at": requirements["created_at"],
                         "updated_at": requirements["updated_at"],
                     }
@@ -916,7 +952,7 @@ async def update_hotel_profile(
             requirements = await Database.fetchrow(
                 """
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id = $1
                 """,
@@ -933,6 +969,7 @@ async def update_hotel_profile(
                     "target_countries": requirements['target_countries'],
                     "target_age_min": requirements['target_age_min'],
                     "target_age_max": requirements['target_age_max'],
+                    "target_age_groups": requirements['target_age_groups'],
                     "created_at": requirements['created_at'],
                     "updated_at": requirements['updated_at'],
                 }).model_dump(by_alias=True)
@@ -1060,17 +1097,18 @@ async def create_hotel_listing(
                 requirements = await conn.fetchrow(
                     """
                     INSERT INTO listing_creator_requirements
-                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     RETURNING id, platforms, min_followers, target_countries, 
-                              target_age_min, target_age_max, created_at, updated_at
+                              target_age_min, target_age_max, target_age_groups, created_at, updated_at
                     """,
                     listing_id,
                     request.creatorRequirements.platforms,
                     request.creatorRequirements.minFollowers,
                     request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
-                    request.creatorRequirements.targetAgeMax
+                    request.creatorRequirements.targetAgeMax,
+                    request.creatorRequirements.targetAgeGroups
                 )
                 
                 requirements_response = CreatorRequirementsResponse.model_validate({
@@ -1081,6 +1119,7 @@ async def create_hotel_listing(
                     "target_countries": requirements['target_countries'],
                     "target_age_min": requirements['target_age_min'],
                     "target_age_max": requirements['target_age_max'],
+                    "target_age_groups": requirements['target_age_groups'],
                     "created_at": requirements['created_at'],
                     "updated_at": requirements['updated_at']
                 })
@@ -1168,7 +1207,7 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
     requirements = await Database.fetchrow(
         """
         SELECT id, listing_id, platforms, min_followers, target_countries,
-               target_age_min, target_age_max, created_at, updated_at
+               target_age_min, target_age_max, target_age_groups, created_at, updated_at
         FROM listing_creator_requirements
         WHERE listing_id = $1
         """,
@@ -1185,6 +1224,7 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
             "target_countries": requirements['target_countries'],
             "target_age_min": requirements['target_age_min'],
             "target_age_max": requirements['target_age_max'],
+            "target_age_groups": requirements['target_age_groups'],
             "created_at": requirements['created_at'],
             "updated_at": requirements['updated_at']
         })
@@ -1298,15 +1338,16 @@ async def update_hotel_listing(
                     await conn.execute(
                         """
                         INSERT INTO listing_creator_requirements
-                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max)
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         listing_id,
                         request.creatorRequirements.platforms,
                         request.creatorRequirements.minFollowers,
                         request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
-                        request.creatorRequirements.targetAgeMax
+                        request.creatorRequirements.targetAgeMax,
+                        request.creatorRequirements.targetAgeGroups
                     )
         
         # Fetch updated listing with details
@@ -1449,7 +1490,7 @@ async def get_hotel_collaborations(
         # Updated to fetch only summary fields and primary handle
         query = """
             SELECT 
-                c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit, c.platform_deliverables,
+                c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit,
                 c.travel_date_from, c.travel_date_to,
                 c.creator_id,
                 cr_user.name as creator_name,
@@ -1497,21 +1538,40 @@ async def get_hotel_collaborations(
         if not collaborations_data:
             return []
         
+        # Fetch all deliverables for these collaborations in one go
+        collab_ids = [str(c['id']) for c in collaborations_data]
+        all_deliverables_rows = await Database.fetch(
+            "SELECT id, collaboration_id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = ANY($1::uuid[])",
+            collab_ids
+        )
+        
+        # Group deliverables by collaboration_id
+        collab_deliverables_map = {}
+        for row in all_deliverables_rows:
+            c_id = str(row['collaboration_id'])
+            if c_id not in collab_deliverables_map:
+                collab_deliverables_map[c_id] = {}
+            
+            p = row['platform']
+            if p not in collab_deliverables_map[c_id]:
+                collab_deliverables_map[c_id][p] = []
+                
+            collab_deliverables_map[c_id][p].append({
+                "id": str(row['id']),
+                "type": row['type'],
+                "quantity": row['quantity'],
+                "status": row['status']
+            })
+
         # Build response
         response = []
         for collab in collaborations_data:
-            # Safely handle platform_deliverables (might be string or already parsed jsonb)
-            deliverables = collab['platform_deliverables']
-            if deliverables and isinstance(deliverables, str):
-                try:
-                    deliverables = json.loads(deliverables)
-                except:
-                    deliverables = []
-            elif not deliverables:
-                deliverables = []
+            c_id = str(collab['id'])
+            collab_dils = collab_deliverables_map.get(c_id, {})
+            deliverables = [{"platform": p, "deliverables": dils} for p, dils in collab_dils.items()]
 
             response.append({
-                "id": str(collab['id']),
+                "id": c_id,
                 "initiator_type": collab['initiator_type'],
                 "is_initiator": collab['initiator_type'] == 'hotel',
                 "status": collab['status'],
@@ -1591,7 +1651,7 @@ async def get_hotel_collaboration_detail(
                 c.paid_amount, c.discount_percentage,
                 c.travel_date_from, c.travel_date_to,
                 c.preferred_date_from, c.preferred_date_to,
-                c.preferred_months, c.platform_deliverables, c.consent,
+                c.preferred_months, c.consent,
                 c.created_at, c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
                 cr_user.name as creator_name,
                 cr.profile_picture as creator_profile_picture,
@@ -1689,15 +1749,26 @@ async def get_hotel_collaboration_detail(
                 reviews=reviews
             )
             
-        # Safely handle platform_deliverables (might be string or already parsed jsonb)
-        deliverables = collab['platform_deliverables']
-        if deliverables and isinstance(deliverables, str):
-            try:
-                deliverables = json.loads(deliverables)
-            except:
-                deliverables = []
-        elif not deliverables:
-            deliverables = []
+        # Fetch deliverables from the new table
+        deliverables_rows = await Database.fetch(
+            "SELECT id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = $1 ORDER BY platform, type",
+            collaboration_id
+        )
+        
+        deliverables = []
+        platform_map = {}
+        for row in deliverables_rows:
+            p = row['platform']
+            if p not in platform_map:
+                platform_map[p] = []
+            platform_map[p].append({
+                "id": str(row['id']),
+                "type": row['type'],
+                "quantity": row['quantity'],
+                "status": row['status']
+            })
+            
+        deliverables = [{"platform": p, "deliverables": dils} for p, dils in platform_map.items()]
 
         return HotelCollaborationDetailResponse(
             # List Response Fields
