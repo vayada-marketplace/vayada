@@ -1491,7 +1491,7 @@ async def create_hotel_listing(
                     request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
                     request.creatorRequirements.targetAgeMax,
-                    request.creatorRequirements.targetAgeGroups
+                    request.creatorRequirements.targetAgeGroups or []
                 )
                 
                 requirements_response = CreatorRequirementsResponse(
@@ -1768,7 +1768,7 @@ async def update_hotel_listing(
                         request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
                         request.creatorRequirements.targetAgeMax,
-                        request.creatorRequirements.targetAgeGroups
+                        request.creatorRequirements.targetAgeGroups or []
                     )
         
         # Fetch updated listing with details
