@@ -222,6 +222,13 @@ class UpdateCollaborationTermsRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class CancelCollaborationRequest(BaseModel):
+    """Request model for cancelling a collaboration"""
+    reason: Optional[str] = Field(None, description="Reason for cancellation")
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ============================================
 # RESPONSE MODELS
 # ============================================
@@ -1013,6 +1020,110 @@ async def approve_collaboration_terms(
         )
     except Exception as e:
         logger.error(f"Error approving: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{collaboration_id}/cancel", response_model=CollaborationResponse)
+async def cancel_collaboration(
+    collaboration_id: str,
+    request: CancelCollaborationRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Withdraw or cancel a collaboration.
+    Can be performed by either party at any stage before completion.
+    """
+    try:
+        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        if not collab:
+            raise HTTPException(status_code=404, detail="Collaboration not found")
+            
+        # Verify permissions
+        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        is_creator = creator_profile and str(creator_profile['id']) == str(collab['creator_id'])
+        
+        hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+        is_hotel = hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id'])
+        
+        if not is_creator and not is_hotel:
+            raise HTTPException(status_code=403, detail="Not authorized to cancel this collaboration")
+            
+        # Verify status
+        if collab['status'] in ['completed', 'cancelled', 'declined']:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel collaboration with status '{collab['status']}'")
+            
+        sender_name = "Creator" if is_creator else "Hotel"
+        
+        # Update
+        updates = [
+            "status = 'cancelled'",
+            "cancelled_at = NOW()",
+            "updated_at = NOW()"
+        ]
+        
+        pool = await Database.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(f"UPDATE collaborations SET {', '.join(updates)} WHERE id = $1", collaboration_id)
+                
+                msg = f"🚫 {sender_name} has cancelled the collaboration."
+                if request.reason:
+                    msg += f"\\n\\nReason: {request.reason}"
+                await create_system_message(collaboration_id, msg, conn=conn)
+
+        # Return Updated
+        updated = await Database.fetchrow(
+            """
+            SELECT c.*, cr_user.name as creator_name, cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE c.id = $1
+            """,
+            collaboration_id
+        )
+        
+        plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
+        
+        return CollaborationResponse(
+            id=str(updated['id']),
+            initiator_type=updated['initiator_type'],
+            status=updated['status'],
+            creator_id=str(updated['creator_id']),
+            creator_name=updated['creator_name'],
+            creator_profile_picture=updated['creator_profile_picture'],
+            hotel_id=str(updated['hotel_id']),
+            hotel_name=updated['hotel_name'],
+            listing_id=str(updated['listing_id']),
+            listing_name=updated['listing_name'],
+            listing_location=updated['listing_location'],
+            collaboration_type=updated['collaboration_type'],
+            free_stay_min_nights=updated['free_stay_min_nights'],
+            free_stay_max_nights=updated['free_stay_max_nights'],
+            paid_amount=updated['paid_amount'],
+            discount_percentage=updated['discount_percentage'],
+            travel_date_from=updated['travel_date_from'],
+            travel_date_to=updated['travel_date_to'],
+            preferred_date_from=updated['preferred_date_from'],
+            preferred_date_to=updated['preferred_date_to'],
+            preferred_months=updated['preferred_months'],
+            why_great_fit=updated['why_great_fit'],
+            platform_deliverables=plat_delivs_resp,
+            consent=updated['consent'],
+            created_at=updated['created_at'],
+            updated_at=updated['updated_at'],
+            responded_at=updated['responded_at'],
+            cancelled_at=updated['cancelled_at'],
+            completed_at=updated['completed_at'],
+            hotel_agreed_at=updated['hotel_agreed_at'],
+            creator_agreed_at=updated['creator_agreed_at'],
+            term_last_updated_at=updated['term_last_updated_at']
+        )
+    except Exception as e:
+        logger.error(f"Error cancelling: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
