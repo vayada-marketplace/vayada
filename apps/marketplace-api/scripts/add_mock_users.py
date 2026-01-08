@@ -753,33 +753,8 @@ async def add_mock_users():
         # - cancelled: Cancelled by either party
         collaboration_requests = [
             # Creator-initiated (applications)
-            {
-                "creator_email": "creator1@mock.com",
-                "hotel_email": "hotel1@mock.com",
-                "listing_name": "Ocean View Villa",
-                "initiator_type": "creator",
-                "status": "pending",
-                "why_great_fit": "I have a strong following in the travel niche with 150K+ Instagram followers. My content focuses on luxury destinations and would perfectly showcase your beautiful resort.",
-                "travel_date_from": "2024-06-01",
-                "travel_date_to": "2024-06-05",
-                "preferred_months": ["Jun", "Jul"],
-                "consent": True,
-                "platform_deliverables": [
-                    {
-                        "platform": "Instagram",
-                        "deliverables": [
-                            {"type": "Instagram Post", "quantity": 2},
-                            {"type": "Instagram Stories", "quantity": 5}
-                        ]
-                    },
-                    {
-                        "platform": "TikTok",
-                        "deliverables": [
-                            {"type": "TikTok Video", "quantity": 3}
-                        ]
-                    }
-                ]
-            },
+            # Removed duplicate pending request to allow the negotiating one (below) to be created
+
             {
                 "creator_email": "creator2@mock.com",
                 "hotel_email": "hotel3@mock.com",
@@ -1190,6 +1165,18 @@ async def add_mock_users():
                     {"sender": creator_user_id, "content": "Looking forward to our stay!", "type": "text"},
                     {"sender": hotel_user_id, "content": "We are excited to host you!", "type": "text"},
                     {"sender": None, "content": "🎉 Collaboration Accepted! Both parties have agreed to the terms.", "type": "system"},
+                ]
+            elif collab['status'] == 'completed':
+                 messages = [
+                    {"sender": creator_user_id, "content": "I've just posted the content! Check it out.", "type": "text"},
+                    {"sender": hotel_user_id, "content": "This looks amazing! Thank you so much.", "type": "text"},
+                    {"sender": None, "content": "✅ Collaboration completed. All deliverables have been fulfilled.", "type": "system"},
+                ]
+            elif collab['status'] == 'declined':
+                messages = [
+                    {"sender": creator_user_id, "content": "Hi, I'm really interested in this collaboration.", "type": "text"},
+                    {"sender": hotel_user_id, "content": "Thank you for your interest. Unfortunately, we are fully booked for those dates or we are not looking for this type of collaboration right now.", "type": "text"},
+                    {"sender": None, "content": "❌ Hotel has declined the collaboration request.", "type": "system"},
                 ]
                 
             for msg in messages:
