@@ -25,13 +25,13 @@ export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'hotel' | 'creator' | 'admin'>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'verified' | 'rejected' | 'suspended'>('all')
-  
+
   // Pagination
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  
+
   // Modal state
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null)
@@ -65,7 +65,7 @@ export default function DashboardPage() {
     try {
       setLoading(true)
       setError('')
-      
+
       const params: any = {
         page,
         page_size: pageSize,
@@ -73,7 +73,7 @@ export default function DashboardPage() {
       if (filterType !== 'all') params.type = filterType
       if (filterStatus !== 'all') params.status = filterStatus
       if (searchTerm) params.search = searchTerm
-      
+
       const response = await usersService.getAllUsers(params)
       setUsers(response.users || [])
       setTotal(response.total || 0)
@@ -117,14 +117,14 @@ export default function DashboardPage() {
       // Remove user from list
       setUsers(prev => prev.filter(u => u.id !== deleteConfirmUser.id))
       setTotal(prev => prev - 1)
-      
+
       // Close modals
       setDeleteConfirmUser(null)
       setSelectedUser(null)
-      
+
       // Show success message
       setSuccessMessage(`User "${deleteConfirmUser.name}" has been deleted successfully.`)
-      
+
       // Clear success message after 5 seconds
       setTimeout(() => setSuccessMessage(''), 5000)
     } catch (err) {
@@ -192,6 +192,12 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-600">Manage all users in the system</p>
             </div>
             <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => router.push('/dashboard/collaborations')}
+              >
+                Collaborations
+              </Button>
               <Button
                 variant="primary"
                 onClick={() => router.push('/dashboard/users/create')}
@@ -307,12 +313,12 @@ export default function DashboardPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {users.map((user) => (
-                    <tr 
-                      key={user.id} 
+                    <tr
+                      key={user.id}
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setSelectedUser(user)}
                     >
-                      <td 
+                      <td
                         className="px-6 py-4 whitespace-nowrap cursor-pointer"
                         onClick={() => setSelectedUser(user)}
                       >
@@ -419,16 +425,15 @@ export default function DashboardPage() {
                         } else {
                           pageNum = page - 5 + i
                         }
-                        
+
                         return (
                           <button
                             key={pageNum}
                             onClick={() => setPage(pageNum)}
-                            className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
-                              pageNum === page
+                            className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${pageNum === page
                                 ? 'z-10 bg-primary-600 text-white focus:z-20'
                                 : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
-                            }`}
+                              }`}
                           >
                             {pageNum}
                           </button>
@@ -462,10 +467,10 @@ export default function DashboardPage() {
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0">
                   {selectedUser.avatar ? (
-                    <img 
-                      className="h-16 w-16 rounded-full" 
-                      src={selectedUser.avatar} 
-                      alt={selectedUser.name} 
+                    <img
+                      className="h-16 w-16 rounded-full"
+                      src={selectedUser.avatar}
+                      alt={selectedUser.name}
                     />
                   ) : (
                     <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">

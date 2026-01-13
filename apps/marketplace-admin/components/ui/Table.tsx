@@ -2,7 +2,7 @@
 
 import { ReactNode } from 'react'
 
-interface TableColumn<T> {
+export interface TableColumn<T> {
   key: string
   header: string
   render?: (item: T) => ReactNode
@@ -17,9 +17,9 @@ interface TableProps<T> {
   loading?: boolean
 }
 
-export function Table<T extends { id: string }>({ 
-  data, 
-  columns, 
+export function Table<T extends { id: string }>({
+  data,
+  columns,
   onRowClick,
   emptyMessage = 'No data available',
   loading = false
