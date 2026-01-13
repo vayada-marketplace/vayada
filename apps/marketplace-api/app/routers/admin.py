@@ -24,6 +24,7 @@ from app.routers.hotels import (
     CollaborationOfferingResponse,
     CreatorRequirementsResponse
 )
+from app.routers.collaborations import CollaborationResponse, get_collaboration_deliverables
 from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,12 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
 
 
 # Response models
+class CollaborationListResponse(BaseModel):
+    """Admin collaboration list response"""
+    collaborations: List[CollaborationResponse]
+    total: int
+
+
 class UserResponse(BaseModel):
     """User response model"""
     id: str
@@ -2013,4 +2020,127 @@ async def delete_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(e)}"
+        )
+
+
+@router.get("/collaborations", response_model=CollaborationListResponse, status_code=status.HTTP_200_OK)
+async def get_admin_collaborations(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search by creator name or hotel name"),
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Get all collaborations for admin monitoring.
+    """
+    try:
+        where_conditions = []
+        params = []
+        param_counter = 1
+        
+        if status:
+            where_conditions.append(f"c.status = ${param_counter}")
+            params.append(status)
+            param_counter += 1
+            
+        if search:
+            search_pattern = f"%{search}%"
+            where_conditions.append(f"(cr_user.name ILIKE ${param_counter} OR hp.name ILIKE ${param_counter})")
+            params.append(search_pattern)
+            param_counter += 1
+            
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+        
+        # Count query
+        count_query = f"""
+            SELECT COUNT(*) as total
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            WHERE {where_clause}
+        """
+        # Execute count query (params contains only filters)
+        total_result = await Database.fetchrow(count_query, *params)
+        total = total_result['total'] if total_result else 0
+        
+        # Data query
+        offset = (page - 1) * page_size
+        
+        # We need to extend params for LIMIT and OFFSET
+        limit_param = param_counter
+        offset_param = param_counter + 1
+        
+        data_query = f"""
+            SELECT c.*, 
+                   cr_user.name as creator_name, 
+                   cr.profile_picture as creator_profile_picture,
+                   hp.name as hotel_name, 
+                   hl.name as listing_name, 
+                   hl.location as listing_location
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN users cr_user ON cr_user.id = cr.user_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            JOIN hotel_listings hl ON hl.id = c.listing_id
+            WHERE {where_clause}
+            ORDER BY c.created_at DESC
+            LIMIT ${limit_param} OFFSET ${offset_param}
+        """
+        
+        # Extend params list with pagination values
+        query_params = params + [page_size, offset]
+        
+        rows = await Database.fetch(data_query, *query_params)
+        
+        collaborations = []
+        for row in rows:
+            # Fetch deliverables for each collaboration
+            collab_id = str(row['id'])
+            deliverables = await get_collaboration_deliverables(collab_id)
+            
+            collaborations.append(CollaborationResponse(
+                id=collab_id,
+                initiator_type=row['initiator_type'],
+                status=row['status'],
+                creator_id=str(row['creator_id']),
+                creator_name=row['creator_name'],
+                creator_profile_picture=row['creator_profile_picture'],
+                hotel_id=str(row['hotel_id']),
+                hotel_name=row['hotel_name'],
+                listing_id=str(row['listing_id']),
+                listing_name=row['listing_name'],
+                listing_location=row['listing_location'],
+                collaboration_type=row['collaboration_type'],
+                free_stay_min_nights=row['free_stay_min_nights'],
+                free_stay_max_nights=row['free_stay_max_nights'],
+                paid_amount=row['paid_amount'],
+                discount_percentage=row['discount_percentage'],
+                stay_nights=row['free_stay_min_nights'] if row['free_stay_min_nights'] == row['free_stay_max_nights'] else None,
+                travel_date_from=row['travel_date_from'],
+                travel_date_to=row['travel_date_to'],
+                preferred_date_from=row['preferred_date_from'],
+                preferred_date_to=row['preferred_date_to'],
+                preferred_months=row['preferred_months'],
+                why_great_fit=row['why_great_fit'],
+                platform_deliverables=deliverables,
+                consent=row['consent'],
+                created_at=row['created_at'],
+                updated_at=row['updated_at'],
+                responded_at=row['responded_at'],
+                cancelled_at=row['cancelled_at'],
+                completed_at=row['completed_at'],
+                hotel_agreed_at=row['hotel_agreed_at'],
+                creator_agreed_at=row['creator_agreed_at'],
+                term_last_updated_at=row['term_last_updated_at']
+            ))
+            
+        return CollaborationListResponse(collaborations=collaborations, total=total)
+        
+    except Exception as e:
+        logger.error(f"Error fetching admin collaborations: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch collaborations: {str(e)}"
         )
