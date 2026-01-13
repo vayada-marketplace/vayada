@@ -1,5 +1,6 @@
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
+import { Avatar } from '../ui/Avatar';
 import { Collaboration, CollaborationStatus } from '../../lib/types/collaboration';
 
 interface CollaborationDetailModalProps {
@@ -54,17 +55,18 @@ export function CollaborationDetailModal({
                 <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100">
                     {/* Creator */}
                     <div className="flex items-center space-x-3">
-                        <img
-                            src={collaboration.creator_profile_picture || `https://ui-avatars.com/api/?name=${collaboration.creator_name}`}
+                        <Avatar
+                            src={collaboration.creator_profile_picture}
                             alt={collaboration.creator_name}
-                            className="w-12 h-12 rounded-full object-cover border border-gray-200"
+                            name={collaboration.creator_name}
+                            size="lg"
+                            className="border border-gray-200"
                         />
                         <div>
                             <p className="text-sm font-bold text-gray-900">{collaboration.creator_name}</p>
                             <p className="text-xs text-gray-500">Creator</p>
                         </div>
                     </div>
-
                     {/* Status */}
                     <div className="my-4 md:my-0 flex flex-col items-center">
                         <Badge variant={statusVariantMap[collaboration.status]}>

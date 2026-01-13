@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Avatar } from '@/components/ui/Avatar';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Collaboration, CollaborationStatus } from '@/lib/types/collaboration';
 import { CollaborationDetailModal } from '@/components/collaborations/CollaborationDetailModal';
@@ -148,10 +149,12 @@ export default function CollaborationsPage() {
                             <div className="flex items-center space-x-2 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
                                 {isCreatorInitiator ? (
                                     <>
-                                        <img
-                                            src={collab.creator_profile_picture || `https://ui-avatars.com/api/?name=${collab.creator_name}`}
+                                        <Avatar
+                                            src={collab.creator_profile_picture}
                                             alt={collab.creator_name}
-                                            className="w-4 h-4 rounded-full object-cover"
+                                            name={collab.creator_name}
+                                            className="w-4 h-4"
+                                            size="sm"
                                         />
                                         <span className="text-sm font-medium text-gray-900">{collab.creator_name}</span>
                                     </>
@@ -170,10 +173,12 @@ export default function CollaborationsPage() {
                             <div className="flex items-center space-x-2 px-2 py-1">
                                 {!isCreatorInitiator ? (
                                     <>
-                                        <img
-                                            src={collab.creator_profile_picture || `https://ui-avatars.com/api/?name=${collab.creator_name}`}
+                                        <Avatar
+                                            src={collab.creator_profile_picture}
                                             alt={collab.creator_name}
-                                            className="w-4 h-4 rounded-full opacity-70 object-cover"
+                                            name={collab.creator_name}
+                                            className="w-4 h-4 opacity-70"
+                                            size="sm"
                                         />
                                         <span className="text-sm text-gray-600">{collab.creator_name}</span>
                                     </>
@@ -355,8 +360,8 @@ export default function CollaborationsPage() {
                                             key={pageNum}
                                             onClick={() => setPage(pageNum)}
                                             className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${pageNum === page
-                                                    ? 'z-10 bg-primary-600 text-white focus:z-20'
-                                                    : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                                                ? 'z-10 bg-primary-600 text-white focus:z-20'
+                                                : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
                                                 }`}
                                         >
                                             {pageNum}
