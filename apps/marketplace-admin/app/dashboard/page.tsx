@@ -28,7 +28,7 @@ export default function DashboardPage() {
 
   // Pagination
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(20)
+  const [pageSize] = useState(100)
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
 
@@ -48,17 +48,18 @@ export default function DashboardPage() {
   }, [router, page, filterType, filterStatus])
 
   // Debounced search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (page === 1) {
-        loadUsers()
-      } else {
-        setPage(1) // Reset to page 1 when search changes
-      }
-    }, 500)
-
-    return () => clearTimeout(timer)
-  }, [searchTerm])
+  // Debounced search removed for frontend filtering
+  // useEffect(() => {
+  //   const timer = setTimeout(() => {
+  //     if (page === 1) {
+  //       loadUsers()
+  //     } else {
+  //       setPage(1) // Reset to page 1 when search changes
+  //     }
+  //   }, 500)
+  //
+  //   return () => clearTimeout(timer)
+  // }, [searchTerm])
 
   const loadUsers = async () => {
     try {
@@ -71,13 +72,16 @@ export default function DashboardPage() {
       }
       if (filterType !== 'all') params.type = filterType
       if (filterStatus !== 'all') params.status = filterStatus
-      if (searchTerm) params.search = searchTerm
+
+      // Frontend filtering - do not send search to backend
+      // if (searchTerm) params.search = searchTerm
 
       const response = await usersService.getAllUsers(params)
       setUsers(response.users || [])
       setTotal(response.total || 0)
       setTotalPages(Math.ceil((response.total || 0) / pageSize))
     } catch (err) {
+      console.error('Error loading users:', err)
       if (err instanceof ApiErrorResponse) {
         if (err.status === 404) {
           setError('Backend endpoint /admin/users not found. Please ensure the backend API is running and the endpoint is configured.')
@@ -87,7 +91,13 @@ export default function DashboardPage() {
         } else if (err.status === 403) {
           setError('Access denied. Admin privileges required.')
         } else {
-          setError(err.data.detail as string || 'Failed to load users')
+          const detail = err.data.detail
+          const errorMessage = typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
+              : JSON.stringify(detail) || 'Failed to load users'
+          setError(errorMessage)
         }
       } else {
         setError('Failed to load users. Please check your connection and try again.')
@@ -126,6 +136,7 @@ export default function DashboardPage() {
       // Clear success message after 5 seconds
       setTimeout(() => setSuccessMessage(''), 5000)
     } catch (err) {
+      console.error('Error loading users:', err)
       if (err instanceof ApiErrorResponse) {
         if (err.status === 400) {
           setDeleteError('Cannot delete your own account.')
@@ -134,7 +145,13 @@ export default function DashboardPage() {
         } else if (err.status === 403) {
           setDeleteError('Access denied. Admin privileges required.')
         } else {
-          setDeleteError(err.data.detail as string || 'Failed to delete user.')
+          const detail = err.data.detail
+          const errorMessage = typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
+              : JSON.stringify(detail) || 'Failed to delete user.'
+          setDeleteError(errorMessage)
         }
       } else {
         setDeleteError('Failed to delete user. Please try again.')
@@ -310,65 +327,71 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {users.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() => router.push(`/dashboard/users/${user.id}`)}
-                    >
-                      <td
-                        className="px-6 py-4 whitespace-nowrap"
+                  {users
+                    .filter(user =>
+                      !searchTerm ||
+                      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      user.email.toLowerCase().includes(searchTerm.toLowerCase())
+                    )
+                    .map((user) => (
+                      <tr
+                        key={user.id}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => router.push(`/dashboard/users/${user.id}`)}
                       >
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10">
-                            {user.avatar ? (
-                              <img className="h-10 w-10 rounded-full" src={user.avatar} alt={user.name} />
-                            ) : (
-                              <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                                <UserIcon className="h-6 w-6 text-gray-400" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                            <div className="text-sm text-gray-500">{user.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeBadgeColor(user.type)}`}>
-                          {user.type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(user.status)}`}>
-                          {user.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {user.email_verified ? (
-                          <span className="text-green-600 font-medium">Yes</span>
-                        ) : (
-                          <span className="text-gray-400">No</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(user.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setDeleteConfirmUser(user)
-                          }}
-                          className="text-red-600 hover:text-red-900 transition-colors"
-                          title="Delete user"
+                        <td
+                          className="px-6 py-4 whitespace-nowrap"
                         >
-                          <TrashIcon className="h-5 w-5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              {user.avatar ? (
+                                <img className="h-10 w-10 rounded-full" src={user.avatar} alt={user.name} />
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                  <UserIcon className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                              <div className="text-sm text-gray-500">{user.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeBadgeColor(user.type)}`}>
+                            {user.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(user.status)}`}>
+                            {user.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {user.email_verified ? (
+                            <span className="text-green-600 font-medium">Yes</span>
+                          ) : (
+                            <span className="text-gray-400">No</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {new Date(user.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleteConfirmUser(user)
+                            }}
+                            className="text-red-600 hover:text-red-900 transition-colors"
+                            title="Delete user"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -428,8 +451,8 @@ export default function DashboardPage() {
                             key={pageNum}
                             onClick={() => setPage(pageNum)}
                             className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${pageNum === page
-                                ? 'z-10 bg-primary-600 text-white focus:z-20'
-                                : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                              ? 'z-10 bg-primary-600 text-white focus:z-20'
+                              : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
                               }`}
                           >
                             {pageNum}
