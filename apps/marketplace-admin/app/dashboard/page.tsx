@@ -33,7 +33,6 @@ export default function DashboardPage() {
   const [totalPages, setTotalPages] = useState(0)
 
   // Modal state
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
@@ -120,7 +119,6 @@ export default function DashboardPage() {
 
       // Close modals
       setDeleteConfirmUser(null)
-      setSelectedUser(null)
 
       // Show success message
       setSuccessMessage(`User "${deleteConfirmUser.name}" has been deleted successfully.`)
@@ -316,11 +314,10 @@ export default function DashboardPage() {
                     <tr
                       key={user.id}
                       className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() => setSelectedUser(user)}
+                      onClick={() => router.push(`/dashboard/users/${user.id}`)}
                     >
                       <td
-                        className="px-6 py-4 whitespace-nowrap cursor-pointer"
-                        onClick={() => setSelectedUser(user)}
+                        className="px-6 py-4 whitespace-nowrap"
                       >
                         <div className="flex items-center">
                           <div className="flex-shrink-0 h-10 w-10">
@@ -454,105 +451,6 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* User Preview Modal */}
-        {selectedUser && (
-          <Modal
-            isOpen={!!selectedUser}
-            onClose={() => setSelectedUser(null)}
-            title="User Preview"
-            size="md"
-          >
-            <div className="space-y-4">
-              {/* User Avatar and Basic Info */}
-              <div className="flex items-start space-x-4">
-                <div className="flex-shrink-0">
-                  {selectedUser.avatar ? (
-                    <img
-                      className="h-16 w-16 rounded-full"
-                      src={selectedUser.avatar}
-                      alt={selectedUser.name}
-                    />
-                  ) : (
-                    <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-                      <UserIcon className="h-8 w-8 text-gray-400" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900">{selectedUser.name}</h3>
-                  <p className="text-sm text-gray-600">{selectedUser.email}</p>
-                  <div className="mt-2 flex gap-2">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getTypeBadgeColor(selectedUser.type)}`}>
-                      {selectedUser.type}
-                    </span>
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(selectedUser.status)}`}>
-                      {selectedUser.status}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Stats */}
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                <div>
-                  <p className="text-xs text-gray-500">Email Verified</p>
-                  <p className="text-sm font-medium text-gray-900">
-                    {selectedUser.email_verified ? (
-                      <span className="text-green-600">Yes</span>
-                    ) : (
-                      <span className="text-gray-400">No</span>
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500">Created</p>
-                  <p className="text-sm font-medium text-gray-900">
-                    {new Date(selectedUser.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-
-              {/* Conditional Stats - Will be replaced with API data later */}
-              {selectedUser.type === 'creator' && (
-                <div className="pt-4 border-t">
-                  <div>
-                    <p className="text-xs text-gray-500">Social Media Platforms</p>
-                    <p className="text-sm font-medium text-gray-900">-</p>
-                  </div>
-                </div>
-              )}
-              {selectedUser.type === 'hotel' && (
-                <div className="pt-4 border-t">
-                  <div>
-                    <p className="text-xs text-gray-500">Listings</p>
-                    <p className="text-sm font-medium text-gray-900">-</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-3 pt-4 border-t">
-                <Button
-                  variant="primary"
-                  className="flex-1"
-                  onClick={() => {
-                    router.push(`/dashboard/users/${selectedUser.id}`)
-                    setSelectedUser(null)
-                  }}
-                >
-                  View Full Details
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedUser(null)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-
         {/* Delete Confirmation Modal */}
         {deleteConfirmUser && (
           <Modal
@@ -621,4 +519,3 @@ export default function DashboardPage() {
     </div>
   )
 }
-
