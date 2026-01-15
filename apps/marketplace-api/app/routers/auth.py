@@ -2,122 +2,40 @@
 Authentication routes
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from pydantic import BaseModel, EmailStr, Field
-from typing import Literal
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 import bcrypt
 import logging
 
-logger = logging.getLogger(__name__)
 from app.database import Database
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
 from app.auth import (
-    create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used, 
+    create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used,
     hash_password, create_email_verification_code, verify_email_code, mark_email_as_verified,
     validate_email_verification_token, mark_email_verification_token_as_used
 )
 from app.email_service import send_email, create_password_reset_email_html, create_email_verification_html
 from app.config import settings
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from app.models.auth import (
+    RegisterRequest,
+    RegisterResponse,
+    LoginRequest,
+    LoginResponse,
+    TokenValidationResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
+    SendVerificationCodeRequest,
+    SendVerificationCodeResponse,
+    VerifyEmailCodeRequest,
+    VerifyEmailCodeResponse,
+    VerifyEmailResponse,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
-
-
-class RegisterRequest(BaseModel):
-    """Registration request model"""
-    email: EmailStr
-    password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
-    type: Literal["creator", "hotel"]
-    name: str | None = Field(None, description="User's name (optional, defaults to email prefix)")
-
-
-class RegisterResponse(BaseModel):
-    """Registration response model"""
-    id: str
-    email: str
-    name: str
-    type: Literal["creator", "hotel", "admin"]
-    status: str
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int  # Token expiration time in seconds
-    message: str
-
-
-class LoginRequest(BaseModel):
-    """Login request model"""
-    email: EmailStr
-    password: str
-
-
-class LoginResponse(BaseModel):
-    """Login response model"""
-    id: str
-    email: str
-    name: str
-    type: Literal["creator", "hotel", "admin"]
-    status: str
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int  # Token expiration time in seconds
-    message: str
-
-
-class TokenValidationResponse(BaseModel):
-    """Token validation response model"""
-    valid: bool
-    expired: bool
-    user_id: str | None = None
-    email: str | None = None
-    type: str | None = None
-
-
-class ForgotPasswordRequest(BaseModel):
-    """Forgot password request model"""
-    email: EmailStr
-
-
-class ForgotPasswordResponse(BaseModel):
-    """Forgot password response model"""
-    message: str
-    # Note: In production, token should not be returned. 
-    # This is for development/testing purposes only.
-    # In production, send the token via email instead.
-    token: str | None = None  # Only returned in development mode
-
-
-class ResetPasswordRequest(BaseModel):
-    """Reset password request model"""
-    token: str
-    new_password: str = Field(..., min_length=8, description="New password must be at least 8 characters")
-
-
-class ResetPasswordResponse(BaseModel):
-    """Reset password response model"""
-    message: str
-
-
-class SendVerificationCodeRequest(BaseModel):
-    """Send verification code request model"""
-    email: EmailStr
-
-
-class SendVerificationCodeResponse(BaseModel):
-    """Send verification code response model"""
-    message: str
-    code: Optional[str] = None  # Only returned in DEBUG mode for testing
-
-
-class VerifyEmailCodeRequest(BaseModel):
-    """Verify email code request model"""
-    email: EmailStr
-    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
-
-
-class VerifyEmailCodeResponse(BaseModel):
-    """Verify email code response model"""
-    message: str
-    verified: bool
 
 
 @router.post("/send-verification-code", response_model=SendVerificationCodeResponse, status_code=status.HTTP_200_OK)
@@ -599,13 +517,6 @@ async def reset_password(request: ResetPasswordRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset password: {str(e)}"
         )
-
-
-class VerifyEmailResponse(BaseModel):
-    """Email verification response model"""
-    message: str
-    verified: bool
-    email: str | None = None
 
 
 @router.get("/verify-email", response_model=VerifyEmailResponse, status_code=status.HTTP_200_OK)

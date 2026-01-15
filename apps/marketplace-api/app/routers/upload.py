@@ -3,7 +3,6 @@ File upload routes for images
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from typing import List, Optional
 import logging
 
@@ -16,27 +15,11 @@ from app.image_processing import (
     get_image_info
 )
 from app.config import settings
+from app.models.upload import ImageUploadResponse, MultipleImageUploadResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
-
-
-class ImageUploadResponse(BaseModel):
-    """Response model for single image upload"""
-    url: str
-    thumbnail_url: Optional[str] = None
-    key: str
-    width: int
-    height: int
-    size_bytes: int
-    format: str
-
-
-class MultipleImageUploadResponse(BaseModel):
-    """Response model for multiple image uploads"""
-    images: List[ImageUploadResponse]
-    total: int
 
 
 @router.post("/image", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)

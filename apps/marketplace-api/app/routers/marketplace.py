@@ -2,100 +2,22 @@
 Marketplace routes for public browsing
 """
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
-from decimal import Decimal
 from app.database import Database
 import logging
 import json
 
+from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse
+from app.models.marketplace import (
+    ListingMarketplaceResponse,
+    PlatformMarketplaceResponse,
+    CreatorMarketplaceResponse,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
-
-
-class CollaborationOfferingResponse(BaseModel):
-    """Collaboration offering response model"""
-    id: str
-    listingId: str = Field(alias="listing_id")
-    collaborationType: str = Field(alias="collaboration_type")
-    availabilityMonths: List[str] = Field(alias="availability_months")
-    platforms: List[str]
-    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
-    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
-    paidMaxAmount: Optional[Decimal] = Field(None, alias="paid_max_amount")
-    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
-
-
-class CreatorRequirementsResponse(BaseModel):
-    """Creator requirements response model"""
-    id: str
-    listingId: str = Field(alias="listing_id")
-    platforms: List[str]
-    minFollowers: Optional[int] = Field(None, alias="min_followers")
-    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
-    targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
-    targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
-    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
-    createdAt: datetime = Field(alias="created_at")
-    updatedAt: datetime = Field(alias="updated_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
-
-
-class ListingMarketplaceResponse(BaseModel):
-    """Listing response model for marketplace"""
-    id: str
-    hotelProfileId: str = Field(alias="hotel_profile_id")
-    hotelName: str = Field(alias="hotel_name")
-    hotelPicture: Optional[str] = Field(None, alias="hotel_picture")
-    name: str
-    location: str
-    description: str
-    accommodationType: Optional[str] = Field(None, alias="accommodation_type")
-    images: List[str]
-    status: str
-    collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
-    creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
-    createdAt: datetime = Field(alias="created_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
-
-
-class PlatformMarketplaceResponse(BaseModel):
-    """Platform response model for marketplace"""
-    id: str
-    name: str
-    handle: str
-    followers: int
-    engagementRate: float = Field(alias="engagement_rate")
-    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
-    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
-    genderSplit: Optional[dict] = Field(None, alias="gender_split")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
-
-
-class CreatorMarketplaceResponse(BaseModel):
-    """Creator response model for marketplace"""
-    id: str
-    name: str
-    location: str
-    shortDescription: str = Field(alias="short_description")
-    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
-    profilePicture: Optional[str] = Field(None, alias="profile_picture")
-    platforms: List[PlatformMarketplaceResponse]
-    audienceSize: int = Field(alias="audience_size")
-    averageRating: float = Field(alias="average_rating")
-    totalReviews: int = Field(alias="total_reviews")
-    createdAt: datetime = Field(alias="created_at")
-    
-    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 @router.get("/listings", response_model=List[ListingMarketplaceResponse])
