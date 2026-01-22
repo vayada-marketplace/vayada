@@ -107,9 +107,9 @@ export interface CreateUserRequest {
       handle: string
       followers: number
       engagementRate: number
-      topCountries?: Array<{country: string, percentage: number}>
-      topAgeGroups?: Array<{ageRange: string, percentage: number}>
-      genderSplit?: {male: number, female: number, other?: number}
+      topCountries?: Array<{ country: string, percentage: number }>
+      topAgeGroups?: Array<{ ageRange: string, percentage: number }>
+      genderSplit?: { male: number, female: number, other?: number }
     }>
   }
   hotelProfile?: {
@@ -137,7 +137,7 @@ export interface CreateSocialMediaPlatformRequest {
   verified?: boolean
 }
 
-export interface UpdateSocialMediaPlatformRequest extends Partial<CreateSocialMediaPlatformRequest> {}
+export interface UpdateSocialMediaPlatformRequest extends Partial<CreateSocialMediaPlatformRequest> { }
 
 export interface CreateListingRequest {
   title: string
@@ -150,7 +150,7 @@ export interface CreateListingRequest {
   location?: string
 }
 
-export interface UpdateListingRequest extends Partial<CreateListingRequest> {}
+export interface UpdateListingRequest extends Partial<CreateListingRequest> { }
 
 // API Response Types for User Detail Endpoint
 export interface UserDetailResponse {
@@ -198,7 +198,6 @@ export interface HotelProfileDetail {
   id: string
   userId: string
   name: string
-  category: string
   location: string
   picture: string | null
   website: string | null
@@ -249,6 +248,7 @@ export interface CreatorRequirements {
   targetCountries: string[]
   targetAgeMin: number | null
   targetAgeMax: number | null
+  targetAgeGroups: string[] | null
   createdAt: string
   updatedAt: string
 }

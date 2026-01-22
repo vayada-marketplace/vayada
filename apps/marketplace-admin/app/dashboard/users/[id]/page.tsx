@@ -34,7 +34,7 @@ export default function UserDetailPage() {
   const router = useRouter()
   const params = useParams()
   const userId = params.id as string
-  
+
   // Active tab state
   const [activeTab, setActiveTab] = useState<'profile' | 'social' | 'listings'>('profile')
   const [userDetail, setUserDetail] = useState<UserDetailResponse | null>(null)
@@ -47,7 +47,7 @@ export default function UserDetailPage() {
   const [listingToDelete, setListingToDelete] = useState<ListingResponse | null>(null)
   const [deletingListing, setDeletingListing] = useState(false)
   const [listingDeleteError, setListingDeleteError] = useState('')
-  
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false)
   const [editFormData, setEditFormData] = useState({
@@ -68,7 +68,7 @@ export default function UserDetailPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [saveSuccess, setSaveSuccess] = useState('')
-  
+
   // Platform editing state for optional fields
   const [platformCountrySearch, setPlatformCountrySearch] = useState<{ [platformIndex: number]: string }>({})
   const [platformCountryDropdownOpen, setPlatformCountryDropdownOpen] = useState<{ [platformIndex: number]: boolean }>({})
@@ -114,12 +114,12 @@ export default function UserDetailPage() {
   const [savingListing, setSavingListing] = useState(false)
   const [listingSaveError, setListingSaveError] = useState('')
   const [listingSaveSuccess, setListingSaveSuccess] = useState('')
-  
+
   // Listing edit state for dropdowns
   const [listingTargetCountrySearch, setListingTargetCountrySearch] = useState<string>('')
   const [listingTargetCountryDropdownOpen, setListingTargetCountryDropdownOpen] = useState(false)
   const listingTargetCountryDropdownRef = useRef<HTMLDivElement | null>(null)
-  
+
   // Listing image edit state
   const [listingImageFiles, setListingImageFiles] = useState<File[]>([])
   const [listingImagePreviews, setListingImagePreviews] = useState<string[]>([])
@@ -344,41 +344,41 @@ export default function UserDetailPage() {
         profileUpdateData.platforms = editPlatforms
           .filter(p => p.handle && p.followers && p.engagementRate)
           .map(p => {
-              const platformData: any = {
-                name: p.name,
-                handle: p.handle,
-                followers: parseInt(p.followers) || 0,
-                engagementRate: parseFloat(p.engagementRate) || 0,
-              }
+            const platformData: any = {
+              name: p.name,
+              handle: p.handle,
+              followers: parseInt(p.followers) || 0,
+              engagementRate: parseFloat(p.engagementRate) || 0,
+            }
 
-              if (p.topCountries && p.topCountries.length > 0) {
-                const validCountries = p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country && (tc.percentage || tc.percentage === '0'))
-                if (validCountries.length > 0) {
-                  platformData.topCountries = validCountries.map((tc: { country: string; percentage: string }) => ({
-                    country: tc.country,
-                    percentage: parseFloat(tc.percentage) || 0,
-                  }))
-                }
+            if (p.topCountries && p.topCountries.length > 0) {
+              const validCountries = p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country && (tc.percentage || tc.percentage === '0'))
+              if (validCountries.length > 0) {
+                platformData.topCountries = validCountries.map((tc: { country: string; percentage: string }) => ({
+                  country: tc.country,
+                  percentage: parseFloat(tc.percentage) || 0,
+                }))
               }
+            }
 
-              if (p.topAgeGroups && p.topAgeGroups.length > 0) {
-                const validAgeGroups = p.topAgeGroups.filter((ag: { ageRange: string }) => ag.ageRange)
-                if (validAgeGroups.length > 0) {
-                  platformData.topAgeGroups = validAgeGroups.map((ag: { ageRange: string }) => ({
-                    ageRange: ag.ageRange,
-                  }))
-                }
+            if (p.topAgeGroups && p.topAgeGroups.length > 0) {
+              const validAgeGroups = p.topAgeGroups.filter((ag: { ageRange: string }) => ag.ageRange)
+              if (validAgeGroups.length > 0) {
+                platformData.topAgeGroups = validAgeGroups.map((ag: { ageRange: string }) => ({
+                  ageRange: ag.ageRange,
+                }))
               }
+            }
 
-              if (p.genderSplit && (p.genderSplit.male || p.genderSplit.female)) {
-                platformData.genderSplit = {
-                  male: p.genderSplit.male ? parseFloat(p.genderSplit.male) : 0,
-                  female: p.genderSplit.female ? parseFloat(p.genderSplit.female) : 0,
-                }
+            if (p.genderSplit && (p.genderSplit.male || p.genderSplit.female)) {
+              platformData.genderSplit = {
+                male: p.genderSplit.male ? parseFloat(p.genderSplit.male) : 0,
+                female: p.genderSplit.female ? parseFloat(p.genderSplit.female) : 0,
               }
+            }
 
-              return platformData
-            })
+            return platformData
+          })
 
         await usersService.updateCreatorProfile(userDetail.id, profileUpdateData)
       }
@@ -412,12 +412,12 @@ export default function UserDetailPage() {
 
       // Reload user details
       await loadUserDetail()
-      
+
       // Exit edit mode
       setIsEditing(false)
       setProfilePictureFile(null)
       setProfilePicturePreview(null)
-      
+
       setSaveSuccess('Profile updated successfully!')
       setTimeout(() => setSaveSuccess(''), 5000)
     } catch (err) {
@@ -472,9 +472,9 @@ export default function UserDetailPage() {
         // Convert targetAgeMin/targetAgeMax to targetAgeGroups array
         targetAgeGroups: listing.creatorRequirements.targetAgeMin !== null && listing.creatorRequirements.targetAgeMax !== null
           ? AGE_GROUPS.filter(ageRange => {
-              const [min, max] = ageRange === '55+' ? [55, 100] : ageRange.split('-').map(Number)
-              return listing.creatorRequirements!.targetAgeMin! <= max && listing.creatorRequirements!.targetAgeMax! >= min
-            })
+            const [min, max] = ageRange === '55+' ? [55, 100] : ageRange.split('-').map(Number)
+            return listing.creatorRequirements!.targetAgeMin! <= max && listing.creatorRequirements!.targetAgeMax! >= min
+          })
           : [],
       } : {
         platforms: [],
@@ -591,7 +591,7 @@ export default function UserDetailPage() {
           availabilityMonths: offering.availabilityMonths,
           platforms: offering.platforms,
         }
-        
+
         if (offering.collaborationType === 'Free Stay') {
           offeringData.freeStayMinNights = offering.freeStayMinNights ? parseInt(offering.freeStayMinNights.toString()) : null
           offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
@@ -600,14 +600,14 @@ export default function UserDetailPage() {
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
         }
-        
+
         return offeringData
       })
 
       // Convert targetAgeGroups to targetAgeMin/targetAgeMax
       let targetAgeMin: number | null = null
       let targetAgeMax: number | null = null
-      
+
       if (editListingData.creatorRequirements.targetAgeGroups.length > 0) {
         const ageValues: number[] = []
         editListingData.creatorRequirements.targetAgeGroups.forEach(ageRange => {
@@ -621,7 +621,7 @@ export default function UserDetailPage() {
         targetAgeMin = Math.min(...ageValues)
         targetAgeMax = Math.max(...ageValues)
       }
-      
+
       createData.creatorRequirements = {
         platforms: editListingData.creatorRequirements.platforms,
         minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
@@ -664,7 +664,7 @@ export default function UserDetailPage() {
       setListingImageFiles([])
       setListingImagePreviews([])
       setListingSaveSuccess('Listing created successfully!')
-      
+
       setTimeout(() => setListingSaveSuccess(''), 5000)
     } catch (err) {
       if (err instanceof ApiErrorResponse) {
@@ -761,7 +761,7 @@ export default function UserDetailPage() {
           availabilityMonths: offering.availabilityMonths,
           platforms: offering.platforms,
         }
-        
+
         if (offering.collaborationType === 'Free Stay') {
           offeringData.freeStayMinNights = offering.freeStayMinNights ? parseInt(offering.freeStayMinNights.toString()) : null
           offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
@@ -770,18 +770,18 @@ export default function UserDetailPage() {
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
         }
-        
+
         if (offering.id) {
           offeringData.id = offering.id
         }
-        
+
         return offeringData
       })
 
       // Convert targetAgeGroups to targetAgeMin/targetAgeMax
       let targetAgeMin: number | null = null
       let targetAgeMax: number | null = null
-      
+
       if (editListingData.creatorRequirements.targetAgeGroups.length > 0) {
         const ageValues: number[] = []
         editListingData.creatorRequirements.targetAgeGroups.forEach(ageRange => {
@@ -795,7 +795,7 @@ export default function UserDetailPage() {
         targetAgeMin = Math.min(...ageValues)
         targetAgeMax = Math.max(...ageValues)
       }
-      
+
       updateData.creatorRequirements = {
         platforms: editListingData.creatorRequirements.platforms,
         minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
@@ -803,7 +803,7 @@ export default function UserDetailPage() {
         targetAgeMin,
         targetAgeMax,
       }
-      
+
       if (editListingData.creatorRequirements.id) {
         updateData.creatorRequirements.id = editListingData.creatorRequirements.id
       }
@@ -965,7 +965,7 @@ export default function UserDetailPage() {
       const newPlatforms = platformIndex >= 0
         ? platforms.filter((_, i) => i !== platformIndex)
         : [...platforms, platform as any]
-      
+
       return {
         ...prev,
         creatorRequirements: { ...prev.creatorRequirements, platforms: newPlatforms }
@@ -978,7 +978,7 @@ export default function UserDetailPage() {
     if (requirements.targetCountries.includes(country) || requirements.targetCountries.length >= 3) {
       return
     }
-    
+
     setEditListingData(prev => ({
       ...prev,
       creatorRequirements: {
@@ -986,7 +986,7 @@ export default function UserDetailPage() {
         targetCountries: [...prev.creatorRequirements.targetCountries, country]
       }
     }))
-    
+
     setListingTargetCountrySearch('')
     setListingTargetCountryDropdownOpen(false)
   }
@@ -1005,7 +1005,7 @@ export default function UserDetailPage() {
     setEditListingData(prev => {
       const ageGroups = prev.creatorRequirements.targetAgeGroups
       const existingIndex = ageGroups.indexOf(ageRange)
-      
+
       if (existingIndex >= 0) {
         return {
           ...prev,
@@ -1036,7 +1036,7 @@ export default function UserDetailPage() {
 
     const newFiles = Array.from(files)
     setListingImageFiles(prev => [...prev, ...newFiles])
-    
+
     // Create previews
     newFiles.forEach(file => {
       const reader = new FileReader()
@@ -1074,7 +1074,7 @@ export default function UserDetailPage() {
   }
 
   const handlePlatformChange = (index: number, field: string, value: any) => {
-    setEditPlatforms(prev => prev.map((p, i) => 
+    setEditPlatforms(prev => prev.map((p, i) =>
       i === index ? { ...p, [field]: value } : p
     ))
   }
@@ -1091,39 +1091,39 @@ export default function UserDetailPage() {
     if (platform.topCountries.length >= 3) return
     if (platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)) return
 
-    setEditPlatforms(prev => prev.map((p, i) => 
-      i === platformIndex 
-        ? { 
-            ...p, 
-            topCountries: [...p.topCountries, { country, percentage: '' }] 
-          }
+    setEditPlatforms(prev => prev.map((p, i) =>
+      i === platformIndex
+        ? {
+          ...p,
+          topCountries: [...p.topCountries, { country, percentage: '' }]
+        }
         : p
     ))
-    
+
     setPlatformCountrySearch(prev => ({ ...prev, [platformIndex]: '' }))
     setPlatformCountryDropdownOpen(prev => ({ ...prev, [platformIndex]: false }))
   }
 
   const handleRemovePlatformCountry = (platformIndex: number, country: string) => {
-    setEditPlatforms(prev => prev.map((p, i) => 
-      i === platformIndex 
-        ? { 
-            ...p, 
-            topCountries: p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country !== country) 
-          }
+    setEditPlatforms(prev => prev.map((p, i) =>
+      i === platformIndex
+        ? {
+          ...p,
+          topCountries: p.topCountries.filter((tc: { country: string; percentage: string }) => tc.country !== country)
+        }
         : p
     ))
   }
 
   const handleTopCountryPercentageChange = (platformIndex: number, country: string, percentage: string) => {
-    setEditPlatforms(prev => prev.map((p, i) => 
-      i === platformIndex 
-        ? { 
-            ...p, 
-            topCountries: p.topCountries.map((tc: { country: string; percentage: string }) => 
-              tc.country === country ? { ...tc, percentage } : tc
-            )
-          }
+    setEditPlatforms(prev => prev.map((p, i) =>
+      i === platformIndex
+        ? {
+          ...p,
+          topCountries: p.topCountries.map((tc: { country: string; percentage: string }) =>
+            tc.country === country ? { ...tc, percentage } : tc
+          )
+        }
         : p
     ))
   }
@@ -1131,9 +1131,9 @@ export default function UserDetailPage() {
   const handleTogglePlatformAgeGroup = (platformIndex: number, ageRange: string) => {
     setEditPlatforms(prev => prev.map((p, i) => {
       if (i !== platformIndex) return p
-      
+
       const existingIndex = p.topAgeGroups.findIndex((ag: { ageRange: string }) => ag.ageRange === ageRange)
-      
+
       if (existingIndex >= 0) {
         return {
           ...p,
@@ -1152,12 +1152,12 @@ export default function UserDetailPage() {
   }
 
   const handleGenderSplitChange = (platformIndex: number, field: 'male' | 'female', value: string) => {
-    setEditPlatforms(prev => prev.map((p, i) => 
-      i === platformIndex 
-        ? { 
-            ...p, 
-            genderSplit: { ...p.genderSplit, [field]: value } 
-          }
+    setEditPlatforms(prev => prev.map((p, i) =>
+      i === platformIndex
+        ? {
+          ...p,
+          genderSplit: { ...p.genderSplit, [field]: value }
+        }
         : p
     ))
   }
@@ -1312,15 +1312,15 @@ export default function UserDetailPage() {
               <div className="flex-shrink-0">
                 {(() => {
                   // For creators, prefer profile.profilePicture, otherwise use avatar
-                  const imageUrl = userDetail.type === 'creator' && userDetail.profile 
-                    ? (userDetail.profile as CreatorProfileDetail).profilePicture 
+                  const imageUrl = userDetail.type === 'creator' && userDetail.profile
+                    ? (userDetail.profile as CreatorProfileDetail).profilePicture
                     : userDetail.avatar
-                  
+
                   return imageUrl ? (
-                    <img 
-                      className="h-20 w-20 rounded-full object-cover" 
-                      src={imageUrl} 
-                      alt={userDetail.name} 
+                    <img
+                      className="h-20 w-20 rounded-full object-cover"
+                      src={imageUrl}
+                      alt={userDetail.name}
                     />
                   ) : (
                     <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center">
@@ -1554,9 +1554,9 @@ export default function UserDetailPage() {
                             <div className="flex items-start gap-4">
                               {(profilePicturePreview || (profile as CreatorProfileDetail).profilePicture) && (
                                 <div className="flex-shrink-0">
-                                  <img 
-                                    src={profilePicturePreview || (profile as CreatorProfileDetail).profilePicture!} 
-                                    alt="Profile" 
+                                  <img
+                                    src={profilePicturePreview || (profile as CreatorProfileDetail).profilePicture!}
+                                    alt="Profile"
                                     className="h-32 w-32 rounded-lg object-cover border border-gray-300"
                                   />
                                   {profilePictureFile && (
@@ -1618,9 +1618,9 @@ export default function UserDetailPage() {
                             <label className="block text-sm font-medium text-gray-700">Portfolio Link</label>
                             <p className="mt-1 text-sm text-gray-900">
                               {(profile as CreatorProfileDetail).portfolioLink ? (
-                                <a 
-                                  href={(profile as CreatorProfileDetail).portfolioLink!} 
-                                  target="_blank" 
+                                <a
+                                  href={(profile as CreatorProfileDetail).portfolioLink!}
+                                  target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 hover:underline"
                                 >
@@ -1634,9 +1634,9 @@ export default function UserDetailPage() {
                           {(profile as CreatorProfileDetail).profilePicture && (
                             <div className="md:col-span-2">
                               <label className="block text-sm font-medium text-gray-700 mb-2">Profile Picture</label>
-                              <img 
-                                src={(profile as CreatorProfileDetail).profilePicture!} 
-                                alt="Profile" 
+                              <img
+                                src={(profile as CreatorProfileDetail).profilePicture!}
+                                alt="Profile"
                                 className="h-32 w-32 rounded-lg object-cover border border-gray-300"
                               />
                             </div>
@@ -1673,12 +1673,7 @@ export default function UserDetailPage() {
                               placeholder="Hotel name"
                             />
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700">Category</label>
-                            <p className="mt-1 text-sm text-gray-900">
-                              {(profile as HotelProfileDetail).category || '-'}
-                            </p>
-                          </div>
+
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
                             <Input
@@ -1731,12 +1726,7 @@ export default function UserDetailPage() {
                               {(profile as HotelProfileDetail).name || '-'}
                             </p>
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700">Category</label>
-                            <p className="mt-1 text-sm text-gray-900">
-                              {(profile as HotelProfileDetail).category || '-'}
-                            </p>
-                          </div>
+
                           <div>
                             <label className="block text-sm font-medium text-gray-700">Location</label>
                             <p className="mt-1 text-sm text-gray-900">
@@ -1759,9 +1749,9 @@ export default function UserDetailPage() {
                             <label className="block text-sm font-medium text-gray-700">Website</label>
                             <p className="mt-1 text-sm text-gray-900">
                               {(profile as HotelProfileDetail).website ? (
-                                <a 
-                                  href={(profile as HotelProfileDetail).website!} 
-                                  target="_blank" 
+                                <a
+                                  href={(profile as HotelProfileDetail).website!}
+                                  target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 hover:underline"
                                 >
@@ -1817,7 +1807,7 @@ export default function UserDetailPage() {
                         Add Platform
                       </Button>
                     </div>
-                    
+
                     {editPlatforms.length === 0 ? (
                       <p className="text-sm text-gray-500">No platforms added. Click "Add Platform" to add one.</p>
                     ) : (
@@ -1901,9 +1891,9 @@ export default function UserDetailPage() {
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-2">Top Countries</label>
                                   <p className="text-sm text-gray-500 mb-3">Select up to 3 countries with their audience percentage</p>
-                                  
+
                                   {/* Country Search Input */}
-                                  <div 
+                                  <div
                                     ref={(el) => { platformCountryDropdownRefs.current[index] = el }}
                                     className="relative mb-4"
                                   >
@@ -1916,12 +1906,12 @@ export default function UserDetailPage() {
                                       disabled={platform.topCountries.length >= 3}
                                       className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                                     />
-                                    
+
                                     {/* Dropdown with filtered countries */}
                                     {platformCountryDropdownOpen[index] && (platformCountrySearch[index] || '').length > 0 && (
                                       <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto">
                                         {COUNTRIES
-                                          .filter(country => 
+                                          .filter(country =>
                                             country.toLowerCase().includes((platformCountrySearch[index] || '').toLowerCase()) &&
                                             !platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)
                                           )
@@ -1936,12 +1926,12 @@ export default function UserDetailPage() {
                                               {country}
                                             </button>
                                           ))}
-                                        {COUNTRIES.filter(country => 
+                                        {COUNTRIES.filter(country =>
                                           country.toLowerCase().includes((platformCountrySearch[index] || '').toLowerCase()) &&
                                           !platform.topCountries.some((tc: { country: string; percentage: string }) => tc.country === country)
                                         ).length === 0 && (
-                                          <div className="px-4 py-2 text-sm text-gray-500">No countries found</div>
-                                        )}
+                                            <div className="px-4 py-2 text-sm text-gray-500">No countries found</div>
+                                          )}
                                       </div>
                                     )}
                                   </div>
@@ -1987,13 +1977,13 @@ export default function UserDetailPage() {
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-2">Age Groups</label>
                                   <p className="text-sm text-gray-500 mb-3">Select up to 3 age groups</p>
-                                  
+
                                   {/* Age Group Selection Buttons */}
                                   <div className="flex flex-wrap gap-2 mb-4">
                                     {AGE_GROUPS.map((ageRange) => {
                                       const isSelected = platform.topAgeGroups.some((ag: { ageRange: string }) => ag.ageRange === ageRange)
                                       const isDisabled = !isSelected && platform.topAgeGroups.length >= 3
-                                      
+
                                       return (
                                         <button
                                           key={ageRange}
@@ -2002,8 +1992,8 @@ export default function UserDetailPage() {
                                           disabled={isDisabled}
                                           className={`
                                             px-4 py-2 rounded-full text-sm font-medium transition-colors
-                                            ${isSelected 
-                                              ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                            ${isSelected
+                                              ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
                                               : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
                                             }
                                             ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
@@ -2147,18 +2137,18 @@ export default function UserDetailPage() {
                 {(profile as HotelProfileDetail).listings && (profile as HotelProfileDetail).listings.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {(profile as HotelProfileDetail).listings.map((listing: ListingResponse) => (
-                      <div 
-                        key={listing.id} 
+                      <div
+                        key={listing.id}
                         className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow relative group"
                       >
-                        <div 
+                        <div
                           className="cursor-pointer"
                           onClick={() => setSelectedListing(listing)}
                         >
                           {listing.images && listing.images.length > 0 && (
                             <div className="aspect-video bg-gray-200 relative">
-                              <img 
-                                src={listing.images[0]} 
+                              <img
+                                src={listing.images[0]}
                                 alt={listing.name}
                                 className="w-full h-full object-cover"
                               />
@@ -2280,8 +2270,8 @@ export default function UserDetailPage() {
                           {listingExistingImages.map((imageUrl, idx) => (
                             <div key={idx} className="relative group">
                               <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
-                                <img 
-                                  src={imageUrl} 
+                                <img
+                                  src={imageUrl}
                                   alt={`Existing ${idx + 1}`}
                                   className="w-full h-full object-cover"
                                 />
@@ -2298,7 +2288,7 @@ export default function UserDetailPage() {
                         </div>
                       </div>
                     )}
-                    
+
                     {/* New Image Upload */}
                     <div>
                       <p className="text-sm text-gray-600 mb-3">Upload New Images</p>
@@ -2324,15 +2314,15 @@ export default function UserDetailPage() {
                           />
                         </label>
                       </div>
-                      
+
                       {/* New Image Previews */}
                       {listingImagePreviews.length > 0 && (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           {listingImagePreviews.map((preview, idx) => (
                             <div key={idx} className="relative group">
                               <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
-                                <img 
-                                  src={preview} 
+                                <img
+                                  src={preview}
                                   alt={`New ${idx + 1}`}
                                   className="w-full h-full object-cover"
                                 />
@@ -2356,8 +2346,8 @@ export default function UserDetailPage() {
                       <div className="grid grid-cols-2 gap-2">
                         {selectedListing.images.slice(0, 4).map((image, idx) => (
                           <div key={idx} className="aspect-video bg-gray-200 rounded-lg overflow-hidden">
-                            <img 
-                              src={image} 
+                            <img
+                              src={image}
                               alt={`${selectedListing.name} ${idx + 1}`}
                               className="w-full h-full object-cover"
                             />
@@ -2507,7 +2497,7 @@ export default function UserDetailPage() {
                                     if (type === 'Paid') return <CurrencyDollarIcon className="w-8 h-8" />
                                     if (type === 'Discount') return <TagIcon className="w-8 h-8" />
                                   }
-                                  
+
                                   return (
                                     <button
                                       key={type}
@@ -2515,8 +2505,8 @@ export default function UserDetailPage() {
                                       onClick={() => handleCollaborationOfferingChange(offeringIndex, 'collaborationType', type)}
                                       className={`
                                         flex flex-col items-center justify-center p-6 border-2 rounded-lg transition-all
-                                        ${isSelected 
-                                          ? 'border-blue-500 bg-blue-50' 
+                                        ${isSelected
+                                          ? 'border-blue-500 bg-blue-50'
                                           : 'border-gray-300 bg-white hover:border-gray-400'
                                         }
                                       `}
@@ -2532,7 +2522,7 @@ export default function UserDetailPage() {
                                 })}
                               </div>
                             </div>
-                            
+
                             {/* Type-specific fields */}
                             {offering.collaborationType === 'Free Stay' && (
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2576,7 +2566,7 @@ export default function UserDetailPage() {
                                 />
                               </div>
                             )}
-                            
+
                             {/* Platforms */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2600,7 +2590,7 @@ export default function UserDetailPage() {
                                 })}
                               </div>
                             </div>
-                            
+
                             {/* Availability Months */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2617,8 +2607,8 @@ export default function UserDetailPage() {
                                       onClick={() => handleToggleOfferingMonth(offeringIndex, month)}
                                       className={`
                                         px-3 py-2 text-sm font-medium rounded-lg transition-colors
-                                        ${isSelected 
-                                          ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                        ${isSelected
+                                          ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
                                           : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
                                         }
                                       `}
@@ -2640,11 +2630,10 @@ export default function UserDetailPage() {
                       {selectedListing.collaborationOfferings.map((offering) => (
                         <div key={offering.id} className="border rounded-lg p-4 bg-gray-50">
                           <div className="flex items-center gap-2 mb-4">
-                            <span className={`px-3 py-1 text-sm font-semibold rounded-full ${
-                              offering.collaborationType === 'Free Stay' ? 'bg-green-100 text-green-800' :
-                              offering.collaborationType === 'Paid' ? 'bg-blue-100 text-blue-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
+                            <span className={`px-3 py-1 text-sm font-semibold rounded-full ${offering.collaborationType === 'Free Stay' ? 'bg-green-100 text-green-800' :
+                                offering.collaborationType === 'Paid' ? 'bg-blue-100 text-blue-800' :
+                                  'bg-yellow-100 text-yellow-800'
+                              }`}>
                               {offering.collaborationType}
                             </span>
                           </div>
@@ -2662,7 +2651,7 @@ export default function UserDetailPage() {
                                 </div>
                               </div>
                             )}
-                            
+
                             {/* Availability Months */}
                             {offering.availabilityMonths && offering.availabilityMonths.length > 0 && (
                               <div className="md:col-span-2">
@@ -2746,7 +2735,7 @@ export default function UserDetailPage() {
                         })}
                       </div>
                     </div>
-                    
+
                     {/* Min Followers */}
                     <div>
                       <Input
@@ -2757,14 +2746,14 @@ export default function UserDetailPage() {
                         placeholder="10000"
                       />
                     </div>
-                    
+
                     {/* Target Countries */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Target Countries
                       </label>
                       <p className="text-sm text-gray-600 mb-3">Select up to 3 countries (optional)</p>
-                      
+
                       {/* Selected Countries */}
                       {editListingData.creatorRequirements.targetCountries.length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-3">
@@ -2785,7 +2774,7 @@ export default function UserDetailPage() {
                           ))}
                         </div>
                       )}
-                      
+
                       {/* Search Input */}
                       {editListingData.creatorRequirements.targetCountries.length < 3 && (
                         <div className="relative" ref={listingTargetCountryDropdownRef}>
@@ -2798,7 +2787,7 @@ export default function UserDetailPage() {
                             onFocus={() => setListingTargetCountryDropdownOpen(true)}
                             placeholder="Search countries..."
                           />
-                          
+
                           {/* Dropdown */}
                           {listingTargetCountryDropdownOpen && listingTargetCountrySearch && (
                             <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
@@ -2820,7 +2809,7 @@ export default function UserDetailPage() {
                         </div>
                       )}
                     </div>
-                    
+
                     {/* Age Groups */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -2831,7 +2820,7 @@ export default function UserDetailPage() {
                         {AGE_GROUPS.map((ageRange) => {
                           const isSelected = editListingData.creatorRequirements.targetAgeGroups.includes(ageRange)
                           const isDisabled = !isSelected && editListingData.creatorRequirements.targetAgeGroups.length >= 3
-                          
+
                           return (
                             <button
                               key={ageRange}
@@ -2840,8 +2829,8 @@ export default function UserDetailPage() {
                               disabled={isDisabled}
                               className={`
                                 px-4 py-2 rounded-full text-sm font-medium transition-colors
-                                ${isSelected 
-                                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' 
+                                ${isSelected
+                                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
                                   : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-gray-400'
                                 }
                                 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
@@ -2870,7 +2859,7 @@ export default function UserDetailPage() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* Minimum Followers */}
                       {selectedListing.creatorRequirements.minFollowers !== null && (
                         <div>
@@ -2880,7 +2869,7 @@ export default function UserDetailPage() {
                           </p>
                         </div>
                       )}
-                      
+
                       {/* Age Range */}
                       {selectedListing.creatorRequirements.targetAgeMin !== null && selectedListing.creatorRequirements.targetAgeMax !== null ? (
                         <div>
@@ -2904,7 +2893,7 @@ export default function UserDetailPage() {
                           </p>
                         </div>
                       ) : null}
-                      
+
                       {/* Target Countries */}
                       {selectedListing.creatorRequirements.targetCountries && selectedListing.creatorRequirements.targetCountries.length > 0 && (
                         <div className="md:col-span-2">
@@ -2918,17 +2907,17 @@ export default function UserDetailPage() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* Show message if no requirements are set */}
-                      {(!selectedListing.creatorRequirements.platforms || selectedListing.creatorRequirements.platforms.length === 0) && 
-                       selectedListing.creatorRequirements.minFollowers === null && 
-                       selectedListing.creatorRequirements.targetAgeMin === null && 
-                       selectedListing.creatorRequirements.targetAgeMax === null &&
-                       (!selectedListing.creatorRequirements.targetCountries || selectedListing.creatorRequirements.targetCountries.length === 0) && (
-                        <div className="md:col-span-2">
-                          <p className="text-sm text-gray-500">No specific requirements set</p>
-                        </div>
-                      )}
+                      {(!selectedListing.creatorRequirements.platforms || selectedListing.creatorRequirements.platforms.length === 0) &&
+                        selectedListing.creatorRequirements.minFollowers === null &&
+                        selectedListing.creatorRequirements.targetAgeMin === null &&
+                        selectedListing.creatorRequirements.targetAgeMax === null &&
+                        (!selectedListing.creatorRequirements.targetCountries || selectedListing.creatorRequirements.targetCountries.length === 0) && (
+                          <div className="md:col-span-2">
+                            <p className="text-sm text-gray-500">No specific requirements set</p>
+                          </div>
+                        )}
                     </div>
                   ) : (
                     <p className="text-sm text-gray-500">No creator requirements specified</p>
@@ -2943,8 +2932,8 @@ export default function UserDetailPage() {
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {selectedListing.images.map((image, idx) => (
                       <div key={idx} className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
-                        <img 
-                          src={image} 
+                        <img
+                          src={image}
                           alt={`${selectedListing.name} image ${idx + 1}`}
                           className="w-full h-full object-cover"
                         />
