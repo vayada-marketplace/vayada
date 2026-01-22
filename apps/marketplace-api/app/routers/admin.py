@@ -24,7 +24,7 @@ from app.models.hotels import (
     UpdateHotelProfileRequest,
     HotelProfileResponse,
 )
-from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse
+from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse, PlatformResponse
 from app.models.collaborations import CollaborationResponse
 from app.models.admin import (
     UserResponse,

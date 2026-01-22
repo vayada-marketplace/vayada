@@ -12,7 +12,7 @@ from app.models.common import (
     PlatformResponse,
 )
 from app.models.collaborations import CollaborationResponse
-from app.models.hotels import CreateListingRequest
+from app.models.hotels import CreateListingRequest, ListingResponse
 
 
 # ============================================
@@ -160,7 +160,7 @@ class CreatorProfileDetail(BaseModel):
     profileCompletedAt: Optional[datetime] = Field(None, alias="profile_completed_at")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
-    platforms: List[AdminPlatformResponse] = Field(default_factory=list)
+    platforms: List[PlatformResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -213,7 +213,7 @@ class AdminListingResponse(BaseModel):
 class HotelProfileDetail(BaseModel):
     """Hotel profile detail"""
     id: str
-    user_id: str
+    userId: str = Field(alias="user_id")
     name: str
     location: str
     picture: Optional[str] = None
@@ -222,9 +222,11 @@ class HotelProfileDetail(BaseModel):
     email: str
     phone: Optional[str] = None
     status: str
-    created_at: datetime
-    updated_at: datetime
-    listings: List[AdminListingResponse] = Field(default_factory=list)
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    listings: List[ListingResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class UserDetailResponse(BaseModel):
