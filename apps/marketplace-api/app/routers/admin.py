@@ -4,6 +4,7 @@ Admin routes for user management
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Literal, Optional, Union
 from datetime import datetime
+from decimal import Decimal
 import logging
 import json
 import bcrypt
