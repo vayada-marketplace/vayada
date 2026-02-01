@@ -209,6 +209,12 @@ export default function DashboardPage() {
             <div className="flex gap-3">
               <Button
                 variant="outline"
+                onClick={() => router.push('/dashboard/marketplace')}
+              >
+                Marketplace
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => router.push('/dashboard/collaborations')}
               >
                 Collaborations
