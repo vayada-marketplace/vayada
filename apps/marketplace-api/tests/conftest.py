@@ -137,9 +137,9 @@ async def cleanup_database(init_database):
     await Database.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_send_email():
-    """Mock email service to track sent emails."""
+    """Mock email service to track sent emails. Applied to all tests automatically."""
     sent_emails = []
 
     async def mock_email(to_email: str, subject: str, html_body: str):
@@ -154,9 +154,9 @@ def mock_send_email():
         yield sent_emails
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_s3_upload():
-    """Mock S3 upload to return fake URLs."""
+    """Mock S3 upload to return fake URLs. Applied to all tests automatically."""
     uploaded_files = []
 
     async def mock_upload(content: bytes, key: str, content_type: str = "image/jpeg", make_public: bool = True):
@@ -171,9 +171,9 @@ def mock_s3_upload():
         yield uploaded_files
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_s3_delete():
-    """Mock S3 delete operations."""
+    """Mock S3 delete operations. Applied to all tests automatically."""
     deleted_files = []
 
     async def mock_delete(key: str):
