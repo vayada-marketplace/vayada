@@ -1,10 +1,11 @@
 """
 Admin routes for user management
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from typing import List, Literal, Optional, Union
 from datetime import datetime
 from decimal import Decimal
+from pydantic import ValidationError
 import logging
 import json
 import bcrypt
@@ -62,26 +63,26 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
     
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
     if user['type'] != 'admin':
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     
     if user['status'] == 'suspended':
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Admin account is suspended"
         )
     
     return user_id
 
 
-@router.get("/users", response_model=UserListResponse, status_code=status.HTTP_200_OK)
+@router.get("/users", response_model=UserListResponse, status_code=http_status.HTTP_200_OK)
 async def get_users(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -116,10 +117,9 @@ async def get_users(
             param_counter += 1
         
         if search:
+            # Use the same placeholder for both name and email comparisons
             where_conditions.append(f"(name ILIKE ${param_counter} OR email ILIKE ${param_counter})")
             search_pattern = f"%{search}%"
-            params.append(search_pattern)
-            param_counter += 1
             params.append(search_pattern)
             param_counter += 1
         
@@ -165,12 +165,12 @@ async def get_users(
     except Exception as e:
         logger.error(f"Error fetching users: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch users: {str(e)}"
         )
 
 
-@router.get("/users/{user_id}", response_model=UserDetailResponse, status_code=status.HTTP_200_OK)
+@router.get("/users/{user_id}", response_model=UserDetailResponse, status_code=http_status.HTTP_200_OK)
 async def get_user_details(
     user_id: str,
     admin_id: str = Depends(get_admin_user)
@@ -195,7 +195,7 @@ async def get_user_details(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
@@ -423,12 +423,12 @@ async def get_user_details(
     except Exception as e:
         logger.error(f"Error fetching user details: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch user details: {str(e)}"
         )
 
 
-@router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/users", response_model=UserResponse, status_code=http_status.HTTP_201_CREATED)
 async def create_user(
     request: CreateUserRequest,
     admin_id: str = Depends(get_admin_user)
@@ -455,7 +455,7 @@ async def create_user(
         
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
         
@@ -612,7 +612,7 @@ async def create_user(
                                 listing_request.creatorRequirements.topCountries,
                                 listing_request.creatorRequirements.targetAgeMin,
                                 listing_request.creatorRequirements.targetAgeMax,
-                                listing_request.creatorRequirements.targetAgeGroups
+                                listing_request.creatorRequirements.targetAgeGroups or []
                             )
         
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
@@ -634,24 +634,24 @@ async def create_user(
     except ValidationError as e:
         logger.error(f"Validation error creating user: {e.errors()}")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=e.errors()
         )
     except ValueError as e:
         logger.error(f"Value error creating user: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         logger.error(f"Error creating user: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create user: {str(e)}"
         )
 
 
-@router.put("/users/{user_id}/profile/creator", response_model=CreatorProfileResponse, status_code=status.HTTP_200_OK)
+@router.put("/users/{user_id}/profile/creator", response_model=CreatorProfileResponse, status_code=http_status.HTTP_200_OK)
 async def update_creator_profile(
     user_id: str,
     request: UpdateCreatorProfileRequest,
@@ -677,13 +677,13 @@ async def update_creator_profile(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'creator':
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a creator"
             )
         
@@ -695,7 +695,7 @@ async def update_creator_profile(
         
         if not creator:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
         
@@ -868,12 +868,12 @@ async def update_creator_profile(
     except Exception as e:
         logger.error(f"Error updating creator profile: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update creator profile: {str(e)}"
         )
 
 
-@router.put("/users/{user_id}/profile/hotel", response_model=HotelProfileResponse, status_code=status.HTTP_200_OK)
+@router.put("/users/{user_id}/profile/hotel", response_model=HotelProfileResponse, status_code=http_status.HTTP_200_OK)
 async def update_hotel_profile(
     user_id: str,
     request: UpdateHotelProfileRequest,
@@ -896,13 +896,13 @@ async def update_hotel_profile(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
         
@@ -914,7 +914,7 @@ async def update_hotel_profile(
         
         if not hotel:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1014,12 +1014,12 @@ async def update_hotel_profile(
     except Exception as e:
         logger.error(f"Error updating hotel profile: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update hotel profile: {str(e)}"
         )
 
 
-@router.put("/users/{user_id}", response_model=UserResponse, status_code=status.HTTP_200_OK)
+@router.put("/users/{user_id}", response_model=UserResponse, status_code=http_status.HTTP_200_OK)
 async def update_user(
     user_id: str,
     request: UpdateUserRequest,
@@ -1042,7 +1042,7 @@ async def update_user(
             # Allow admins to update their own name and avatar, but not status or emailVerified
             if request.status is not None or request.emailVerified is not None:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Cannot modify your own status or email verification status"
                 )
         
@@ -1054,7 +1054,7 @@ async def update_user(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
@@ -1068,7 +1068,7 @@ async def update_user(
             
             if existing_user:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Email already registered"
                 )
         
@@ -1143,7 +1143,7 @@ async def update_user(
     except Exception as e:
         logger.error(f"Error updating user: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update user: {str(e)}"
         )
 
@@ -1185,7 +1185,7 @@ async def delete_user_images(user_id: str, user_type: str) -> dict:
     return stats
 
 
-@router.post("/users/{user_id}/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/users/{user_id}/listings", response_model=ListingResponse, status_code=http_status.HTTP_201_CREATED)
 async def create_hotel_listing(
     user_id: str,
     request: CreateListingRequest,
@@ -1208,13 +1208,13 @@ async def create_hotel_listing(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
         
@@ -1226,7 +1226,7 @@ async def create_hotel_listing(
         
         if not hotel_profile:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1345,13 +1345,13 @@ async def create_hotel_listing(
     except ValueError as e:
         logger.error(f"Value error creating listing: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         logger.error(f"Error creating listing: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create listing: {str(e)}"
         )
 
@@ -1372,7 +1372,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
     
     if not listing:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Listing not found"
         )
     
@@ -1439,7 +1439,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
     }
 
 
-@router.put("/users/{user_id}/listings/{listing_id}", response_model=ListingResponse, status_code=status.HTTP_200_OK)
+@router.put("/users/{user_id}/listings/{listing_id}", response_model=ListingResponse, status_code=http_status.HTTP_200_OK)
 async def update_hotel_listing(
     user_id: str,
     listing_id: str,
@@ -1462,13 +1462,13 @@ async def update_hotel_listing(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
         
@@ -1480,7 +1480,7 @@ async def update_hotel_listing(
         
         if not hotel_profile:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1615,18 +1615,18 @@ async def update_hotel_listing(
     except ValueError as e:
         logger.error(f"Value error updating listing: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         logger.error(f"Error updating listing: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update listing: {str(e)}"
         )
 
 
-@router.delete("/users/{user_id}/listings/{listing_id}", status_code=status.HTTP_200_OK)
+@router.delete("/users/{user_id}/listings/{listing_id}", status_code=http_status.HTTP_200_OK)
 async def delete_hotel_listing(
     user_id: str,
     listing_id: str,
@@ -1652,13 +1652,13 @@ async def delete_hotel_listing(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
         if user['type'] != 'hotel':
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
         
@@ -1670,7 +1670,7 @@ async def delete_hotel_listing(
         
         if not hotel_profile:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
         
@@ -1688,7 +1688,7 @@ async def delete_hotel_listing(
         
         if not listing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Listing not found"
             )
         
@@ -1755,12 +1755,12 @@ async def delete_hotel_listing(
     except Exception as e:
         logger.error(f"Error deleting listing: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete listing: {str(e)}"
         )
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)
+@router.delete("/users/{user_id}", status_code=http_status.HTTP_200_OK)
 async def delete_user(
     user_id: str,
     admin_id: str = Depends(get_admin_user)
@@ -1781,7 +1781,7 @@ async def delete_user(
         # Prevent self-deletion
         if user_id == admin_id:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete your own account"
             )
         
@@ -1797,7 +1797,7 @@ async def delete_user(
         
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
@@ -1827,12 +1827,12 @@ async def delete_user(
     except Exception as e:
         logger.error(f"Error deleting user: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(e)}"
         )
 
 
-@router.get("/collaborations", response_model=CollaborationListResponse, status_code=status.HTTP_200_OK)
+@router.get("/collaborations", response_model=CollaborationListResponse, status_code=http_status.HTTP_200_OK)
 async def get_admin_collaborations(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -1950,6 +1950,6 @@ async def get_admin_collaborations(
     except Exception as e:
         logger.error(f"Error fetching admin collaborations: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
         )

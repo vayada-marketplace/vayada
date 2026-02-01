@@ -252,6 +252,8 @@ async def create_collaboration(
             completed_at=collaboration['completed_at']
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating collaboration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -647,6 +649,8 @@ async def update_collaboration_terms(
             creator_agreed_at=updated['creator_agreed_at'],
             term_last_updated_at=updated['term_last_updated_at']
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating terms: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -757,6 +761,8 @@ async def approve_collaboration_terms(
             creator_agreed_at=updated['creator_agreed_at'],
             term_last_updated_at=updated['term_last_updated_at']
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error approving: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -861,6 +867,8 @@ async def cancel_collaboration(
             creator_agreed_at=updated['creator_agreed_at'],
             term_last_updated_at=updated['term_last_updated_at']
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error cancelling: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

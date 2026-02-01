@@ -4,6 +4,7 @@ Creator profile routes
 from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from typing import List, Literal, Optional
 from datetime import datetime
+from decimal import Decimal
 import json
 import logging
 
