@@ -9,7 +9,7 @@ import logging
 import json
 
 from app.database import Database
-from app.dependencies import get_current_user_id, get_current_hotel_profile_id
+from app.dependencies import get_current_user_id, get_current_user_id_allow_pending, get_current_hotel_profile_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.s3_service import upload_file_to_s3, generate_file_key, delete_file_from_s3, extract_key_from_url
 from app.image_processing import validate_image, process_image, generate_thumbnail, get_image_info
@@ -39,7 +39,7 @@ router = APIRouter(prefix="/hotels", tags=["hotels"])
 
 
 @router.get("/me/profile-status", response_model=HotelProfileStatusResponse)
-async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
+async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id_allow_pending)):
     """
     Get the profile completion status for the currently authenticated hotel user.
     
@@ -165,7 +165,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id)):
 
 
 @router.get("/me", response_model=HotelProfileResponse, status_code=http_status.HTTP_200_OK)
-async def get_hotel_profile(user_id: str = Depends(get_current_user_id)):
+async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pending)):
     """
     Get the complete profile data for the currently authenticated hotel user.
     """
@@ -322,7 +322,7 @@ async def update_hotel_profile(
     website: Optional[str] = Form(default=None),
     phone: Optional[str] = Form(default=None),
     picture: Optional[UploadFile] = File(default=None),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id_allow_pending)
 ):
     """
     Update the currently authenticated hotel's profile.

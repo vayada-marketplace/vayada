@@ -9,7 +9,7 @@ import json
 import logging
 
 from app.database import Database
-from app.dependencies import get_current_user_id, get_current_creator_id
+from app.dependencies import get_current_user_id, get_current_user_id_allow_pending, get_current_creator_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.auth import create_email_verification_token
 from app.config import settings
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/creators", tags=["creators"])
 
 
 @router.get("/me/profile-status", response_model=CreatorProfileStatusResponse)
-async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)):
+async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_allow_pending)):
     """
     Get the profile completion status for the currently authenticated creator user.
     
@@ -142,7 +142,7 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id)
 
 
 @router.get("/me", response_model=CreatorProfileFullResponse)
-async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
+async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_pending)):
     """
     Get the complete profile data for the currently authenticated creator user.
     """
@@ -273,7 +273,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id)):
 @router.put("/me", response_model=CreatorProfileResponse, status_code=http_status.HTTP_200_OK)
 async def update_creator_profile(
     request: UpdateCreatorProfileRequest,
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id_allow_pending)
 ):
     """
     Update the currently authenticated creator's profile.

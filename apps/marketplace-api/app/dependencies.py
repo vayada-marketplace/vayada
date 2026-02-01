@@ -73,6 +73,52 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
     return user_id
 
 
+async def get_current_user_id_allow_pending(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """
+    Get current user ID from JWT token, allowing pending/unverified users.
+    Used for profile completion endpoints that need to work before verification.
+    """
+    token = credentials.credentials
+
+    if is_token_expired(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired. Please login again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Verify user exists (but don't check status)
+    user = await Database.fetchrow(
+        "SELECT id FROM users WHERE id = $1",
+        user_id
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user_id
+
+
 async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) -> str:
     """
     Get current creator ID from user ID.
