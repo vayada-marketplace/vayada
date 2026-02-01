@@ -161,7 +161,7 @@ class TestUpdateHotelProfile:
         assert data["about"] == "A beautiful hotel in Rome"
 
     async def test_update_profile_multipart(
-        self, client: AsyncClient, test_hotel, mock_s3_upload
+        self, client: AsyncClient, test_hotel
     ):
         """Test updating profile with multipart form data including picture."""
         image_data = create_test_image()

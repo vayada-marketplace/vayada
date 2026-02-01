@@ -366,7 +366,7 @@ class TestDeleteUser:
     """Tests for DELETE /admin/users/{user_id}"""
 
     async def test_delete_user_success(
-        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_s3_delete
+        self, client: AsyncClient, test_admin, cleanup_database, init_database
     ):
         """Test deleting a user."""
         creator = await create_test_creator()
@@ -389,7 +389,7 @@ class TestDeleteUser:
         assert user is None
 
     async def test_delete_user_cascade(
-        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_s3_delete
+        self, client: AsyncClient, test_admin, cleanup_database, init_database
     ):
         """Test that deleting user cascades to profile."""
         creator = await create_test_creator()
@@ -648,7 +648,7 @@ class TestAdminDeleteListing:
     """Tests for DELETE /admin/users/{user_id}/listings/{listing_id}"""
 
     async def test_delete_listing(
-        self, client: AsyncClient, test_admin, test_hotel_verified, mock_s3_delete
+        self, client: AsyncClient, test_admin, test_hotel_verified
     ):
         """Test admin deleting listing."""
         user_id = str(test_hotel_verified["user"]["id"])

@@ -31,7 +31,7 @@ class TestUploadImage:
     """Tests for POST /upload/image"""
 
     async def test_upload_jpeg_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading a JPEG image."""
         image_data = create_test_image(format="JPEG")
@@ -49,7 +49,7 @@ class TestUploadImage:
         assert data["format"] in ["JPEG", "jpeg"]
 
     async def test_upload_png_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading a PNG image."""
         image_data = create_test_image(format="PNG")
@@ -65,7 +65,7 @@ class TestUploadImage:
         assert "url" in data
 
     async def test_upload_webp_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading a WEBP image."""
         image_data = create_test_image(format="WEBP")
@@ -120,7 +120,7 @@ class TestUploadImage:
         assert response.status_code == 403
 
     async def test_upload_with_prefix(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading with custom prefix."""
         image_data = create_test_image()
@@ -141,7 +141,7 @@ class TestUploadMultipleImages:
     """Tests for POST /upload/images"""
 
     async def test_upload_multiple_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading multiple images."""
         image1 = create_test_image()
@@ -163,7 +163,7 @@ class TestUploadMultipleImages:
         assert len(data["images"]) == 2
 
     async def test_upload_multiple_partial_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading multiple images with some invalid."""
         valid_image = create_test_image()
@@ -219,7 +219,7 @@ class TestUploadHotelProfileImage:
     """Tests for POST /upload/image/hotel-profile"""
 
     async def test_upload_hotel_profile_success(
-        self, client: AsyncClient, test_hotel, mock_s3_upload
+        self, client: AsyncClient, test_hotel
     ):
         """Test uploading hotel profile image."""
         image_data = create_test_image()
@@ -252,7 +252,7 @@ class TestUploadListingImage:
     """Tests for POST /upload/image/listing"""
 
     async def test_upload_listing_image_success(
-        self, client: AsyncClient, test_hotel, mock_s3_upload
+        self, client: AsyncClient, test_hotel
     ):
         """Test uploading listing image."""
         image_data = create_test_image()
@@ -285,7 +285,7 @@ class TestUploadListingImages:
     """Tests for POST /upload/images/listing"""
 
     async def test_upload_listing_images_success(
-        self, client: AsyncClient, test_hotel, mock_s3_upload
+        self, client: AsyncClient, test_hotel
     ):
         """Test uploading multiple listing images."""
         image1 = create_test_image()
@@ -307,7 +307,7 @@ class TestUploadListingImages:
             assert "listings" in img["key"]
 
     async def test_upload_listing_images_with_target_user(
-        self, client: AsyncClient, test_admin, test_hotel, mock_s3_upload
+        self, client: AsyncClient, test_admin, test_hotel
     ):
         """Test admin uploading listing images for another user."""
         image_data = create_test_image()
@@ -329,7 +329,7 @@ class TestUploadCreatorProfileImage:
     """Tests for POST /upload/image/creator-profile"""
 
     async def test_upload_creator_profile_success(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test uploading creator profile image."""
         image_data = create_test_image()
@@ -345,7 +345,7 @@ class TestUploadCreatorProfileImage:
         assert "creators" in data["key"]
 
     async def test_upload_creator_profile_with_target_user(
-        self, client: AsyncClient, test_admin, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_admin, test_creator
     ):
         """Test admin uploading creator profile image for another user."""
         image_data = create_test_image()
@@ -391,7 +391,7 @@ class TestImageValidation:
     """Tests for image validation"""
 
     async def test_upload_returns_image_dimensions(
-        self, client: AsyncClient, test_creator, mock_s3_upload
+        self, client: AsyncClient, test_creator
     ):
         """Test that upload returns image dimensions."""
         image_data = create_test_image(width=800, height=600)

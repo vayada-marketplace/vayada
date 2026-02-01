@@ -11,6 +11,11 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("EMAIL_ENABLED", "true")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ENVIRONMENT", "test")
+# S3 configuration for tests - required for upload endpoints to not return 503
+os.environ.setdefault("S3_BUCKET_NAME", "test-bucket")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "test-access-key")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
 import pytest
 import asyncio
@@ -155,38 +160,43 @@ def mock_send_email():
 
 
 @pytest.fixture(autouse=True)
-def mock_s3_upload():
-    """Mock S3 upload to return fake URLs. Applied to all tests automatically."""
+def mock_s3_operations():
+    """Mock all S3 operations. Applied to all tests automatically."""
     uploaded_files = []
+    deleted_files = []
+    listed_files = []
 
-    async def mock_upload(content: bytes, key: str, content_type: str = "image/jpeg", make_public: bool = True):
+    async def mock_upload(file_content: bytes, file_key: str, content_type: str = "image/jpeg", make_public: bool = True):
         uploaded_files.append({
-            "content_length": len(content),
-            "key": key,
+            "content_length": len(file_content),
+            "key": file_key,
             "content_type": content_type
         })
-        return f"https://test-bucket.s3.amazonaws.com/{key}"
+        return f"https://test-bucket.s3.amazonaws.com/{file_key}"
 
-    with patch("app.s3_service.upload_file_to_s3", side_effect=mock_upload):
-        yield uploaded_files
-
-
-@pytest.fixture(autouse=True)
-def mock_s3_delete():
-    """Mock S3 delete operations. Applied to all tests automatically."""
-    deleted_files = []
-
-    async def mock_delete(key: str):
-        deleted_files.append(key)
+    async def mock_delete(file_key: str):
+        deleted_files.append(file_key)
         return True
+
+    async def mock_list_prefix(prefix: str):
+        listed_files.append(prefix)
+        return []  # Return empty list - no files to delete
 
     async def mock_delete_prefix(prefix: str):
         deleted_files.append(f"prefix:{prefix}")
-        return {"deleted_count": 1, "failed_count": 0, "total_objects": 1}
+        return {"deleted_count": 0, "failed_count": 0, "total_objects": 0}
 
-    with patch("app.s3_service.delete_file_from_s3", side_effect=mock_delete), \
-         patch("app.s3_service.delete_all_objects_in_prefix", side_effect=mock_delete_prefix):
-        yield deleted_files
+    # Patch at both source module AND where functions are imported in routers
+    # This is necessary because `from module import func` binds func locally
+    with patch("app.s3_service.upload_file_to_s3", side_effect=mock_upload), \
+         patch("app.s3_service.delete_file_from_s3", side_effect=mock_delete), \
+         patch("app.s3_service.list_objects_in_prefix", side_effect=mock_list_prefix), \
+         patch("app.s3_service.delete_all_objects_in_prefix", side_effect=mock_delete_prefix), \
+         patch("app.routers.upload.upload_file_to_s3", side_effect=mock_upload), \
+         patch("app.routers.hotels.upload_file_to_s3", side_effect=mock_upload), \
+         patch("app.routers.admin.delete_file_from_s3", side_effect=mock_delete), \
+         patch("app.routers.admin.delete_all_objects_in_prefix", side_effect=mock_delete_prefix):
+        yield {"uploaded": uploaded_files, "deleted": deleted_files, "listed": listed_files}
 
 
 # User factory helpers
