@@ -44,19 +44,32 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Verify user exists
+    # Verify user exists and check status
     user = await Database.fetchrow(
-        "SELECT id, type FROM users WHERE id = $1",
+        "SELECT id, type, status FROM users WHERE id = $1",
         user_id
     )
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    # Check if user account is active (verified)
+    if user['status'] != 'verified':
+        status_messages = {
+            'pending': "Your account is pending verification. Please wait for approval.",
+            'rejected': "Your account has been rejected. Please contact support.",
+            'suspended': "Your account has been suspended. Please contact support.",
+        }
+        detail = status_messages.get(user['status'], "Your account is not active. Please contact support.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail,
+        )
+
     return user_id
 
 
