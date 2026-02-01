@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.database import Database, check_database_connection
 from app.config import settings
-from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat
+from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact
 
 
 @asynccontextmanager
@@ -71,4 +71,5 @@ app.include_router(admin.router)
 app.include_router(marketplace.router)
 app.include_router(collaborations.router)
 app.include_router(chat.router)
+app.include_router(contact.router)
 
