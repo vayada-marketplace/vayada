@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     EMAIL_ENABLED: bool = True
     EMAIL_FROM_ADDRESS: str = Field("noreply@vayada.com", description="Email address to send from")
     EMAIL_FROM_NAME: str = "Vayada"
+    CONTACT_EMAIL: str = Field("hello@vayada.com", description="Email address to receive contact form submissions")
     FRONTEND_URL: str = Field("https://vayada.com", description="Frontend URL for reset password links")
     
     # SMTP Configuration (for sending emails via SMTP)

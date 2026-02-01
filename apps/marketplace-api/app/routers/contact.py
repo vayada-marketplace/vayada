@@ -4,7 +4,8 @@ Contact form routes
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional
-from app.database import Database
+from app.email_service import send_email
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,21 +33,26 @@ class ContactFormResponse(BaseModel):
 async def submit_contact_form(request: ContactFormRequest):
     """
     Submit a contact form.
-    Stores the submission in the database.
+    Sends an email notification to the team.
     """
     try:
-        await Database.execute(
-            """
-            INSERT INTO contact_submissions (name, email, phone, company, country, user_type, message)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            """,
-            request.name,
-            request.email,
-            request.phone,
-            request.company,
-            request.country,
-            request.user_type,
-            request.message
+        html_body = f"""
+        <h2>New Contact Form Submission</h2>
+        <p><strong>Name:</strong> {request.name}</p>
+        <p><strong>Email:</strong> {request.email}</p>
+        <p><strong>Phone:</strong> {request.phone or 'Not provided'}</p>
+        <p><strong>Company:</strong> {request.company or 'Not provided'}</p>
+        <p><strong>Country:</strong> {request.country or 'Not provided'}</p>
+        <p><strong>User Type:</strong> {request.user_type or 'Not specified'}</p>
+        <hr>
+        <p><strong>Message:</strong></p>
+        <p>{request.message}</p>
+        """
+
+        await send_email(
+            to_email=settings.CONTACT_EMAIL or settings.EMAIL_FROM_ADDRESS,
+            subject=f"New Contact Form: {request.name}",
+            html_body=html_body
         )
 
         return ContactFormResponse(message="Contact form submitted successfully")
