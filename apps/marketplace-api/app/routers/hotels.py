@@ -11,7 +11,7 @@ import json
 from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 from app.email_service import send_email, create_profile_completion_email_html
-from app.s3_service import upload_file_to_s3, generate_file_key
+from app.s3_service import upload_file_to_s3, generate_file_key, delete_file_from_s3, extract_key_from_url
 from app.image_processing import validate_image, process_image, generate_thumbnail, get_image_info
 from app.config import settings
 from app.auth import create_email_verification_token
@@ -961,7 +961,8 @@ async def update_hotel_listing(
         # Get current listing data
         listing_data = await _get_listing_with_details(listing_id, hotel_profile_id)
         current_listing = listing_data["listing"]
-        
+        old_images = current_listing.get('images') or []
+
         # Use transaction to ensure atomicity
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
@@ -1058,7 +1059,23 @@ async def update_hotel_listing(
                         request.creatorRequirements.targetAgeMax,
                         request.creatorRequirements.targetAgeGroups or []
                     )
-        
+
+        # Delete removed images from S3 if images were updated
+        if request.images is not None:
+            new_images = set(request.images)
+            removed_images = [img for img in old_images if img not in new_images]
+            for image_url in removed_images:
+                try:
+                    image_key = extract_key_from_url(image_url)
+                    if image_key:
+                        await delete_file_from_s3(image_key)
+                        # Also try to delete thumbnail
+                        thumbnail_key = image_key.replace('/images/', '/thumbnails/')
+                        await delete_file_from_s3(thumbnail_key)
+                        logger.info(f"Deleted removed listing image from S3: {image_key}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete image from S3: {e}")
+
         # Fetch updated listing with details
         updated_data = await _get_listing_with_details(listing_id, hotel_profile_id)
         updated_listing = updated_data["listing"]

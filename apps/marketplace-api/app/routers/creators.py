@@ -13,6 +13,7 @@ from app.dependencies import get_current_user_id, get_current_creator_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.auth import create_email_verification_token
 from app.config import settings
+from app.s3_service import delete_file_from_s3, extract_key_from_url
 from app.models.common import PlatformResponse, CreatorRequirementsResponse
 from app.models.creators import (
     CreatorProfileStatusResponse,
@@ -304,20 +305,21 @@ async def update_creator_profile(
                 detail="This endpoint is only available for creators"
             )
         
-        # Get creator profile with completion status
+        # Get creator profile with completion status and current profile picture
         creator = await Database.fetchrow(
-            "SELECT id, profile_complete FROM creators WHERE user_id = $1",
+            "SELECT id, profile_complete, profile_picture FROM creators WHERE user_id = $1",
             user_id
         )
-        
+
         if not creator:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
-        
+
         creator_id = creator['id']
         was_complete_before = creator.get('profile_complete', False)
+        old_profile_picture = creator.get('profile_picture')
         
         # Start transaction - update user name, creator profile, and platforms
         pool = await Database.get_pool()
@@ -390,7 +392,7 @@ async def update_creator_profile(
                         
                         await conn.execute(
                             """
-                            INSERT INTO creator_platforms 
+                            INSERT INTO creator_platforms
                             (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                             """,
@@ -403,7 +405,17 @@ async def update_creator_profile(
                             top_age_groups_data,
                             gender_split_data
                         )
-        
+
+        # Delete old profile picture from S3 if replaced with a new one
+        if request.profilePicture is not None and old_profile_picture and old_profile_picture != request.profilePicture:
+            try:
+                old_key = extract_key_from_url(old_profile_picture)
+                if old_key:
+                    await delete_file_from_s3(old_key)
+                    logger.info(f"Deleted old profile picture from S3: {old_key}")
+            except Exception as e:
+                logger.warning(f"Failed to delete old profile picture from S3: {e}")
+
         # Fetch updated profile with platforms and check if profile became complete
         creator_data = await Database.fetchrow(
             """
