@@ -225,6 +225,27 @@ class CancelCollaborationRequest(BaseModel):
 
 
 # ============================================
+# RATE COLLABORATION
+# ============================================
+
+class RateCollaborationRequest(BaseModel):
+    """Request model for rating a collaboration"""
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5")
+    comment: Optional[str] = Field(None, max_length=1000, description="Optional comment")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class RateCollaborationResponse(BaseModel):
+    """Response model for rating submission"""
+    message: str
+    rating_id: str
+    created_at: datetime
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ============================================
 # COLLABORATION RESPONSE
 # ============================================
 

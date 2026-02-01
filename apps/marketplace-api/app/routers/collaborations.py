@@ -18,6 +18,8 @@ from app.models.collaborations import (
     UpdateCollaborationTermsRequest,
     CancelCollaborationRequest,
     CollaborationResponse,
+    RateCollaborationRequest,
+    RateCollaborationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -973,4 +975,106 @@ async def toggle_deliverable(
         raise
     except Exception as e:
         logger.error(f"Error toggling: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{collaboration_id}/rate", response_model=RateCollaborationResponse)
+async def rate_collaboration(
+    collaboration_id: str,
+    request: RateCollaborationRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Rate a creator after completing a collaboration.
+    Only hotels can rate collaborations they participated in.
+    """
+    try:
+        # Verify user is a hotel
+        user = await Database.fetchrow(
+            "SELECT id, type FROM users WHERE id = $1",
+            user_id
+        )
+
+        if not user or user['type'] != 'hotel':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only hotels can rate collaborations"
+            )
+
+        # Get hotel profile
+        hotel_profile = await Database.fetchrow(
+            "SELECT id FROM hotel_profiles WHERE user_id = $1",
+            user_id
+        )
+
+        if not hotel_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hotel profile not found"
+            )
+
+        hotel_profile_id = str(hotel_profile['id'])
+
+        # Fetch collaboration
+        collab = await Database.fetchrow(
+            "SELECT * FROM collaborations WHERE id = $1",
+            collaboration_id
+        )
+
+        if not collab:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Collaboration not found"
+            )
+
+        # Verify the hotel is a participant in this collaboration
+        if str(collab['hotel_id']) != hotel_profile_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to rate this collaboration"
+            )
+
+        # Verify collaboration is completed
+        if collab['status'] != 'completed':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Collaboration is not completed"
+            )
+
+        # Check if already rated
+        existing_rating = await Database.fetchrow(
+            "SELECT id FROM creator_ratings WHERE collaboration_id = $1",
+            collaboration_id
+        )
+
+        if existing_rating:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already rated this collaboration"
+            )
+
+        # Insert rating
+        rating_row = await Database.fetchrow(
+            """
+            INSERT INTO creator_ratings (creator_id, hotel_id, collaboration_id, rating, comment)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, created_at
+            """,
+            str(collab['creator_id']),
+            hotel_profile_id,
+            collaboration_id,
+            request.rating,
+            request.comment
+        )
+
+        return RateCollaborationResponse(
+            message="Rating submitted successfully",
+            rating_id=str(rating_row['id']),
+            created_at=rating_row['created_at']
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rating collaboration: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
