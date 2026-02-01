@@ -216,7 +216,7 @@ async def create_test_user(
     password: str = "TestPassword123!",
     name: str = "Test User",
     user_type: str = "creator",
-    status: str = "pending",
+    status: str = "verified",
     email_verified: bool = False
 ) -> Dict:
     """Create a test user in the database."""
@@ -239,7 +239,7 @@ async def create_test_creator(
     email: Optional[str] = None,
     password: str = "TestPassword123!",
     name: str = "Test Creator",
-    status: str = "pending",
+    status: str = "verified",
     location: str = "New York, USA",
     short_description: str = "Test creator description",
     profile_complete: bool = False
@@ -274,7 +274,7 @@ async def create_test_hotel(
     email: Optional[str] = None,
     password: str = "TestPassword123!",
     name: str = "Test Hotel",
-    status: str = "pending",
+    status: str = "verified",
     hotel_name: str = "Grand Test Hotel",
     location: str = "Paris, France",
     about: str = "A luxury test hotel with amazing amenities and service",

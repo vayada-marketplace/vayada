@@ -128,19 +128,21 @@ class TestGetMarketplaceListings:
             listing = data[0]
             assert "creator_requirements" in listing
 
-    async def test_listings_empty_when_no_verified(
+    async def test_listings_exclude_unverified_hotels(
         self, client: AsyncClient, cleanup_database, init_database
     ):
-        """Test that listings are empty when no verified hotels exist."""
-        # Create only unverified hotels
+        """Test that listings from unverified hotels are excluded."""
+        # Create an unverified hotel with a listing
         unverified_hotel = await create_test_hotel(status="pending", profile_complete=True)
-        await create_test_listing(hotel_profile_id=str(unverified_hotel["hotel"]["id"]))
+        unverified_listing = await create_test_listing(hotel_profile_id=str(unverified_hotel["hotel"]["id"]))
 
         response = await client.get("/marketplace/listings")
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 0
+        # Verify the unverified hotel's listing is NOT in the results
+        listing_ids = [listing["id"] for listing in data]
+        assert str(unverified_listing["listing"]["id"]) not in listing_ids
 
     async def test_listings_public_no_auth_required(
         self, client: AsyncClient
