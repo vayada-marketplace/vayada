@@ -138,48 +138,76 @@ async def verify_email_code_endpoint(request: VerifyEmailCodeRequest):
 async def register(request: RegisterRequest):
     """
     Register a new user (creator or hotel)
-    
+
     - **email**: User's email address (must be unique)
     - **password**: Password (minimum 8 characters)
     - **type**: User type - either "creator" or "hotel"
     - **name**: User's name
+    - **terms_accepted**: Must be True (required for GDPR)
+    - **privacy_accepted**: Must be True (required for GDPR)
+    - **marketing_consent**: Optional marketing consent
     """
     try:
+        # Validate GDPR consent requirements
+        if not request.terms_accepted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You must accept the Terms of Service to register"
+            )
+
+        if not request.privacy_accepted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You must accept the Privacy Policy to register"
+            )
+
         # Check if email already exists
         existing_user = await Database.fetchrow(
             "SELECT id FROM users WHERE email = $1",
             request.email
         )
-        
+
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
+
         # Hash password
         password_hash = bcrypt.hashpw(
             request.password.encode('utf-8'),
             bcrypt.gensalt()
         ).decode('utf-8')
-        
+
         # Use provided name or default to email prefix
         user_name = request.name
         if not user_name or user_name.strip() == "":
             # Extract name from email (part before @)
             user_name = request.email.split('@')[0].capitalize()
-        
-        # Insert user into database
+
+        # Default versions if not provided
+        terms_version = request.terms_version or "2024-01-01"
+        privacy_version = request.privacy_version or "2024-01-01"
+
+        # Insert user into database with consent fields
         user = await Database.fetchrow(
             """
-            INSERT INTO users (email, password_hash, name, type, status)
-            VALUES ($1, $2, $3, $4, 'pending')
+            INSERT INTO users (
+                email, password_hash, name, type, status,
+                terms_accepted_at, terms_version,
+                privacy_accepted_at, privacy_version,
+                marketing_consent, marketing_consent_at
+            )
+            VALUES ($1, $2, $3, $4, 'pending', now(), $5, now(), $6, $7, CASE WHEN $7 THEN now() ELSE NULL END)
             RETURNING id, email, name, type, status
             """,
             request.email,
             password_hash,
             user_name,
-            request.type
+            request.type,
+            terms_version,
+            privacy_version,
+            request.marketing_consent
         )
         
         # Automatically create corresponding profile based on user type
@@ -205,7 +233,35 @@ async def register(request: RegisterRequest):
                 user['id'],
                 user['name']
             )
-        
+
+        # Create consent history records for GDPR audit trail
+        await Database.execute(
+            """
+            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
+            VALUES ($1, 'terms', true, $2)
+            """,
+            user['id'],
+            terms_version
+        )
+
+        await Database.execute(
+            """
+            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
+            VALUES ($1, 'privacy', true, $2)
+            """,
+            user['id'],
+            privacy_version
+        )
+
+        if request.marketing_consent:
+            await Database.execute(
+                """
+                INSERT INTO consent_history (user_id, consent_type, consent_given)
+                VALUES ($1, 'marketing', true)
+                """,
+                user['id']
+            )
+
         # Create JWT token
         access_token = create_access_token(
             data={"sub": str(user['id']), "email": user['email'], "type": user['type']}

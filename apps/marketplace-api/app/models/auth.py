@@ -15,6 +15,12 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     type: Literal["creator", "hotel"]
     name: str | None = Field(None, description="User's name (optional, defaults to email prefix)")
+    # GDPR consent fields
+    terms_accepted: bool = Field(..., description="Must accept Terms of Service")
+    privacy_accepted: bool = Field(..., description="Must accept Privacy Policy")
+    marketing_consent: bool = Field(default=False, description="Optional marketing consent")
+    terms_version: str | None = Field(default=None, description="Version of Terms accepted")
+    privacy_version: str | None = Field(default=None, description="Version of Privacy Policy accepted")
 
 
 class RegisterResponse(BaseModel):
