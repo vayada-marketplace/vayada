@@ -181,7 +181,9 @@ class TestRegister:
                 "email": email,
                 "password": "SecurePassword123!",
                 "name": "Test Creator",
-                "type": "creator"
+                "type": "creator",
+                "terms_accepted": True,
+                "privacy_accepted": True
             }
         )
 
@@ -204,7 +206,9 @@ class TestRegister:
                 "email": email,
                 "password": "SecurePassword123!",
                 "name": "Test Hotel",
-                "type": "hotel"
+                "type": "hotel",
+                "terms_accepted": True,
+                "privacy_accepted": True
             }
         )
 
@@ -226,7 +230,9 @@ class TestRegister:
                 "email": user["email"],
                 "password": "SecurePassword123!",
                 "name": "Duplicate User",
-                "type": "creator"
+                "type": "creator",
+                "terms_accepted": True,
+                "privacy_accepted": True
             }
         )
 
@@ -245,7 +251,9 @@ class TestRegister:
                 "email": email,
                 "password": "weak",  # Too short
                 "name": "Test User",
-                "type": "creator"
+                "type": "creator",
+                "terms_accepted": True,
+                "privacy_accepted": True
             }
         )
 
@@ -272,7 +280,9 @@ class TestRegister:
                 "email": generate_test_email(),
                 "password": "SecurePassword123!",
                 "name": "Test User",
-                "type": "invalid_type"
+                "type": "invalid_type",
+                "terms_accepted": True,
+                "privacy_accepted": True
             }
         )
 
