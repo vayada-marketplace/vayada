@@ -742,7 +742,12 @@ async def update_creator_profile(
                     update_fields.append(f"profile_picture = ${param_counter}")
                     update_values.append(request.profilePicture)
                     param_counter += 1
-                
+
+                if request.creatorType is not None:
+                    update_fields.append(f"creator_type = ${param_counter}")
+                    update_values.append(request.creatorType)
+                    param_counter += 1
+
                 # Update creator profile if there are fields to update
                 if update_fields:
                     update_fields.append("updated_at = now()")
@@ -798,8 +803,8 @@ async def update_creator_profile(
         # Fetch updated profile with platforms
         creator_data = await Database.fetchrow(
             """
-            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
-                   c.profile_picture, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name
+            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone,
+                   c.profile_picture, c.creator_type, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name
             FROM creators c
             JOIN users u ON u.id = c.user_id
             WHERE c.id = $1
@@ -856,6 +861,7 @@ async def update_creator_profile(
             portfolioLink=creator_data['portfolio_link'],
             phone=creator_data['phone'],
             profilePicture=creator_data['profile_picture'],
+            creatorType=creator_data['creator_type'] or 'Lifestyle',
             platforms=platforms,
             audienceSize=audience_size,
             status=creator_data['status'],
