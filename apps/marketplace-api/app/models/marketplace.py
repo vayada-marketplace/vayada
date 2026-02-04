@@ -64,6 +64,7 @@ class CreatorMarketplaceResponse(BaseModel):
     shortDescription: str = Field(alias="short_description")
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    creatorType: str = Field(alias="creator_type")
     platforms: List[PlatformMarketplaceResponse]
     audienceSize: int = Field(alias="audience_size")
     averageRating: float = Field(alias="average_rating")

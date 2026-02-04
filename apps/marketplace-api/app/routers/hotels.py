@@ -246,7 +246,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
             requirements = await Database.fetchrow(
                 """
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id = $1
                 """,
@@ -264,6 +264,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
                         "target_age_min": requirements["target_age_min"],
                         "target_age_max": requirements["target_age_max"],
                         "target_age_groups": requirements["target_age_groups"],
+                        "creator_types": requirements["creator_types"],
                         "created_at": requirements["created_at"],
                         "updated_at": requirements["updated_at"],
                     }
@@ -661,13 +662,13 @@ async def update_hotel_profile(
             requirements = await Database.fetchrow(
                 """
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id = $1
                 """,
                 listing['id']
             )
-            
+
             requirements_response = None
             if requirements:
                 requirements_response = CreatorRequirementsResponse.model_validate({
@@ -679,6 +680,7 @@ async def update_hotel_profile(
                     "target_age_min": requirements['target_age_min'],
                     "target_age_max": requirements['target_age_max'],
                     "target_age_groups": requirements['target_age_groups'],
+                    "creator_types": requirements['creator_types'],
                     "created_at": requirements['created_at'],
                     "updated_at": requirements['updated_at'],
                 }).model_dump(by_alias=True)
@@ -733,10 +735,11 @@ async def update_hotel_profile(
 @router.post("/me/listings", response_model=ListingResponse, status_code=http_status.HTTP_201_CREATED)
 async def create_hotel_listing(
     request: CreateListingRequest,
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id_allow_pending)
 ):
     """
     Create a new property listing for the currently authenticated hotel.
+    Allows pending users for profile completion.
     """
     try:
         # Verify user is a hotel and get hotel profile
@@ -806,10 +809,10 @@ async def create_hotel_listing(
                 requirements = await conn.fetchrow(
                     """
                     INSERT INTO listing_creator_requirements
-                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    RETURNING id, platforms, min_followers, target_countries, 
-                              target_age_min, target_age_max, target_age_groups, created_at, updated_at
+                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    RETURNING id, platforms, min_followers, target_countries,
+                              target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
                     """,
                     listing_id,
                     request.creatorRequirements.platforms,
@@ -817,9 +820,10 @@ async def create_hotel_listing(
                     request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
                     request.creatorRequirements.targetAgeMax,
-                    request.creatorRequirements.targetAgeGroups or []
+                    request.creatorRequirements.targetAgeGroups or [],
+                    request.creatorRequirements.creatorTypes or []
                 )
-                
+
                 requirements_response = CreatorRequirementsResponse.model_validate({
                     "id": str(requirements['id']),
                     "listing_id": str(listing_id),
@@ -829,6 +833,7 @@ async def create_hotel_listing(
                     "target_age_min": requirements['target_age_min'],
                     "target_age_max": requirements['target_age_max'],
                     "target_age_groups": requirements['target_age_groups'],
+                    "creator_types": requirements['creator_types'],
                     "created_at": requirements['created_at'],
                     "updated_at": requirements['updated_at']
                 })
@@ -916,13 +921,13 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
     requirements = await Database.fetchrow(
         """
         SELECT id, listing_id, platforms, min_followers, target_countries,
-               target_age_min, target_age_max, target_age_groups, created_at, updated_at
+               target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
         FROM listing_creator_requirements
         WHERE listing_id = $1
         """,
         listing_id
     )
-    
+
     requirements_response = None
     if requirements:
         requirements_response = CreatorRequirementsResponse.model_validate({
@@ -934,10 +939,11 @@ async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> d
             "target_age_min": requirements['target_age_min'],
             "target_age_max": requirements['target_age_max'],
             "target_age_groups": requirements['target_age_groups'],
+            "creator_types": requirements['creator_types'],
             "created_at": requirements['created_at'],
             "updated_at": requirements['updated_at']
         })
-    
+
     return {
         "listing": listing,
         "offerings": offerings_response,
@@ -1043,13 +1049,13 @@ async def update_hotel_listing(
                         "DELETE FROM listing_creator_requirements WHERE listing_id = $1",
                         listing_id
                     )
-                    
+
                     # Insert new requirements
                     await conn.execute(
                         """
                         INSERT INTO listing_creator_requirements
-                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         """,
                         listing_id,
                         request.creatorRequirements.platforms,
@@ -1057,7 +1063,8 @@ async def update_hotel_listing(
                         request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
                         request.creatorRequirements.targetAgeMax,
-                        request.creatorRequirements.targetAgeGroups or []
+                        request.creatorRequirements.targetAgeGroups or [],
+                        request.creatorRequirements.creatorTypes or []
                     )
 
         # Delete removed images from S3 if images were updated

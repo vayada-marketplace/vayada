@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from typing import List, Optional
 import logging
 
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, get_current_user_id_allow_pending
 from app.s3_service import upload_file_to_s3, generate_file_key
 from app.image_processing import (
     validate_image,
@@ -275,12 +275,13 @@ async def upload_multiple_images(
 @router.post("/image/hotel-profile", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_hotel_profile_image(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id_allow_pending)
 ):
     """
     Upload a hotel profile picture
-    
+
     Convenience endpoint that uploads to the 'hotels' prefix.
+    Allows pending users for profile completion.
     """
     return await upload_image(file, user_id, prefix="hotels")
 
@@ -288,12 +289,13 @@ async def upload_hotel_profile_image(
 @router.post("/image/listing", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_listing_image(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id_allow_pending)
 ):
     """
     Upload a listing image
-    
+
     Convenience endpoint that uploads to the 'listings' prefix.
+    Allows pending users for profile completion.
     """
     return await upload_image(file, user_id, prefix="listings")
 
@@ -301,20 +303,21 @@ async def upload_listing_image(
 @router.post("/images/listing", response_model=MultipleImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_listing_images(
     files: List[UploadFile] = File(...),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_allow_pending),
     target_user_id: Optional[str] = Query(None, description="Target hotel user_id (for admin uploading on behalf of a hotel). When creating a new hotel, first create the hotel to get their user_id, then upload using that user_id here.")
 ):
     """
     Upload multiple listing images
-    
+
     Convenience endpoint that uploads to the 'listings' prefix.
-    
+    Allows pending users for profile completion.
+
     - For regular hotels: Uses authenticated user's ID → `listings/{user_id}/filename.jpg`
     - For admin uploading for a hotel: Use `target_user_id` query param → `listings/{target_user_id}/filename.jpg`
-    
+
     **Important for admin creating new hotels:**
     1. First create the hotel via `POST /admin/users` (without listings) to get the hotel's user_id
-    2. Then upload listing images using `?target_user_id={hotel_user_id}` 
+    2. Then upload listing images using `?target_user_id={hotel_user_id}`
     3. Finally create listings with the image URLs via `POST /admin/users/{hotel_user_id}/listings` or include in hotel creation
     """
     # Use target_user_id if provided (for admin), otherwise use authenticated user_id
@@ -325,25 +328,123 @@ async def upload_listing_images(
 @router.post("/image/creator-profile", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_creator_profile_image(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_allow_pending),
     target_user_id: Optional[str] = Query(None, description="Target creator user_id (for admin uploading on behalf of a creator). When creating a new user, first create the user to get their user_id, then upload using that user_id here.")
 ):
     """
     Upload a creator profile picture
-    
+
     Convenience endpoint that uploads to the 'creators' prefix.
-    
+    Allows pending users for profile completion.
+
     - For regular creators: Uses authenticated user's ID → `creators/{user_id}/filename.jpg`
     - For admin uploading for a creator: Use `target_user_id` query param → `creators/{target_user_id}/filename.jpg`
-    
+
     **Important for admin creating new users:**
     1. First create the user via `POST /admin/users` (without profilePicture) to get the creator's user_id
-    2. Then upload the image using `?target_user_id={creator_user_id}` 
+    2. Then upload the image using `?target_user_id={creator_user_id}`
     3. Finally update the profile with the image URL via `PUT /admin/users/{user_id}/profile/creator`
-    
+
     This ensures images are organized by the creator's user_id, not the admin's.
     """
     # Use target_user_id if provided (for admin), otherwise use authenticated user_id
     upload_user_id = target_user_id if target_user_id else user_id
     return await upload_image(file, user_id, prefix="creators", target_user_id=upload_user_id)
+
+
+@router.post("/image/chat", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_chat_image(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Upload an image for chat messages
+
+    - **file**: Image file (JPEG, PNG, WEBP, or GIF)
+    - Max file size: 5MB
+
+    Returns the S3 URL of the uploaded image.
+    """
+    try:
+        # Check if S3 is configured
+        if not settings.S3_BUCKET_NAME:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="S3 storage is not configured. Please configure S3_BUCKET_NAME in environment variables."
+            )
+
+        # Read file content
+        file_content = await file.read()
+
+        if not file_content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Empty file"
+            )
+
+        # Check file size (5MB max for chat images)
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Image must be smaller than 5MB"
+            )
+
+        # Validate content type (allow GIF for chat)
+        allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+        if file.content_type and file.content_type.lower() not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please select an image (JPG, PNG, WebP, GIF)"
+            )
+
+        # Validate image
+        is_valid, error_message = validate_image(
+            file_content,
+            file.filename or "image",
+            file.content_type
+        )
+
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_message or "Invalid image file"
+            )
+
+        # Get image info
+        image_info = get_image_info(file_content)
+
+        # For chat images, don't resize to preserve quality
+        processed_content = file_content
+
+        # Generate file key with chat prefix
+        file_key = generate_file_key("chat", file.filename or "image.jpg", user_id)
+
+        # Upload to S3
+        content_type = file.content_type or "image/jpeg"
+        url = await upload_file_to_s3(
+            processed_content,
+            file_key,
+            content_type=content_type,
+            make_public=settings.S3_USE_PUBLIC_URLS
+        )
+
+        return ImageUploadResponse(
+            url=url,
+            thumbnail_url=None,
+            key=file_key,
+            width=image_info.get("width", 0),
+            height=image_info.get("height", 0),
+            size_bytes=image_info.get("size_bytes", len(processed_content)),
+            format=image_info.get("format", "JPEG")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading chat image: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload. Please try again."
+        )
 

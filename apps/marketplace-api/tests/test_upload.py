@@ -387,6 +387,156 @@ class TestS3Configuration:
             assert "s3" in response.json()["detail"].lower()
 
 
+class TestUploadChatImage:
+    """Tests for POST /upload/image/chat"""
+
+    async def test_upload_chat_image_jpeg_success(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading a JPEG chat image."""
+        image_data = create_test_image(format="JPEG")
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.jpg", image_data, "image/jpeg")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "url" in data
+        assert "chat" in data["key"]
+
+    async def test_upload_chat_image_png_success(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading a PNG chat image."""
+        image_data = create_test_image(format="PNG")
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.png", image_data, "image/png")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "url" in data
+
+    async def test_upload_chat_image_webp_success(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading a WEBP chat image."""
+        image_data = create_test_image(format="WEBP")
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.webp", image_data, "image/webp")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "url" in data
+
+    async def test_upload_chat_image_gif_success(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading a GIF chat image."""
+        image_data = create_test_image(format="GIF")
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.gif", image_data, "image/gif")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "url" in data
+
+    async def test_upload_chat_image_invalid_format(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading chat image with invalid format."""
+        invalid_file = create_invalid_file()
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.txt", invalid_file, "text/plain")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 400
+        assert "Please select an image" in response.json()["detail"]
+
+    async def test_upload_chat_image_empty_file(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading empty chat image."""
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("empty.jpg", b"", "image/jpeg")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 400
+
+    async def test_upload_chat_image_no_auth(
+        self, client: AsyncClient
+    ):
+        """Test uploading chat image without authentication."""
+        image_data = create_test_image()
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.jpg", image_data, "image/jpeg")}
+        )
+
+        assert response.status_code == 403
+
+    async def test_upload_chat_image_too_large(
+        self, client: AsyncClient, test_creator
+    ):
+        """Test uploading chat image larger than 5MB."""
+        # Create a large image (slightly over 5MB)
+        large_image = create_test_image(width=3000, height=3000)
+
+        # If the test image isn't large enough, pad it
+        if len(large_image) < 5 * 1024 * 1024:
+            # Create a BytesIO with the image and append data to exceed 5MB
+            # For testing purposes, we'll create raw data that exceeds the limit
+            large_data = large_image + b"\x00" * (5 * 1024 * 1024 - len(large_image) + 1000)
+        else:
+            large_data = large_image
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("large.jpg", large_data, "image/jpeg")},
+            headers=get_auth_headers(test_creator["token"])
+        )
+
+        assert response.status_code == 400
+        assert "5MB" in response.json()["detail"]
+
+    async def test_upload_chat_image_hotel_user(
+        self, client: AsyncClient, test_hotel
+    ):
+        """Test that hotel users can also upload chat images."""
+        image_data = create_test_image()
+
+        response = await client.post(
+            "/upload/image/chat",
+            files={"file": ("chat.jpg", image_data, "image/jpeg")},
+            headers=get_auth_headers(test_hotel["token"])
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "url" in data
+        assert "chat" in data["key"]
+
+
 class TestImageValidation:
     """Tests for image validation"""
 

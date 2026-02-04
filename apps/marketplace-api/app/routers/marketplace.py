@@ -1,8 +1,8 @@
 """
 Marketplace routes for public browsing
 """
-from fastapi import APIRouter, HTTPException, status
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, status, Query
+from typing import List, Optional, Literal
 from datetime import datetime
 from app.database import Database
 import logging
@@ -99,14 +99,14 @@ async def get_all_listings():
             placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
             requirements_query = f"""
                 SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, target_age_groups, created_at, updated_at
+                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
                 FROM listing_creator_requirements
                 WHERE listing_id IN ({placeholders})
             """
             requirements_data = await Database.fetch(requirements_query, *listing_ids)
         else:
             requirements_data = []
-        
+
         # Create a map of listing_id -> requirements
         requirements_map = {}
         for r in requirements_data:
@@ -120,6 +120,7 @@ async def get_all_listings():
                 target_age_min=r['target_age_min'],
                 target_age_max=r['target_age_max'],
                 target_age_groups=r['target_age_groups'],
+                creator_types=r['creator_types'],
                 created_at=r['created_at'],
                 updated_at=r['updated_at']
             )
@@ -158,22 +159,27 @@ async def get_all_listings():
 
 
 @router.get("/creators", response_model=List[CreatorMarketplaceResponse])
-async def get_all_creators():
+async def get_all_creators(
+    creator_type: Optional[List[Literal["Lifestyle", "Travel"]]] = Query(None, description="Filter by creator type(s)")
+):
     """
     Get all creators for the marketplace page.
     Returns only creators with complete profiles (profile_complete = true) and verified status.
     Includes platforms, audience size, and ratings information.
+
+    Optional filters:
+    - creator_type: Filter by creator type(s) - can pass multiple values (e.g., ?creator_type=Lifestyle&creator_type=Travel)
     """
     try:
-        # Get all creators with complete profiles, platforms, and ratings in one query
-        creators_data = await Database.fetch(
-            """
-            SELECT 
+        # Build dynamic query with filters
+        query = """
+            SELECT
                 c.id,
                 c.location,
                 c.short_description,
                 c.portfolio_link,
                 c.profile_picture,
+                c.creator_type,
                 c.created_at,
                 u.name,
                 u.status,
@@ -182,7 +188,7 @@ async def get_all_creators():
             FROM creators c
             JOIN users u ON u.id = c.user_id
             LEFT JOIN (
-                SELECT 
+                SELECT
                     creator_id,
                     AVG(rating)::float as average_rating,
                     COUNT(*)::int as total_reviews
@@ -191,9 +197,20 @@ async def get_all_creators():
             ) rating_stats ON rating_stats.creator_id = c.id
             WHERE c.profile_complete = true
             AND u.status = 'verified'
-            ORDER BY c.created_at DESC
-            """
-        )
+        """
+
+        params = []
+        param_counter = 1
+
+        # Add creator_type filter if provided
+        if creator_type:
+            query += f" AND c.creator_type = ANY(${param_counter}::text[])"
+            params.append(creator_type)
+            param_counter += 1
+
+        query += " ORDER BY c.created_at DESC"
+
+        creators_data = await Database.fetch(query, *params)
         
         if not creators_data:
             return []
@@ -268,6 +285,7 @@ async def get_all_creators():
                 short_description=creator['short_description'] or "",
                 portfolio_link=creator['portfolio_link'],
                 profile_picture=creator['profile_picture'],
+                creator_type=creator['creator_type'] or 'Lifestyle',
                 platforms=platforms,
                 audience_size=audience_size,
                 average_rating=round(float(creator['average_rating']), 2),

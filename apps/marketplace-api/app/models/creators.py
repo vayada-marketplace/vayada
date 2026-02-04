@@ -58,6 +58,7 @@ class UpdateCreatorProfileRequest(BaseModel):
     profilePicture: Optional[str] = Field(None, alias="profile_picture", description="S3 URL of the profile picture")
     platforms: Optional[List[PlatformRequest]] = Field(None, min_length=1)
     audienceSize: Optional[int] = Field(None, alias="audience_size", gt=0)
+    creatorType: Optional[Literal["Lifestyle", "Travel"]] = Field(None, alias="creator_type")
 
     @model_validator(mode='after')
     def validate_audience_size(self):
@@ -108,6 +109,7 @@ class CreatorProfileFullResponse(BaseModel):
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     shortDescription: Optional[str] = Field(None, alias="short_description")
     profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    creatorType: str = Field(alias="creator_type")
     platforms: List[PlatformResponse]
     rating: RatingResponse
     status: str
@@ -126,6 +128,7 @@ class CreatorProfileResponse(BaseModel):
     portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
     phone: Optional[str] = None
     profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    creatorType: str = Field(alias="creator_type")
     platforms: List[PlatformResponse]
     audienceSize: int = Field(alias="audience_size")
     status: str
@@ -180,6 +183,9 @@ class CreatorCollaborationDetailResponse(CreatorCollaborationListResponse):
 
     # Listing Requirements (Looking for)
     creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
+
+    # Listing's allowed collaboration types
+    allowedCollaborationTypes: List[str] = Field(default_factory=list, alias="allowed_collaboration_types")
 
     # Collaboration terms
     preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")

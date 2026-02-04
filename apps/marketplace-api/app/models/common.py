@@ -68,6 +68,7 @@ class CreatorRequirementsResponse(BaseModel):
     targetAgeMin: Optional[int] = Field(None, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, alias="target_age_max")
     targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
+    creatorTypes: Optional[List[str]] = Field(None, alias="creator_types")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
 

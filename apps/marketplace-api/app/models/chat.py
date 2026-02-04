@@ -55,5 +55,6 @@ class ConversationResponse(BaseModel):
     lastMessageType: Optional[str] = Field(None, alias="last_message_type")
     unreadCount: int = Field(0, alias="unread_count")
     myRole: str = Field(alias="my_role")  # 'creator' or 'hotel'
+    listingName: Optional[str] = Field(None, alias="listing_name")
 
     model_config = ConfigDict(populate_by_name=True)

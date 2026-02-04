@@ -168,8 +168,8 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
         # Get creator profile
         creator = await Database.fetchrow(
             """
-            SELECT id, location, short_description, portfolio_link, phone, 
-                   profile_picture, created_at, updated_at
+            SELECT id, location, short_description, portfolio_link, phone,
+                   profile_picture, creator_type, created_at, updated_at
             FROM creators
             WHERE user_id = $1
             """,
@@ -254,6 +254,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
             portfolio_link=creator['portfolio_link'],
             short_description=creator['short_description'],
             profile_picture=creator['profile_picture'],
+            creator_type=creator['creator_type'] or 'Lifestyle',
             platforms=platforms_response,
             rating=rating_response,
             status=user['status'],
@@ -362,7 +363,12 @@ async def update_creator_profile(
                     update_fields.append(f"profile_picture = ${param_counter}")
                     update_values.append(request.profilePicture)
                     param_counter += 1
-                
+
+                if request.creatorType is not None:
+                    update_fields.append(f"creator_type = ${param_counter}")
+                    update_values.append(request.creatorType)
+                    param_counter += 1
+
                 # Update creator profile if there are fields to update
                 if update_fields:
                     update_fields.append("updated_at = now()")
@@ -419,8 +425,8 @@ async def update_creator_profile(
         # Fetch updated profile with platforms and check if profile became complete
         creator_data = await Database.fetchrow(
             """
-            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone, 
-                   c.profile_picture, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
+            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone,
+                   c.profile_picture, c.creator_type, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
             FROM creators c
             JOIN users u ON u.id = c.user_id
             WHERE c.id = $1
@@ -507,6 +513,7 @@ async def update_creator_profile(
             portfolio_link=creator_data['portfolio_link'],
             phone=creator_data['phone'],
             profile_picture=creator_data['profile_picture'],
+            creator_type=creator_data['creator_type'] or 'Lifestyle',
             platforms=platforms_response,
             audience_size=audience_size,
             status=creator_data['status'],
@@ -728,6 +735,7 @@ async def get_creator_collaboration_detail(
                 lcr.target_age_min as req_target_age_min,
                 lcr.target_age_max as req_target_age_max,
                 lcr.target_age_groups as req_target_age_groups,
+                lcr.creator_types as req_creator_types,
                 lcr.created_at as req_created_at,
                 lcr.updated_at as req_updated_at
             FROM collaborations c
@@ -767,6 +775,13 @@ async def get_creator_collaboration_detail(
             
         deliverables = [{"platform": p, "deliverables": dils} for p, dils in platform_map.items()]
 
+        # Fetch allowed collaboration types from listing
+        allowed_types_rows = await Database.fetch(
+            "SELECT DISTINCT collaboration_type FROM listing_collaboration_offerings WHERE listing_id = $1",
+            str(collab['listing_id'])
+        )
+        allowed_collaboration_types = [row['collaboration_type'] for row in allowed_types_rows]
+
         # Prepare creator requirements if they exist
         creator_requirements = None
         if collab['req_id']:
@@ -779,6 +794,7 @@ async def get_creator_collaboration_detail(
                 target_age_min=collab['req_target_age_min'],
                 target_age_max=collab['req_target_age_max'],
                 target_age_groups=collab['req_target_age_groups'],
+                creator_types=collab['req_creator_types'],
                 created_at=collab['req_created_at'],
                 updated_at=collab['req_updated_at']
             )
@@ -808,7 +824,10 @@ async def get_creator_collaboration_detail(
             
             # Listing Requirements (Looking for)
             creator_requirements=creator_requirements,
-            
+
+            # Listing's allowed collaboration types
+            allowed_collaboration_types=allowed_collaboration_types,
+
             # Collaboration terms
             collaboration_type=collab['collaboration_type'],
             free_stay_min_nights=collab['free_stay_min_nights'],

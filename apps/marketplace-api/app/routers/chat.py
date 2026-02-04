@@ -57,14 +57,15 @@ async def get_conversations(
     """
     query = """
     WITH user_collabs AS (
-        SELECT 
+        SELECT
             c.id as collab_id,
             c.status as collab_status,
-            CASE 
+            c.listing_id,
+            CASE
                 WHEN cr.user_id = $1 THEN 'creator'
                 WHEN hp.user_id = $1 THEN 'hotel'
             END as my_role,
-            CASE 
+            CASE
                 WHEN cr.user_id = $1 THEN hp.user_id
                 ELSE cr.user_id
             END as partner_user_id
@@ -75,7 +76,7 @@ async def get_conversations(
           AND c.status != 'pending'
     ),
     latest_messages AS (
-        SELECT DISTINCT ON (collaboration_id) 
+        SELECT DISTINCT ON (collaboration_id)
             collaboration_id, content, created_at, message_type
         FROM chat_messages
         ORDER BY collaboration_id, created_at DESC
@@ -86,7 +87,7 @@ async def get_conversations(
         WHERE read_at IS NULL AND sender_id != $1
         GROUP BY collaboration_id
     )
-    SELECT 
+    SELECT
         uc.collab_id,
         uc.collab_status,
         uc.my_role,
@@ -95,13 +96,15 @@ async def get_conversations(
         lm.content as last_message_content,
         lm.created_at as last_message_at,
         lm.message_type as last_message_type,
-        COALESCE(un.count, 0) as unread_count
+        COALESCE(un.count, 0) as unread_count,
+        l.name as listing_name
     FROM user_collabs uc
     JOIN users p_user ON p_user.id = uc.partner_user_id
     LEFT JOIN creators p_creator ON p_creator.user_id = uc.partner_user_id
     LEFT JOIN hotel_profiles p_hotel ON p_hotel.user_id = uc.partner_user_id
     LEFT JOIN latest_messages lm ON lm.collaboration_id = uc.collab_id
     LEFT JOIN unread_counts un ON un.collaboration_id = uc.collab_id
+    LEFT JOIN hotel_listings l ON l.id = uc.listing_id
     ORDER BY COALESCE(lm.created_at, '1970-01-01') DESC
     """
     
@@ -117,7 +120,8 @@ async def get_conversations(
             last_message_at=row['last_message_at'],
             last_message_type=row['last_message_type'],
             unread_count=row['unread_count'],
-            my_role=row['my_role']
+            my_role=row['my_role'],
+            listing_name=row['listing_name']
         )
         for row in rows
     ]

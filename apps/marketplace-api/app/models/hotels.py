@@ -122,6 +122,7 @@ class CreatorRequirementsRequest(BaseModel):
     targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")
     targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
+    creatorTypes: Optional[List[Literal["Lifestyle", "Travel"]]] = Field(None, alias="creator_types")
 
     @model_validator(mode='after')
     def validate_age_range(self):

@@ -57,6 +57,7 @@ async def add_mock_users():
                     "phone": "+1-555-1001",
                     "profile_picture": "https://i.pravatar.cc/300?img=1",
                     "profile_complete": True,
+                    "creator_type": "Travel",
                 },
                 "platforms": [
                     {
@@ -102,6 +103,7 @@ async def add_mock_users():
                     "phone": "+1-555-1002",
                     "profile_picture": "https://i.pravatar.cc/300?img=12",
                     "profile_complete": True,
+                    "creator_type": "Lifestyle",
                 },
                 "platforms": [
                     {
@@ -138,6 +140,7 @@ async def add_mock_users():
                     "phone": "+44-20-7946-1003",
                     "profile_picture": "https://i.pravatar.cc/300?img=5",
                     "profile_complete": True,
+                    "creator_type": "Lifestyle",
                 },
                 "platforms": [
                     {
@@ -174,6 +177,7 @@ async def add_mock_users():
                     "phone": "+34-93-123-4567",
                     "profile_picture": "https://i.pravatar.cc/300?img=15",
                     "profile_complete": True,
+                    "creator_type": "Travel",
                 },
                 "platforms": [
                     {
@@ -248,6 +252,7 @@ async def add_mock_users():
                             "target_age_min": 25,
                             "target_age_max": 45,
                             "target_age_groups": ["25-34", "35-44"],
+                            "creator_types": ["Travel"],
                         },
                     },
                     {
@@ -275,6 +280,7 @@ async def add_mock_users():
                             "target_age_min": 30,
                             "target_age_max": 50,
                             "target_age_groups": ["25-34", "35-44", "45-54"],
+                            "creator_types": ["Lifestyle", "Travel"],
                         },
                     },
                     {
@@ -355,6 +361,7 @@ async def add_mock_users():
                             "target_age_min": 28,
                             "target_age_max": 45,
                             "target_age_groups": ["25-34", "35-44"],
+                            "creator_types": ["Travel"],
                         },
                     },
                     {
@@ -560,10 +567,10 @@ async def add_mock_users():
                 profile_data = user_data["profile"]
                 creator = await conn.fetchrow(
                     """
-                    INSERT INTO creators (user_id, location, short_description, portfolio_link, phone, 
-                                        profile_picture, profile_complete, profile_completed_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, 
-                            CASE WHEN $7 = true THEN now() ELSE NULL END)
+                    INSERT INTO creators (user_id, location, short_description, portfolio_link, phone,
+                                        profile_picture, profile_complete, profile_completed_at, creator_type)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7,
+                            CASE WHEN $7 = true THEN now() ELSE NULL END, $8)
                     RETURNING id
                     """,
                     user_id,
@@ -573,6 +580,7 @@ async def add_mock_users():
                     profile_data.get("phone"),
                     profile_data.get("profile_picture"),
                     profile_data.get("profile_complete", False),
+                    profile_data.get("creator_type", "Lifestyle"),
                 )
                 
                 creator_id = creator['id']
@@ -682,8 +690,8 @@ async def add_mock_users():
                         await conn.execute(
                             """
                             INSERT INTO listing_creator_requirements
-                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                             """,
                             listing_id,
                             req_data["platforms"],
@@ -692,6 +700,7 @@ async def add_mock_users():
                             req_data.get("target_age_min"),
                             req_data.get("target_age_max"),
                             req_data.get("target_age_groups"),
+                            req_data.get("creator_types", []),
                         )
                 
                 total_offerings = sum(len(l.get("collaboration_offerings", [])) for l in user_data.get("listings", []))
