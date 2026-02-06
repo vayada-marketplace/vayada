@@ -136,8 +136,8 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="max-w-5xl mx-auto px-4 -mt-10 relative z-10">
+      {/* Search Bar — sticky on scroll */}
+      <div className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-col md:flex-row items-center gap-4 md:gap-6">
           {/* Dates — clickable to open calendar */}
           <div className="relative flex-1 min-w-0">
