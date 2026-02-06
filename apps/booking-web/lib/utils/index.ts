@@ -5,8 +5,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(amount: number, currency: string = 'EUR'): string {
-  return new Intl.NumberFormat('en-US', {
+const LOCALE_MAP: Record<string, string> = {
+  en: 'en-GB',
+  de: 'de-DE',
+  fr: 'fr-FR',
+  es: 'es-ES',
+  id: 'id-ID',
+}
+
+function resolveLocale(locale?: string): string {
+  return LOCALE_MAP[locale || 'en'] || 'en-GB'
+}
+
+export function formatCurrency(amount: number, currency: string = 'EUR', locale?: string): string {
+  return new Intl.NumberFormat(resolveLocale(locale), {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,
@@ -14,18 +26,18 @@ export function formatCurrency(amount: number, currency: string = 'EUR'): string
   }).format(amount)
 }
 
-export function formatDate(date: string | Date): string {
+export function formatDate(date: string | Date, locale?: string): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleDateString('en-GB', {
+  return d.toLocaleDateString(resolveLocale(locale), {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   })
 }
 
-export function formatDateShort(date: string | Date): string {
+export function formatDateShort(date: string | Date, locale?: string): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleDateString('en-GB', {
+  return d.toLocaleDateString(resolveLocale(locale), {
     day: 'numeric',
     month: 'short',
   })

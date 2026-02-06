@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import Image from 'next/image'
@@ -10,6 +12,7 @@ export default function BookingConfirmationPage({
 }: {
   params: { reference: string }
 }) {
+  const t = useTranslations('confirmation')
   const { hotel } = useHotel()
 
   return (
@@ -36,67 +39,67 @@ export default function BookingConfirmationPage({
             </svg>
           </div>
 
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Booking Confirmed!</h1>
-          <p className="text-gray-600 mb-6">Your reservation has been successfully confirmed.</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+          <p className="text-gray-600 mb-6">{t('subtitle')}</p>
 
           {/* Booking Reference */}
           <div className="bg-gray-50 rounded-xl p-4 mb-8 inline-block">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Booking Reference</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{t('bookingReference')}</p>
             <p className="text-2xl font-bold text-primary-600 tracking-wider">{params.reference}</p>
           </div>
 
           {/* Booking Details */}
           <div className="text-left space-y-0 divide-y divide-gray-100">
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Hotel</span>
+              <span className="text-gray-600">{t('hotel')}</span>
               <span className="font-medium text-gray-900">{hotel.name}</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Room</span>
+              <span className="text-gray-600">{t('room')}</span>
               <span className="font-medium text-gray-900">Superior Mountain View</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Check-in</span>
+              <span className="text-gray-600">{t('checkIn')}</span>
               <span className="font-medium text-gray-900">13 Feb 2026</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Check-out</span>
+              <span className="text-gray-600">{t('checkOut')}</span>
               <span className="font-medium text-gray-900">18 Feb 2026</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Duration</span>
+              <span className="text-gray-600">{t('duration')}</span>
               <span className="font-medium text-gray-900">5 nights</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Guests</span>
+              <span className="text-gray-600">{t('guests')}</span>
               <span className="font-medium text-gray-900">2 Adults</span>
             </div>
             <div className="flex justify-between py-3">
-              <span className="text-gray-600">Total Paid</span>
+              <span className="text-gray-600">{t('totalPaid')}</span>
               <span className="font-bold text-gray-900 text-lg">&euro;900</span>
             </div>
           </div>
 
           {/* Actions */}
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-            <a
+            <Link
               href="/"
               className="px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
             >
-              Back to Hotel
-            </a>
-            <a
+              {t('backToHotel')}
+            </Link>
+            <Link
               href="/my-booking"
               className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
             >
-              Manage Booking
-            </a>
+              {t('manageBooking')}
+            </Link>
           </div>
         </div>
 
         {/* Email notice */}
         <p className="text-center text-sm text-gray-500 mt-6">
-          A confirmation email has been sent to your email address.
+          {t('emailNotice')}
         </p>
       </div>
 

@@ -2,12 +2,17 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import { useLocale, useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 
 export default function AvailabilityPage() {
+  const locale = useLocale()
+  const t = useTranslations('availability')
+  const tc = useTranslations('common')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
   const [checkIn, setCheckIn] = useState('2026-02-13')
@@ -32,7 +37,7 @@ export default function AvailabilityPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">
-          <h1 className="text-3xl md:text-4xl font-serif italic text-white">Check Availability</h1>
+          <h1 className="text-3xl md:text-4xl font-serif italic text-white">{t('title')}</h1>
         </div>
       </div>
 
@@ -43,7 +48,7 @@ export default function AvailabilityPage() {
             {/* Check-in */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Check-in
+                {t('checkIn')}
               </label>
               <input
                 type="date"
@@ -56,7 +61,7 @@ export default function AvailabilityPage() {
             {/* Check-out */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Check-out
+                {t('checkOut')}
               </label>
               <input
                 type="date"
@@ -70,7 +75,7 @@ export default function AvailabilityPage() {
             {/* Adults */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Adults
+                {t('adults')}
               </label>
               <div className="flex items-center border border-gray-300 rounded-lg bg-gray-50">
                 <button
@@ -96,7 +101,7 @@ export default function AvailabilityPage() {
             {/* Children */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Children
+                {t('children')}
               </label>
               <div className="flex items-center border border-gray-300 rounded-lg bg-gray-50">
                 <button
@@ -124,14 +129,14 @@ export default function AvailabilityPage() {
               onClick={() => setHasSearched(true)}
               className="w-full px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
             >
-              Search
+              {tc('search')}
             </button>
           </div>
 
           {nights > 0 && (
             <p className="text-sm text-gray-500 mt-3">
-              {formatDateShort(checkIn)} — {formatDate(checkOut)} &middot; {nights} night{nights !== 1 ? 's' : ''} &middot; {adults} adult{adults !== 1 ? 's' : ''}
-              {children > 0 && `, ${children} child${children !== 1 ? 'ren' : ''}`}
+              {formatDateShort(checkIn, locale)} — {formatDate(checkOut, locale)} &middot; {tc('nights', { count: nights })} &middot; {tc('adults', { count: adults })}
+              {children > 0 && `, ${tc('children', { count: children })}`}
             </p>
           )}
         </div>
@@ -140,7 +145,7 @@ export default function AvailabilityPage() {
         {hasSearched && (
           <>
             <h2 className="text-xl font-bold text-gray-900 mb-4">
-              {rooms.length} rooms available
+              {t('roomsAvailable', { count: rooms.length })}
             </h2>
             <div className="space-y-4">
               {rooms.map((room) => {
@@ -160,7 +165,7 @@ export default function AvailabilityPage() {
                         />
                         {room.remainingRooms <= 3 && (
                           <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                            {room.remainingRooms} left
+                            {tc('left', { count: room.remainingRooms })}
                           </div>
                         )}
                       </div>
@@ -168,7 +173,7 @@ export default function AvailabilityPage() {
                         <div className="flex-1">
                           <h3 className="text-lg font-bold text-gray-900">{room.name}</h3>
                           <p className="text-sm text-gray-500 mt-0.5 mb-3">
-                            {room.size} m&sup2; &middot; {room.bedType} &middot; Max {room.maxOccupancy} guests
+                            {room.size} m&sup2; &middot; {room.bedType} &middot; {t('maxGuests', { count: room.maxOccupancy })}
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {room.features.slice(0, 3).map((f) => (
@@ -184,19 +189,19 @@ export default function AvailabilityPage() {
                         <div className="flex items-end justify-between pt-4 mt-4 border-t border-gray-100">
                           <div>
                             <span className="text-2xl font-bold text-gray-900">
-                              {formatCurrency(room.baseRate, room.currency)}
+                              {formatCurrency(room.baseRate, room.currency, locale)}
                             </span>
-                            <span className="text-sm text-gray-500 ml-1">/ night</span>
+                            <span className="text-sm text-gray-500 ml-1">{tc('perNight')}</span>
                             <p className="text-sm text-gray-500">
-                              {formatCurrency(total, room.currency)} total
+                              {t('totalLabel', { amount: formatCurrency(total, room.currency, locale) })}
                             </p>
                           </div>
-                          <a
+                          <Link
                             href={`/book?room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}`}
                             className="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
                           >
-                            Book Now
-                          </a>
+                            {tc('bookNow')}
+                          </Link>
                         </div>
                       </div>
                     </div>

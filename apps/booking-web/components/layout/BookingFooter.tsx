@@ -1,9 +1,11 @@
 'use client'
 
 import { useHotel } from '@/contexts/HotelContext'
+import { useTranslations } from 'next-intl'
 
 export default function BookingFooter() {
   const { hotel } = useHotel()
+  const t = useTranslations('common')
 
   return (
     <footer className="bg-primary-600 text-white py-8 px-4 sm:px-6 lg:px-8">
@@ -19,11 +21,11 @@ export default function BookingFooter() {
 
           {/* Contact */}
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider mb-3">Contact</h4>
+            <h4 className="text-sm font-bold uppercase tracking-wider mb-3">{t('contact')}</h4>
             <div className="space-y-1 text-sm text-white/80">
               <p>{hotel.contact.address}</p>
-              <p>Phone: {hotel.contact.phone}</p>
-              <p>Email: {hotel.contact.email}</p>
+              <p>{t('phone')}: {hotel.contact.phone}</p>
+              <p>{t('email')}: {hotel.contact.email}</p>
             </div>
           </div>
         </div>
@@ -31,9 +33,9 @@ export default function BookingFooter() {
         {/* Bottom bar */}
         <div className="border-t border-white/20 pt-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs text-white/70">
-            <p>&copy; {new Date().getFullYear()} {hotel.name}. All rights reserved.</p>
+            <p>&copy; {new Date().getFullYear()} {t('allRightsReserved', { name: hotel.name })}</p>
             <p>
-              Powered by{' '}
+              {t('poweredBy')}{' '}
               <span className="text-white font-semibold underline">vayada</span>
             </p>
           </div>

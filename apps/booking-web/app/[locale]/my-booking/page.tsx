@@ -2,11 +2,13 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import { useTranslations } from 'next-intl'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel } from '@/contexts/HotelContext'
 
 export default function MyBookingPage() {
+  const t = useTranslations('myBooking')
   const { hotel } = useHotel()
   const [reference, setReference] = useState('')
   const [email, setEmail] = useState('')
@@ -26,21 +28,21 @@ export default function MyBookingPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">
-          <h1 className="text-3xl md:text-4xl font-serif italic text-white">My Booking</h1>
+          <h1 className="text-3xl md:text-4xl font-serif italic text-white">{t('title')}</h1>
         </div>
       </div>
 
       <div className="max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Lookup Form */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Look Up Your Booking</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">{t('lookUp')}</h2>
           <p className="text-sm text-gray-600 mb-6">
-            Enter your booking reference and email address to view your reservation details.
+            {t('lookUpDesc')}
           </p>
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Booking Reference *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('reference')} *</label>
               <input
                 type="text"
                 value={reference}
@@ -50,7 +52,7 @@ export default function MyBookingPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('emailAddress')} *</label>
               <input
                 type="email"
                 value={email}
@@ -63,7 +65,7 @@ export default function MyBookingPage() {
               onClick={() => setShowResult(true)}
               className="w-full py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
             >
-              Find My Booking
+              {t('findBooking')}
             </button>
           </div>
         </div>
@@ -78,38 +80,38 @@ export default function MyBookingPage() {
                 </svg>
               </div>
               <div>
-                <p className="font-bold text-gray-900">Booking Found</p>
-                <p className="text-sm text-success-600">Confirmed</p>
+                <p className="font-bold text-gray-900">{t('bookingFound')}</p>
+                <p className="text-sm text-success-600">{t('confirmed')}</p>
               </div>
             </div>
 
             <div className="space-y-0 divide-y divide-gray-100">
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Reference</span>
+                <span className="text-gray-600 text-sm">{t('reference')}</span>
                 <span className="font-medium text-gray-900 text-sm">{reference || 'VBK-A1B2C3'}</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Hotel</span>
+                <span className="text-gray-600 text-sm">{t('hotel')}</span>
                 <span className="font-medium text-gray-900 text-sm">{hotel.name}</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Room</span>
+                <span className="text-gray-600 text-sm">{t('room')}</span>
                 <span className="font-medium text-gray-900 text-sm">Superior Mountain View</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Check-in</span>
+                <span className="text-gray-600 text-sm">{t('checkIn')}</span>
                 <span className="font-medium text-gray-900 text-sm">13 Feb 2026</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Check-out</span>
+                <span className="text-gray-600 text-sm">{t('checkOut')}</span>
                 <span className="font-medium text-gray-900 text-sm">18 Feb 2026</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Guests</span>
+                <span className="text-gray-600 text-sm">{t('guests')}</span>
                 <span className="font-medium text-gray-900 text-sm">2 Adults</span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600 text-sm">Total</span>
+                <span className="text-gray-600 text-sm">{t('total')}</span>
                 <span className="font-bold text-gray-900">&euro;900</span>
               </div>
             </div>

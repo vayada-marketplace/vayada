@@ -1,22 +1,22 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
+import { useLocale, useTranslations } from 'next-intl'
+import { useRouter, Link } from '@/i18n/navigation'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights, formatDate } from '@/lib/utils'
 
-const STEPS = [
-  { number: 1, label: 'Rooms' },
-  { number: 2, label: 'Add-ons' },
-  { number: 3, label: 'Details' },
-  { number: 4, label: 'Payment' },
-]
-
 function PaymentPageContent() {
   const router = useRouter()
+  const locale = useLocale()
+  const t = useTranslations('payment')
+  const tc = useTranslations('common')
+  const ts = useTranslations('steps')
+  const tb = useTranslations('book')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
   const searchParams = useSearchParams()
@@ -24,6 +24,13 @@ function PaymentPageContent() {
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const currentStep = 4
+
+  const STEPS = [
+    { number: 1, label: ts('rooms') },
+    { number: 2, label: ts('addons') },
+    { number: 3, label: ts('details') },
+    { number: 4, label: ts('payment') },
+  ]
 
   const room = rooms.find((r) => r.id === roomId) || rooms[1]
   const nights = calculateNights(checkIn, checkOut)
@@ -59,7 +66,7 @@ function PaymentPageContent() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
-          <h2 className="text-3xl font-serif text-gray-900">Secure Payment</h2>
+          <h2 className="text-3xl font-serif text-gray-900">{t('securePayment')}</h2>
 
           <div className="flex items-center gap-2 flex-shrink-0">
             {STEPS.map((step, index) => (
@@ -104,7 +111,7 @@ function PaymentPageContent() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            Details confirmed
+            {t('detailsConfirmed')}
           </div>
         </div>
 
@@ -117,26 +124,26 @@ function PaymentPageContent() {
                 <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
-                <h3 className="text-lg font-bold text-gray-900">Payment Details</h3>
+                <h3 className="text-lg font-bold text-gray-900">{t('paymentDetails')}</h3>
               </div>
 
               <div className="space-y-5">
                 {/* Cardholder Name */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">Cardholder Name</label>
+                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cardholderName')}</label>
                   <input
                     type="text"
-                    placeholder="Name on card"
+                    placeholder={t('nameOnCard')}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                   />
                 </div>
 
                 {/* Card Number */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">Card Number</label>
+                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cardNumber')}</label>
                   <input
                     type="text"
-                    placeholder="1234 5678 9012 3456"
+                    placeholder={t('cardPlaceholder')}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                   />
                 </div>
@@ -144,18 +151,18 @@ function PaymentPageContent() {
                 {/* Expiry + CVC */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">Expiry Date</label>
+                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('expiryDate')}</label>
                     <input
                       type="text"
-                      placeholder="MM/YY"
+                      placeholder={t('expiryPlaceholder')}
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">CVC</label>
+                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cvc')}</label>
                     <input
                       type="text"
-                      placeholder="123"
+                      placeholder={t('cvcPlaceholder')}
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                     />
                   </div>
@@ -168,13 +175,13 @@ function PaymentPageContent() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
-                  SSL Encrypted
+                  {t('sslEncrypted')}
                 </div>
                 <div className="flex items-center gap-1.5 text-sm text-gray-500">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
-                  Secure Payment
+                  {t('securePaymentBadge')}
                 </div>
               </div>
             </div>
@@ -195,20 +202,20 @@ function PaymentPageContent() {
                   )}
                 </button>
                 <span className="text-sm text-gray-700 leading-relaxed">
-                  I agree to the{' '}
-                  <a href="#" className="text-primary-600 underline font-medium">Terms and Conditions</a>
-                  {' '}and{' '}
-                  <a href="#" className="text-primary-600 underline font-medium">Cancellation Policy</a>.
-                  {' '}I understand that my card will be charged {formatCurrency(total, room.currency)} upon confirmation.
+                  {t.rich('agreeTerms', {
+                    terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('termsAndConditions')}</a>,
+                    cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('cancellationPolicy')}</a>,
+                    amount: formatCurrency(total, room.currency, locale),
+                  })}
                 </span>
               </label>
             </div>
 
             {/* Cancellation Policy */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-2">Cancellation Policy</h3>
+              <h3 className="text-base font-bold text-gray-900 mb-2">{t('cancellationPolicyTitle')}</h3>
               <p className="text-sm text-gray-600">
-                Free cancellation until {formatDate(checkIn)}. After this date, the first night will be charged.
+                {t('cancellationPolicyDesc', { date: formatDate(checkIn, locale) })}
               </p>
             </div>
 
@@ -221,7 +228,7 @@ function PaymentPageContent() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Back to Guest Details
+                {t('backToDetails')}
               </button>
             </div>
           </div>
@@ -229,7 +236,7 @@ function PaymentPageContent() {
           {/* Right Sidebar — Order Summary */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-5">Order Summary</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-5">{t('orderSummary')}</h3>
 
               {/* Room info */}
               <div className="flex items-center gap-3 pb-5 border-b border-gray-100">
@@ -238,37 +245,37 @@ function PaymentPageContent() {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-gray-900">{room.name}</p>
-                  <p className="text-xs text-gray-500">Flexible Rate</p>
+                  <p className="text-xs text-gray-500">{tb('flexibleRate')}</p>
                 </div>
               </div>
 
               {/* Stay details */}
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Check-in</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkIn)}</span>
+                  <span className="text-gray-500">{tb('checkIn')}</span>
+                  <span className="font-semibold text-gray-900">{formatDate(checkIn, locale)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Check-out</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkOut)}</span>
+                  <span className="text-gray-500">{tb('checkOut')}</span>
+                  <span className="font-semibold text-gray-900">{formatDate(checkOut, locale)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Duration</span>
-                  <span className="font-semibold text-gray-900">{nights} nights</span>
+                  <span className="text-gray-500">{tb('duration')}</span>
+                  <span className="font-semibold text-gray-900">{tc('nights', { count: nights })}</span>
                 </div>
               </div>
 
               {/* Price breakdown */}
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Room ({nights} nights)</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency)}</span>
+                  <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</span>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">Add-ons:</p>
+                  <p className="text-xs text-gray-400 mb-1">{t('addonsLabel')}</p>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500 pl-2">Airport Transfer</span>
-                    <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency)}</span>
+                    <span className="text-gray-500 pl-2">{t('airportTransfer')}</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</span>
                   </div>
                 </div>
               </div>
@@ -276,16 +283,16 @@ function PaymentPageContent() {
               {/* Total */}
               <div className="pt-5 mb-5">
                 <div className="flex justify-between items-start">
-                  <span className="text-base font-bold text-gray-900">Total</span>
+                  <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency)}</p>
-                    <p className="text-xs text-gray-500">Includes taxes &amp; fees</p>
+                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                    <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
               </div>
 
               {/* Pay button */}
-              <a
+              <Link
                 href="/booking/VBK-A1B2C3"
                 className={`block w-full py-3 text-center font-semibold rounded-lg transition-colors text-sm ${
                   agreedToTerms
@@ -293,9 +300,9 @@ function PaymentPageContent() {
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed pointer-events-none'
                 }`}
               >
-                Pay {formatCurrency(total, room.currency)}
-              </a>
-              <p className="text-xs text-gray-500 text-center mt-2">Your payment is 100% secure</p>
+                {t('pay', { amount: formatCurrency(total, room.currency, locale) })}
+              </Link>
+              <p className="text-xs text-gray-500 text-center mt-2">{t('paymentSecure')}</p>
             </div>
           </div>
         </div>

@@ -2,27 +2,32 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import { useRouter } from 'next/navigation'
+import { useLocale, useTranslations } from 'next-intl'
+import { useRouter } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { ADDON_CATEGORIES } from '@/lib/mock/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { formatCurrency } from '@/lib/utils'
 
-const STEPS = [
-  { number: 1, label: 'Rooms' },
-  { number: 2, label: 'Add-ons' },
-  { number: 3, label: 'Details' },
-  { number: 4, label: 'Payment' },
-]
-
 export default function AddonsPage() {
   const router = useRouter()
+  const locale = useLocale()
+  const t = useTranslations('addons')
+  const tc = useTranslations('common')
+  const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { addons } = useAddons()
   const [activeCategory, setActiveCategory] = useState('all')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const currentStep = 2
+
+  const STEPS = [
+    { number: 1, label: ts('rooms') },
+    { number: 2, label: ts('addons') },
+    { number: 3, label: ts('details') },
+    { number: 4, label: ts('payment') },
+  ]
 
   const filteredAddons =
     activeCategory === 'all'
@@ -70,8 +75,8 @@ export default function AddonsPage() {
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-start justify-between mb-8 gap-6">
           <div>
-            <h1 className="text-3xl font-serif text-gray-900 mb-1">Enhance Your Stay</h1>
-            <p className="text-gray-500">Customize your experience with our premium services and activities.</p>
+            <h1 className="text-3xl font-serif text-gray-900 mb-1">{t('title')}</h1>
+            <p className="text-gray-500">{t('subtitle')}</p>
           </div>
 
           {/* Step Indicator */}
@@ -151,7 +156,7 @@ export default function AddonsPage() {
                   <h3 className="text-base font-bold text-gray-900 mb-1">{addon.name}</h3>
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{addon.description}</p>
                   <div className="flex items-center justify-between">
-                    <p className="text-lg font-bold text-gray-900">{formatCurrency(addon.price, addon.currency)}</p>
+                    <p className="text-lg font-bold text-gray-900">{formatCurrency(addon.price, addon.currency, locale)}</p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className={`px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors ${
@@ -160,7 +165,7 @@ export default function AddonsPage() {
                           : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
                       }`}
                     >
-                      {isAdded ? 'Added' : 'Add'}
+                      {isAdded ? t('added') : t('add')}
                     </button>
                   </div>
                 </div>
@@ -177,7 +182,7 @@ export default function AddonsPage() {
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
               </div>
               <h3 className="text-lg font-bold text-gray-900">
-                Your Selections ({addedIds.size})
+                {t('yourSelections', { count: addedIds.size })}
               </h3>
             </div>
             <div className="space-y-3 mb-5">
@@ -193,7 +198,7 @@ export default function AddonsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <p className="text-sm font-bold text-gray-900">{formatCurrency(addon.price, addon.currency)}</p>
+                    <p className="text-sm font-bold text-gray-900">{formatCurrency(addon.price, addon.currency, locale)}</p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
@@ -205,11 +210,12 @@ export default function AddonsPage() {
               ))}
             </div>
             <div className="flex items-center justify-between pt-4 border-t border-primary-100">
-              <p className="text-sm text-gray-500">Add-ons total</p>
+              <p className="text-sm text-gray-500">{t('addonsTotal')}</p>
               <p className="text-xl font-bold text-gray-900">
                 {formatCurrency(
                   addons.filter((a) => addedIds.has(a.id)).reduce((sum, a) => sum + a.price, 0),
-                  hotel.currency
+                  hotel.currency,
+                  locale
                 )}
               </p>
             </div>
@@ -225,13 +231,13 @@ export default function AddonsPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Rooms
+            {t('backToRooms')}
           </button>
           <button
             onClick={() => router.push('/book')}
             className="px-8 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
           >
-            Proceed to Guest Information
+            {t('proceedToGuest')}
           </button>
         </div>
       </div>

@@ -1,12 +1,17 @@
 'use client'
 
 import Image from 'next/image'
+import { useLocale, useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency } from '@/lib/utils'
 
 export default function RoomsPage() {
+  const locale = useLocale()
+  const t = useTranslations('rooms')
+  const tc = useTranslations('common')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
 
@@ -24,8 +29,8 @@ export default function RoomsPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-          <h1 className="text-4xl md:text-5xl font-serif italic text-white mb-2">Our Rooms</h1>
-          <p className="text-white/80 text-lg">Find your perfect alpine retreat</p>
+          <h1 className="text-4xl md:text-5xl font-serif italic text-white mb-2">{t('title')}</h1>
+          <p className="text-white/80 text-lg">{t('subtitle')}</p>
         </div>
       </div>
 
@@ -47,7 +52,7 @@ export default function RoomsPage() {
                 />
                 {room.remainingRooms <= 3 && (
                   <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                    Only {room.remainingRooms} left
+                    {tc('onlyLeft', { count: room.remainingRooms })}
                   </div>
                 )}
               </div>
@@ -56,7 +61,7 @@ export default function RoomsPage() {
               <div className="p-6">
                 <h3 className="text-xl font-bold text-gray-900 mb-1">{room.name}</h3>
                 <p className="text-sm text-gray-500 mb-3">
-                  {room.size} m&sup2; &middot; {room.bedType} &middot; Up to {room.maxOccupancy} guests
+                  {room.size} m&sup2; &middot; {room.bedType} &middot; {tc('adults', { count: room.maxOccupancy })}
                 </p>
                 <p className="text-gray-600 text-sm mb-4">{room.shortDescription}</p>
 
@@ -72,7 +77,7 @@ export default function RoomsPage() {
                   ))}
                   {room.amenities.length > 4 && (
                     <span className="px-2.5 py-1 text-primary-600 text-xs font-medium">
-                      +{room.amenities.length - 4} more
+                      {tc('more', { count: room.amenities.length - 4 })}
                     </span>
                   )}
                 </div>
@@ -80,20 +85,20 @@ export default function RoomsPage() {
                 {/* Price + CTA */}
                 <div className="flex items-end justify-between pt-4 border-t border-gray-100">
                   <div>
-                    <p className="text-sm text-gray-500">From</p>
+                    <p className="text-sm text-gray-500">{tc('from')}</p>
                     <div className="flex items-baseline gap-1">
                       <span className="text-2xl font-bold text-gray-900">
-                        {formatCurrency(room.baseRate, room.currency)}
+                        {formatCurrency(room.baseRate, room.currency, locale)}
                       </span>
-                      <span className="text-sm text-gray-500">/ night</span>
+                      <span className="text-sm text-gray-500">{tc('perNight')}</span>
                     </div>
                   </div>
-                  <a
+                  <Link
                     href={`/availability?room=${room.id}`}
                     className="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
                   >
-                    Check Availability
-                  </a>
+                    {tc('checkAvailability')}
+                  </Link>
                 </div>
               </div>
             </div>

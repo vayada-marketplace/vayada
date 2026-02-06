@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useHotel } from '@/contexts/HotelContext'
+import { useTranslations, useLocale } from 'next-intl'
+import { useRouter, usePathname } from '@/i18n/navigation'
 
 const LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -9,7 +11,7 @@ const LANGUAGES = [
   { code: 'fr', label: 'Français' },
   { code: 'es', label: 'Español' },
   { code: 'id', label: 'Indonesia' },
-]
+] as const
 
 const CURRENCIES = [
   { code: 'USD', symbol: '$', label: 'US Dollar' },
@@ -33,6 +35,7 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () =
 // --- Contact Popover ---
 function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boolean; onClose: () => void; phone: string; whatsapp?: string; email: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const t = useTranslations('nav')
   useClickOutside(ref, onClose)
   if (!open) return null
 
@@ -48,7 +51,7 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
           </svg>
         </div>
         <div>
-          <p className="text-sm font-medium text-gray-900">Phone</p>
+          <p className="text-sm font-medium text-gray-900">{t('phone')}</p>
           <p className="text-xs text-gray-500">{phone}</p>
         </div>
       </a>
@@ -59,7 +62,7 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
           </svg>
         </div>
         <div>
-          <p className="text-sm font-medium text-gray-900">WhatsApp</p>
+          <p className="text-sm font-medium text-gray-900">{t('whatsapp')}</p>
           <p className="text-xs text-gray-500">{whatsapp || phone}</p>
         </div>
       </a>
@@ -70,7 +73,7 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
           </svg>
         </div>
         <div>
-          <p className="text-sm font-medium text-gray-900">Email</p>
+          <p className="text-sm font-medium text-gray-900">{t('email')}</p>
           <p className="text-xs text-gray-500">{email}</p>
         </div>
       </a>
@@ -80,6 +83,8 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
 
 // --- Refer a Guest Modal (3 steps) ---
 function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () => void; hotelSlug: string }) {
+  const t = useTranslations('refer')
+  const tc = useTranslations('common')
   const [step, setStep] = useState(1)
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -124,7 +129,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-2">
-          <h2 className="text-xl font-bold text-gray-900">Refer a Guest</h2>
+          <h2 className="text-xl font-bold text-gray-900">{t('title')}</h2>
           <button
             onClick={() => { onClose(); reset() }}
             className="p-1 rounded-lg hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
@@ -137,9 +142,9 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
         {/* Subtitle */}
         <p className="px-6 text-sm text-gray-500 mb-4">
-          {step === 1 && 'Earn 5% commission on every booking made through your link.'}
-          {step === 2 && 'Where should we send your earnings?'}
-          {step === 3 && 'Share your unique link to start earning!'}
+          {step === 1 && t('step1Desc')}
+          {step === 2 && t('step2Desc')}
+          {step === 3 && t('step3Desc')}
         </p>
 
         {/* Step Indicator */}
@@ -179,7 +184,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  Full Name
+                  {t('fullName')}
                 </label>
                 <input
                   type="text"
@@ -194,7 +199,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
-                  Email Address
+                  {t('emailAddress')}
                 </label>
                 <input
                   type="email"
@@ -209,7 +214,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
-                  Social Media / Channel (Optional)
+                  {t('socialMedia')}
                 </label>
                 <input
                   type="text"
@@ -222,7 +227,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
               {/* I am a... */}
               <div>
-                <p className="text-sm font-medium text-gray-700 mb-2">I am a...</p>
+                <p className="text-sm font-medium text-gray-700 mb-2">{t('iAmA')}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setUserType('guest')}
@@ -232,7 +237,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                         : 'border-gray-200 text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    <span>🏨</span> Guest
+                    <span>🏨</span> {t('guest')}
                   </button>
                   <button
                     onClick={() => setUserType('creator')}
@@ -242,7 +247,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                         : 'border-gray-200 text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    <span>🌍</span> Creator
+                    <span>🌍</span> {t('creator')}
                   </button>
                 </div>
               </div>
@@ -251,7 +256,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 onClick={() => setStep(2)}
                 className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2"
               >
-                Continue
+                {tc('continue')}
               </button>
             </div>
           )}
@@ -260,7 +265,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
           {step === 2 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-bold text-gray-900 mb-2">Payment Method</p>
+                <p className="text-sm font-bold text-gray-900 mb-2">{t('paymentMethod')}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setPaymentMethod('paypal')}
@@ -270,7 +275,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                         : 'border-gray-200 text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    PayPal
+                    {t('paypal')}
                   </button>
                   <button
                     onClick={() => setPaymentMethod('bank')}
@@ -280,7 +285,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                         : 'border-gray-200 text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    Bank Transfer
+                    {t('bankTransfer')}
                   </button>
                 </div>
               </div>
@@ -291,7 +296,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                     <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
-                    PayPal Email
+                    {t('paypalEmail')}
                   </label>
                   <input
                     type="email"
@@ -309,7 +314,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                     <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
-                    IBAN
+                    {t('iban')}
                   </label>
                   <input
                     type="text"
@@ -326,13 +331,13 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   onClick={() => setStep(1)}
                   className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
                 >
-                  Back
+                  {tc('back')}
                 </button>
                 <button
                   onClick={() => setStep(3)}
                   className="flex-1 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors"
                 >
-                  Generate Link
+                  {t('generateLink')}
                 </button>
               </div>
             </div>
@@ -346,7 +351,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
-                  Your Referral Link
+                  {t('yourReferralLink')}
                 </p>
                 <div className="flex items-center gap-2">
                   <input
@@ -373,19 +378,15 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 </div>
               </div>
 
-              <p className="text-sm text-gray-600 text-center">
-                You will receive <strong>5%</strong> of the total booking revenue for every successful direct booking made via your link.
-              </p>
+              <p className="text-sm text-gray-600 text-center" dangerouslySetInnerHTML={{ __html: t.raw('commissionInfo') }} />
 
-              <p className="text-sm text-gray-500 text-center">
-                Your application is pending review. We&apos;ll notify you at <strong>{email || 'your email'}</strong> once approved.
-              </p>
+              <p className="text-sm text-gray-500 text-center" dangerouslySetInnerHTML={{ __html: (t.raw('pendingReview') as string).replace('{email}', email || 'your email') }} />
 
               <button
                 onClick={() => { onClose(); reset() }}
                 className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors"
               >
-                Done
+                {tc('done')}
               </button>
             </div>
           )}
@@ -440,21 +441,28 @@ function Dropdown({
 // --- Main Navigation ---
 export default function BookingNavigation() {
   const { hotel } = useHotel()
+  const t = useTranslations('nav')
+  const locale = useLocale()
+  const router = useRouter()
+  const pathname = usePathname()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [referOpen, setReferOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
   const [currOpen, setCurrOpen] = useState(false)
-  const [lang, setLang] = useState('en')
   const [currency, setCurrency] = useState('EUR')
 
-  const selectedLangLabel = LANGUAGES.find((l) => l.code === lang)?.label.slice(0, 2).toUpperCase() || 'EN'
+  const selectedLangLabel = LANGUAGES.find((l) => l.code === locale)?.label.slice(0, 2).toUpperCase() || 'EN'
   const selectedCurrLabel = CURRENCIES.find((c) => c.code === currency)?.code || 'EUR'
 
   const closeAll = () => {
     setContactOpen(false)
     setLangOpen(false)
     setCurrOpen(false)
+  }
+
+  const handleLanguageChange = (newLocale: string) => {
+    router.replace(pathname, { locale: newLocale as 'en' | 'de' | 'fr' | 'es' | 'id' })
   }
 
   return (
@@ -475,7 +483,7 @@ export default function BookingNavigation() {
                   onClick={() => { closeAll(); setContactOpen(!contactOpen) }}
                   className="px-5 py-2 text-sm font-semibold text-white bg-primary-600 rounded-full hover:bg-primary-700 transition-colors"
                 >
-                  Contact
+                  {t('contact')}
                 </button>
                 <ContactPopover
                   open={contactOpen}
@@ -494,7 +502,7 @@ export default function BookingNavigation() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                 </svg>
-                Refer a Guest
+                {t('referGuest')}
               </button>
 
               {/* Language */}
@@ -515,8 +523,8 @@ export default function BookingNavigation() {
                   open={langOpen}
                   onClose={() => setLangOpen(false)}
                   items={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
-                  selected={lang}
-                  onSelect={setLang}
+                  selected={locale}
+                  onSelect={handleLanguageChange}
                 />
               </div>
 
@@ -561,13 +569,13 @@ export default function BookingNavigation() {
                 onClick={() => { setContactOpen(!contactOpen); setIsMenuOpen(false) }}
                 className="block w-full text-left text-white hover:text-white/80 py-2 font-medium"
               >
-                Contact
+                {t('contact')}
               </button>
               <button
                 onClick={() => { setReferOpen(true); setIsMenuOpen(false) }}
                 className="block w-full text-left text-white hover:text-white/80 py-2 font-medium"
               >
-                Refer a Guest
+                {t('referGuest')}
               </button>
             </div>
           </div>

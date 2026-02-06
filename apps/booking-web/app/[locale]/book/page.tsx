@@ -1,19 +1,14 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
+import { useLocale, useTranslations } from 'next-intl'
+import { useRouter, Link } from '@/i18n/navigation'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights, formatDate } from '@/lib/utils'
-
-const STEPS = [
-  { number: 1, label: 'Rooms' },
-  { number: 2, label: 'Add-ons' },
-  { number: 3, label: 'Details' },
-  { number: 4, label: 'Payment' },
-]
 
 const COUNTRIES = [
   'Austria', 'Germany', 'Switzerland', 'United States', 'United Kingdom',
@@ -21,7 +16,7 @@ const COUNTRIES = [
 ]
 
 const ARRIVAL_TIMES = [
-  'I don\'t know yet',
+  'iDontKnow',
   '12:00 - 13:00',
   '13:00 - 14:00',
   '14:00 - 15:00',
@@ -36,6 +31,10 @@ const ARRIVAL_TIMES = [
 
 function BookPageContent() {
   const router = useRouter()
+  const locale = useLocale()
+  const t = useTranslations('book')
+  const tc = useTranslations('common')
+  const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
   const searchParams = useSearchParams()
@@ -43,6 +42,13 @@ function BookPageContent() {
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const currentStep = 3
+
+  const STEPS = [
+    { number: 1, label: ts('rooms') },
+    { number: 2, label: ts('addons') },
+    { number: 3, label: ts('details') },
+    { number: 4, label: ts('payment') },
+  ]
 
   const room = rooms.find((r) => r.id === roomId) || rooms[1]
   const nights = calculateNights(checkIn, checkOut)
@@ -76,7 +82,7 @@ function BookPageContent() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
-          <h2 className="text-3xl font-serif text-gray-900">Guest Information</h2>
+          <h2 className="text-3xl font-serif text-gray-900">{t('guestInformation')}</h2>
 
           <div className="flex items-center gap-2 flex-shrink-0">
             {STEPS.map((step, index) => (
@@ -116,7 +122,7 @@ function BookPageContent() {
           <div className="lg:col-span-2 space-y-6">
             {/* Booking Summary Card */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-5">Booking Summary</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-5">{t('bookingSummary')}</h3>
 
               {/* Room row */}
               <div className="flex items-start gap-4 pb-5 border-b border-gray-100">
@@ -126,44 +132,44 @@ function BookPageContent() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-gray-900">{room.name}</p>
                   <p className="text-sm text-gray-500">
-                    {formatDate(checkIn)} - {formatDate(checkOut)} &middot; {nights} nights
+                    {formatDate(checkIn, locale)} - {formatDate(checkOut, locale)} &middot; {tc('nights', { count: nights })}
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-bold text-gray-900">{formatCurrency(roomTotal, room.currency)}</p>
-                  <p className="text-xs text-gray-500">{formatCurrency(room.baseRate, room.currency)} &times; {nights}</p>
+                  <p className="text-sm font-bold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</p>
+                  <p className="text-xs text-gray-500">{formatCurrency(room.baseRate, room.currency, locale)} &times; {nights}</p>
                 </div>
               </div>
 
               {/* Add-ons row */}
               <div className="py-4 border-b border-gray-100">
-                <p className="text-xs font-medium text-gray-500 mb-2">Add-ons:</p>
+                <p className="text-xs font-medium text-gray-500 mb-2">{t('addonsLabel')}</p>
                 <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-700">Airport Transfer</p>
-                  <p className="text-sm font-medium text-gray-900">{formatCurrency(addonsTotal, room.currency)}</p>
+                  <p className="text-sm text-gray-700">{t('airportTransfer')}</p>
+                  <p className="text-sm font-medium text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</p>
                 </div>
               </div>
 
               {/* Total */}
               <div className="flex items-center justify-between pt-4">
-                <p className="text-base font-bold text-gray-900">Total</p>
+                <p className="text-base font-bold text-gray-900">{tc('total')}</p>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency)}</p>
-                  <p className="text-xs text-gray-500">Includes taxes &amp; fees</p>
+                  <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                  <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                 </div>
               </div>
             </div>
 
             {/* Guest Form Card */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <p className="text-gray-600 mb-6">Please provide your details to complete your reservation.</p>
+              <p className="text-gray-600 mb-6">{t('pleaseProvide')}</p>
 
               <div className="space-y-5">
                 {/* First + Last Name */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                      First Name <span className="text-red-500">*</span>
+                      {t('firstName')} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -173,7 +179,7 @@ function BookPageContent() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                      Last Name <span className="text-red-500">*</span>
+                      {t('lastName')} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -186,7 +192,7 @@ function BookPageContent() {
                 {/* Email */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                    Email Address <span className="text-red-500">*</span>
+                    {t('emailAddress')} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="email"
@@ -199,7 +205,7 @@ function BookPageContent() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                      Phone Number <span className="text-red-500">*</span>
+                      {t('phoneNumber')} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="tel"
@@ -209,10 +215,10 @@ function BookPageContent() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                      Country <span className="text-red-500">*</span>
+                      {t('country')} <span className="text-red-500">*</span>
                     </label>
                     <select className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.75rem_center] bg-no-repeat">
-                      <option value="">Select a country</option>
+                      <option value="">{t('selectCountry')}</option>
                       {COUNTRIES.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
@@ -223,12 +229,12 @@ function BookPageContent() {
                 {/* Estimated Arrival Time */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                    Estimated Arrival Time
+                    {t('estimatedArrival')}
                   </label>
                   <select className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.75rem_center] bg-no-repeat">
-                    <option value="">Select an arrival time</option>
-                    {ARRIVAL_TIMES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                    <option value="">{t('selectArrival')}</option>
+                    {ARRIVAL_TIMES.map((time) => (
+                      <option key={time} value={time}>{time === 'iDontKnow' ? t('iDontKnow') : time}</option>
                     ))}
                   </select>
                 </div>
@@ -236,11 +242,11 @@ function BookPageContent() {
                 {/* Special Requests */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                    Special Requests
+                    {t('specialRequests')}
                   </label>
                   <textarea
                     rows={4}
-                    placeholder="Any special requests or preferences for your stay..."
+                    placeholder={t('specialRequestsPlaceholder')}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400 resize-y"
                   />
                 </div>
@@ -256,65 +262,65 @@ function BookPageContent() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Back to Add-ons
+                {t('backToAddons')}
               </button>
-              <a
+              <Link
                 href="/payment"
                 className="px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
               >
-                Proceed to Payment
-              </a>
+                {t('proceedToPayment')}
+              </Link>
             </div>
           </div>
 
           {/* Right Sidebar — Your Stay */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-5">Your Stay</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-5">{t('yourStay')}</h3>
 
               {/* Stay details */}
               <div className="space-y-3 pb-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Room</span>
+                  <span className="text-gray-500">{t('roomLabel')}</span>
                   <span className="font-semibold text-gray-900 text-right">{room.name}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Rate</span>
-                  <span className="font-semibold text-gray-900">Flexible Rate</span>
+                  <span className="text-gray-500">{t('rate')}</span>
+                  <span className="font-semibold text-gray-900">{t('flexibleRate')}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Check-in</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkIn)}</span>
+                  <span className="text-gray-500">{t('checkIn')}</span>
+                  <span className="font-semibold text-gray-900">{formatDate(checkIn, locale)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Check-out</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkOut)}</span>
+                  <span className="text-gray-500">{t('checkOut')}</span>
+                  <span className="font-semibold text-gray-900">{formatDate(checkOut, locale)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Duration</span>
-                  <span className="font-semibold text-gray-900">{nights} nights</span>
+                  <span className="text-gray-500">{t('duration')}</span>
+                  <span className="font-semibold text-gray-900">{tc('nights', { count: nights })}</span>
                 </div>
               </div>
 
               {/* Price breakdown */}
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Room ({nights} nights)</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency)}</span>
+                  <span className="text-gray-500">{t('roomLabel')} ({tc('nights', { count: nights })})</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Add-ons</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency)}</span>
+                  <span className="text-gray-500">{t('addonsLabel')}</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</span>
                 </div>
               </div>
 
               {/* Total */}
               <div className="pt-5">
                 <div className="flex justify-between items-start">
-                  <span className="text-base font-bold text-gray-900">Total</span>
+                  <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency)}</p>
-                    <p className="text-xs text-gray-500">Includes taxes &amp; fees</p>
+                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                    <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
               </div>
