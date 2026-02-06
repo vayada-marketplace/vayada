@@ -8,8 +8,7 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import DatePickerCalendar from '@/components/booking/DatePickerCalendar'
 import GuestSelector from '@/components/booking/GuestSelector'
 import RoomDetailModal from '@/components/booking/RoomDetailModal'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
-import { MOCK_ROOMS } from '@/lib/mock/rooms'
+import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights } from '@/lib/utils'
 
 function PromoPopover({
@@ -77,11 +76,13 @@ const STEPS = [
 
 export default function HomePage() {
   const router = useRouter()
+  const { hotel } = useHotel()
+  const { rooms } = useRooms()
   const [checkIn, setCheckIn] = useState('2026-02-13')
   const [checkOut, setCheckOut] = useState('2026-02-18')
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
-  const [rooms] = useState(1)
+  const [roomCount] = useState(1)
   const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [currentStep] = useState(1)
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -115,8 +116,8 @@ export default function HomePage() {
       {/* Hero Section */}
       <div className="relative h-[520px] w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -128,10 +129,10 @@ export default function HomePage() {
         {/* Hero Content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-serif italic text-white mb-4">
-            {MOCK_HOTEL.name}
+            {hotel.name}
           </h1>
           <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
-            {MOCK_HOTEL.description}
+            {hotel.description}
           </p>
         </div>
       </div>
@@ -190,7 +191,7 @@ export default function HomePage() {
                   {adults} Adult{adults !== 1 ? 's' : ''}
                   {children > 0 && `, ${children} Child${children !== 1 ? 'ren' : ''}`}
                 </p>
-                <p className="text-sm text-gray-500">{rooms} Room</p>
+                <p className="text-sm text-gray-500">{roomCount} Room</p>
               </div>
             </button>
             <GuestSelector
@@ -316,7 +317,7 @@ export default function HomePage() {
 
         {/* Room Cards */}
         <div className="space-y-6">
-          {MOCK_ROOMS.map((room, roomIndex) => {
+          {rooms.map((room, roomIndex) => {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
             const flexibleTotal = room.baseRate * nights
@@ -570,14 +571,14 @@ export default function HomePage() {
       {/* Room Detail Modal */}
       {detailModalIndex !== null && (
         <RoomDetailModal
-          room={MOCK_ROOMS[detailModalIndex]}
+          room={rooms[detailModalIndex]}
           nights={nights}
           open={true}
           onClose={() => setDetailModalIndex(null)}
           currentIndex={detailModalIndex}
-          totalRooms={MOCK_ROOMS.length}
-          onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? MOCK_ROOMS.length - 1 : detailModalIndex - 1)}
-          onNext={() => setDetailModalIndex(detailModalIndex === MOCK_ROOMS.length - 1 ? 0 : detailModalIndex + 1)}
+          totalRooms={rooms.length}
+          onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? rooms.length - 1 : detailModalIndex - 1)}
+          onNext={() => setDetailModalIndex(detailModalIndex === rooms.length - 1 ? 0 : detailModalIndex + 1)}
         />
       )}
 

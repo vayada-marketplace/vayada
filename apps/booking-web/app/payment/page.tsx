@@ -5,8 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
-import { MOCK_ROOMS } from '@/lib/mock/rooms'
+import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights, formatDate } from '@/lib/utils'
 
 const STEPS = [
@@ -18,13 +17,15 @@ const STEPS = [
 
 function PaymentPageContent() {
   const router = useRouter()
+  const { hotel } = useHotel()
+  const { rooms } = useRooms()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || 'room-2'
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const currentStep = 4
 
-  const room = MOCK_ROOMS.find((r) => r.id === roomId) || MOCK_ROOMS[1]
+  const room = rooms.find((r) => r.id === roomId) || rooms[1]
   const nights = calculateNights(checkIn, checkOut)
   const roomTotal = room.baseRate * nights
   const addonsTotal = 80
@@ -37,8 +38,8 @@ function PaymentPageContent() {
       {/* Hero */}
       <div className="relative h-[420px] w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -47,10 +48,10 @@ function PaymentPageContent() {
         <BookingNavigation />
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-serif italic text-white mb-4">
-            {MOCK_HOTEL.name}
+            {hotel.name}
           </h1>
           <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
-            {MOCK_HOTEL.description}
+            {hotel.description}
           </p>
         </div>
       </div>

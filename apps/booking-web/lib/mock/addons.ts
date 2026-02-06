@@ -1,12 +1,4 @@
-export interface Addon {
-  id: string
-  name: string
-  description: string
-  price: number
-  currency: string
-  category: 'transfers' | 'wellness' | 'experiences' | 'dining'
-  image: string
-}
+import { Addon } from '@/lib/types'
 
 export const ADDON_CATEGORIES = [
   { key: 'all', label: 'All Services' },

@@ -4,9 +4,10 @@ import { useState } from 'react'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
+import { useHotel } from '@/contexts/HotelContext'
 
 export default function MyBookingPage() {
+  const { hotel } = useHotel()
   const [reference, setReference] = useState('')
   const [email, setEmail] = useState('')
   const [showResult, setShowResult] = useState(false)
@@ -16,8 +17,8 @@ export default function MyBookingPage() {
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -89,7 +90,7 @@ export default function MyBookingPage() {
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">Hotel</span>
-                <span className="font-medium text-gray-900 text-sm">Hotel Alpenrose</span>
+                <span className="font-medium text-gray-900 text-sm">{hotel.name}</span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">Room</span>

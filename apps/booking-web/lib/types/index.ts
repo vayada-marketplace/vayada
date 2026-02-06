@@ -1,3 +1,23 @@
+export interface HotelContact {
+  address: string
+  phone: string
+  email: string
+  whatsapp?: string
+}
+
+export interface HotelSocialLinks {
+  facebook?: string
+  instagram?: string
+  twitter?: string
+  youtube?: string
+}
+
+export interface HotelBranding {
+  primaryColor: string
+  logoUrl?: string
+  faviconUrl?: string
+}
+
 export interface Hotel {
   id: string
   name: string
@@ -12,6 +32,9 @@ export interface Hotel {
   amenities: string[]
   checkInTime: string
   checkOutTime: string
+  contact: HotelContact
+  socialLinks?: HotelSocialLinks
+  branding?: HotelBranding
 }
 
 export interface RoomType {
@@ -91,3 +114,15 @@ export interface Booking {
 }
 
 export type BookingStep = 'rooms' | 'addons' | 'details' | 'payment'
+
+export interface Addon {
+  id: string
+  name: string
+  description: string
+  price: number
+  currency: string
+  category: string
+  image: string
+  duration?: string
+  perPerson?: boolean
+}

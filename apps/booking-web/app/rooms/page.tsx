@@ -3,18 +3,20 @@
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
-import { MOCK_ROOMS } from '@/lib/mock/rooms'
+import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency } from '@/lib/utils'
 
 export default function RoomsPage() {
+  const { hotel } = useHotel()
+  const { rooms } = useRooms()
+
   return (
     <div className="min-h-screen bg-white">
       {/* Mini Hero */}
       <div className="relative h-64 w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -30,7 +32,7 @@ export default function RoomsPage() {
       {/* Room Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {MOCK_ROOMS.map((room) => (
+          {rooms.map((room) => (
             <div
               key={room.id}
               className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-lg transition-shadow group"

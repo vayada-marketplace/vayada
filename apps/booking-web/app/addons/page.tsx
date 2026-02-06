@@ -5,8 +5,8 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { MOCK_ADDONS, ADDON_CATEGORIES } from '@/lib/mock/addons'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
+import { ADDON_CATEGORIES } from '@/lib/mock/addons'
+import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { formatCurrency } from '@/lib/utils'
 
 const STEPS = [
@@ -18,14 +18,16 @@ const STEPS = [
 
 export default function AddonsPage() {
   const router = useRouter()
+  const { hotel } = useHotel()
+  const { addons } = useAddons()
   const [activeCategory, setActiveCategory] = useState('all')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const currentStep = 2
 
   const filteredAddons =
     activeCategory === 'all'
-      ? MOCK_ADDONS
-      : MOCK_ADDONS.filter((a) => a.category === activeCategory)
+      ? addons
+      : addons.filter((a) => a.category === activeCategory)
 
   const toggleAddon = (id: string) => {
     setAddedIds((prev) => {
@@ -44,8 +46,8 @@ export default function AddonsPage() {
       {/* Hero Section */}
       <div className="relative h-[420px] w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -56,10 +58,10 @@ export default function AddonsPage() {
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-serif italic text-white mb-4">
-            {MOCK_HOTEL.name}
+            {hotel.name}
           </h1>
           <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
-            {MOCK_HOTEL.description}
+            {hotel.description}
           </p>
         </div>
       </div>
@@ -179,7 +181,7 @@ export default function AddonsPage() {
               </h3>
             </div>
             <div className="space-y-3 mb-5">
-              {MOCK_ADDONS.filter((a) => addedIds.has(a.id)).map((addon) => (
+              {addons.filter((a) => addedIds.has(a.id)).map((addon) => (
                 <div key={addon.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-gray-100">
                   <div className="flex items-center gap-3">
                     <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
@@ -206,8 +208,8 @@ export default function AddonsPage() {
               <p className="text-sm text-gray-500">Add-ons total</p>
               <p className="text-xl font-bold text-gray-900">
                 {formatCurrency(
-                  MOCK_ADDONS.filter((a) => addedIds.has(a.id)).reduce((sum, a) => sum + a.price, 0),
-                  'EUR'
+                  addons.filter((a) => addedIds.has(a.id)).reduce((sum, a) => sum + a.price, 0),
+                  hotel.currency
                 )}
               </p>
             </div>

@@ -30,4 +30,17 @@ export const MOCK_HOTEL: Hotel = {
   ],
   checkInTime: '15:00',
   checkOutTime: '11:00',
+  contact: {
+    address: 'Alpengasse 12, 6020 Innsbruck, Austria',
+    phone: '+43 512 123 456',
+    email: 'reservations@hotel-alpenrose.at',
+    whatsapp: '+43 512 123 456',
+  },
+  socialLinks: {
+    facebook: 'https://facebook.com/hotelalpenrose',
+    instagram: 'https://instagram.com/hotelalpenrose',
+  },
+  branding: {
+    primaryColor: '#1E3EDB',
+  },
 }

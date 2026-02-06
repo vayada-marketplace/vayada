@@ -3,20 +3,22 @@
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import Image from 'next/image'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
+import { useHotel } from '@/contexts/HotelContext'
 
 export default function BookingConfirmationPage({
   params,
 }: {
   params: { reference: string }
 }) {
+  const { hotel } = useHotel()
+
   return (
     <div className="min-h-screen bg-surface">
       {/* Mini Hero */}
       <div className="relative h-32 w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -47,7 +49,7 @@ export default function BookingConfirmationPage({
           <div className="text-left space-y-0 divide-y divide-gray-100">
             <div className="flex justify-between py-3">
               <span className="text-gray-600">Hotel</span>
-              <span className="font-medium text-gray-900">Hotel Alpenrose</span>
+              <span className="font-medium text-gray-900">{hotel.name}</span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">Room</span>

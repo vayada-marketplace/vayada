@@ -4,11 +4,12 @@ import { useState } from 'react'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { MOCK_HOTEL } from '@/lib/mock/hotel'
-import { MOCK_ROOMS } from '@/lib/mock/rooms'
+import { useHotel, useRooms } from '@/contexts/HotelContext'
 import { formatCurrency, calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 
 export default function AvailabilityPage() {
+  const { hotel } = useHotel()
+  const { rooms } = useRooms()
   const [checkIn, setCheckIn] = useState('2026-02-13')
   const [checkOut, setCheckOut] = useState('2026-02-18')
   const [adults, setAdults] = useState(2)
@@ -22,8 +23,8 @@ export default function AvailabilityPage() {
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
         <Image
-          src={MOCK_HOTEL.heroImage}
-          alt={MOCK_HOTEL.name}
+          src={hotel.heroImage}
+          alt={hotel.name}
           fill
           className="object-cover"
           priority
@@ -139,10 +140,10 @@ export default function AvailabilityPage() {
         {hasSearched && (
           <>
             <h2 className="text-xl font-bold text-gray-900 mb-4">
-              {MOCK_ROOMS.length} rooms available
+              {rooms.length} rooms available
             </h2>
             <div className="space-y-4">
-              {MOCK_ROOMS.map((room) => {
+              {rooms.map((room) => {
                 const total = room.baseRate * nights
                 return (
                   <div
