@@ -14,9 +14,9 @@ router = APIRouter(prefix="/api/hotels", tags=["hotels"])
 
 
 @router.get("/{slug}", response_model=HotelResponse)
-async def get_hotel(slug: str):
+async def get_hotel(slug: str, lang: str = "en"):
     try:
-        hotel = await get_hotel_by_slug(slug)
+        hotel = await get_hotel_by_slug(slug, locale=lang)
     except Exception as e:
         logger.error(f"Error fetching hotel {slug}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

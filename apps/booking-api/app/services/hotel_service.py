@@ -14,15 +14,43 @@ from app.models.hotel import (
 logger = logging.getLogger(__name__)
 
 
-async def get_hotel_by_slug(slug: str) -> Optional[HotelResponse]:
-    row = await Database.fetchrow(
-        "SELECT * FROM booking_hotels WHERE slug = $1", slug
-    )
+async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResponse]:
+    if locale and locale != "en":
+        row = await Database.fetchrow(
+            """
+            SELECT h.*,
+                   COALESCE(t.name, h.name) AS t_name,
+                   COALESCE(t.description, h.description) AS t_description,
+                   COALESCE(t.location, h.location) AS t_location,
+                   COALESCE(t.country, h.country) AS t_country,
+                   COALESCE(t.contact_address, h.contact_address) AS t_contact_address,
+                   COALESCE(t.amenities, h.amenities) AS t_amenities
+            FROM booking_hotels h
+            LEFT JOIN booking_hotel_translations t
+                ON t.hotel_id = h.id AND t.locale = $2
+            WHERE h.slug = $1
+            """,
+            slug,
+            locale,
+        )
+    else:
+        row = await Database.fetchrow(
+            "SELECT * FROM booking_hotels WHERE slug = $1", slug
+        )
+
     if not row:
         return None
 
+    # Use translated fields when available (non-English locale)
+    name = row.get("t_name", row["name"]) if locale != "en" else row["name"]
+    description = row.get("t_description", row["description"]) if locale != "en" else row["description"]
+    location = row.get("t_location", row["location"]) if locale != "en" else row["location"]
+    country = row.get("t_country", row["country"]) if locale != "en" else row["country"]
+    contact_address = row.get("t_contact_address", row["contact_address"]) if locale != "en" else row["contact_address"]
+    raw_amenities = row.get("t_amenities", row["amenities"]) if locale != "en" else row["amenities"]
+
     contact = HotelContact(
-        address=row["contact_address"],
+        address=contact_address,
         phone=row["contact_phone"],
         email=row["contact_email"],
         whatsapp=row["contact_whatsapp"],
@@ -46,15 +74,15 @@ async def get_hotel_by_slug(slug: str) -> Optional[HotelResponse]:
         )
 
     images = json.loads(row["images"]) if isinstance(row["images"], str) else row["images"]
-    amenities = json.loads(row["amenities"]) if isinstance(row["amenities"], str) else row["amenities"]
+    amenities = json.loads(raw_amenities) if isinstance(raw_amenities, str) else raw_amenities
 
     return HotelResponse(
         id=str(row["id"]),
-        name=row["name"],
+        name=name,
         slug=row["slug"],
-        description=row["description"],
-        location=row["location"],
-        country=row["country"],
+        description=description,
+        location=location,
+        country=country,
         star_rating=row["star_rating"],
         currency=row["currency"],
         hero_image=row["hero_image"],

@@ -1,5 +1,5 @@
 """
-Seed script — inserts 3 example hotels into booking_hotels.
+Seed script — inserts 3 example hotels and German translations into the database.
 
 Usage:
     python scripts/seed.py
@@ -127,6 +127,70 @@ HOTELS = [
     },
 ]
 
+GERMAN_TRANSLATIONS = [
+    {
+        "hotel_slug": "hotel-alpenrose",
+        "locale": "de",
+        "name": "Hotel Alpenrose",
+        "description": "Ein Boutique-Alpenrefugium mit Panoramablick auf die Berge, erstklassigen Spa-Einrichtungen und erlesener österreichischer Gastfreundschaft im Herzen von Innsbruck.",
+        "location": "Innsbruck, Österreich",
+        "country": "Österreich",
+        "contact_address": "Alpengasse 12, 6020 Innsbruck, Österreich",
+        "amenities": [
+            "Kostenloses WLAN",
+            "Spa & Wellness",
+            "Restaurant",
+            "Bar & Lounge",
+            "Fitnesscenter",
+            "Zimmerservice",
+            "Concierge",
+            "Flughafentransfer",
+            "Skiaufbewahrung",
+            "Bergblick",
+        ],
+    },
+    {
+        "hotel_slug": "grand-hotel-riviera",
+        "locale": "de",
+        "name": "Grand Hotel Riviera",
+        "description": "Ein elegantes mediterranes Refugium an den Klippen der Amalfiküste mit atemberaubendem Meerblick, privatem Strand und authentischer italienischer Gourmetküche.",
+        "location": "Amalfi, Italien",
+        "country": "Italien",
+        "contact_address": "Via Costiera Amalfitana 88, 84011 Amalfi, Italien",
+        "amenities": [
+            "Kostenloses WLAN",
+            "Privatstrand",
+            "Infinity-Pool",
+            "Gourmetküche",
+            "Spa & Wellness",
+            "Zimmerservice",
+            "Parkservice",
+            "Concierge",
+            "Bootstouren",
+            "Meerblick",
+        ],
+    },
+    {
+        "hotel_slug": "the-birchwood-lodge",
+        "locale": "de",
+        "name": "The Birchwood Lodge",
+        "description": "Eine gemütliche Lodge am See, eingebettet in die schottischen Highlands, die rustikalen Charme mit modernem Komfort für den perfekten Landurlaub verbindet.",
+        "location": "Inverness, Schottland",
+        "country": "Vereinigtes Königreich",
+        "contact_address": "12 Lochside Road, Inverness IV3 8LA, Schottland",
+        "amenities": [
+            "Kostenloses WLAN",
+            "Kamin-Lounge",
+            "Restaurant",
+            "Wanderwege",
+            "Kajakverleih",
+            "Kostenlose Parkplätze",
+            "Haustierfreundlich",
+            "Seeblick",
+        ],
+    },
+]
+
 INSERT_SQL = """
     INSERT INTO booking_hotels (
         name, slug, description, location, country, star_rating, currency,
@@ -141,6 +205,16 @@ INSERT_SQL = """
         $17, $18,
         $19
     ) ON CONFLICT (slug) DO NOTHING
+"""
+
+INSERT_TRANSLATION_SQL = """
+    INSERT INTO booking_hotel_translations (
+        hotel_id, locale, name, description, location, country,
+        contact_address, amenities
+    )
+    SELECT h.id, $2, $3, $4, $5, $6, $7, $8::jsonb
+    FROM booking_hotels h WHERE h.slug = $1
+    ON CONFLICT (hotel_id, locale) DO NOTHING
 """
 
 
@@ -178,8 +252,24 @@ async def main():
             )
             print(f"  Seeded: {hotel['name']} ({hotel['slug']})")
 
+        # Seed German translations
+        for t in GERMAN_TRANSLATIONS:
+            await conn.execute(
+                INSERT_TRANSLATION_SQL,
+                t["hotel_slug"],
+                t["locale"],
+                t["name"],
+                t["description"],
+                t["location"],
+                t["country"],
+                t["contact_address"],
+                json.dumps(t["amenities"]),
+            )
+            print(f"  Seeded translation: {t['hotel_slug']} ({t['locale']})")
+
         count = await conn.fetchval("SELECT COUNT(*) FROM booking_hotels")
-        print(f"\nDone. {count} hotel(s) in database.")
+        trans_count = await conn.fetchval("SELECT COUNT(*) FROM booking_hotel_translations")
+        print(f"\nDone. {count} hotel(s), {trans_count} translation(s) in database.")
     finally:
         await conn.close()
 
