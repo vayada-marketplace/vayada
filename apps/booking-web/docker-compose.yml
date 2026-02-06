@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  booking-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3002:3002"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+      - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
+      - NEXT_PUBLIC_HOTEL_SLUG=hotel-alpenrose
