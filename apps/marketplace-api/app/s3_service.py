@@ -16,24 +16,24 @@ _s3_client: Optional[boto3.client] = None
 def get_s3_client():
     """Get or create S3 client"""
     global _s3_client
-    
+
     if _s3_client is None:
         try:
+            kwargs = {
+                'region_name': settings.AWS_REGION,
+            }
             if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-                _s3_client = boto3.client(
-                    's3',
-                    region_name=settings.AWS_REGION,
-                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
-                )
-            else:
-                # Try to use default credentials (e.g., from IAM role or ~/.aws/credentials)
-                _s3_client = boto3.client('s3', region_name=settings.AWS_REGION)
-                logger.info("Using default AWS credentials for S3")
+                kwargs['aws_access_key_id'] = settings.AWS_ACCESS_KEY_ID
+                kwargs['aws_secret_access_key'] = settings.AWS_SECRET_ACCESS_KEY
+            if settings.S3_ENDPOINT_URL:
+                kwargs['endpoint_url'] = settings.S3_ENDPOINT_URL
+            _s3_client = boto3.client('s3', **kwargs)
+            if settings.S3_ENDPOINT_URL:
+                logger.info(f"Using custom S3 endpoint: {settings.S3_ENDPOINT_URL}")
         except NoCredentialsError:
             logger.error("AWS credentials not found")
             raise
-    
+
     return _s3_client
 
 
@@ -75,8 +75,12 @@ async def upload_file_to_s3(
         
         # Generate URL
         if settings.S3_USE_PUBLIC_URLS and make_public:
-            # Public URL format
-            url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{file_key}"
+            if settings.S3_PUBLIC_URL:
+                # Custom public URL (MinIO/local dev)
+                url = f"{settings.S3_PUBLIC_URL}/{settings.S3_BUCKET_NAME}/{file_key}"
+            else:
+                # AWS S3 public URL format
+                url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{file_key}"
         else:
             # Generate signed URL
             url = s3_client.generate_presigned_url(

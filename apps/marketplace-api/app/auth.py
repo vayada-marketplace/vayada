@@ -25,9 +25,9 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 async def get_user_by_email(email: str) -> Optional[dict]:
     """Get user by email from database"""
-    from app.database import Database
-    
-    user = await Database.fetchrow(
+    from app.database import AuthDatabase
+
+    user = await AuthDatabase.fetchrow(
         "SELECT * FROM users WHERE email = $1",
         email
     )
@@ -36,13 +36,13 @@ async def get_user_by_email(email: str) -> Optional[dict]:
 
 async def create_user(email: str, password_hash: str, user_type: str, name: Optional[str] = None) -> dict:
     """Create a new user in the database"""
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     # Use email as name if not provided
     if not name:
         name = email.split('@')[0]  # Use part before @ as default name
-    
-    user = await Database.fetchrow(
+
+    user = await AuthDatabase.fetchrow(
         """
         INSERT INTO users (email, password_hash, name, type, status)
         VALUES ($1, $2, $3, $4, 'pending')
@@ -72,12 +72,12 @@ async def create_password_reset_token(user_id: str, expires_in_hours: int = 1) -
     Returns:
         The generated reset token
     """
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     token = generate_password_reset_token()
     expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
-    
-    await Database.execute(
+
+    await AuthDatabase.execute(
         """
         INSERT INTO password_reset_tokens (user_id, token, expires_at)
         VALUES ($1, $2, $3)
@@ -100,10 +100,10 @@ async def validate_password_reset_token(token: str) -> Optional[dict]:
     Returns:
         Dictionary with user_id if token is valid, None otherwise
     """
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     # Get token from database
-    token_record = await Database.fetchrow(
+    token_record = await AuthDatabase.fetchrow(
         """
         SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.status
         FROM password_reset_tokens prt
@@ -144,9 +144,9 @@ async def mark_password_reset_token_as_used(token: str) -> bool:
     Returns:
         True if token was marked as used, False otherwise
     """
-    from app.database import Database
-    
-    result = await Database.execute(
+    from app.database import AuthDatabase
+
+    result = await AuthDatabase.execute(
         """
         UPDATE password_reset_tokens
         SET used = true
@@ -174,13 +174,13 @@ async def create_email_verification_code(email: str, expires_in_minutes: int = 1
     Returns:
         The generated 6-digit verification code
     """
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     code = generate_email_verification_code()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
-    
+
     # Invalidate any existing unused codes for this email
-    await Database.execute(
+    await AuthDatabase.execute(
         """
         UPDATE email_verification_codes
         SET used = true
@@ -188,9 +188,9 @@ async def create_email_verification_code(email: str, expires_in_minutes: int = 1
         """,
         email
     )
-    
+
     # Insert new code
-    await Database.execute(
+    await AuthDatabase.execute(
         """
         INSERT INTO email_verification_codes (email, code, expires_at)
         VALUES ($1, $2, $3)
@@ -214,15 +214,15 @@ async def verify_email_code(email: str, code: str) -> bool:
     Returns:
         True if code is valid and not expired, False otherwise
     """
-    from app.database import Database
+    from app.database import AuthDatabase
     import logging
-    
+
     logger = logging.getLogger(__name__)
-    
+
     # Get the most recent unused code for this email
     # Use database-side timezone comparison to avoid timezone issues
     # This ensures consistent timezone handling regardless of server timezone
-    code_record = await Database.fetchrow(
+    code_record = await AuthDatabase.fetchrow(
         """
         SELECT id, expires_at, used, created_at
         FROM email_verification_codes
@@ -242,7 +242,7 @@ async def verify_email_code(email: str, code: str) -> bool:
         return False
     
     # Mark code as used
-    await Database.execute(
+    await AuthDatabase.execute(
         """
         UPDATE email_verification_codes
         SET used = true
@@ -265,9 +265,9 @@ async def mark_email_as_verified(email: str) -> bool:
     Returns:
         True if email was marked as verified, False otherwise
     """
-    from app.database import Database
-    
-    result = await Database.execute(
+    from app.database import AuthDatabase
+
+    result = await AuthDatabase.execute(
         """
         UPDATE users
         SET email_verified = true
@@ -295,13 +295,13 @@ async def create_email_verification_token(user_id: str, expires_in_hours: int = 
     Returns:
         The generated verification token
     """
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     token = generate_email_verification_token()
     expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
-    
+
     # Invalidate any existing unused tokens for this user
-    await Database.execute(
+    await AuthDatabase.execute(
         """
         UPDATE email_verification_tokens
         SET used = true
@@ -309,9 +309,9 @@ async def create_email_verification_token(user_id: str, expires_in_hours: int = 
         """,
         user_id
     )
-    
+
     # Insert new token
-    await Database.execute(
+    await AuthDatabase.execute(
         """
         INSERT INTO email_verification_tokens (user_id, token, expires_at)
         VALUES ($1, $2, $3)
@@ -334,10 +334,10 @@ async def validate_email_verification_token(token: str) -> Optional[dict]:
     Returns:
         Dictionary with user_id and email if token is valid, None otherwise
     """
-    from app.database import Database
-    
+    from app.database import AuthDatabase
+
     # Get token from database
-    token_record = await Database.fetchrow(
+    token_record = await AuthDatabase.fetchrow(
         """
         SELECT evt.id, evt.user_id, evt.expires_at, evt.used, u.email, u.status
         FROM email_verification_tokens evt
@@ -378,9 +378,9 @@ async def mark_email_verification_token_as_used(token: str) -> bool:
     Returns:
         True if token was marked as used, False otherwise
     """
-    from app.database import Database
-    
-    result = await Database.execute(
+    from app.database import AuthDatabase
+
+    result = await AuthDatabase.execute(
         """
         UPDATE email_verification_tokens
         SET used = true

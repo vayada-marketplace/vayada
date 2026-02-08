@@ -4,7 +4,7 @@ Marketplace routes for public browsing
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import List, Optional, Literal
 from datetime import datetime
-from app.database import Database
+from app.database import Database, AuthDatabase
 import logging
 import json
 
@@ -28,10 +28,19 @@ async def get_all_listings():
     Includes hotel information, listing details, and collaboration offerings.
     """
     try:
-        # Get all listings from verified hotels with complete profiles
+        # Pre-fetch verified user IDs from AuthDatabase
+        verified_users = await AuthDatabase.fetch(
+            "SELECT id FROM users WHERE status = 'verified'"
+        )
+        verified_ids = [r['id'] for r in verified_users]
+
+        if not verified_ids:
+            return []
+
+        # Get all listings from hotels with complete profiles whose user_id is verified
         listings_data = await Database.fetch(
             """
-            SELECT 
+            SELECT
                 hl.id,
                 hl.hotel_profile_id,
                 hl.name,
@@ -45,11 +54,11 @@ async def get_all_listings():
                 hp.picture as hotel_picture
             FROM hotel_listings hl
             JOIN hotel_profiles hp ON hp.id = hl.hotel_profile_id
-            JOIN users u ON u.id = hp.user_id
             WHERE hp.profile_complete = true
-            AND u.status = 'verified'
+            AND hp.user_id = ANY($1::uuid[])
             ORDER BY hl.created_at DESC
-            """
+            """,
+            verified_ids
         )
         
         if not listings_data:
@@ -171,22 +180,30 @@ async def get_all_creators(
     - creator_type: Filter by creator type(s) - can pass multiple values (e.g., ?creator_type=Lifestyle&creator_type=Travel)
     """
     try:
-        # Build dynamic query with filters
+        # Pre-fetch verified user data from AuthDatabase
+        verified_users = await AuthDatabase.fetch(
+            "SELECT id, name, status FROM users WHERE status = 'verified'"
+        )
+        verified_ids = [r['id'] for r in verified_users]
+        users_map = {str(u['id']): u for u in verified_users}
+
+        if not verified_ids:
+            return []
+
+        # Build dynamic query with filters (no JOIN on users - auth data comes from AuthDatabase)
         query = """
             SELECT
                 c.id,
+                c.user_id,
                 c.location,
                 c.short_description,
                 c.portfolio_link,
                 c.profile_picture,
                 c.creator_type,
                 c.created_at,
-                u.name,
-                u.status,
                 COALESCE(rating_stats.average_rating, 0.0) as average_rating,
                 COALESCE(rating_stats.total_reviews, 0) as total_reviews
             FROM creators c
-            JOIN users u ON u.id = c.user_id
             LEFT JOIN (
                 SELECT
                     creator_id,
@@ -196,11 +213,11 @@ async def get_all_creators(
                 GROUP BY creator_id
             ) rating_stats ON rating_stats.creator_id = c.id
             WHERE c.profile_complete = true
-            AND u.status = 'verified'
+            AND c.user_id = ANY($1::uuid[])
         """
 
-        params = []
-        param_counter = 1
+        params = [verified_ids]
+        param_counter = 2
 
         # Add creator_type filter if provided
         if creator_type:
@@ -211,10 +228,10 @@ async def get_all_creators(
         query += " ORDER BY c.created_at DESC"
 
         creators_data = await Database.fetch(query, *params)
-        
+
         if not creators_data:
             return []
-        
+
         # Get all creator IDs
         creator_ids = [c['id'] for c in creators_data]
         
@@ -277,10 +294,14 @@ async def get_all_creators(
             creator_id_str = str(creator['id'])
             platforms = platforms_map.get(creator_id_str, [])
             audience_size = sum(p.followers for p in platforms)
-            
+
+            # Look up user name from AuthDatabase data
+            user_info = users_map.get(str(creator['user_id']))
+            user_name = user_info['name'] if user_info else ""
+
             response.append(CreatorMarketplaceResponse(
                 id=creator_id_str,
-                name=creator['name'],
+                name=user_name,
                 location=creator['location'] or "",
                 short_description=creator['short_description'] or "",
                 portfolio_link=creator['portfolio_link'],

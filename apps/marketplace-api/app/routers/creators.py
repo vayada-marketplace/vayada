@@ -8,7 +8,7 @@ from decimal import Decimal
 import json
 import logging
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id, get_current_user_id_allow_pending, get_current_creator_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.auth import create_email_verification_token
@@ -45,23 +45,23 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
     """
     try:
         # Verify user is a creator
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, name FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
-        
+
         # Get creator profile
         creator = await Database.fetchrow(
             """
@@ -71,13 +71,13 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
             """,
             user_id
         )
-        
+
         if not creator:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
-        
+
         # Check for platforms
         platforms = await Database.fetch(
             """
@@ -148,23 +148,23 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
     """
     try:
         # Verify user is a creator
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, name, email, status FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
-        
+
         # Get creator profile
         creator = await Database.fetchrow(
             """
@@ -289,23 +289,23 @@ async def update_creator_profile(
     """
     try:
         # Verify user is a creator
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, name FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
-        
+
         # Get creator profile with completion status and current profile picture
         creator = await Database.fetchrow(
             "SELECT id, profile_complete, profile_picture FROM creators WHERE user_id = $1",
@@ -322,18 +322,18 @@ async def update_creator_profile(
         was_complete_before = creator.get('profile_complete', False)
         old_profile_picture = creator.get('profile_picture')
         
-        # Start transaction - update user name, creator profile, and platforms
+        # Update user name on AuthDatabase (separate from business DB transaction)
+        if request.name is not None:
+            await AuthDatabase.execute(
+                "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
+                request.name,
+                user_id
+            )
+
+        # Start transaction - update creator profile and platforms
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Update user name if provided
-                if request.name is not None:
-                    await conn.execute(
-                        "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
-                        request.name,
-                        user_id
-                    )
-                
                 # Build dynamic UPDATE query for creator profile
                 update_fields = []
                 update_values = []
@@ -425,31 +425,31 @@ async def update_creator_profile(
         # Fetch updated profile with platforms and check if profile became complete
         creator_data = await Database.fetchrow(
             """
-            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone,
-                   c.profile_picture, c.creator_type, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name, u.email
-            FROM creators c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.id = $1
+            SELECT id, location, short_description, portfolio_link, phone,
+                   profile_picture, creator_type, created_at, updated_at, profile_complete, user_id
+            FROM creators
+            WHERE id = $1
             """,
             creator_id
         )
-        
+
+        user_data = await AuthDatabase.fetchrow(
+            "SELECT name, email, status, email_verified FROM users WHERE id = $1",
+            creator_data['user_id']
+        )
+
         # Check if profile just became complete (transition from incomplete to complete)
         is_complete_now = creator_data.get('profile_complete', False)
         profile_just_completed = not was_complete_before and is_complete_now
-        
+
         # Send confirmation email if profile just became complete
         if profile_just_completed:
             try:
-                user_email = creator_data['email']
-                user_name = creator_data['user_name'] or user_email.split('@')[0]
-                
+                user_email = user_data['email']
+                user_name = user_data['name'] or user_email.split('@')[0]
+
                 # Check if email is already verified
-                user_record = await Database.fetchrow(
-                    "SELECT email_verified FROM users WHERE id = $1",
-                    user_id
-                )
-                email_verified = user_record.get('email_verified', False) if user_record else False
+                email_verified = user_data.get('email_verified', False)
                 
                 # Generate verification token and link if email is not verified
                 verification_link = None
@@ -507,7 +507,7 @@ async def update_creator_profile(
         
         return CreatorProfileResponse(
             id=str(creator_data['id']),
-            name=request.name if request.name is not None else creator_data['user_name'],
+            name=request.name if request.name is not None else user_data['name'],
             location=creator_data['location'],
             short_description=creator_data['short_description'],
             portfolio_link=creator_data['portfolio_link'],
@@ -516,7 +516,7 @@ async def update_creator_profile(
             creator_type=creator_data['creator_type'] or 'Lifestyle',
             platforms=platforms_response,
             audience_size=audience_size,
-            status=creator_data['status'],
+            status=user_data['status'],
             created_at=creator_data['created_at'],
             updated_at=creator_data['updated_at']
         )
@@ -544,17 +544,17 @@ async def get_creator_collaborations(
     """
     try:
         # Verify user is a creator and get creator profile
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user or user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
-        
+
         creator = await Database.fetchrow(
             "SELECT id FROM creators WHERE user_id = $1",
             user_id
@@ -683,17 +683,17 @@ async def get_creator_collaboration_detail(
     """
     try:
         # Verify user is a creator
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user or user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators"
             )
-        
+
         creator_profile = await Database.fetchrow(
             "SELECT id FROM creators WHERE user_id = $1",
             user_id

@@ -4,7 +4,7 @@ Dependencies for FastAPI routes
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.jwt_utils import decode_access_token, get_user_id_from_token, is_token_expired
 
 security = HTTPBearer()
@@ -45,7 +45,7 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
         )
     
     # Verify user exists and check status
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id, type, status FROM users WHERE id = $1",
         user_id
     )
@@ -104,7 +104,7 @@ async def get_current_user_id_allow_pending(credentials: HTTPAuthorizationCreden
         )
 
     # Verify user exists (but don't check status)
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id FROM users WHERE id = $1",
         user_id
     )
@@ -125,11 +125,11 @@ async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) ->
     Verifies that the user is a creator and has a creator profile.
     """
     # Verify user is a creator
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id, type FROM users WHERE id = $1",
         user_id
     )
-    
+
     if user['type'] != 'creator':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -157,11 +157,11 @@ async def get_current_hotel_profile_id(user_id: str = Depends(get_current_user_i
     Verifies that the user is a hotel and has a hotel profile.
     """
     # Verify user is a hotel
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id, type FROM users WHERE id = $1",
         user_id
     )
-    
+
     if user['type'] != 'hotel':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

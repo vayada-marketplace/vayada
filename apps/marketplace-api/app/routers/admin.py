@@ -10,7 +10,7 @@ import logging
 import json
 import bcrypt
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id
 from app.routers.collaborations import get_collaboration_deliverables
 from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
@@ -56,23 +56,23 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
     """
     Verify that the current user is an admin.
     """
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id, type, status FROM users WHERE id = $1",
         user_id
     )
-    
+
     if not user:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     if user['type'] != 'admin':
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    
+
     if user['status'] == 'suspended':
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
@@ -127,9 +127,9 @@ async def get_users(
         
         # Get total count
         count_query = f"SELECT COUNT(*) as total FROM users WHERE {where_clause}"
-        total_result = await Database.fetchrow(count_query, *params)
+        total_result = await AuthDatabase.fetchrow(count_query, *params)
         total = total_result['total'] if total_result else 0
-        
+
         # Get users with pagination
         offset = (page - 1) * page_size
         users_query = f"""
@@ -141,7 +141,7 @@ async def get_users(
         """
         params.extend([page_size, offset])
         
-        users_data = await Database.fetch(users_query, *params)
+        users_data = await AuthDatabase.fetch(users_query, *params)
         
         users = [
             UserResponse(
@@ -184,7 +184,7 @@ async def get_user_details(
     """
     try:
         # Get user info
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             """
             SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
             FROM users
@@ -448,7 +448,7 @@ async def create_user(
     """
     try:
         # Check if email already exists
-        existing_user = await Database.fetchrow(
+        existing_user = await AuthDatabase.fetchrow(
             "SELECT id FROM users WHERE email = $1",
             request.email
         )
@@ -465,8 +465,8 @@ async def create_user(
             bcrypt.gensalt()
         ).decode('utf-8')
         
-        # Insert user into database
-        user = await Database.fetchrow(
+        # Insert user into auth database
+        user = await AuthDatabase.fetchrow(
             """
             INSERT INTO users (email, password_hash, name, type, status, email_verified, avatar)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -482,138 +482,143 @@ async def create_user(
         )
         
         user_id = user['id']
-        
-        # Create profile based on user type
-        if request.type == "creator":
-            # Create creator profile
-            profile_data = request.creatorProfile or CreateCreatorProfileRequest()
-            
-            creator = await Database.fetchrow(
-                """
-                INSERT INTO creators (user_id, location, short_description, portfolio_link, phone, profile_picture)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id
-                """,
-                user_id,
-                profile_data.location,
-                profile_data.shortDescription,
-                profile_data.portfolioLink,
-                profile_data.phone,
-                profile_data.profilePicture
-            )
-            
-            creator_id = creator['id']
-            
-            # Create platforms if provided
-            if profile_data.platforms:
-                for platform in profile_data.platforms:
-                    # Prepare analytics data as JSONB
-                    top_countries_data = None
-                    if platform.topCountries:
-                        top_countries_data = json.dumps(platform.topCountries)
-                    
-                    top_age_groups_data = None
-                    if platform.topAgeGroups:
-                        top_age_groups_data = json.dumps(platform.topAgeGroups)
-                    
-                    gender_split_data = None
-                    if platform.genderSplit:
-                        gender_split_data = json.dumps(platform.genderSplit)
-                    
-                    await Database.execute(
-                        """
-                        INSERT INTO creator_platforms 
-                        (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        """,
-                        creator_id,
-                        platform.name,
-                        platform.handle,
-                        platform.followers,
-                        Decimal(str(platform.engagementRate)),
-                        top_countries_data,
-                        top_age_groups_data,
-                        gender_split_data
-                    )
-        
-        elif request.type == "hotel":
-            # Create hotel profile
-            profile_data = request.hotelProfile or CreateHotelProfileRequest()
-            
-            hotel_profile = await Database.fetchrow(
-                """
-                INSERT INTO hotel_profiles (user_id, name, location, about, website, phone)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id
-                """,
-                user_id,
-                profile_data.name or request.name,
-                profile_data.location or "Not specified",
-                profile_data.about,
-                profile_data.website,
-                profile_data.phone
-            )
-            
-            hotel_profile_id = hotel_profile['id']
-            
-            # Create listings if provided
-            if profile_data.listings:
-                pool = await Database.get_pool()
-                async with pool.acquire() as conn:
-                    async with conn.transaction():
-                        for listing_request in profile_data.listings:
-                            # Create listing
-                            listing = await conn.fetchrow(
-                                """
-                                INSERT INTO hotel_listings 
-                                (hotel_profile_id, name, location, description, accommodation_type, images)
-                                VALUES ($1, $2, $3, $4, $5, $6)
-                                RETURNING id
-                                """,
-                                hotel_profile_id,
-                                listing_request.name,
-                                listing_request.location,
-                                listing_request.description,
-                                listing_request.accommodationType,
-                                listing_request.images
-                            )
-                            
-                            listing_id = listing['id']
-                            
-                            # Create collaboration offerings
-                            for offering in listing_request.collaborationOfferings:
+
+        try:
+            # Create profile based on user type (on business Database)
+            if request.type == "creator":
+                # Create creator profile
+                profile_data = request.creatorProfile or CreateCreatorProfileRequest()
+
+                creator = await Database.fetchrow(
+                    """
+                    INSERT INTO creators (user_id, location, short_description, portfolio_link, phone, profile_picture)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id
+                    """,
+                    user_id,
+                    profile_data.location,
+                    profile_data.shortDescription,
+                    profile_data.portfolioLink,
+                    profile_data.phone,
+                    profile_data.profilePicture
+                )
+
+                creator_id = creator['id']
+
+                # Create platforms if provided
+                if profile_data.platforms:
+                    for platform in profile_data.platforms:
+                        # Prepare analytics data as JSONB
+                        top_countries_data = None
+                        if platform.topCountries:
+                            top_countries_data = json.dumps(platform.topCountries)
+
+                        top_age_groups_data = None
+                        if platform.topAgeGroups:
+                            top_age_groups_data = json.dumps(platform.topAgeGroups)
+
+                        gender_split_data = None
+                        if platform.genderSplit:
+                            gender_split_data = json.dumps(platform.genderSplit)
+
+                        await Database.execute(
+                            """
+                            INSERT INTO creator_platforms
+                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            creator_id,
+                            platform.name,
+                            platform.handle,
+                            platform.followers,
+                            Decimal(str(platform.engagementRate)),
+                            top_countries_data,
+                            top_age_groups_data,
+                            gender_split_data
+                        )
+
+            elif request.type == "hotel":
+                # Create hotel profile
+                profile_data = request.hotelProfile or CreateHotelProfileRequest()
+
+                hotel_profile = await Database.fetchrow(
+                    """
+                    INSERT INTO hotel_profiles (user_id, name, location, about, website, phone)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id
+                    """,
+                    user_id,
+                    profile_data.name or request.name,
+                    profile_data.location or "Not specified",
+                    profile_data.about,
+                    profile_data.website,
+                    profile_data.phone
+                )
+
+                hotel_profile_id = hotel_profile['id']
+
+                # Create listings if provided
+                if profile_data.listings:
+                    pool = await Database.get_pool()
+                    async with pool.acquire() as conn:
+                        async with conn.transaction():
+                            for listing_request in profile_data.listings:
+                                # Create listing
+                                listing = await conn.fetchrow(
+                                    """
+                                    INSERT INTO hotel_listings
+                                    (hotel_profile_id, name, location, description, accommodation_type, images)
+                                    VALUES ($1, $2, $3, $4, $5, $6)
+                                    RETURNING id
+                                    """,
+                                    hotel_profile_id,
+                                    listing_request.name,
+                                    listing_request.location,
+                                    listing_request.description,
+                                    listing_request.accommodationType,
+                                    listing_request.images
+                                )
+
+                                listing_id = listing['id']
+
+                                # Create collaboration offerings
+                                for offering in listing_request.collaborationOfferings:
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO listing_collaboration_offerings
+                                        (listing_id, collaboration_type, availability_months, platforms,
+                                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                        """,
+                                        listing_id,
+                                        offering.collaborationType,
+                                        offering.availabilityMonths,
+                                        offering.platforms,
+                                        offering.freeStayMinNights,
+                                        offering.freeStayMaxNights,
+                                        offering.paidMaxAmount,
+                                        offering.discountPercentage
+                                    )
+
+                                # Create creator requirements
                                 await conn.execute(
                                     """
-                                    INSERT INTO listing_collaboration_offerings
-                                    (listing_id, collaboration_type, availability_months, platforms,
-                                     free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
-                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                    INSERT INTO listing_creator_requirements
+                                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                                     """,
                                     listing_id,
-                                    offering.collaborationType,
-                                    offering.availabilityMonths,
-                                    offering.platforms,
-                                    offering.freeStayMinNights,
-                                    offering.freeStayMaxNights,
-                                    offering.paidMaxAmount,
-                                    offering.discountPercentage
+                                    listing_request.creatorRequirements.platforms,
+                                    listing_request.creatorRequirements.minFollowers,
+                                    listing_request.creatorRequirements.topCountries,
+                                    listing_request.creatorRequirements.targetAgeMin,
+                                    listing_request.creatorRequirements.targetAgeMax,
+                                    listing_request.creatorRequirements.targetAgeGroups or []
                                 )
-                            
-                            # Create creator requirements
-                            await conn.execute(
-                                """
-                                INSERT INTO listing_creator_requirements
-                                (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                                """,
-                                listing_id,
-                                listing_request.creatorRequirements.platforms,
-                                listing_request.creatorRequirements.minFollowers,
-                                listing_request.creatorRequirements.topCountries,
-                                listing_request.creatorRequirements.targetAgeMin,
-                                listing_request.creatorRequirements.targetAgeMax,
-                                listing_request.creatorRequirements.targetAgeGroups or []
-                            )
+        except Exception:
+            # Compensating action: delete user from auth DB if profile creation fails
+            await AuthDatabase.execute("DELETE FROM users WHERE id = $1", user_id)
+            raise
         
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
         
@@ -670,17 +675,17 @@ async def update_creator_profile(
     """
     try:
         # Verify user exists and is a creator
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, name FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'creator':
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -701,18 +706,18 @@ async def update_creator_profile(
         
         creator_id = creator['id']
         
-        # Start transaction - update user name, creator profile, and platforms
+        # Update user name on auth database if provided
+        if request.name is not None:
+            await AuthDatabase.execute(
+                "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
+                request.name,
+                user_id
+            )
+
+        # Start transaction - update creator profile and platforms
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Update user name if provided
-                if request.name is not None:
-                    await conn.execute(
-                        "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
-                        request.name,
-                        user_id
-                    )
-                
                 # Build dynamic UPDATE query for creator profile
                 update_fields = []
                 update_values = []
@@ -800,16 +805,19 @@ async def update_creator_profile(
                             gender_split_data
                         )
         
-        # Fetch updated profile with platforms
+        # Fetch updated profile with platforms (split across databases)
         creator_data = await Database.fetchrow(
             """
-            SELECT c.id, c.location, c.short_description, c.portfolio_link, c.phone,
-                   c.profile_picture, c.creator_type, c.created_at, c.updated_at, c.profile_complete, u.status, u.name as user_name
-            FROM creators c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.id = $1
+            SELECT id, location, short_description, portfolio_link, phone,
+                   profile_picture, creator_type, created_at, updated_at, profile_complete, user_id
+            FROM creators WHERE id = $1
             """,
             creator_id
+        )
+
+        user_data = await AuthDatabase.fetchrow(
+            "SELECT name, status FROM users WHERE id = $1",
+            creator_data['user_id']
         )
         
         # Get platforms
@@ -855,7 +863,7 @@ async def update_creator_profile(
         
         return CreatorProfileResponse(
             id=str(creator_data['id']),
-            name=request.name if request.name is not None else creator_data['user_name'],
+            name=request.name if request.name is not None else user_data['name'],
             location=creator_data['location'] or "",
             shortDescription=creator_data['short_description'] or "",
             portfolioLink=creator_data['portfolio_link'],
@@ -864,7 +872,7 @@ async def update_creator_profile(
             creatorType=creator_data['creator_type'] or 'Lifestyle',
             platforms=platforms,
             audienceSize=audience_size,
-            status=creator_data['status'],
+            status=user_data['status'],
             createdAt=creator_data['created_at'],
             updatedAt=creator_data['updated_at']
         )
@@ -895,17 +903,17 @@ async def update_hotel_profile(
     """
     try:
         # Verify user exists and is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, name FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -973,11 +981,11 @@ async def update_hotel_profile(
             """
             await Database.execute(update_query, *update_values)
         
-        # Update email in users table if provided
+        # Update email in users table if provided (auth database)
         if request.email is not None:
-            await Database.execute(
+            await AuthDatabase.execute(
                 """
-                UPDATE users 
+                UPDATE users
                 SET email = $1, updated_at = now()
                 WHERE id = $2
                 """,
@@ -985,27 +993,29 @@ async def update_hotel_profile(
                 user_id
             )
         
-        # Fetch updated profile with email from users table
+        # Fetch updated profile (split across databases)
         updated_hotel = await Database.fetchrow(
             """
-            SELECT hp.id, hp.user_id, hp.name, hp.location, hp.about, hp.website, hp.phone, hp.picture, 
-                   hp.status, hp.created_at, hp.updated_at, hp.profile_complete,
-                   u.email, u.name as user_name
-            FROM hotel_profiles hp
-            JOIN users u ON hp.user_id = u.id
-            WHERE hp.id = $1
+            SELECT id, user_id, name, location, about, website, phone, picture,
+                   status, created_at, updated_at, profile_complete
+            FROM hotel_profiles WHERE id = $1
             """,
             hotel_id
         )
-        
+
+        updated_user = await AuthDatabase.fetchrow(
+            "SELECT email, name as user_name FROM users WHERE id = $1",
+            updated_hotel['user_id']
+        )
+
         logger.info(f"Admin {admin_id} updated hotel profile for user {user_id}")
-        
+
         return HotelProfileResponse(
             id=str(updated_hotel['id']),
             user_id=str(updated_hotel['user_id']),
             name=updated_hotel['name'],
             location=updated_hotel['location'] or "",
-            email=updated_hotel['email'],
+            email=updated_user['email'],
             about=updated_hotel['about'] or "",
             website=updated_hotel['website'],
             phone=updated_hotel['phone'],
@@ -1053,7 +1063,7 @@ async def update_user(
                 )
         
         # Verify user exists
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, email, name, type, status, email_verified, avatar FROM users WHERE id = $1",
             user_id
         )
@@ -1066,7 +1076,7 @@ async def update_user(
         
         # Check if email is being changed and if it's already taken
         if request.email is not None and request.email != user['email']:
-            existing_user = await Database.fetchrow(
+            existing_user = await AuthDatabase.fetchrow(
                 "SELECT id FROM users WHERE email = $1 AND id != $2",
                 request.email,
                 user_id
@@ -1118,10 +1128,10 @@ async def update_user(
                 SET {', '.join(update_fields)}
                 WHERE id = ${param_counter}
             """
-            await Database.execute(update_query, *update_values)
-        
+            await AuthDatabase.execute(update_query, *update_values)
+
         # Fetch updated user
-        updated_user = await Database.fetchrow(
+        updated_user = await AuthDatabase.fetchrow(
             """
             SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
             FROM users
@@ -1207,17 +1217,17 @@ async def create_hotel_listing(
         logger.info(f"Admin {admin_id} creating listing for hotel user {user_id}")
         logger.debug(f"Request data: {request.model_dump()}")
         # Verify user exists and is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -1461,37 +1471,37 @@ async def update_hotel_listing(
     """
     try:
         # Verify user exists and is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
-        
+
         # Get hotel profile
         hotel_profile = await Database.fetchrow(
             "SELECT id FROM hotel_profiles WHERE user_id = $1",
             user_id
         )
-        
+
         if not hotel_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
-        
+
         hotel_profile_id = hotel_profile['id']
-        
+
         # Get current listing data
         listing_data = await _get_listing_with_details_admin(listing_id, hotel_profile_id)
         current_listing = listing_data["listing"]
@@ -1651,29 +1661,29 @@ async def delete_hotel_listing(
     """
     try:
         # Verify user exists and is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
-        
+
         # Get hotel profile
         hotel_profile = await Database.fetchrow(
             "SELECT id FROM hotel_profiles WHERE user_id = $1",
             user_id
         )
-        
+
         if not hotel_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1792,7 +1802,7 @@ async def delete_user(
             )
         
         # Verify user exists and get user info
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             """
             SELECT id, email, name, type, status
             FROM users
@@ -1809,12 +1819,26 @@ async def delete_user(
         
         # Delete all images associated with this user from S3
         image_deletion_stats = await delete_user_images(user_id, user['type'])
-        
-        # Delete user (CASCADE will handle related records)
-        await Database.execute(
-            "DELETE FROM users WHERE id = $1",
-            user_id
-        )
+
+        # Delete business data first (different DB, no cross-DB cascade)
+        if user['type'] == 'creator':
+            creator = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+            if creator:
+                await Database.execute("DELETE FROM creator_platforms WHERE creator_id = $1", creator['id'])
+                await Database.execute("DELETE FROM creators WHERE id = $1", creator['id'])
+        elif user['type'] == 'hotel':
+            hotel = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            if hotel:
+                # Delete listings and their children
+                listings = await Database.fetch("SELECT id FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
+                for listing in listings:
+                    await Database.execute("DELETE FROM listing_collaboration_offerings WHERE listing_id = $1", listing['id'])
+                    await Database.execute("DELETE FROM listing_creator_requirements WHERE listing_id = $1", listing['id'])
+                await Database.execute("DELETE FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
+                await Database.execute("DELETE FROM hotel_profiles WHERE id = $1", hotel['id'])
+
+        # Delete user from auth DB
+        await AuthDatabase.execute("DELETE FROM users WHERE id = $1", user_id)
         
         logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']}, email: {user['email']})")
         
@@ -1850,77 +1874,97 @@ async def get_admin_collaborations(
     Get all collaborations for admin monitoring.
     """
     try:
+        # If searching, find matching user IDs from AuthDatabase
+        search_user_ids = None
+        if search:
+            search_users = await AuthDatabase.fetch(
+                "SELECT id FROM users WHERE name ILIKE $1",
+                f"%{search}%"
+            )
+            search_user_ids = [r['id'] for r in search_users]
+
+        # Build WHERE clause for business data
         where_conditions = []
         params = []
         param_counter = 1
-        
+
         if status:
             where_conditions.append(f"c.status = ${param_counter}")
             params.append(status)
             param_counter += 1
-            
+
         if search:
-            search_pattern = f"%{search}%"
-            where_conditions.append(f"(cr_user.name ILIKE ${param_counter} OR hp.name ILIKE ${param_counter})")
-            params.append(search_pattern)
-            param_counter += 1
-            
+            # Search by hotel name OR by user name (pre-fetched IDs)
+            if search_user_ids:
+                where_conditions.append(f"(hp.name ILIKE ${param_counter} OR cr.user_id = ANY(${param_counter + 1}::uuid[]))")
+                params.append(f"%{search}%")
+                params.append(search_user_ids)
+                param_counter += 2
+            else:
+                where_conditions.append(f"hp.name ILIKE ${param_counter}")
+                params.append(f"%{search}%")
+                param_counter += 1
+
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-        
-        # Count query
+
+        # Count query (no JOIN users)
         count_query = f"""
             SELECT COUNT(*) as total
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
-            JOIN users cr_user ON cr_user.id = cr.user_id
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             WHERE {where_clause}
         """
-        # Execute count query (params contains only filters)
         total_result = await Database.fetchrow(count_query, *params)
         total = total_result['total'] if total_result else 0
-        
-        # Data query
+
+        # Data query (no JOIN users, add cr.user_id)
         offset = (page - 1) * page_size
-        
-        # We need to extend params for LIMIT and OFFSET
         limit_param = param_counter
         offset_param = param_counter + 1
-        
+
         data_query = f"""
-            SELECT c.*, 
-                   cr_user.name as creator_name, 
+            SELECT c.*,
                    cr.profile_picture as creator_profile_picture,
-                   hp.name as hotel_name, 
-                   hl.name as listing_name, 
+                   cr.user_id as creator_user_id,
+                   hp.name as hotel_name,
+                   hl.name as listing_name,
                    hl.location as listing_location
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
-            JOIN users cr_user ON cr_user.id = cr.user_id
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             JOIN hotel_listings hl ON hl.id = c.listing_id
             WHERE {where_clause}
             ORDER BY c.created_at DESC
             LIMIT ${limit_param} OFFSET ${offset_param}
         """
-        
-        # Extend params list with pagination values
+
         query_params = params + [page_size, offset]
-        
         rows = await Database.fetch(data_query, *query_params)
-        
+
+        # Batch-fetch user names from AuthDatabase
+        if rows:
+            creator_user_ids = list(set(row['creator_user_id'] for row in rows))
+            user_rows = await AuthDatabase.fetch(
+                "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
+                creator_user_ids
+            )
+            users_map = {str(u['id']): u['name'] for u in user_rows}
+        else:
+            users_map = {}
+
         collaborations = []
         for row in rows:
             # Fetch deliverables for each collaboration
             collab_id = str(row['id'])
             deliverables = await get_collaboration_deliverables(collab_id)
-            
+
             collaborations.append(CollaborationResponse(
                 id=collab_id,
                 initiator_type=row['initiator_type'],
                 status=row['status'],
                 creator_id=str(row['creator_id']),
-                creator_name=row['creator_name'],
+                creator_name=users_map.get(str(row['creator_user_id']), 'Unknown'),
                 creator_profile_picture=row['creator_profile_picture'],
                 hotel_id=str(row['hotel_id']),
                 hotel_name=row['hotel_name'],
@@ -1950,7 +1994,7 @@ async def get_admin_collaborations(
                 creator_agreed_at=row['creator_agreed_at'],
                 term_last_updated_at=row['term_last_updated_at']
             ))
-            
+
         return CollaborationListResponse(collaborations=collaborations, total=total)
         
     except Exception as e:

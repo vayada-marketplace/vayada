@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import logging
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id
 from app.models.chat import (
     CreateChatMessageRequest,
@@ -91,7 +91,7 @@ async def get_conversations(
         uc.collab_id,
         uc.collab_status,
         uc.my_role,
-        p_user.name as partner_name,
+        uc.partner_user_id,
         COALESCE(p_creator.profile_picture, p_hotel.picture) as partner_avatar,
         lm.content as last_message_content,
         lm.created_at as last_message_at,
@@ -99,7 +99,6 @@ async def get_conversations(
         COALESCE(un.count, 0) as unread_count,
         l.name as listing_name
     FROM user_collabs uc
-    JOIN users p_user ON p_user.id = uc.partner_user_id
     LEFT JOIN creators p_creator ON p_creator.user_id = uc.partner_user_id
     LEFT JOIN hotel_profiles p_hotel ON p_hotel.user_id = uc.partner_user_id
     LEFT JOIN latest_messages lm ON lm.collaboration_id = uc.collab_id
@@ -107,14 +106,25 @@ async def get_conversations(
     LEFT JOIN hotel_listings l ON l.id = uc.listing_id
     ORDER BY COALESCE(lm.created_at, '1970-01-01') DESC
     """
-    
+
     rows = await Database.fetch(query, user_id)
-    
+
+    # Batch-fetch partner names from AuthDatabase
+    partner_ids = list(set(str(row['partner_user_id']) for row in rows if row['partner_user_id']))
+    if partner_ids:
+        partner_users = await AuthDatabase.fetch(
+            "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
+            partner_ids
+        )
+        partner_names_map = {str(u['id']): u['name'] for u in partner_users}
+    else:
+        partner_names_map = {}
+
     return [
         ConversationResponse(
             collaboration_id=str(row['collab_id']),
             collaboration_status=row['collab_status'],
-            partner_name=row['partner_name'],
+            partner_name=partner_names_map.get(str(row['partner_user_id']), 'Unknown'),
             partner_avatar=row['partner_avatar'],
             last_message_content=row['last_message_content'],
             last_message_at=row['last_message_at'],
@@ -142,31 +152,40 @@ async def get_chat_messages(
     # Ideally reuse access check logic
     
     query = """
-        SELECT m.*, 
-               CASE WHEN u.name IS NOT NULL THEN u.name ELSE 'System' END as sender_name,
-               CASE 
-                   WHEN c.profile_picture IS NOT NULL THEN c.profile_picture 
-                   WHEN hp.picture IS NOT NULL THEN hp.picture 
-                   ELSE NULL 
+        SELECT m.*,
+               CASE
+                   WHEN c.profile_picture IS NOT NULL THEN c.profile_picture
+                   WHEN hp.picture IS NOT NULL THEN hp.picture
+                   ELSE NULL
                END as sender_avatar
         FROM chat_messages m
-        LEFT JOIN users u ON u.id = m.sender_id
-        LEFT JOIN creators c ON c.user_id = u.id
-        LEFT JOIN hotel_profiles hp ON hp.user_id = u.id
+        LEFT JOIN creators c ON c.user_id = m.sender_id
+        LEFT JOIN hotel_profiles hp ON hp.user_id = m.sender_id
         WHERE m.collaboration_id = $1
     """
     params = [collaboration_id]
     param_idx = 2
-    
+
     if before:
         query += f" AND m.created_at < ${param_idx}"
         params.append(before)
         param_idx += 1
-        
+
     query += " ORDER BY m.created_at DESC LIMIT 50"
-    
+
     messages = await Database.fetch(query, *params)
-    
+
+    # Batch-fetch sender names from AuthDatabase
+    sender_ids = list(set(str(m['sender_id']) for m in messages if m['sender_id']))
+    if sender_ids:
+        sender_users = await AuthDatabase.fetch(
+            "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
+            sender_ids
+        )
+        sender_names_map = {str(u['id']): u['name'] for u in sender_users}
+    else:
+        sender_names_map = {}
+
     return [
         ChatMessageResponse(
             id=str(m['id']),
@@ -177,7 +196,7 @@ async def get_chat_messages(
             metadata=json.loads(m['metadata']) if m['metadata'] else None,
             created_at=m['created_at'],
             read_at=m['read_at'],
-            sender_name=m['sender_name'],
+            sender_name=sender_names_map.get(str(m['sender_id']), 'System') if m['sender_id'] else 'System',
             sender_avatar=m['sender_avatar']
         )
         for m in messages

@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 import json
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id_allow_pending
 from app.models.consent import (
     GdprExportRequestResponse,
@@ -48,7 +48,7 @@ async def request_data_export(
     """
     try:
         # Check for existing pending/processing export request
-        existing = await Database.fetchrow(
+        existing = await AuthDatabase.fetchrow(
             """
             SELECT id, status, requested_at
             FROM gdpr_requests
@@ -68,7 +68,7 @@ async def request_data_export(
         expires_at = datetime.now(timezone.utc) + timedelta(days=EXPORT_EXPIRY_DAYS)
 
         # Create export request
-        result = await Database.fetchrow(
+        result = await AuthDatabase.fetchrow(
             """
             INSERT INTO gdpr_requests (user_id, request_type, status, download_token, expires_at, ip_address)
             VALUES ($1, 'export', 'pending', $2, $3, $4)
@@ -114,7 +114,7 @@ async def _process_export(user_id: str, request_id: str):
     """Process a data export request (collect and prepare user data)"""
     try:
         # Update status to processing
-        await Database.execute(
+        await AuthDatabase.execute(
             "UPDATE gdpr_requests SET status = 'processing' WHERE id = $1",
             request_id
         )
@@ -123,7 +123,7 @@ async def _process_export(user_id: str, request_id: str):
         user_data = {}
 
         # Basic user info
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             """
             SELECT id, email, name, type, status, created_at, updated_at,
                    terms_accepted_at, terms_version, privacy_accepted_at, privacy_version,
@@ -189,7 +189,7 @@ async def _process_export(user_id: str, request_id: str):
         ]
 
         # Consent history
-        consent_history = await Database.fetch(
+        consent_history = await AuthDatabase.fetch(
             "SELECT * FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC",
             user_id
         )
@@ -199,7 +199,7 @@ async def _process_export(user_id: str, request_id: str):
         ]
 
         # Cookie consent
-        cookie_consent = await Database.fetch(
+        cookie_consent = await AuthDatabase.fetch(
             "SELECT * FROM cookie_consent WHERE user_id = $1",
             user_id
         )
@@ -213,7 +213,7 @@ async def _process_export(user_id: str, request_id: str):
         export_json = json.dumps(user_data, indent=2, default=str)
 
         # Update request as completed
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             UPDATE gdpr_requests
             SET status = 'completed', processed_at = now()
@@ -226,7 +226,7 @@ async def _process_export(user_id: str, request_id: str):
 
     except Exception as e:
         logger.error(f"Error processing export: {e}")
-        await Database.execute(
+        await AuthDatabase.execute(
             "UPDATE gdpr_requests SET status = 'pending' WHERE id = $1",
             request_id
         )
@@ -244,7 +244,7 @@ async def download_data_export(
     """
     try:
         # Verify token and get request
-        request_record = await Database.fetchrow(
+        request_record = await AuthDatabase.fetchrow(
             """
             SELECT id, user_id, status, expires_at
             FROM gdpr_requests
@@ -307,7 +307,7 @@ async def _collect_user_data(user_id: str) -> dict:
     user_data = {"export_date": datetime.now(timezone.utc).isoformat()}
 
     # Basic user info
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         """
         SELECT id, email, name, type, status, created_at, updated_at,
                terms_accepted_at, terms_version, privacy_accepted_at, privacy_version,
@@ -354,7 +354,7 @@ async def _collect_user_data(user_id: str) -> dict:
         ]
 
     # Consent history
-    consent_history = await Database.fetch(
+    consent_history = await AuthDatabase.fetch(
         "SELECT id, consent_type, consent_given, version, created_at FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC",
         user_id
     )
@@ -372,7 +372,7 @@ async def get_export_status(user_id: str = Depends(get_current_user_id_allow_pen
     Get the status of the most recent export request.
     """
     try:
-        result = await Database.fetchrow(
+        result = await AuthDatabase.fetchrow(
             """
             SELECT id, request_type, status, requested_at, processed_at, expires_at
             FROM gdpr_requests
@@ -424,7 +424,7 @@ async def request_account_deletion(
     """
     try:
         # Check for existing pending deletion request
-        existing = await Database.fetchrow(
+        existing = await AuthDatabase.fetchrow(
             """
             SELECT id, status, expires_at
             FROM gdpr_requests
@@ -446,7 +446,7 @@ async def request_account_deletion(
         scheduled_deletion = datetime.now(timezone.utc) + timedelta(days=DELETION_GRACE_PERIOD_DAYS)
 
         # Create deletion request
-        result = await Database.fetchrow(
+        result = await AuthDatabase.fetchrow(
             """
             INSERT INTO gdpr_requests (user_id, request_type, status, expires_at, ip_address)
             VALUES ($1, 'deletion', 'pending', $2, $3)
@@ -458,7 +458,7 @@ async def request_account_deletion(
         )
 
         # Create consent history entry
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
             VALUES ($1, 'deletion_request', $2, $3, $4)
@@ -501,7 +501,7 @@ async def cancel_account_deletion(
     """
     try:
         # Find pending deletion request
-        existing = await Database.fetchrow(
+        existing = await AuthDatabase.fetchrow(
             """
             SELECT id, status, expires_at
             FROM gdpr_requests
@@ -517,7 +517,7 @@ async def cancel_account_deletion(
             )
 
         # Cancel the request
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             UPDATE gdpr_requests
             SET status = 'cancelled', cancellation_reason = 'User cancelled'
@@ -527,7 +527,7 @@ async def cancel_account_deletion(
         )
 
         # Create consent history entry
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
             VALUES ($1, 'deletion_cancelled', $2, $3, $4)
@@ -561,7 +561,7 @@ async def get_deletion_status(user_id: str = Depends(get_current_user_id_allow_p
     Get the status of the most recent deletion request.
     """
     try:
-        result = await Database.fetchrow(
+        result = await AuthDatabase.fetchrow(
             """
             SELECT id, request_type, status, requested_at, processed_at, expires_at
             FROM gdpr_requests

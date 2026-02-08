@@ -7,7 +7,7 @@ from typing import Optional
 import bcrypt
 import logging
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
 from app.auth import (
     create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used,
@@ -48,7 +48,7 @@ async def send_verification_code(request: SendVerificationCodeRequest):
     """
     try:
         # Check if email is already registered
-        existing_user = await Database.fetchrow(
+        existing_user = await AuthDatabase.fetchrow(
             "SELECT id FROM users WHERE email = $1",
             request.email
         )
@@ -162,7 +162,7 @@ async def register(request: RegisterRequest):
             )
 
         # Check if email already exists
-        existing_user = await Database.fetchrow(
+        existing_user = await AuthDatabase.fetchrow(
             "SELECT id FROM users WHERE email = $1",
             request.email
         )
@@ -189,8 +189,8 @@ async def register(request: RegisterRequest):
         terms_version = request.terms_version or "2024-01-01"
         privacy_version = request.privacy_version or "2024-01-01"
 
-        # Insert user into database with consent fields
-        user = await Database.fetchrow(
+        # Insert user into auth database with consent fields
+        user = await AuthDatabase.fetchrow(
             """
             INSERT INTO users (
                 email, password_hash, name, type, status,
@@ -209,58 +209,60 @@ async def register(request: RegisterRequest):
             privacy_version,
             request.marketing_consent
         )
-        
-        # Automatically create corresponding profile based on user type
-        if request.type == "creator":
-            # Create empty creator profile (location and short_description will be filled later)
-            await Database.execute(
+
+        # Create profile in business DB + consent history in auth DB
+        # Uses compensating action: if profile creation fails, delete user from auth DB
+        try:
+            # Automatically create corresponding profile based on user type
+            if request.type == "creator":
+                await Database.execute(
+                    """
+                    INSERT INTO creators (user_id, location, short_description)
+                    VALUES ($1, NULL, NULL)
+                    """,
+                    user['id']
+                )
+            elif request.type == "hotel":
+                await Database.execute(
+                    """
+                    INSERT INTO hotel_profiles (user_id, name, location)
+                    VALUES ($1, $2, 'Not specified')
+                    """,
+                    user['id'],
+                    user['name']
+                )
+
+            # Create consent history records for GDPR audit trail
+            await AuthDatabase.execute(
                 """
-                INSERT INTO creators (user_id, location, short_description)
-                VALUES ($1, NULL, NULL)
-                """,
-                user['id']
-            )
-        elif request.type == "hotel":
-            # Create minimal hotel profile (name, location will be filled/updated later)
-            # Using defaults: name from user, location='Not specified'
-            # Note: email is stored in users table only (like creators)
-            # Note: category is removed - accommodation_type exists at listing level only
-            await Database.execute(
-                """
-                INSERT INTO hotel_profiles (user_id, name, location)
-                VALUES ($1, $2, 'Not specified')
+                INSERT INTO consent_history (user_id, consent_type, consent_given, version)
+                VALUES ($1, 'terms', true, $2)
                 """,
                 user['id'],
-                user['name']
+                terms_version
             )
 
-        # Create consent history records for GDPR audit trail
-        await Database.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
-            VALUES ($1, 'terms', true, $2)
-            """,
-            user['id'],
-            terms_version
-        )
-
-        await Database.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
-            VALUES ($1, 'privacy', true, $2)
-            """,
-            user['id'],
-            privacy_version
-        )
-
-        if request.marketing_consent:
-            await Database.execute(
+            await AuthDatabase.execute(
                 """
-                INSERT INTO consent_history (user_id, consent_type, consent_given)
-                VALUES ($1, 'marketing', true)
+                INSERT INTO consent_history (user_id, consent_type, consent_given, version)
+                VALUES ($1, 'privacy', true, $2)
                 """,
-                user['id']
+                user['id'],
+                privacy_version
             )
+
+            if request.marketing_consent:
+                await AuthDatabase.execute(
+                    """
+                    INSERT INTO consent_history (user_id, consent_type, consent_given)
+                    VALUES ($1, 'marketing', true)
+                    """,
+                    user['id']
+                )
+        except Exception:
+            # Compensating action: clean up user from auth DB if profile creation failed
+            await AuthDatabase.execute("DELETE FROM users WHERE id = $1", user['id'])
+            raise
 
         # Create JWT token
         access_token = create_access_token(
@@ -297,11 +299,11 @@ async def login(request: LoginRequest):
     """
     try:
         # Find user by email
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, email, password_hash, name, type, status FROM users WHERE email = $1",
             request.email
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -413,11 +415,11 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
             type=None
         )
     
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         "SELECT id, email, type FROM users WHERE id = $1",
         user_id
     )
-    
+
     if not user:
         return TokenValidationResponse(
             valid=False,
@@ -454,7 +456,7 @@ async def forgot_password(request: ForgotPasswordRequest):
     """
     try:
         # Find user by email
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, email, name, status FROM users WHERE email = $1",
             request.email
         )
@@ -538,7 +540,7 @@ async def reset_password(request: ResetPasswordRequest):
         password_hash = hash_password(request.new_password)
         
         # Update user's password
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             UPDATE users
             SET password_hash = $1, updated_at = now()
@@ -547,13 +549,13 @@ async def reset_password(request: ResetPasswordRequest):
             password_hash,
             user_id
         )
-        
+
         # Mark token as used
         await mark_password_reset_token_as_used(request.token)
-        
+
         # Optionally: Invalidate all existing tokens for this user (security best practice)
         # This prevents reuse of any other tokens that might have been generated
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             UPDATE password_reset_tokens
             SET used = true

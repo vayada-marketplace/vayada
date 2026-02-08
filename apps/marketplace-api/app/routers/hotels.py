@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 import json
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id, get_current_user_id_allow_pending, get_current_hotel_profile_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.s3_service import upload_file_to_s3, generate_file_key, delete_file_from_s3, extract_key_from_url
@@ -52,31 +52,29 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id_al
     """
     try:
         # Verify user is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         if user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
-        
-        # Get hotel profile with email from users table
+
+        # Get hotel profile
         hotel = await Database.fetchrow(
             """
-            SELECT hp.id, hp.name, hp.location, hp.website, hp.about, hp.picture, hp.phone,
-                   u.email
-            FROM hotel_profiles hp
-            JOIN users u ON hp.user_id = u.id
-            WHERE hp.user_id = $1
+            SELECT id, name, location, website, about, picture, phone
+            FROM hotel_profiles
+            WHERE user_id = $1
             """,
             user_id
         )
@@ -170,7 +168,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
     Get the complete profile data for the currently authenticated hotel user.
     """
     try:
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, email, status FROM users WHERE id = $1",
             user_id
         )
@@ -392,11 +390,11 @@ async def update_hotel_profile(
                 # If JSON parsing fails, continue with Form data (if any)
         
         # Verify user is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type, email FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -548,9 +546,9 @@ async def update_hotel_profile(
         
         # Update email in users table if provided
         if email is not None:
-            await Database.execute(
+            await AuthDatabase.execute(
                 """
-                UPDATE users 
+                UPDATE users
                 SET email = $1, updated_at = now()
                 WHERE id = $2
                 """,
@@ -558,17 +556,20 @@ async def update_hotel_profile(
                 user_id
             )
         
-        # Fetch updated profile with email from users table and check if profile became complete
+        # Fetch updated profile and user data separately (different databases)
         updated_hotel = await Database.fetchrow(
             """
-            SELECT hp.id, hp.user_id, hp.name, hp.location, hp.about, hp.website, hp.phone, hp.picture, 
-                   hp.status, hp.created_at, hp.updated_at, hp.profile_complete,
-                   u.email, u.name as user_name
-            FROM hotel_profiles hp
-            JOIN users u ON hp.user_id = u.id
-            WHERE hp.id = $1
+            SELECT id, user_id, name, location, about, website, phone, picture,
+                   status, created_at, updated_at, profile_complete
+            FROM hotel_profiles
+            WHERE id = $1
             """,
             hotel['id']
+        )
+
+        updated_user = await AuthDatabase.fetchrow(
+            "SELECT email, name as user_name FROM users WHERE id = $1",
+            updated_hotel['user_id']
         )
         
         # Check if profile just became complete (transition from incomplete to complete)
@@ -578,11 +579,11 @@ async def update_hotel_profile(
         # Send confirmation email if profile just became complete
         if profile_just_completed:
             try:
-                user_email = updated_hotel['email']
-                user_name = updated_hotel.get('user_name') or updated_hotel.get('name') or user_email.split('@')[0]
+                user_email = updated_user['email']
+                user_name = updated_user.get('user_name') or updated_hotel.get('name') or user_email.split('@')[0]
                 
                 # Check if email is already verified
-                user_record = await Database.fetchrow(
+                user_record = await AuthDatabase.fetchrow(
                     "SELECT email_verified FROM users WHERE id = $1",
                     user_id
                 )
@@ -707,7 +708,7 @@ async def update_hotel_profile(
             user_id=str(updated_hotel['user_id']),
             name=updated_hotel['name'],
             location=updated_hotel['location'],
-            email=updated_hotel['email'],
+            email=updated_user['email'],
             about=updated_hotel['about'],
             website=updated_hotel['website'],
             phone=updated_hotel['phone'],
@@ -1195,22 +1196,22 @@ async def get_hotel_collaborations(
     """
     try:
         # Verify user is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user or user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
-        
+
         hotel_profile = await Database.fetchrow(
             "SELECT id FROM hotel_profiles WHERE user_id = $1",
             user_id
         )
-        
+
         if not hotel_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1219,24 +1220,22 @@ async def get_hotel_collaborations(
         
         hotel_id = str(hotel_profile['id'])
         
-        # Build query
-        # Updated to fetch only summary fields and primary handle
+        # Build query - business tables only (no users JOIN)
         query = """
-            SELECT 
+            SELECT
                 c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit,
                 c.travel_date_from, c.travel_date_to,
                 c.creator_id,
-                cr_user.name as creator_name,
+                cr.user_id as creator_user_id,
                 cr.profile_picture as creator_profile_picture,
                 cr.location as creator_location,
-                cr_user.status as user_status,
                 (SELECT SUM(followers) FROM creator_platforms WHERE creator_id = c.creator_id) as total_followers,
                 (SELECT AVG(engagement_rate) FROM creator_platforms WHERE creator_id = c.creator_id) as avg_engagement_rate,
                 (
-                    SELECT handle 
-                    FROM creator_platforms 
-                    WHERE creator_id = c.creator_id 
-                    ORDER BY followers DESC 
+                    SELECT handle
+                    FROM creator_platforms
+                    WHERE creator_id = c.creator_id
+                    ORDER BY followers DESC
                     LIMIT 1
                 ) as primary_handle,
                 (
@@ -1248,10 +1247,9 @@ async def get_hotel_collaborations(
                 ) as active_platform
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
-            JOIN users cr_user ON cr_user.id = cr.user_id
             WHERE c.hotel_id = $1
         """
-        
+
         params = [hotel_id]
         # Apply filters
         if listing_id:
@@ -1263,32 +1261,43 @@ async def get_hotel_collaborations(
         if initiated_by:
             query += " AND c.initiator_type = $" + str(len(params) + 1)
             params.append(initiated_by)
-        
+
         query += " ORDER BY c.created_at DESC"
-        
+
         collaborations_data = await Database.fetch(query, *params)
-        
+
         if not collaborations_data:
             return []
-        
+
+        # Batch fetch user data for creators from AuthDatabase
+        creator_user_ids = list(set(str(row['creator_user_id']) for row in collaborations_data))
+        if creator_user_ids:
+            user_rows = await AuthDatabase.fetch(
+                "SELECT id, name, status FROM users WHERE id = ANY($1::uuid[])",
+                creator_user_ids
+            )
+            users_map = {str(u['id']): u for u in user_rows}
+        else:
+            users_map = {}
+
         # Fetch all deliverables for these collaborations in one go
         collab_ids = [str(c['id']) for c in collaborations_data]
         all_deliverables_rows = await Database.fetch(
             "SELECT id, collaboration_id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = ANY($1::uuid[])",
             collab_ids
         )
-        
+
         # Group deliverables by collaboration_id
         collab_deliverables_map = {}
         for row in all_deliverables_rows:
             c_id = str(row['collaboration_id'])
             if c_id not in collab_deliverables_map:
                 collab_deliverables_map[c_id] = {}
-            
+
             p = row['platform']
             if p not in collab_deliverables_map[c_id]:
                 collab_deliverables_map[c_id][p] = []
-                
+
             collab_deliverables_map[c_id][p].append({
                 "id": str(row['id']),
                 "type": row['type'],
@@ -1302,6 +1311,7 @@ async def get_hotel_collaborations(
             c_id = str(collab['id'])
             collab_dils = collab_deliverables_map.get(c_id, {})
             deliverables = [{"platform": p, "deliverables": dils} for p, dils in collab_dils.items()]
+            creator_user = users_map.get(str(collab['creator_user_id']), {})
 
             response.append({
                 "id": c_id,
@@ -1310,22 +1320,22 @@ async def get_hotel_collaborations(
                 "status": collab['status'],
                 "created_at": collab['created_at'],
                 "why_great_fit": collab['why_great_fit'],
-                
+
                 # Creator Summary
                 "creator_id": str(collab['creator_id']),
-                "creator_name": collab['creator_name'],
+                "creator_name": creator_user.get('name', 'Unknown'),
                 "creator_profile_picture": collab['creator_profile_picture'],
                 "creator_location": collab['creator_location'],
                 "primary_handle": collab['primary_handle'],
                 "total_followers": int(collab['total_followers']) if collab['total_followers'] is not None else 0,
                 "avg_engagement_rate": float(collab['avg_engagement_rate']) if collab['avg_engagement_rate'] is not None else 0.0,
                 "active_platform": collab['active_platform'],
-                "is_verified": collab['user_status'] == 'verified',
+                "is_verified": creator_user.get('status') == 'verified',
                 "platform_deliverables": deliverables,
                 "travel_date_from": collab['travel_date_from'],
                 "travel_date_to": collab['travel_date_to']
             })
-            
+
         return response
         
     except HTTPException:
@@ -1349,22 +1359,22 @@ async def get_hotel_collaboration_detail(
     """
     try:
         # Verify user is a hotel
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id, type FROM users WHERE id = $1",
             user_id
         )
-        
+
         if not user or user['type'] != 'hotel':
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels"
             )
-        
+
         hotel_profile = await Database.fetchrow(
             "SELECT id FROM hotel_profiles WHERE user_id = $1",
             user_id
         )
-        
+
         if not hotel_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1373,11 +1383,10 @@ async def get_hotel_collaboration_detail(
         
         hotel_id = str(hotel_profile['id'])
         
-        # Fetch collaboration details
-        # Using a similar query to the list endpoint but for a single ID
+        # Fetch collaboration details - business tables only (no users JOIN)
         collab = await Database.fetchrow(
             """
-            SELECT 
+            SELECT
                 c.id, c.initiator_type, c.status, c.creator_id, c.hotel_id, c.listing_id,
                 c.why_great_fit, c.collaboration_type,
                 c.free_stay_min_nights, c.free_stay_max_nights,
@@ -1386,7 +1395,7 @@ async def get_hotel_collaboration_detail(
                 c.preferred_date_from, c.preferred_date_to,
                 c.preferred_months, c.consent,
                 c.created_at, c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
-                cr_user.name as creator_name,
+                cr.user_id as creator_user_id,
                 cr.profile_picture as creator_profile_picture,
                 cr.portfolio_link as creator_portfolio_link,
                 cr.location as creator_location,
@@ -1395,7 +1404,6 @@ async def get_hotel_collaboration_detail(
                 hl.location as listing_location
             FROM collaborations c
             JOIN creators cr ON cr.id = c.creator_id
-            JOIN users cr_user ON cr_user.id = cr.user_id
             JOIN hotel_profiles hp ON hp.id = c.hotel_id
             JOIN hotel_listings hl ON hl.id = c.listing_id
             WHERE c.id = $1 AND c.hotel_id = $2
@@ -1403,14 +1411,20 @@ async def get_hotel_collaboration_detail(
             collaboration_id,
             hotel_id
         )
-        
+
         if not collab:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Collaboration not found"
             )
-            
+
         creator_id = collab['creator_id']
+
+        # Fetch creator user data from AuthDatabase
+        creator_user = await AuthDatabase.fetchrow(
+            "SELECT name, status FROM users WHERE id = $1",
+            collab['creator_user_id']
+        )
         
         # Fetch detailed platform metrics for the creator
         platforms_data = await Database.fetch(
@@ -1514,12 +1528,12 @@ async def get_hotel_collaboration_detail(
             
             # Creator Summary
             creator_id=str(collab['creator_id']),
-            creator_name=collab['creator_name'],
+            creator_name=creator_user['name'] if creator_user else 'Unknown',
             creator_profile_picture=collab['creator_profile_picture'],
             creator_location=collab['creator_location'],
             total_followers=total_followers,
             avg_engagement_rate=float(avg_engagement_rate),
-            is_verified=True, # You might want to fetch actual status
+            is_verified=(creator_user.get('status') == 'verified') if creator_user else False,
             primary_handle=primary_handle,
             
             # Detail Fields

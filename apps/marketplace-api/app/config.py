@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Database Configuration
     # Require explicit database URL in env (no baked-in default)
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
+    AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60
@@ -62,6 +63,8 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = Field("", description="S3 bucket name for storing images")
     AWS_ACCESS_KEY_ID: str = Field("", description="AWS access key ID for S3")
     AWS_SECRET_ACCESS_KEY: str = Field("", description="AWS secret access key for S3")
+    S3_ENDPOINT_URL: str = Field("", description="Custom S3 endpoint URL (for MinIO/local dev)")
+    S3_PUBLIC_URL: str = Field("", description="Public URL base for S3 objects (for MinIO/local dev)")
     S3_PUBLIC_URL_EXPIRY: int = Field(3600, description="Public URL expiry time in seconds (default: 1 hour)")
     S3_USE_PUBLIC_URLS: bool = Field(True, description="Whether to use public URLs or signed URLs")
     
