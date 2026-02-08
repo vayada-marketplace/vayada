@@ -5,7 +5,7 @@ import pytest
 from httpx import AsyncClient
 from unittest.mock import patch, AsyncMock
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from tests.conftest import (
     get_auth_headers,
     create_test_user,
@@ -74,7 +74,7 @@ class TestSendVerificationCode:
         )
 
         # Get first code
-        first_code = await Database.fetchrow(
+        first_code = await AuthDatabase.fetchrow(
             "SELECT code FROM email_verification_codes WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
             email
         )
@@ -112,7 +112,7 @@ class TestVerifyEmailCode:
         )
 
         # Get the code from database
-        code_row = await Database.fetchrow(
+        code_row = await AuthDatabase.fetchrow(
             "SELECT code FROM email_verification_codes WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
             email
         )
@@ -148,7 +148,7 @@ class TestVerifyEmailCode:
         email = generate_test_email()
 
         # Insert expired code directly
-        await Database.execute(
+        await AuthDatabase.execute(
             """
             INSERT INTO email_verification_codes (email, code, expires_at, used)
             VALUES ($1, $2, NOW() - INTERVAL '1 hour', false)
@@ -483,7 +483,7 @@ class TestResetPassword:
         )
 
         # Get token from database
-        token_row = await Database.fetchrow(
+        token_row = await AuthDatabase.fetchrow(
             "SELECT token FROM password_reset_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
             user["id"]
         )
@@ -536,7 +536,7 @@ class TestResetPassword:
         )
 
         # Get token
-        token_row = await Database.fetchrow(
+        token_row = await AuthDatabase.fetchrow(
             "SELECT token FROM password_reset_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
             user["id"]
         )

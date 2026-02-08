@@ -4,7 +4,7 @@ Tests for admin management endpoints.
 import pytest
 from httpx import AsyncClient
 
-from app.database import Database
+from app.database import Database, AuthDatabase
 from tests.conftest import (
     get_auth_headers,
     create_test_creator,
@@ -382,7 +382,7 @@ class TestDeleteUser:
         assert data["deleted_user"]["id"] == user_id
 
         # Verify user is deleted
-        user = await Database.fetchrow(
+        user = await AuthDatabase.fetchrow(
             "SELECT id FROM users WHERE id = $1",
             creator["user"]["id"]
         )
