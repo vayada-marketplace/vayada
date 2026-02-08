@@ -1,21 +1,26 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { authService } from '@/services/auth'
+import { ApiErrorResponse } from '@/services/api/client'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   })
   const [showPassword, setShowPassword] = useState(false)
   const [emailError, setEmailError] = useState('')
-  const [submitError, setSubmitError] = useState('')
+  const [submitError, setSubmitError] = useState(
+    searchParams.get('expired') === 'true' ? 'Your session has expired. Please sign in again.' : ''
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,10 +51,34 @@ export default function LoginPage() {
 
     setIsSubmitting(true)
 
-    // TODO: wire up to auth service
-    setTimeout(() => {
+    try {
+      await authService.login({ email: formData.email, password: formData.password })
       router.push('/dashboard')
-    }, 500)
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        if (error.status === 401) {
+          setSubmitError('Invalid email or password.')
+        } else if (error.status === 403) {
+          setSubmitError('Your account has been suspended. Please contact support.')
+        } else if (error.status === 422) {
+          const detail = error.data.detail
+          if (Array.isArray(detail)) {
+            setSubmitError(detail.map(e => e.msg).join('. '))
+          } else {
+            setSubmitError(detail || 'Validation error.')
+          }
+        } else {
+          setSubmitError('An unexpected error occurred. Please try again.')
+        }
+      } else if (error instanceof Error) {
+        setSubmitError(error.message)
+      } else {
+        setSubmitError('An unexpected error occurred. Please try again.')
+      }
+      setFormData(prev => ({ ...prev, password: '' }))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (

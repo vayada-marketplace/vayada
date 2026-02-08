@@ -1,13 +1,31 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
+import { authService } from '@/services/auth'
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const router = useRouter()
+  const [isAuthorized, setIsAuthorized] = useState(false)
+
+  useEffect(() => {
+    if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
+      router.replace('/login')
+    } else {
+      setIsAuthorized(true)
+    }
+  }, [router])
+
+  if (!isAuthorized) {
+    return null
+  }
+
   return (
     <div className="h-screen flex">
       <Sidebar />

@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { authService } from '@/services/auth'
+import { ApiErrorResponse } from '@/services/api/client'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -74,10 +76,33 @@ export default function RegisterPage() {
     setIsSubmitting(true)
     setErrors({})
 
-    // TODO: wire up to auth service
-    setTimeout(() => {
+    try {
+      await authService.register({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+      })
       router.push('/dashboard')
-    }, 500)
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        if (error.status === 400) {
+          setErrors({ submit: 'An account with this email already exists.' })
+        } else if (error.status === 422) {
+          const detail = error.data.detail
+          if (Array.isArray(detail)) {
+            setErrors({ submit: detail.map(e => e.msg).join('. ') })
+          } else {
+            setErrors({ submit: detail || 'Validation error.' })
+          }
+        } else {
+          setErrors({ submit: 'An unexpected error occurred. Please try again.' })
+        }
+      } else {
+        setErrors({ submit: 'An unexpected error occurred. Please try again.' })
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
