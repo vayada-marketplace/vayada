@@ -6,6 +6,7 @@ import os
 # Set environment variables BEFORE importing any app modules
 # These must be set before pydantic Settings loads
 os.environ.setdefault("DATABASE_URL", "postgresql://vayada_user:vayada_password@localhost:5432/vayada_db")
+os.environ.setdefault("AUTH_DATABASE_URL", "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("EMAIL_ENABLED", "true")
@@ -28,7 +29,7 @@ import bcrypt
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
-from app.database import Database
+from app.database import Database, AuthDatabase
 from app.jwt_utils import create_access_token
 from app.config import settings
 
@@ -47,9 +48,11 @@ def event_loop():
 
 @pytest.fixture(scope="session")
 async def init_database():
-    """Initialize database pool for tests."""
+    """Initialize database pools for tests."""
     await Database.get_pool()
+    await AuthDatabase.get_pool()
     yield
+    await AuthDatabase.close_pool()
     await Database.close_pool()
 
 
@@ -66,80 +69,94 @@ async def cleanup_database(init_database):
     """
     Cleanup test data after each test.
     Respects foreign key constraints by deleting in correct order.
+    Users are in AuthDatabase, business data is in Database.
     """
     yield
 
-    # Cleanup order respects foreign keys
-    await Database.execute(
-        "DELETE FROM chat_messages WHERE collaboration_id IN "
-        "(SELECT id FROM collaborations WHERE creator_id IN "
-        "(SELECT id FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)))",
-        TEST_EMAIL_PATTERN
+    # First get test user IDs from auth DB
+    test_users = await AuthDatabase.fetch(
+        "SELECT id FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN
     )
-    await Database.execute(
-        "DELETE FROM collaboration_deliverables WHERE collaboration_id IN "
-        "(SELECT id FROM collaborations WHERE creator_id IN "
-        "(SELECT id FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM collaborations WHERE creator_id IN "
-        "(SELECT id FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM collaborations WHERE hotel_id IN "
-        "(SELECT id FROM hotel_profiles WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM listing_collaboration_offerings WHERE listing_id IN "
-        "(SELECT id FROM hotel_listings WHERE hotel_profile_id IN "
-        "(SELECT id FROM hotel_profiles WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM listing_creator_requirements WHERE listing_id IN "
-        "(SELECT id FROM hotel_listings WHERE hotel_profile_id IN "
-        "(SELECT id FROM hotel_profiles WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM hotel_listings WHERE hotel_profile_id IN "
-        "(SELECT id FROM hotel_profiles WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM creator_platforms WHERE creator_id IN "
-        "(SELECT id FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM creator_ratings WHERE creator_id IN "
-        "(SELECT id FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1))",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM creators WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
-        "DELETE FROM hotel_profiles WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)",
-        TEST_EMAIL_PATTERN
-    )
-    await Database.execute(
+    test_user_ids = [row['id'] for row in test_users]
+
+    if test_user_ids:
+        # Clean up business data using user IDs
+        await Database.execute(
+            "DELETE FROM chat_messages WHERE collaboration_id IN "
+            "(SELECT id FROM collaborations WHERE creator_id IN "
+            "(SELECT id FROM creators WHERE user_id = ANY($1::uuid[])))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM collaboration_deliverables WHERE collaboration_id IN "
+            "(SELECT id FROM collaborations WHERE creator_id IN "
+            "(SELECT id FROM creators WHERE user_id = ANY($1::uuid[])))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM collaborations WHERE creator_id IN "
+            "(SELECT id FROM creators WHERE user_id = ANY($1::uuid[]))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM collaborations WHERE hotel_id IN "
+            "(SELECT id FROM hotel_profiles WHERE user_id = ANY($1::uuid[]))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM listing_collaboration_offerings WHERE listing_id IN "
+            "(SELECT id FROM hotel_listings WHERE hotel_profile_id IN "
+            "(SELECT id FROM hotel_profiles WHERE user_id = ANY($1::uuid[])))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM listing_creator_requirements WHERE listing_id IN "
+            "(SELECT id FROM hotel_listings WHERE hotel_profile_id IN "
+            "(SELECT id FROM hotel_profiles WHERE user_id = ANY($1::uuid[])))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM hotel_listings WHERE hotel_profile_id IN "
+            "(SELECT id FROM hotel_profiles WHERE user_id = ANY($1::uuid[]))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM creator_platforms WHERE creator_id IN "
+            "(SELECT id FROM creators WHERE user_id = ANY($1::uuid[]))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM creator_ratings WHERE creator_id IN "
+            "(SELECT id FROM creators WHERE user_id = ANY($1::uuid[]))",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM creators WHERE user_id = ANY($1::uuid[])",
+            test_user_ids
+        )
+        await Database.execute(
+            "DELETE FROM hotel_profiles WHERE user_id = ANY($1::uuid[])",
+            test_user_ids
+        )
+
+    # Clean up auth data from AuthDatabase
+    await AuthDatabase.execute(
         "DELETE FROM password_reset_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)",
         TEST_EMAIL_PATTERN
     )
-    await Database.execute(
+    await AuthDatabase.execute(
         "DELETE FROM email_verification_codes WHERE email LIKE $1",
         TEST_EMAIL_PATTERN
     )
-    await Database.execute(
+    await AuthDatabase.execute(
         "DELETE FROM email_verification_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)",
         TEST_EMAIL_PATTERN
     )
-    await Database.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
+    await AuthDatabase.execute(
+        "DELETE FROM consent_history WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)",
+        TEST_EMAIL_PATTERN
+    )
+    await AuthDatabase.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +240,7 @@ async def create_test_user(
     email = email or generate_test_email()
     password_hash = hash_password(password)
 
-    user = await Database.fetchrow(
+    user = await AuthDatabase.fetchrow(
         """
         INSERT INTO users (email, password_hash, name, type, status, email_verified)
         VALUES ($1, $2, $3, $4, $5, $6)
