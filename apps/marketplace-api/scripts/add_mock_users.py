@@ -22,9 +22,11 @@ from app.config import settings
 async def add_mock_users():
     """Add mock users with platforms and listings"""
     try:
-        print("🔗 Connecting to database...")
+        print("🔗 Connecting to databases...")
         conn = await asyncpg.connect(settings.DATABASE_URL)
-        print("✅ Connected to database\n")
+        auth_conn = await asyncpg.connect(settings.AUTH_DATABASE_URL)
+        print("✅ Connected to marketplace database")
+        print("✅ Connected to auth database\n")
         
         # 0. Clean up existing data to ensure a fresh start
         print("🧹 Cleaning up existing mock data...")
@@ -530,36 +532,61 @@ async def add_mock_users():
         for user_data in mock_users:
             email = user_data["email"]
             
-            # Check if user already exists
+            # Check if user already exists in either database
             existing = await conn.fetchrow(
                 "SELECT id, type FROM users WHERE email = $1",
                 email
             )
-            
-            if existing:
+            existing_auth = await auth_conn.fetchrow(
+                "SELECT id, type FROM users WHERE email = $1",
+                email
+            )
+
+            if existing and existing_auth:
                 print(f"⏭️  Skipping {email} (already exists)")
                 skipped_count += 1
                 continue
-            
+
             print(f"👤 Creating user: {email} ({user_data['type']})")
-            
-            # Create user
-            user = await conn.fetchrow(
-                """
-                INSERT INTO users (email, password_hash, name, type, status, email_verified, avatar)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id
-                """,
-                email,
-                password_hash,
-                user_data["name"],
-                user_data["type"],
-                user_data["status"],
-                user_data["email_verified"],
-                user_data.get("avatar")
-            )
-            
-            user_id = user['id']
+
+            # Generate a shared UUID for both databases
+            shared_id = uuid.uuid4()
+
+            # Create user in auth database
+            if not existing_auth:
+                await auth_conn.execute(
+                    """
+                    INSERT INTO users (id, email, password_hash, name, type, status, email_verified, avatar)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    shared_id,
+                    email,
+                    password_hash,
+                    user_data["name"],
+                    user_data["type"],
+                    user_data["status"],
+                    user_data["email_verified"],
+                    user_data.get("avatar")
+                )
+
+            # Create user in marketplace database
+            if not existing:
+                await conn.execute(
+                    """
+                    INSERT INTO users (id, email, password_hash, name, type, status, email_verified, avatar)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    shared_id,
+                    email,
+                    password_hash,
+                    user_data["name"],
+                    user_data["type"],
+                    user_data["status"],
+                    user_data["email_verified"],
+                    user_data.get("avatar")
+                )
+
+            user_id = shared_id
             created_count += 1
             
             # Create profile based on type
@@ -1288,7 +1315,8 @@ async def add_mock_users():
         print(f"   ✨ Created {review_count} reviews\n")
         
         await conn.close()
-        
+        await auth_conn.close()
+
         print("=" * 60)
         print(f"✨ Mock users creation complete!")
         print(f"   Created: {created_count} users")
