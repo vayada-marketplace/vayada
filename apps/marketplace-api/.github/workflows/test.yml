@@ -8,6 +8,7 @@ on:
 
 env:
   DATABASE_URL: postgresql://vayada_user:vayada_password@localhost:5432/vayada_test_db
+  AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db
   TEST_DATABASE_URL: postgresql://vayada_user:vayada_password@localhost:5432/vayada_test_db
   EMAIL_ENABLED: "true"
   DEBUG: "true"
@@ -34,6 +35,20 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
+      auth-postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: vayada_auth_user
+          POSTGRES_PASSWORD: vayada_auth_password
+          POSTGRES_DB: vayada_auth_db
+        options: >-
+          --health-cmd "pg_isready -U vayada_auth_user -d vayada_auth_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5435:5432
     
     steps:
       - name: Checkout code
@@ -81,12 +96,106 @@ jobs:
           PGUSER: vayada_user
           PGPASSWORD: vayada_password
       
+      - name: Set up auth database schema
+        run: |
+          echo "Waiting for auth PostgreSQL..."
+          for i in {1..30}; do
+            if PGPASSWORD=vayada_auth_password psql -h localhost -p 5435 -U vayada_auth_user -d vayada_auth_db -c '\q' 2>/dev/null; then
+              echo "Auth PostgreSQL is ready!"
+              break
+            fi
+            echo "Attempt $i/30: Waiting..."
+            sleep 2
+          done
+          echo "Running auth DB schema..."
+          PGPASSWORD=vayada_auth_password psql -h localhost -p 5435 -U vayada_auth_user -d vayada_auth_db <<'EOSQL'
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE TABLE IF NOT EXISTS public.users (
+            id uuid NOT NULL DEFAULT uuid_generate_v4(),
+            email text NOT NULL UNIQUE,
+            password_hash text NOT NULL,
+            name text NOT NULL,
+            type text NOT NULL CHECK (type = ANY (ARRAY['hotel','creator','admin'])),
+            status text NOT NULL DEFAULT 'pending' CHECK (status = ANY (ARRAY['pending','verified','rejected','suspended'])),
+            avatar text,
+            email_verified boolean NOT NULL DEFAULT false,
+            terms_accepted_at timestamp with time zone,
+            privacy_accepted_at timestamp with time zone,
+            terms_version text,
+            privacy_version text,
+            marketing_consent boolean DEFAULT false,
+            marketing_consent_at timestamp with time zone,
+            created_at timestamp with time zone NOT NULL DEFAULT now(),
+            updated_at timestamp with time zone NOT NULL DEFAULT now(),
+            CONSTRAINT users_pkey PRIMARY KEY (id)
+          );
+          CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
+            id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+            user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            token text NOT NULL UNIQUE,
+            expires_at timestamp with time zone NOT NULL,
+            used boolean NOT NULL DEFAULT false,
+            created_at timestamp with time zone NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS public.email_verification_codes (
+            id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+            email text NOT NULL,
+            code text NOT NULL,
+            expires_at timestamp with time zone NOT NULL,
+            used boolean NOT NULL DEFAULT false,
+            created_at timestamp with time zone NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS public.email_verification_tokens (
+            id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+            user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            token text NOT NULL UNIQUE,
+            expires_at timestamp with time zone NOT NULL,
+            used boolean NOT NULL DEFAULT false,
+            created_at timestamp with time zone NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS public.cookie_consent (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            visitor_id text NOT NULL,
+            user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+            necessary boolean DEFAULT true NOT NULL,
+            functional boolean DEFAULT false NOT NULL,
+            analytics boolean DEFAULT false NOT NULL,
+            marketing boolean DEFAULT false NOT NULL,
+            created_at timestamp with time zone DEFAULT now() NOT NULL,
+            updated_at timestamp with time zone DEFAULT now() NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS public.consent_history (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+            consent_type text NOT NULL,
+            consent_given boolean NOT NULL,
+            version text,
+            ip_address text,
+            user_agent text,
+            created_at timestamp with time zone DEFAULT now() NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS public.gdpr_requests (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id uuid REFERENCES users(id) ON DELETE SET NULL NOT NULL,
+            request_type text NOT NULL,
+            status text NOT NULL DEFAULT 'pending',
+            requested_at timestamp with time zone DEFAULT now() NOT NULL,
+            processed_at timestamp with time zone,
+            expires_at timestamp with time zone,
+            download_token text,
+            cancellation_reason text,
+            ip_address text,
+            CONSTRAINT valid_request_type CHECK (request_type IN ('export', 'deletion')),
+            CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'completed', 'cancelled', 'expired'))
+          );
+          EOSQL
+
       - name: Run database migrations
         run: |
           # Verify test database is ready
           echo "Verifying test database connection..."
           PGPASSWORD=vayada_password psql -h localhost -U vayada_user -d vayada_test_db -c '\q'
-          
+
           # Run migrations using the migration script
           echo "Running migrations..."
           PYTHONPATH=. python scripts/run_migrations.py
