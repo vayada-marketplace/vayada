@@ -200,4 +200,23 @@ export const authService = {
   getToken: (): string | null => {
     return getToken()
   },
+
+  /**
+   * Request a password reset link
+   */
+  forgotPassword: async (email: string): Promise<{ message: string; token?: string }> => {
+    const response = await apiClient.post<{ message: string; token?: string }>('/auth/forgot-password', { email })
+    return response
+  },
+
+  /**
+   * Reset password using a reset token
+   */
+  resetPassword: async (token: string, newPassword: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>('/auth/reset-password', {
+      token,
+      new_password: newPassword,
+    })
+    return response
+  },
 }

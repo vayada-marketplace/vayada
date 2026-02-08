@@ -139,6 +139,13 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Forgot password */}
+          <div className="text-right">
+            <Link href="/forgot-password" className="text-[13px] text-primary-600 hover:text-primary-700 font-medium">
+              Forgot password?
+            </Link>
+          </div>
+
           {/* Submit Error */}
           {submitError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
