@@ -29,6 +29,8 @@ class HotelBranding(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     primary_color: str
+    accent_color: Optional[str] = None
+    font_pairing: Optional[str] = None
     logo_url: Optional[str] = None
     favicon_url: Optional[str] = None
 

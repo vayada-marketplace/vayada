@@ -122,7 +122,7 @@ class BookingHotelRepository:
         query = (
             f"UPDATE booking_hotels SET {', '.join(set_clauses)} "
             f"WHERE user_id = ${idx} "
-            f"RETURNING name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports"
+            f"RETURNING *"
         )
         values.append(user_id)
 

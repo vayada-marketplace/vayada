@@ -10,6 +10,7 @@ from app.dependencies import require_hotel_admin
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
+from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -185,4 +186,97 @@ async def update_property_settings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update property settings"
+        )
+
+
+# ── Design Settings ──────────────────────────────────────────────────
+
+_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing"
+
+_DESIGN_DEFAULTS = DesignSettingsResponse(
+    hero_image='',
+    hero_heading='',
+    hero_subtext='',
+    primary_color='',
+    accent_color='',
+    font_pairing='',
+)
+
+# API field name → DB column name
+_DESIGN_FIELD_MAP = {
+    "hero_image": "hero_image",
+    "hero_heading": "name",
+    "hero_subtext": "description",
+    "primary_color": "branding_primary_color",
+    "accent_color": "branding_accent_color",
+    "font_pairing": "branding_font_pairing",
+}
+
+
+def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
+    return DesignSettingsResponse(
+        hero_image=hotel.get('hero_image') or '',
+        hero_heading=hotel.get('name') or '',
+        hero_subtext=hotel.get('description') or '',
+        primary_color=hotel.get('branding_primary_color') or '',
+        accent_color=hotel.get('branding_accent_color') or '',
+        font_pairing=hotel.get('branding_font_pairing') or '',
+    )
+
+
+@router.get("/settings/design", response_model=DesignSettingsResponse)
+async def get_design_settings(user_id: str = Depends(require_hotel_admin)):
+    """Get design settings for the current hotel admin's hotel."""
+    try:
+        hotel = await BookingHotelRepository.get_by_user_id(
+            user_id, columns=_DESIGN_COLUMNS
+        )
+        if not hotel:
+            return _DESIGN_DEFAULTS
+        return _hotel_to_design_settings(hotel)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting design settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get design settings"
+        )
+
+
+@router.patch("/settings/design", response_model=DesignSettingsResponse)
+async def update_design_settings(
+    data: DesignSettingsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Update design settings for the current hotel admin's hotel."""
+    try:
+        existing = await BookingHotelRepository.get_by_user_id(user_id, columns="id")
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No hotel found. Please complete property setup first."
+            )
+
+        updates = {}
+        for api_field, db_col in _DESIGN_FIELD_MAP.items():
+            value = getattr(data, api_field)
+            if value is not None:
+                updates[db_col] = value
+
+        if updates:
+            await BookingHotelRepository.partial_update(user_id, updates)
+
+        hotel = await BookingHotelRepository.get_by_user_id(
+            user_id, columns=_DESIGN_COLUMNS
+        )
+        return _hotel_to_design_settings(hotel)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating design settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update design settings"
         )

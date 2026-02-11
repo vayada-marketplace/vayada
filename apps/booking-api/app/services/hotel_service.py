@@ -51,6 +51,8 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     if row["branding_primary_color"]:
         branding = HotelBranding(
             primary_color=row["branding_primary_color"],
+            accent_color=row.get("branding_accent_color"),
+            font_pairing=row.get("branding_font_pairing"),
             logo_url=row["branding_logo_url"],
             favicon_url=row["branding_favicon_url"],
         )
