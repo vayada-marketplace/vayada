@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
+import { isSetupComplete } from '@/lib/utils/setupStatus'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -82,6 +83,13 @@ export default function RegisterPage() {
         email: formData.email,
         password: formData.password,
       })
+      const complete = await isSetupComplete()
+      if (!complete) {
+        localStorage.setItem('setupComplete', 'false')
+        router.push('/setup')
+        return
+      }
+      localStorage.setItem('setupComplete', 'true')
       router.push('/dashboard')
     } catch (error) {
       if (error instanceof ApiErrorResponse) {

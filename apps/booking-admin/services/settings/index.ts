@@ -28,6 +28,20 @@ export interface DesignSettings {
 
 export type DesignSettingsUpdate = Partial<DesignSettings>
 
+export interface SetupPrefillData {
+  property_name?: string
+  reservation_email?: string
+  phone_number?: string
+  address?: string
+  hero_image?: string
+}
+
+export interface SetupStatusResponse {
+  setup_complete: boolean
+  missing_fields: string[]
+  prefill_data?: SetupPrefillData | null
+}
+
 export const settingsService = {
   getPropertySettings: () =>
     apiClient.get<PropertySettings>('/admin/settings/property'),
@@ -43,4 +57,7 @@ export const settingsService = {
 
   updateDesignSettings: (data: DesignSettingsUpdate) =>
     apiClient.patch<DesignSettings>('/admin/settings/design', data),
+
+  getSetupStatus: () =>
+    apiClient.get<SetupStatusResponse>('/admin/settings/setup-status'),
 }

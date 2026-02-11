@@ -18,6 +18,11 @@ export default function AppLayout({
     if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
       router.replace('/login')
     } else {
+      const setupOk = localStorage.getItem('setupComplete')
+      if (setupOk === 'false') {
+        router.replace('/setup')
+        return
+      }
       setIsAuthorized(true)
     }
   }, [router])

@@ -7,45 +7,11 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService } from '@/services/settings'
+import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
 type Tab = 'media' | 'colors' | 'fonts'
-
-const COLOR_PRESETS = [
-  { name: 'Indigo', primary: '#4F46E5', accent: '#F5F5F4' },
-  { name: 'Emerald', primary: '#059669', accent: '#F0FDF4' },
-  { name: 'Amber', primary: '#D97706', accent: '#FFFBEB' },
-  { name: 'Rose', primary: '#E11D48', accent: '#FFF1F2' },
-  { name: 'Slate', primary: '#475569', accent: '#F8FAFC' },
-]
-
-const FONT_PAIRINGS = [
-  {
-    id: 'high-end-serif',
-    name: 'High-end Serif',
-    fonts: 'Playfair Display + Source Sans Pro',
-    preview: 'Elegant & Timeless',
-    headingFamily: "'Playfair Display', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
-  },
-  {
-    id: 'modern-minimalist',
-    name: 'Modern Minimalist',
-    fonts: 'Inter + Inter',
-    preview: 'Clean & Contemporary',
-    headingFamily: "'Inter', sans-serif",
-    bodyFamily: "'Inter', sans-serif",
-  },
-  {
-    id: 'grand-classic',
-    name: 'Grand Classic',
-    fonts: 'Lora + Source Sans Pro',
-    preview: 'Stately & Readable',
-    headingFamily: "'Lora', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
-  },
-]
 
 export default function DesignStudioPage() {
   const [activeTab, setActiveTab] = useState<Tab>('media')

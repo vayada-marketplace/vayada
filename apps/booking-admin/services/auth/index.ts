@@ -164,8 +164,8 @@ export const authService = {
    */
   logout: (): void => {
     clearAuthData()
-
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('setupComplete')
       window.location.href = '/login'
     }
   },
