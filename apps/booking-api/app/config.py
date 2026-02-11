@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Database Configuration
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
     AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
+    MARKETPLACE_DATABASE_URL: str = Field(default="", description="Marketplace PostgreSQL connection string (optional, for pre-fill)")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60

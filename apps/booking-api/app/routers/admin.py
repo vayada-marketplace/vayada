@@ -11,6 +11,9 @@ from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
 from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
+from app.models.setup import SetupStatusResponse, SetupPrefillData
+from app.database import MarketplaceDatabase
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,93 @@ async def get_admin_profile(user_id: str = Depends(require_hotel_admin)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get profile"
+        )
+
+
+_SETUP_COLUMNS = "name, contact_email, contact_phone, contact_address, timezone, currency, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing"
+
+_SETUP_FIELD_MAP = {
+    "name": "property_name",
+    "contact_email": "reservation_email",
+    "contact_phone": "phone_number",
+    "contact_address": "address",
+    "timezone": "timezone",
+    "currency": "currency",
+    "hero_image": "hero_image",
+    "branding_primary_color": "primary_color",
+    "branding_accent_color": "accent_color",
+    "branding_font_pairing": "font_pairing",
+}
+
+# DB defaults that count as "not set"
+_SETUP_DEFAULTS = {"timezone": "UTC", "currency": "EUR"}
+
+_ALL_SETUP_FIELDS = list(_SETUP_FIELD_MAP.values())
+
+
+async def _get_marketplace_prefill(user_id: str) -> SetupPrefillData | None:
+    """Try to fetch hotel profile from marketplace DB for pre-filling setup."""
+    if not settings.MARKETPLACE_DATABASE_URL:
+        return None
+    try:
+        row = await MarketplaceDatabase.fetchrow(
+            "SELECT name, email, phone, location, picture "
+            "FROM hotel_profiles WHERE user_id = $1",
+            user_id,
+        )
+        if not row:
+            return None
+        return SetupPrefillData(
+            property_name=row['name'] or None,
+            reservation_email=row['email'] or None,
+            phone_number=row['phone'] or None,
+            address=row['location'] or None,
+            hero_image=row['picture'] or None,
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch marketplace prefill data: {e}")
+        return None
+
+
+@router.get("/settings/setup-status", response_model=SetupStatusResponse)
+async def get_setup_status(user_id: str = Depends(require_hotel_admin)):
+    """Check whether the hotel admin has completed onboarding setup."""
+    try:
+        hotel = await BookingHotelRepository.get_by_user_id(
+            user_id, columns=_SETUP_COLUMNS
+        )
+
+        if not hotel:
+            prefill = await _get_marketplace_prefill(user_id)
+            return SetupStatusResponse(
+                setup_complete=False,
+                missing_fields=_ALL_SETUP_FIELDS,
+                prefill_data=prefill,
+            )
+
+        missing = []
+        for db_col, api_name in _SETUP_FIELD_MAP.items():
+            value = hotel.get(db_col)
+            if not value or value == _SETUP_DEFAULTS.get(db_col):
+                missing.append(api_name)
+
+        prefill = None
+        if missing:
+            prefill = await _get_marketplace_prefill(user_id)
+
+        return SetupStatusResponse(
+            setup_complete=len(missing) == 0,
+            missing_fields=missing,
+            prefill_data=prefill,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking setup status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check setup status"
         )
 
 

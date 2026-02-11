@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.database import Database, AuthDatabase, check_database_connection
+from app.database import Database, AuthDatabase, MarketplaceDatabase, check_database_connection
 from app.config import settings
 from app.routers import hotels, auth, admin
 
@@ -10,7 +10,10 @@ from app.routers import hotels, auth, admin
 async def lifespan(app: FastAPI):
     await Database.get_pool()
     await AuthDatabase.get_pool()
+    if settings.MARKETPLACE_DATABASE_URL:
+        await MarketplaceDatabase.get_pool()
     yield
+    await MarketplaceDatabase.close_pool()
     await AuthDatabase.close_pool()
     await Database.close_pool()
 
