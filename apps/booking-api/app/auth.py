@@ -4,7 +4,10 @@ Authentication utilities
 import bcrypt
 import secrets
 from typing import Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
+from app.repositories.user_repo import UserRepository
+from app.repositories.password_reset_repo import PasswordResetRepository
 
 
 def hash_password(password: str) -> str:
@@ -21,13 +24,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 
 async def get_user_by_email(email: str) -> Optional[dict]:
-    from app.database import AuthDatabase
-
-    user = await AuthDatabase.fetchrow(
-        "SELECT * FROM users WHERE email = $1",
-        email
-    )
-    return dict(user) if user else None
+    return await UserRepository.get_by_email(email)
 
 
 def generate_password_reset_token() -> str:
@@ -46,21 +43,8 @@ async def create_password_reset_token(user_id: str, expires_in_hours: int = 1) -
     Returns:
         The generated reset token
     """
-    from app.database import AuthDatabase
-
     token = generate_password_reset_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
-
-    await AuthDatabase.execute(
-        """
-        INSERT INTO password_reset_tokens (user_id, token, expires_at)
-        VALUES ($1, $2, $3)
-        """,
-        user_id,
-        token,
-        expires_at
-    )
-
+    await PasswordResetRepository.create(user_id, token, expires_in_hours)
     return token
 
 
@@ -74,17 +58,7 @@ async def validate_password_reset_token(token: str) -> Optional[dict]:
     Returns:
         Dictionary with user_id if token is valid, None otherwise
     """
-    from app.database import AuthDatabase
-
-    token_record = await AuthDatabase.fetchrow(
-        """
-        SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.status
-        FROM password_reset_tokens prt
-        JOIN users u ON u.id = prt.user_id
-        WHERE prt.token = $1
-        """,
-        token
-    )
+    token_record = await PasswordResetRepository.get_valid_token(token)
 
     if not token_record:
         return None
@@ -114,15 +88,4 @@ async def mark_password_reset_token_as_used(token: str) -> bool:
     Returns:
         True if token was marked as used, False otherwise
     """
-    from app.database import AuthDatabase
-
-    result = await AuthDatabase.execute(
-        """
-        UPDATE password_reset_tokens
-        SET used = true
-        WHERE token = $1 AND used = false
-        """,
-        token
-    )
-
-    return result == "UPDATE 1"
+    return await PasswordResetRepository.mark_used(token)

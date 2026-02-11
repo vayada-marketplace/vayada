@@ -7,10 +7,13 @@ from typing import Optional
 import bcrypt
 import logging
 
-from app.database import AuthDatabase
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
-from app.auth import hash_password, create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used
+from app.auth import hash_password, verify_password, create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used
 from app.config import settings
+from app.dependencies import get_current_user_id
+from app.repositories.user_repo import UserRepository
+from app.repositories.password_reset_repo import PasswordResetRepository
+from app.repositories.consent_repo import ConsentRepository
 from app.models.auth import (
     RegisterRequest,
     RegisterResponse,
@@ -21,6 +24,8 @@ from app.models.auth import (
     ForgotPasswordResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,12 +55,7 @@ async def register(request: RegisterRequest):
                 detail="You must accept the Privacy Policy to register"
             )
 
-        existing_user = await AuthDatabase.fetchrow(
-            "SELECT id FROM users WHERE email = $1",
-            request.email
-        )
-
-        if existing_user:
+        if await UserRepository.exists_by_email(request.email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -70,52 +70,21 @@ async def register(request: RegisterRequest):
         terms_version = request.terms_version or "2024-01-01"
         privacy_version = request.privacy_version or "2024-01-01"
 
-        user = await AuthDatabase.fetchrow(
-            """
-            INSERT INTO users (
-                email, password_hash, name, type, status,
-                terms_accepted_at, terms_version,
-                privacy_accepted_at, privacy_version,
-                marketing_consent, marketing_consent_at
-            )
-            VALUES ($1, $2, $3, 'hotel', 'pending', now(), $4, now(), $5, $6, CASE WHEN $6 THEN now() ELSE NULL END)
-            RETURNING id, email, name, type, status
-            """,
-            request.email,
-            password_hash,
-            user_name,
-            terms_version,
-            privacy_version,
-            request.marketing_consent
+        user = await UserRepository.create(
+            email=request.email,
+            password_hash=password_hash,
+            name=user_name,
+            terms_version=terms_version,
+            privacy_version=privacy_version,
+            marketing_consent=request.marketing_consent,
         )
 
         # Create consent history records for GDPR audit trail
-        await AuthDatabase.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
-            VALUES ($1, 'terms', true, $2)
-            """,
-            user['id'],
-            terms_version
-        )
-
-        await AuthDatabase.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, version)
-            VALUES ($1, 'privacy', true, $2)
-            """,
-            user['id'],
-            privacy_version
-        )
+        await ConsentRepository.record(user['id'], 'terms', True, version=terms_version)
+        await ConsentRepository.record(user['id'], 'privacy', True, version=privacy_version)
 
         if request.marketing_consent:
-            await AuthDatabase.execute(
-                """
-                INSERT INTO consent_history (user_id, consent_type, consent_given)
-                VALUES ($1, 'marketing', true)
-                """,
-                user['id']
-            )
+            await ConsentRepository.record(user['id'], 'marketing', True)
 
         access_token = create_access_token(
             data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
@@ -150,10 +119,7 @@ async def login(request: LoginRequest):
     regardless of which service they originally registered on.
     """
     try:
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, email, password_hash, name, type, status FROM users WHERE email = $1",
-            request.email
-        )
+        user = await UserRepository.get_by_email(request.email)
 
         if not user:
             raise HTTPException(
@@ -251,10 +217,7 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
             type=None
         )
 
-    user = await AuthDatabase.fetchrow(
-        "SELECT id, email, type FROM users WHERE id = $1",
-        user_id
-    )
+    user = await UserRepository.get_by_id(user_id, columns="id, email, type")
 
     if not user:
         return TokenValidationResponse(
@@ -284,10 +247,7 @@ async def forgot_password(request: ForgotPasswordRequest):
     Always returns success (security: don't reveal if email exists).
     """
     try:
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, email, name, status FROM users WHERE email = $1",
-            request.email
-        )
+        user = await UserRepository.get_by_email(request.email)
 
         if user and user['status'] != 'suspended':
             token = await create_password_reset_token(str(user['id']), expires_in_hours=1)
@@ -337,27 +297,11 @@ async def reset_password(request: ResetPasswordRequest):
 
         password_hash = hash_password(request.new_password)
 
-        await AuthDatabase.execute(
-            """
-            UPDATE users
-            SET password_hash = $1, updated_at = now()
-            WHERE id = $2
-            """,
-            password_hash,
-            user_id
-        )
-
+        await UserRepository.update_password(user_id, password_hash)
         await mark_password_reset_token_as_used(request.token)
 
         # Invalidate all other tokens for this user
-        await AuthDatabase.execute(
-            """
-            UPDATE password_reset_tokens
-            SET used = true
-            WHERE user_id = $1 AND used = false
-            """,
-            user_id
-        )
+        await PasswordResetRepository.invalidate_all_for_user(user_id)
 
         return ResetPasswordResponse(
             message="Password has been reset successfully"
@@ -369,4 +313,44 @@ async def reset_password(request: ResetPasswordRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset password: {str(e)}"
+        )
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse, status_code=status.HTTP_200_OK)
+async def change_password(
+    request: ChangePasswordRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Change the current user's password.
+
+    Requires the current password for verification and a new password.
+    """
+    try:
+        user = await UserRepository.get_by_id(user_id, columns="id, password_hash")
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if not verify_password(request.current_password, user['password_hash']):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+
+        new_hash = hash_password(request.new_password)
+        await UserRepository.update_password(user_id, new_hash)
+
+        return ChangePasswordResponse(message="Password changed successfully")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error changing password: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to change password"
         )

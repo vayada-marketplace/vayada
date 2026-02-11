@@ -1,15 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.database import Database, check_database_connection
+from app.database import Database, AuthDatabase, check_database_connection
 from app.config import settings
-from app.routers import hotels
+from app.routers import hotels, auth, admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await Database.get_pool()
+    await AuthDatabase.get_pool()
     yield
+    await AuthDatabase.close_pool()
     await Database.close_pool()
 
 
@@ -49,4 +51,6 @@ async def health_db():
     }
 
 
+app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(hotels.router)

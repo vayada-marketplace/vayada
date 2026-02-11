@@ -70,3 +70,12 @@ class ResetPasswordRequest(BaseModel):
 
 class ResetPasswordResponse(BaseModel):
     message: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8, description="New password must be at least 8 characters")
+
+
+class ChangePasswordResponse(BaseModel):
+    message: str

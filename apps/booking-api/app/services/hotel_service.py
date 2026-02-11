@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Optional, List
-from app.database import Database
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.hotel import (
     HotelResponse,
     HotelContact,
@@ -16,27 +16,9 @@ logger = logging.getLogger(__name__)
 
 async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResponse]:
     if locale and locale != "en":
-        row = await Database.fetchrow(
-            """
-            SELECT h.*,
-                   COALESCE(t.name, h.name) AS t_name,
-                   COALESCE(t.description, h.description) AS t_description,
-                   COALESCE(t.location, h.location) AS t_location,
-                   COALESCE(t.country, h.country) AS t_country,
-                   COALESCE(t.contact_address, h.contact_address) AS t_contact_address,
-                   COALESCE(t.amenities, h.amenities) AS t_amenities
-            FROM booking_hotels h
-            LEFT JOIN booking_hotel_translations t
-                ON t.hotel_id = h.id AND t.locale = $2
-            WHERE h.slug = $1
-            """,
-            slug,
-            locale,
-        )
+        row = await BookingHotelRepository.get_by_slug_translated(slug, locale)
     else:
-        row = await Database.fetchrow(
-            "SELECT * FROM booking_hotels WHERE slug = $1", slug
-        )
+        row = await BookingHotelRepository.get_by_slug(slug)
 
     if not row:
         return None
