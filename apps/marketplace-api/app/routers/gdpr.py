@@ -8,8 +8,13 @@ import secrets
 from datetime import datetime, timedelta, timezone
 import json
 
-from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id_allow_pending
+from app.repositories.user_repo import UserRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
+from app.repositories.consent_repo import ConsentRepository
+from app.repositories.collaboration_repo import CollaborationRepository
+from app.repositories.gdpr_repo import GdprRepository
 from app.models.consent import (
     GdprExportRequestResponse,
     GdprExportDownloadResponse,
@@ -48,14 +53,7 @@ async def request_data_export(
     """
     try:
         # Check for existing pending/processing export request
-        existing = await AuthDatabase.fetchrow(
-            """
-            SELECT id, status, requested_at
-            FROM gdpr_requests
-            WHERE user_id = $1 AND request_type = 'export' AND status IN ('pending', 'processing')
-            """,
-            user_id
-        )
+        existing = await GdprRepository.get_pending_request(user_id, 'export')
 
         if existing:
             raise HTTPException(
@@ -68,24 +66,9 @@ async def request_data_export(
         expires_at = datetime.now(timezone.utc) + timedelta(days=EXPORT_EXPIRY_DAYS)
 
         # Create export request
-        result = await AuthDatabase.fetchrow(
-            """
-            INSERT INTO gdpr_requests (user_id, request_type, status, download_token, expires_at, ip_address)
-            VALUES ($1, 'export', 'pending', $2, $3, $4)
-            RETURNING id, status, requested_at, expires_at
-            """,
-            user_id,
-            download_token,
-            expires_at,
-            get_client_ip(request)
+        result = await GdprRepository.create_export_request(
+            user_id, download_token, expires_at, get_client_ip(request)
         )
-
-        # In a production system, this would trigger a background task to:
-        # 1. Collect all user data from various tables
-        # 2. Generate a JSON/ZIP file
-        # 3. Store it securely
-        # 4. Send email notification when ready
-        # For now, we'll process it synchronously for demonstration
 
         # Process export immediately (in production, use background task)
         await _process_export(user_id, str(result['id']))
@@ -114,122 +97,77 @@ async def _process_export(user_id: str, request_id: str):
     """Process a data export request (collect and prepare user data)"""
     try:
         # Update status to processing
-        await AuthDatabase.execute(
-            "UPDATE gdpr_requests SET status = 'processing' WHERE id = $1",
-            request_id
-        )
+        await GdprRepository.update_status(request_id, 'processing')
 
         # Collect user data from all relevant tables
         user_data = {}
 
         # Basic user info
-        user = await AuthDatabase.fetchrow(
-            """
-            SELECT id, email, name, type, status, created_at, updated_at,
-                   terms_accepted_at, terms_version, privacy_accepted_at, privacy_version,
-                   marketing_consent, marketing_consent_at
-            FROM users WHERE id = $1
-            """,
-            user_id
+        user = await UserRepository.get_by_id(
+            user_id,
+            columns="id, email, name, type, status, created_at, updated_at, terms_accepted_at, terms_version, privacy_accepted_at, privacy_version, marketing_consent, marketing_consent_at"
         )
         if user:
-            user_data['user'] = {k: str(v) if v else None for k, v in dict(user).items()}
+            user_data['user'] = {k: str(v) if v else None for k, v in user.items()}
 
         # Creator profile (if exists)
-        creator = await Database.fetchrow(
-            "SELECT * FROM creators WHERE user_id = $1",
-            user_id
-        )
+        creator = await CreatorRepository.get_by_user_id(user_id)
         if creator:
-            user_data['creator_profile'] = {k: str(v) if v else None for k, v in dict(creator).items()}
+            user_data['creator_profile'] = {k: str(v) if v else None for k, v in creator.items()}
 
         # Creator platforms
         if creator:
-            platforms = await Database.fetch(
-                "SELECT * FROM creator_platforms WHERE creator_id = $1",
-                creator['id']
-            )
+            platforms = await CreatorRepository.get_platforms(str(creator['id']), columns="*")
             user_data['creator_platforms'] = [
-                {k: str(v) if v else None for k, v in dict(p).items()}
+                {k: str(v) if v else None for k, v in p.items()}
                 for p in platforms
             ]
 
         # Hotel profile (if exists)
-        hotel = await Database.fetchrow(
-            "SELECT * FROM hotel_profiles WHERE user_id = $1",
-            user_id
-        )
+        hotel = await HotelRepository.get_profile_by_user_id(user_id)
         if hotel:
-            user_data['hotel_profile'] = {k: str(v) if v else None for k, v in dict(hotel).items()}
+            user_data['hotel_profile'] = {k: str(v) if v else None for k, v in hotel.items()}
 
         # Hotel listings (if hotel)
         if hotel:
-            listings = await Database.fetch(
-                "SELECT * FROM hotel_listings WHERE hotel_profile_id = $1",
-                hotel['id']
-            )
+            listings = await HotelRepository.get_listings_by_profile_id(str(hotel['id']), columns="*")
             user_data['hotel_listings'] = [
-                {k: str(v) if v else None for k, v in dict(l).items()}
+                {k: str(v) if v else None for k, v in l.items()}
                 for l in listings
             ]
 
         # Collaborations
-        collaborations = await Database.fetch(
-            """
-            SELECT * FROM collaborations
-            WHERE creator_id IN (SELECT id FROM creators WHERE user_id = $1)
-               OR listing_id IN (SELECT id FROM hotel_listings WHERE hotel_profile_id IN
-                   (SELECT id FROM hotel_profiles WHERE user_id = $1))
-            """,
-            user_id
-        )
+        collaborations = await CollaborationRepository.get_user_collaborations(user_id)
         user_data['collaborations'] = [
-            {k: str(v) if v else None for k, v in dict(c).items()}
+            {k: str(v) if v else None for k, v in c.items()}
             for c in collaborations
         ]
 
         # Consent history
-        consent_history = await AuthDatabase.fetch(
-            "SELECT * FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC",
-            user_id
-        )
+        consent_history = await ConsentRepository.get_all_history(user_id)
         user_data['consent_history'] = [
-            {k: str(v) if v else None for k, v in dict(c).items()}
+            {k: str(v) if v else None for k, v in c.items()}
             for c in consent_history
         ]
 
         # Cookie consent
-        cookie_consent = await AuthDatabase.fetch(
-            "SELECT * FROM cookie_consent WHERE user_id = $1",
-            user_id
-        )
+        cookie_consent = await ConsentRepository.get_cookie_consents_by_user_id(user_id)
         user_data['cookie_consent'] = [
-            {k: str(v) if v else None for k, v in dict(c).items()}
+            {k: str(v) if v else None for k, v in c.items()}
             for c in cookie_consent
         ]
 
         # Store the export data (in production, store in S3 or similar)
-        # For now, we'll store the JSON in a metadata field or just mark as complete
         export_json = json.dumps(user_data, indent=2, default=str)
 
         # Update request as completed
-        await AuthDatabase.execute(
-            """
-            UPDATE gdpr_requests
-            SET status = 'completed', processed_at = now()
-            WHERE id = $1
-            """,
-            request_id
-        )
+        await GdprRepository.mark_completed(request_id)
 
         logger.info(f"Export processed for user {user_id}, request {request_id}")
 
     except Exception as e:
         logger.error(f"Error processing export: {e}")
-        await AuthDatabase.execute(
-            "UPDATE gdpr_requests SET status = 'pending' WHERE id = $1",
-            request_id
-        )
+        await GdprRepository.update_status(request_id, 'pending')
 
 
 @router.get("/export-download", status_code=status.HTTP_200_OK)
@@ -244,14 +182,7 @@ async def download_data_export(
     """
     try:
         # Verify token and get request
-        request_record = await AuthDatabase.fetchrow(
-            """
-            SELECT id, user_id, status, expires_at
-            FROM gdpr_requests
-            WHERE download_token = $1 AND request_type = 'export'
-            """,
-            token
-        )
+        request_record = await GdprRepository.get_by_download_token(token)
 
         if not request_record:
             raise HTTPException(
@@ -307,59 +238,41 @@ async def _collect_user_data(user_id: str) -> dict:
     user_data = {"export_date": datetime.now(timezone.utc).isoformat()}
 
     # Basic user info
-    user = await AuthDatabase.fetchrow(
-        """
-        SELECT id, email, name, type, status, created_at, updated_at,
-               terms_accepted_at, terms_version, privacy_accepted_at, privacy_version,
-               marketing_consent, marketing_consent_at
-        FROM users WHERE id = $1
-        """,
-        user_id
+    user = await UserRepository.get_by_id(
+        user_id,
+        columns="id, email, name, type, status, created_at, updated_at, terms_accepted_at, terms_version, privacy_accepted_at, privacy_version, marketing_consent, marketing_consent_at"
     )
     if user:
-        user_data['user'] = {k: str(v) if v else None for k, v in dict(user).items()}
+        user_data['user'] = {k: str(v) if v else None for k, v in user.items()}
 
     # Creator profile
-    creator = await Database.fetchrow(
-        "SELECT * FROM creators WHERE user_id = $1",
-        user_id
-    )
+    creator = await CreatorRepository.get_by_user_id(user_id)
     if creator:
-        user_data['creator_profile'] = {k: str(v) if v else None for k, v in dict(creator).items()}
+        user_data['creator_profile'] = {k: str(v) if v else None for k, v in creator.items()}
 
-        platforms = await Database.fetch(
-            "SELECT * FROM creator_platforms WHERE creator_id = $1",
-            creator['id']
-        )
+        platforms = await CreatorRepository.get_platforms(str(creator['id']), columns="*")
         user_data['creator_platforms'] = [
-            {k: str(v) if v else None for k, v in dict(p).items()}
+            {k: str(v) if v else None for k, v in p.items()}
             for p in platforms
         ]
 
     # Hotel profile
-    hotel = await Database.fetchrow(
-        "SELECT * FROM hotel_profiles WHERE user_id = $1",
-        user_id
-    )
+    hotel = await HotelRepository.get_profile_by_user_id(user_id)
     if hotel:
-        user_data['hotel_profile'] = {k: str(v) if v else None for k, v in dict(hotel).items()}
+        user_data['hotel_profile'] = {k: str(v) if v else None for k, v in hotel.items()}
 
-        listings = await Database.fetch(
-            "SELECT * FROM hotel_listings WHERE hotel_profile_id = $1",
-            hotel['id']
-        )
+        listings = await HotelRepository.get_listings_by_profile_id(str(hotel['id']), columns="*")
         user_data['hotel_listings'] = [
-            {k: str(v) if v else None for k, v in dict(l).items()}
+            {k: str(v) if v else None for k, v in l.items()}
             for l in listings
         ]
 
     # Consent history
-    consent_history = await AuthDatabase.fetch(
-        "SELECT id, consent_type, consent_given, version, created_at FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC",
-        user_id
+    consent_history = await ConsentRepository.get_all_history(
+        user_id, columns="id, consent_type, consent_given, version, created_at"
     )
     user_data['consent_history'] = [
-        {k: str(v) if v else None for k, v in dict(c).items()}
+        {k: str(v) if v else None for k, v in c.items()}
         for c in consent_history
     ]
 
@@ -372,16 +285,7 @@ async def get_export_status(user_id: str = Depends(get_current_user_id_allow_pen
     Get the status of the most recent export request.
     """
     try:
-        result = await AuthDatabase.fetchrow(
-            """
-            SELECT id, request_type, status, requested_at, processed_at, expires_at
-            FROM gdpr_requests
-            WHERE user_id = $1 AND request_type = 'export'
-            ORDER BY requested_at DESC
-            LIMIT 1
-            """,
-            user_id
-        )
+        result = await GdprRepository.get_latest_request(user_id, 'export')
 
         if not result:
             raise HTTPException(
@@ -424,14 +328,7 @@ async def request_account_deletion(
     """
     try:
         # Check for existing pending deletion request
-        existing = await AuthDatabase.fetchrow(
-            """
-            SELECT id, status, expires_at
-            FROM gdpr_requests
-            WHERE user_id = $1 AND request_type = 'deletion' AND status IN ('pending', 'processing')
-            """,
-            user_id
-        )
+        existing = await GdprRepository.get_pending_request(user_id, 'deletion')
 
         if existing:
             return GdprDeletionRequestResponse(
@@ -446,27 +343,15 @@ async def request_account_deletion(
         scheduled_deletion = datetime.now(timezone.utc) + timedelta(days=DELETION_GRACE_PERIOD_DAYS)
 
         # Create deletion request
-        result = await AuthDatabase.fetchrow(
-            """
-            INSERT INTO gdpr_requests (user_id, request_type, status, expires_at, ip_address)
-            VALUES ($1, 'deletion', 'pending', $2, $3)
-            RETURNING id, status, requested_at, expires_at
-            """,
-            user_id,
-            scheduled_deletion,
-            get_client_ip(request)
+        result = await GdprRepository.create_deletion_request(
+            user_id, scheduled_deletion, get_client_ip(request)
         )
 
         # Create consent history entry
-        await AuthDatabase.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
-            VALUES ($1, 'deletion_request', $2, $3, $4)
-            """,
-            user_id,
-            True,
-            get_client_ip(request),
-            request.headers.get("user-agent", "unknown")
+        await ConsentRepository.record(
+            user_id, 'deletion_request', True,
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "unknown")
         )
 
         logger.info(f"Account deletion requested for user {user_id}, scheduled for {scheduled_deletion}")
@@ -501,14 +386,7 @@ async def cancel_account_deletion(
     """
     try:
         # Find pending deletion request
-        existing = await AuthDatabase.fetchrow(
-            """
-            SELECT id, status, expires_at
-            FROM gdpr_requests
-            WHERE user_id = $1 AND request_type = 'deletion' AND status = 'pending'
-            """,
-            user_id
-        )
+        existing = await GdprRepository.get_pending_deletion(user_id)
 
         if not existing:
             raise HTTPException(
@@ -517,25 +395,13 @@ async def cancel_account_deletion(
             )
 
         # Cancel the request
-        await AuthDatabase.execute(
-            """
-            UPDATE gdpr_requests
-            SET status = 'cancelled', cancellation_reason = 'User cancelled'
-            WHERE id = $1
-            """,
-            existing['id']
-        )
+        await GdprRepository.cancel_request(existing['id'])
 
         # Create consent history entry
-        await AuthDatabase.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
-            VALUES ($1, 'deletion_cancelled', $2, $3, $4)
-            """,
-            user_id,
-            False,
-            get_client_ip(request),
-            request.headers.get("user-agent", "unknown")
+        await ConsentRepository.record(
+            user_id, 'deletion_cancelled', False,
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "unknown")
         )
 
         logger.info(f"Account deletion cancelled for user {user_id}")
@@ -561,16 +427,7 @@ async def get_deletion_status(user_id: str = Depends(get_current_user_id_allow_p
     Get the status of the most recent deletion request.
     """
     try:
-        result = await AuthDatabase.fetchrow(
-            """
-            SELECT id, request_type, status, requested_at, processed_at, expires_at
-            FROM gdpr_requests
-            WHERE user_id = $1 AND request_type = 'deletion'
-            ORDER BY requested_at DESC
-            LIMIT 1
-            """,
-            user_id
-        )
+        result = await GdprRepository.get_latest_request(user_id, 'deletion')
 
         if not result:
             raise HTTPException(

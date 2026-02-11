@@ -6,7 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 import logging
 
-from app.database import AuthDatabase
+from app.repositories.consent_repo import ConsentRepository
 from app.dependencies import get_current_user_id_allow_pending
 from app.jwt_utils import decode_access_token
 from app.models.consent import (
@@ -47,20 +47,7 @@ async def get_consent_status(user_id: str = Depends(get_current_user_id_allow_pe
     - Marketing consent
     """
     try:
-        user = await AuthDatabase.fetchrow(
-            """
-            SELECT
-                terms_accepted_at,
-                terms_version,
-                privacy_accepted_at,
-                privacy_version,
-                marketing_consent,
-                marketing_consent_at
-            FROM users
-            WHERE id = $1
-            """,
-            user_id
-        )
+        user = await ConsentRepository.get_consent_status(user_id)
 
         if not user:
             raise HTTPException(
@@ -102,18 +89,7 @@ async def update_marketing_consent(
     """
     try:
         # Update marketing consent
-        result = await AuthDatabase.fetchrow(
-            """
-            UPDATE users
-            SET marketing_consent = $1,
-                marketing_consent_at = now(),
-                updated_at = now()
-            WHERE id = $2
-            RETURNING marketing_consent, marketing_consent_at
-            """,
-            request_body.marketing_consent,
-            user_id
-        )
+        result = await ConsentRepository.update_marketing_consent(user_id, request_body.marketing_consent)
 
         if not result:
             raise HTTPException(
@@ -122,15 +98,12 @@ async def update_marketing_consent(
             )
 
         # Create audit trail entry
-        await AuthDatabase.execute(
-            """
-            INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
-            VALUES ($1, 'marketing', $2, $3, $4)
-            """,
+        await ConsentRepository.record(
             user_id,
+            'marketing',
             request_body.marketing_consent,
-            get_client_ip(request),
-            request.headers.get("user-agent", "unknown")
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "unknown"),
         )
 
         action = "given" if request_body.marketing_consent else "withdrawn"
@@ -175,60 +148,24 @@ async def store_cookie_consent(
         # Ensure necessary cookies are always true
         necessary = True
 
-        # Check if consent record exists for this visitor
-        existing = await AuthDatabase.fetchrow(
-            "SELECT id FROM cookie_consent WHERE visitor_id = $1",
-            consent.visitor_id
+        # Insert or update cookie consent record
+        result = await ConsentRepository.upsert_cookie_consent(
+            consent.visitor_id,
+            user_id,
+            necessary,
+            consent.functional,
+            consent.analytics,
+            consent.marketing,
         )
-
-        if existing:
-            # Update existing record
-            result = await AuthDatabase.fetchrow(
-                """
-                UPDATE cookie_consent
-                SET user_id = COALESCE($1, user_id),
-                    necessary = $2,
-                    functional = $3,
-                    analytics = $4,
-                    marketing = $5,
-                    updated_at = now()
-                WHERE visitor_id = $6
-                RETURNING id, visitor_id, user_id, necessary, functional, analytics, marketing, created_at, updated_at
-                """,
-                user_id,
-                necessary,
-                consent.functional,
-                consent.analytics,
-                consent.marketing,
-                consent.visitor_id
-            )
-        else:
-            # Create new record
-            result = await AuthDatabase.fetchrow(
-                """
-                INSERT INTO cookie_consent (visitor_id, user_id, necessary, functional, analytics, marketing)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id, visitor_id, user_id, necessary, functional, analytics, marketing, created_at, updated_at
-                """,
-                consent.visitor_id,
-                user_id,
-                necessary,
-                consent.functional,
-                consent.analytics,
-                consent.marketing
-            )
 
         # Create audit trail if user is logged in
         if user_id:
-            await AuthDatabase.execute(
-                """
-                INSERT INTO consent_history (user_id, consent_type, consent_given, ip_address, user_agent)
-                VALUES ($1, 'cookies', $2, $3, $4)
-                """,
+            await ConsentRepository.record(
                 user_id,
-                True,  # Cookie consent was given (at least necessary)
-                get_client_ip(request),
-                request.headers.get("user-agent", "unknown")
+                'cookies',
+                True,
+                ip_address=get_client_ip(request),
+                user_agent=request.headers.get("user-agent", "unknown"),
             )
 
         logger.info(f"Cookie consent stored for visitor {consent.visitor_id}")
@@ -264,10 +201,7 @@ async def get_cookie_consent(
     Returns the current cookie consent settings, or null if not set.
     """
     try:
-        result = await AuthDatabase.fetchrow(
-            "SELECT id, visitor_id, user_id, necessary, functional, analytics, marketing, created_at, updated_at FROM cookie_consent WHERE visitor_id = $1",
-            visitor_id
-        )
+        result = await ConsentRepository.get_cookie_consent(visitor_id)
 
         if not result:
             return None
@@ -305,25 +239,10 @@ async def get_consent_history(
     """
     try:
         # Get total count
-        count_result = await AuthDatabase.fetchrow(
-            "SELECT COUNT(*) as total FROM consent_history WHERE user_id = $1",
-            user_id
-        )
-        total = count_result['total'] if count_result else 0
+        total = await ConsentRepository.count_history(user_id)
 
         # Get history records
-        records = await AuthDatabase.fetch(
-            """
-            SELECT id, consent_type, consent_given, version, created_at
-            FROM consent_history
-            WHERE user_id = $1
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            """,
-            user_id,
-            limit,
-            offset
-        )
+        records = await ConsentRepository.get_history(user_id, limit, offset)
 
         history = [
             ConsentHistoryItem(

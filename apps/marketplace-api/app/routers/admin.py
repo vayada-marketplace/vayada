@@ -14,6 +14,9 @@ from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id
 from app.routers.collaborations import get_collaboration_deliverables
 from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
+from app.repositories.user_repo import UserRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
 
 # Import models from centralized location
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
@@ -56,10 +59,7 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
     """
     Verify that the current user is an admin.
     """
-    user = await AuthDatabase.fetchrow(
-        "SELECT id, type, status FROM users WHERE id = $1",
-        user_id
-    )
+    user = await UserRepository.get_by_id(user_id, columns="id, type, status")
 
     if not user:
         raise HTTPException(
@@ -78,7 +78,7 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Admin account is suspended"
         )
-    
+
     return user_id
 
 
@@ -184,49 +184,32 @@ async def get_user_details(
     """
     try:
         # Get user info
-        user = await AuthDatabase.fetchrow(
-            """
-            SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
-            FROM users
-            WHERE id = $1
-            """,
-            user_id
+        user = await UserRepository.get_by_id(
+            user_id,
+            columns="id, email, name, type, status, email_verified, avatar, created_at, updated_at"
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         profile = None
-        
+
         # Get profile based on user type
         if user['type'] == 'creator':
             # Get creator profile
-            creator_profile = await Database.fetchrow(
-                """
-                SELECT id, user_id, location, short_description, portfolio_link, phone,
-                       profile_picture, profile_complete, profile_completed_at,
-                       created_at, updated_at
-                FROM creators
-                WHERE user_id = $1
-                """,
-                user_id
+            creator_profile = await CreatorRepository.get_by_user_id(
+                user_id,
+                columns="id, user_id, location, short_description, portfolio_link, phone, profile_picture, profile_complete, profile_completed_at, created_at, updated_at"
             )
-            
+
             if creator_profile:
                 # Get platforms
-                platforms_data = await Database.fetch(
-                    """
-                    SELECT id, name, handle, followers, engagement_rate,
-                           top_countries, top_age_groups, gender_split,
-                           created_at, updated_at
-                    FROM creator_platforms
-                    WHERE creator_id = $1
-                    ORDER BY created_at DESC
-                    """,
-                    creator_profile['id']
+                platforms_data = await CreatorRepository.get_platforms(
+                    creator_profile['id'],
+                    columns="id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split, created_at, updated_at"
                 )
                 
                 platforms = []
@@ -289,27 +272,16 @@ async def get_user_details(
         
         elif user['type'] == 'hotel':
             # Get hotel profile (email comes from users table, not hotel_profiles)
-            hotel_profile = await Database.fetchrow(
-                """
-                SELECT id, user_id, name, location, picture, website, about,
-                       phone, status, created_at, updated_at
-                FROM hotel_profiles
-                WHERE user_id = $1
-                """,
-                user_id
+            hotel_profile = await HotelRepository.get_profile_by_user_id(
+                user_id,
+                columns="id, user_id, name, location, picture, website, about, phone, status, created_at, updated_at"
             )
-            
+
             if hotel_profile:
                 # Get listings
-                listings_data = await Database.fetch(
-                    """
-                    SELECT id, hotel_profile_id, name, location, description,
-                           accommodation_type, images, status, created_at, updated_at
-                    FROM hotel_listings
-                    WHERE hotel_profile_id = $1
-                    ORDER BY created_at DESC
-                    """,
-                    hotel_profile['id']
+                listings_data = await HotelRepository.get_listings_by_profile_id(
+                    hotel_profile['id'],
+                    columns="id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at"
                 )
                 
                 listings = []
@@ -317,17 +289,7 @@ async def get_user_details(
                     listing_id = str(l['id'])
                     
                     # Get collaboration offerings for this listing
-                    offerings_data = await Database.fetch(
-                        """
-                        SELECT id, listing_id, collaboration_type, availability_months, platforms,
-                               free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
-                               created_at, updated_at
-                        FROM listing_collaboration_offerings
-                        WHERE listing_id = $1
-                        ORDER BY created_at DESC
-                        """,
-                        l['id']
-                    )
+                    offerings_data = await HotelRepository.get_offerings(l['id'])
                     
                     offerings = [
                         CollaborationOfferingResponse(
@@ -347,15 +309,7 @@ async def get_user_details(
                     ]
                     
                     # Get creator requirements for this listing
-                    requirements_data = await Database.fetchrow(
-                        """
-                        SELECT id, listing_id, platforms, min_followers, target_countries,
-                               target_age_min, target_age_max, target_age_groups, created_at, updated_at
-                        FROM listing_creator_requirements
-                        WHERE listing_id = $1
-                        """,
-                        l['id']
-                    )
+                    requirements_data = await HotelRepository.get_requirements(l['id'])
                     
                     requirements = None
                     if requirements_data:
@@ -448,12 +402,7 @@ async def create_user(
     """
     try:
         # Check if email already exists
-        existing_user = await AuthDatabase.fetchrow(
-            "SELECT id FROM users WHERE email = $1",
-            request.email
-        )
-        
-        if existing_user:
+        if await UserRepository.exists_by_email(request.email):
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -521,12 +470,7 @@ async def create_user(
                         if platform.genderSplit:
                             gender_split_data = json.dumps(platform.genderSplit)
 
-                        await Database.execute(
-                            """
-                            INSERT INTO creator_platforms
-                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                            """,
+                        await CreatorRepository.insert_platform(
                             creator_id,
                             platform.name,
                             platform.handle,
@@ -617,7 +561,7 @@ async def create_user(
                                 )
         except Exception:
             # Compensating action: delete user from auth DB if profile creation fails
-            await AuthDatabase.execute("DELETE FROM users WHERE id = $1", user_id)
+            await UserRepository.delete(user_id)
             raise
         
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
@@ -675,10 +619,7 @@ async def update_creator_profile(
     """
     try:
         # Verify user exists and is a creator
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type, name FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
             raise HTTPException(
@@ -691,13 +632,12 @@ async def update_creator_profile(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a creator"
             )
-        
+
         # Get creator profile
-        creator = await Database.fetchrow(
-            "SELECT id, profile_complete FROM creators WHERE user_id = $1",
-            user_id
+        creator = await CreatorRepository.get_by_user_id(
+            user_id, columns="id, profile_complete"
         )
-        
+
         if not creator:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -708,11 +648,7 @@ async def update_creator_profile(
         
         # Update user name on auth database if provided
         if request.name is not None:
-            await AuthDatabase.execute(
-                "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
-                request.name,
-                user_id
-            )
+            await UserRepository.update_name(user_id, request.name)
 
         # Start transaction - update creator profile and platforms
         pool = await Database.get_pool()
@@ -806,31 +742,19 @@ async def update_creator_profile(
                         )
         
         # Fetch updated profile with platforms (split across databases)
-        creator_data = await Database.fetchrow(
-            """
-            SELECT id, location, short_description, portfolio_link, phone,
-                   profile_picture, creator_type, created_at, updated_at, profile_complete, user_id
-            FROM creators WHERE id = $1
-            """,
-            creator_id
+        creator_data = await CreatorRepository.get_by_id(
+            creator_id,
+            columns="id, location, short_description, portfolio_link, phone, profile_picture, creator_type, created_at, updated_at, profile_complete, user_id"
         )
 
-        user_data = await AuthDatabase.fetchrow(
-            "SELECT name, status FROM users WHERE id = $1",
-            creator_data['user_id']
+        user_data = await UserRepository.get_by_id(
+            creator_data['user_id'], columns="name, status"
         )
-        
+
         # Get platforms
-        platforms_data = await Database.fetch(
-            """
-            SELECT id, name, handle, followers, engagement_rate,
-                   top_countries, top_age_groups, gender_split,
-                   created_at, updated_at
-            FROM creator_platforms
-            WHERE creator_id = $1
-            ORDER BY created_at DESC
-            """,
-            creator_id
+        platforms_data = await CreatorRepository.get_platforms(
+            creator_id,
+            columns="id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split, created_at, updated_at"
         )
         
         platforms = []
@@ -903,10 +827,7 @@ async def update_hotel_profile(
     """
     try:
         # Verify user exists and is a hotel
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type, name FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
             raise HTTPException(
@@ -919,13 +840,12 @@ async def update_hotel_profile(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
-        
+
         # Get hotel profile
-        hotel = await Database.fetchrow(
-            "SELECT id, profile_complete FROM hotel_profiles WHERE user_id = $1",
-            user_id
+        hotel = await HotelRepository.get_profile_by_user_id(
+            user_id, columns="id, profile_complete"
         )
-        
+
         if not hotel:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -971,41 +891,20 @@ async def update_hotel_profile(
         
         # Update hotel profile if there are fields to update
         if update_fields:
-            update_fields.append("updated_at = now()")
-            update_values.append(hotel_id)  # WHERE clause parameter
-            
-            update_query = f"""
-                UPDATE hotel_profiles 
-                SET {', '.join(update_fields)}
-                WHERE id = ${param_counter}
-            """
-            await Database.execute(update_query, *update_values)
-        
+            await HotelRepository.update_profile(hotel_id, update_fields, update_values)
+
         # Update email in users table if provided (auth database)
         if request.email is not None:
-            await AuthDatabase.execute(
-                """
-                UPDATE users
-                SET email = $1, updated_at = now()
-                WHERE id = $2
-                """,
-                request.email,
-                user_id
-            )
+            await UserRepository.update_email(user_id, request.email)
         
         # Fetch updated profile (split across databases)
-        updated_hotel = await Database.fetchrow(
-            """
-            SELECT id, user_id, name, location, about, website, phone, picture,
-                   status, created_at, updated_at, profile_complete
-            FROM hotel_profiles WHERE id = $1
-            """,
-            hotel_id
+        updated_hotel = await HotelRepository.get_profile_by_id(
+            hotel_id,
+            columns="id, user_id, name, location, about, website, phone, picture, status, created_at, updated_at, profile_complete"
         )
 
-        updated_user = await AuthDatabase.fetchrow(
-            "SELECT email, name as user_name FROM users WHERE id = $1",
-            updated_hotel['user_id']
+        updated_user = await UserRepository.get_by_id(
+            updated_hotel['user_id'], columns="email, name as user_name"
         )
 
         logger.info(f"Admin {admin_id} updated hotel profile for user {user_id}")
@@ -1063,11 +962,10 @@ async def update_user(
                 )
         
         # Verify user exists
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, email, name, type, status, email_verified, avatar FROM users WHERE id = $1",
-            user_id
+        user = await UserRepository.get_by_id(
+            user_id, columns="id, email, name, type, status, email_verified, avatar"
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1131,13 +1029,9 @@ async def update_user(
             await AuthDatabase.execute(update_query, *update_values)
 
         # Fetch updated user
-        updated_user = await AuthDatabase.fetchrow(
-            """
-            SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
-            FROM users
-            WHERE id = $1
-            """,
-            user_id
+        updated_user = await UserRepository.get_by_id(
+            user_id,
+            columns="id, email, name, type, status, email_verified, avatar, created_at, updated_at"
         )
         
         logger.info(f"Admin {admin_id} updated user {user_id} (fields: {list(request.model_dump(exclude_unset=True).keys())})")
@@ -1217,10 +1111,7 @@ async def create_hotel_listing(
         logger.info(f"Admin {admin_id} creating listing for hotel user {user_id}")
         logger.debug(f"Request data: {request.model_dump()}")
         # Verify user exists and is a hotel
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user:
             raise HTTPException(
@@ -1233,21 +1124,20 @@ async def create_hotel_listing(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="User is not a hotel"
             )
-        
+
         # Get hotel profile
-        hotel_profile = await Database.fetchrow(
-            "SELECT id FROM hotel_profiles WHERE user_id = $1",
-            user_id
+        hotel_profile = await HotelRepository.get_profile_by_user_id(
+            user_id, columns="id"
         )
-        
+
         if not hotel_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
-        
+
         hotel_profile_id = hotel_profile['id']
-        
+
         # Use transaction to ensure atomicity
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
@@ -1375,35 +1265,16 @@ async def create_hotel_listing(
 async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str) -> dict:
     """Helper function to fetch a listing with its offerings and requirements (admin version)"""
     # Verify listing belongs to hotel
-    listing = await Database.fetchrow(
-        """
-        SELECT id, hotel_profile_id, name, location, description, accommodation_type,
-               images, status, created_at, updated_at
-        FROM hotel_listings
-        WHERE id = $1 AND hotel_profile_id = $2
-        """,
-        listing_id,
-        hotel_profile_id
-    )
-    
+    listing = await HotelRepository.get_listing(listing_id, hotel_profile_id)
+
     if not listing:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Listing not found"
         )
-    
+
     # Get collaboration offerings
-    offerings_data = await Database.fetch(
-        """
-        SELECT id, listing_id, collaboration_type, availability_months, platforms,
-               free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
-               created_at, updated_at
-        FROM listing_collaboration_offerings
-        WHERE listing_id = $1
-        ORDER BY created_at DESC
-        """,
-        listing_id
-    )
+    offerings_data = await HotelRepository.get_offerings(listing_id)
     
     offerings_response = [
         CollaborationOfferingResponse.model_validate({
@@ -1423,15 +1294,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
     ]
     
     # Get creator requirements
-    requirements = await Database.fetchrow(
-        """
-        SELECT id, listing_id, platforms, min_followers, target_countries,
-               target_age_min, target_age_max, target_age_groups, created_at, updated_at
-        FROM listing_creator_requirements
-        WHERE listing_id = $1
-        """,
-        listing_id
-    )
+    requirements = await HotelRepository.get_requirements(listing_id)
     
     requirements_response = None
     if requirements:
@@ -1471,10 +1334,7 @@ async def update_hotel_listing(
     """
     try:
         # Verify user exists and is a hotel
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user:
             raise HTTPException(
@@ -1489,9 +1349,8 @@ async def update_hotel_listing(
             )
 
         # Get hotel profile
-        hotel_profile = await Database.fetchrow(
-            "SELECT id FROM hotel_profiles WHERE user_id = $1",
-            user_id
+        hotel_profile = await HotelRepository.get_profile_by_user_id(
+            user_id, columns="id"
         )
 
         if not hotel_profile:
@@ -1505,7 +1364,7 @@ async def update_hotel_listing(
         # Get current listing data
         listing_data = await _get_listing_with_details_admin(listing_id, hotel_profile_id)
         current_listing = listing_data["listing"]
-        
+
         # Use transaction to ensure atomicity
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
@@ -1661,10 +1520,7 @@ async def delete_hotel_listing(
     """
     try:
         # Verify user exists and is a hotel
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user:
             raise HTTPException(
@@ -1679,9 +1535,8 @@ async def delete_hotel_listing(
             )
 
         # Get hotel profile
-        hotel_profile = await Database.fetchrow(
-            "SELECT id FROM hotel_profiles WHERE user_id = $1",
-            user_id
+        hotel_profile = await HotelRepository.get_profile_by_user_id(
+            user_id, columns="id"
         )
 
         if not hotel_profile:
@@ -1689,25 +1544,20 @@ async def delete_hotel_listing(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
-        
+
         hotel_profile_id = hotel_profile['id']
-        
+
         # Verify listing exists and belongs to hotel
-        listing = await Database.fetchrow(
-            """
-            SELECT id, name, images FROM hotel_listings
-            WHERE id = $1 AND hotel_profile_id = $2
-            """,
-            listing_id,
-            hotel_profile_id
+        listing = await HotelRepository.get_listing(
+            listing_id, hotel_profile_id, columns="id, name, images"
         )
-        
+
         if not listing:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Listing not found"
             )
-        
+
         # Delete listing images from S3
         deleted_images = 0
         failed_images = 0
@@ -1802,43 +1652,38 @@ async def delete_user(
             )
         
         # Verify user exists and get user info
-        user = await AuthDatabase.fetchrow(
-            """
-            SELECT id, email, name, type, status
-            FROM users
-            WHERE id = $1
-            """,
-            user_id
+        user = await UserRepository.get_by_id(
+            user_id, columns="id, email, name, type, status"
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         # Delete all images associated with this user from S3
         image_deletion_stats = await delete_user_images(user_id, user['type'])
 
         # Delete business data first (different DB, no cross-DB cascade)
         if user['type'] == 'creator':
-            creator = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+            creator = await CreatorRepository.get_by_user_id(user_id, columns="id")
             if creator:
-                await Database.execute("DELETE FROM creator_platforms WHERE creator_id = $1", creator['id'])
+                await CreatorRepository.delete_platforms(creator['id'])
                 await Database.execute("DELETE FROM creators WHERE id = $1", creator['id'])
         elif user['type'] == 'hotel':
-            hotel = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            hotel = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             if hotel:
                 # Delete listings and their children
-                listings = await Database.fetch("SELECT id FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
+                listings = await HotelRepository.get_listings_by_profile_id(hotel['id'], columns="id")
                 for listing in listings:
-                    await Database.execute("DELETE FROM listing_collaboration_offerings WHERE listing_id = $1", listing['id'])
-                    await Database.execute("DELETE FROM listing_creator_requirements WHERE listing_id = $1", listing['id'])
+                    await HotelRepository.delete_offerings(listing['id'])
+                    await HotelRepository.delete_requirements(listing['id'])
                 await Database.execute("DELETE FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
                 await Database.execute("DELETE FROM hotel_profiles WHERE id = $1", hotel['id'])
 
         # Delete user from auth DB
-        await AuthDatabase.execute("DELETE FROM users WHERE id = $1", user_id)
+        await UserRepository.delete(user_id)
         
         logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']}, email: {user['email']})")
         

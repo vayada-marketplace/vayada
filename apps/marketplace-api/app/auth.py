@@ -5,7 +5,11 @@ import bcrypt
 import secrets
 import random
 from typing import Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
+from app.repositories.user_repo import UserRepository
+from app.repositories.password_reset_repo import PasswordResetRepository
+from app.repositories.verification_repo import VerificationRepository
 
 
 def hash_password(password: str) -> str:
@@ -25,35 +29,23 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 async def get_user_by_email(email: str) -> Optional[dict]:
     """Get user by email from database"""
-    from app.database import AuthDatabase
-
-    user = await AuthDatabase.fetchrow(
-        "SELECT * FROM users WHERE email = $1",
-        email
-    )
-    return dict(user) if user else None
+    return await UserRepository.get_by_email(email)
 
 
 async def create_user(email: str, password_hash: str, user_type: str, name: Optional[str] = None) -> dict:
     """Create a new user in the database"""
-    from app.database import AuthDatabase
-
-    # Use email as name if not provided
     if not name:
-        name = email.split('@')[0]  # Use part before @ as default name
+        name = email.split('@')[0]
 
-    user = await AuthDatabase.fetchrow(
-        """
-        INSERT INTO users (email, password_hash, name, type, status)
-        VALUES ($1, $2, $3, $4, 'pending')
-        RETURNING *
-        """,
-        email,
-        password_hash,
-        name,
-        user_type
+    return await UserRepository.create(
+        email=email,
+        password_hash=password_hash,
+        name=name,
+        user_type=user_type,
+        terms_version="2024-01-01",
+        privacy_version="2024-01-01",
+        marketing_consent=False,
     )
-    return dict(user)
 
 
 def generate_password_reset_token() -> str:
@@ -64,70 +56,43 @@ def generate_password_reset_token() -> str:
 async def create_password_reset_token(user_id: str, expires_in_hours: int = 1) -> str:
     """
     Create a password reset token for a user
-    
+
     Args:
         user_id: User ID
         expires_in_hours: Token expiration time in hours (default: 1 hour)
-    
+
     Returns:
         The generated reset token
     """
-    from app.database import AuthDatabase
-
     token = generate_password_reset_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
-
-    await AuthDatabase.execute(
-        """
-        INSERT INTO password_reset_tokens (user_id, token, expires_at)
-        VALUES ($1, $2, $3)
-        """,
-        user_id,
-        token,
-        expires_at
-    )
-    
+    await PasswordResetRepository.create(user_id, token, expires_in_hours)
     return token
 
 
 async def validate_password_reset_token(token: str) -> Optional[dict]:
     """
     Validate a password reset token
-    
+
     Args:
         token: Password reset token
-    
+
     Returns:
         Dictionary with user_id if token is valid, None otherwise
     """
-    from app.database import AuthDatabase
+    token_record = await PasswordResetRepository.get_valid_token(token)
 
-    # Get token from database
-    token_record = await AuthDatabase.fetchrow(
-        """
-        SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.status
-        FROM password_reset_tokens prt
-        JOIN users u ON u.id = prt.user_id
-        WHERE prt.token = $1
-        """,
-        token
-    )
-    
     if not token_record:
         return None
-    
-    # Check if token is used
+
     if token_record['used']:
         return None
-    
-    # Check if token is expired
+
     if datetime.now(timezone.utc) > token_record['expires_at']:
         return None
-    
-    # Check if user account is suspended
+
     if token_record['status'] == 'suspended':
         return None
-    
+
     return {
         'user_id': str(token_record['user_id']),
         'email': token_record['email']
@@ -137,25 +102,14 @@ async def validate_password_reset_token(token: str) -> Optional[dict]:
 async def mark_password_reset_token_as_used(token: str) -> bool:
     """
     Mark a password reset token as used
-    
+
     Args:
         token: Password reset token
-    
+
     Returns:
         True if token was marked as used, False otherwise
     """
-    from app.database import AuthDatabase
-
-    result = await AuthDatabase.execute(
-        """
-        UPDATE password_reset_tokens
-        SET used = true
-        WHERE token = $1 AND used = false
-        """,
-        token
-    )
-    
-    return result == "UPDATE 1"
+    return await PasswordResetRepository.mark_used(token)
 
 
 def generate_email_verification_code() -> str:
@@ -166,91 +120,48 @@ def generate_email_verification_code() -> str:
 async def create_email_verification_code(email: str, expires_in_minutes: int = 15) -> str:
     """
     Create and store an email verification code
-    
+
     Args:
         email: Email address to verify
         expires_in_minutes: Code expiration time in minutes (default: 15 minutes)
-    
+
     Returns:
         The generated 6-digit verification code
     """
-    from app.database import AuthDatabase
-
     code = generate_email_verification_code()
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
 
     # Invalidate any existing unused codes for this email
-    await AuthDatabase.execute(
-        """
-        UPDATE email_verification_codes
-        SET used = true
-        WHERE email = $1 AND used = false AND expires_at > now()
-        """,
-        email
-    )
+    await VerificationRepository.invalidate_codes_for_email(email)
 
     # Insert new code
-    await AuthDatabase.execute(
-        """
-        INSERT INTO email_verification_codes (email, code, expires_at)
-        VALUES ($1, $2, $3)
-        """,
-        email,
-        code,
-        expires_at
-    )
-    
+    await VerificationRepository.create_code(email, code, expires_in_minutes)
+
     return code
 
 
 async def verify_email_code(email: str, code: str) -> bool:
     """
     Verify an email verification code
-    
+
     Args:
         email: Email address
         code: 6-digit verification code
-    
+
     Returns:
         True if code is valid and not expired, False otherwise
     """
-    from app.database import AuthDatabase
     import logging
-
     logger = logging.getLogger(__name__)
 
-    # Get the most recent unused code for this email
-    # Use database-side timezone comparison to avoid timezone issues
-    # This ensures consistent timezone handling regardless of server timezone
-    code_record = await AuthDatabase.fetchrow(
-        """
-        SELECT id, expires_at, used, created_at
-        FROM email_verification_codes
-        WHERE email = $1 
-          AND code = $2 
-          AND used = false
-          AND expires_at > now()
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        email,
-        code
-    )
-    
+    code_record = await VerificationRepository.get_valid_code(email, code)
+
     if not code_record:
         logger.debug(f"No valid code found for email: {email}, code: {code}")
         return False
-    
+
     # Mark code as used
-    await AuthDatabase.execute(
-        """
-        UPDATE email_verification_codes
-        SET used = true
-        WHERE id = $1
-        """,
-        code_record['id']
-    )
-    
+    await VerificationRepository.mark_code_used(code_record['id'])
+
     logger.debug(f"Code verified successfully for email: {email}, expires_at: {code_record['expires_at']}")
     return True
 
@@ -258,25 +169,14 @@ async def verify_email_code(email: str, code: str) -> bool:
 async def mark_email_as_verified(email: str) -> bool:
     """
     Mark a user's email as verified
-    
+
     Args:
         email: Email address to mark as verified
-    
+
     Returns:
         True if email was marked as verified, False otherwise
     """
-    from app.database import AuthDatabase
-
-    result = await AuthDatabase.execute(
-        """
-        UPDATE users
-        SET email_verified = true
-        WHERE email = $1
-        """,
-        email
-    )
-    
-    return result == "UPDATE 1"
+    return await UserRepository.mark_email_verified(email)
 
 
 def generate_email_verification_token() -> str:
@@ -287,81 +187,49 @@ def generate_email_verification_token() -> str:
 async def create_email_verification_token(user_id: str, expires_in_hours: int = 48) -> str:
     """
     Create an email verification token for a user
-    
+
     Args:
         user_id: User ID
         expires_in_hours: Token expiration time in hours (default: 48 hours)
-    
+
     Returns:
         The generated verification token
     """
-    from app.database import AuthDatabase
-
     token = generate_email_verification_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
 
     # Invalidate any existing unused tokens for this user
-    await AuthDatabase.execute(
-        """
-        UPDATE email_verification_tokens
-        SET used = true
-        WHERE user_id = $1 AND used = false AND expires_at > now()
-        """,
-        user_id
-    )
+    await VerificationRepository.invalidate_tokens_for_user(user_id)
 
     # Insert new token
-    await AuthDatabase.execute(
-        """
-        INSERT INTO email_verification_tokens (user_id, token, expires_at)
-        VALUES ($1, $2, $3)
-        """,
-        user_id,
-        token,
-        expires_at
-    )
-    
+    await VerificationRepository.create_token(user_id, token, expires_in_hours)
+
     return token
 
 
 async def validate_email_verification_token(token: str) -> Optional[dict]:
     """
     Validate an email verification token
-    
+
     Args:
         token: Email verification token
-    
+
     Returns:
         Dictionary with user_id and email if token is valid, None otherwise
     """
-    from app.database import AuthDatabase
+    token_record = await VerificationRepository.get_valid_token(token)
 
-    # Get token from database
-    token_record = await AuthDatabase.fetchrow(
-        """
-        SELECT evt.id, evt.user_id, evt.expires_at, evt.used, u.email, u.status
-        FROM email_verification_tokens evt
-        JOIN users u ON u.id = evt.user_id
-        WHERE evt.token = $1
-        """,
-        token
-    )
-    
     if not token_record:
         return None
-    
-    # Check if token is used
+
     if token_record['used']:
         return None
-    
-    # Check if token is expired (use database-side comparison for consistency)
+
     if datetime.now(timezone.utc) > token_record['expires_at']:
         return None
-    
-    # Check if user account is suspended
+
     if token_record['status'] == 'suspended':
         return None
-    
+
     return {
         'user_id': str(token_record['user_id']),
         'email': token_record['email']
@@ -371,23 +239,11 @@ async def validate_email_verification_token(token: str) -> Optional[dict]:
 async def mark_email_verification_token_as_used(token: str) -> bool:
     """
     Mark an email verification token as used
-    
+
     Args:
         token: Email verification token
-    
+
     Returns:
         True if token was marked as used, False otherwise
     """
-    from app.database import AuthDatabase
-
-    result = await AuthDatabase.execute(
-        """
-        UPDATE email_verification_tokens
-        SET used = true
-        WHERE token = $1 AND used = false
-        """,
-        token
-    )
-    
-    return result == "UPDATE 1"
-
+    return await VerificationRepository.mark_token_used(token)

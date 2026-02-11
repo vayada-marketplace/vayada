@@ -7,8 +7,9 @@ from datetime import datetime
 import json
 import logging
 
-from app.database import Database, AuthDatabase
 from app.dependencies import get_current_user_id
+from app.repositories.user_repo import UserRepository
+from app.repositories.chat_repo import ChatRepository
 from app.models.chat import (
     CreateChatMessageRequest,
     ChatMessageResponse,
@@ -25,22 +26,18 @@ router = APIRouter(prefix="/collaborations", tags=["chat"])
 # ============================================
 
 async def create_system_message(
-    collaboration_id: str, 
-    content: str, 
+    collaboration_id: str,
+    content: str,
     metadata: dict = None,
     conn = None
 ):
     """Helper to insert a system message into chat"""
-    query = """
-    INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, metadata)
-    VALUES ($1, NULL, $2, 'system', $3)
-    """
-    params = [collaboration_id, content, json.dumps(metadata) if metadata else None]
-    
-    if conn:
-        await conn.execute(query, *params)
-    else:
-        await Database.execute(query, *params)
+    await ChatRepository.create_system_message(
+        collaboration_id,
+        content,
+        json.dumps(metadata) if metadata else None,
+        conn=conn
+    )
 
 
 # ============================================
@@ -55,70 +52,11 @@ async def get_conversations(
     Get all chat threads for the logged-in user.
     Returns partner info, last message, and unread count.
     """
-    query = """
-    WITH user_collabs AS (
-        SELECT
-            c.id as collab_id,
-            c.status as collab_status,
-            c.listing_id,
-            CASE
-                WHEN cr.user_id = $1 THEN 'creator'
-                WHEN hp.user_id = $1 THEN 'hotel'
-            END as my_role,
-            CASE
-                WHEN cr.user_id = $1 THEN hp.user_id
-                ELSE cr.user_id
-            END as partner_user_id
-        FROM collaborations c
-        JOIN creators cr ON cr.id = c.creator_id
-        JOIN hotel_profiles hp ON hp.id = c.hotel_id
-        WHERE (cr.user_id = $1 OR hp.user_id = $1)
-          AND c.status != 'pending'
-    ),
-    latest_messages AS (
-        SELECT DISTINCT ON (collaboration_id)
-            collaboration_id, content, created_at, message_type
-        FROM chat_messages
-        ORDER BY collaboration_id, created_at DESC
-    ),
-    unread_counts AS (
-        SELECT collaboration_id, COUNT(*) as count
-        FROM chat_messages
-        WHERE read_at IS NULL AND sender_id != $1
-        GROUP BY collaboration_id
-    )
-    SELECT
-        uc.collab_id,
-        uc.collab_status,
-        uc.my_role,
-        uc.partner_user_id,
-        COALESCE(p_creator.profile_picture, p_hotel.picture) as partner_avatar,
-        lm.content as last_message_content,
-        lm.created_at as last_message_at,
-        lm.message_type as last_message_type,
-        COALESCE(un.count, 0) as unread_count,
-        l.name as listing_name
-    FROM user_collabs uc
-    LEFT JOIN creators p_creator ON p_creator.user_id = uc.partner_user_id
-    LEFT JOIN hotel_profiles p_hotel ON p_hotel.user_id = uc.partner_user_id
-    LEFT JOIN latest_messages lm ON lm.collaboration_id = uc.collab_id
-    LEFT JOIN unread_counts un ON un.collaboration_id = uc.collab_id
-    LEFT JOIN hotel_listings l ON l.id = uc.listing_id
-    ORDER BY COALESCE(lm.created_at, '1970-01-01') DESC
-    """
+    rows = await ChatRepository.get_conversations(user_id)
 
-    rows = await Database.fetch(query, user_id)
-
-    # Batch-fetch partner names from AuthDatabase
+    # Batch-fetch partner names
     partner_ids = list(set(str(row['partner_user_id']) for row in rows if row['partner_user_id']))
-    if partner_ids:
-        partner_users = await AuthDatabase.fetch(
-            "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
-            partner_ids
-        )
-        partner_names_map = {str(u['id']): u['name'] for u in partner_users}
-    else:
-        partner_names_map = {}
+    partner_names_map = await UserRepository.batch_get_names(partner_ids) if partner_ids else {}
 
     return [
         ConversationResponse(
@@ -144,47 +82,11 @@ async def get_chat_messages(
     user_id: str = Depends(get_current_user_id)
 ):
     """Get chat history"""
-    # 1. Verify access checking user is participant
-    # (Simple check: user must be creator or hotel associated with collab)
-    # We can fetch the collaboration to verify specific user, 
-    # but for now we follow the pattern in collaborations.py (which I added but simplified)
-    
-    # Ideally reuse access check logic
-    
-    query = """
-        SELECT m.*,
-               CASE
-                   WHEN c.profile_picture IS NOT NULL THEN c.profile_picture
-                   WHEN hp.picture IS NOT NULL THEN hp.picture
-                   ELSE NULL
-               END as sender_avatar
-        FROM chat_messages m
-        LEFT JOIN creators c ON c.user_id = m.sender_id
-        LEFT JOIN hotel_profiles hp ON hp.user_id = m.sender_id
-        WHERE m.collaboration_id = $1
-    """
-    params = [collaboration_id]
-    param_idx = 2
+    messages = await ChatRepository.get_messages(collaboration_id, before)
 
-    if before:
-        query += f" AND m.created_at < ${param_idx}"
-        params.append(before)
-        param_idx += 1
-
-    query += " ORDER BY m.created_at DESC LIMIT 50"
-
-    messages = await Database.fetch(query, *params)
-
-    # Batch-fetch sender names from AuthDatabase
+    # Batch-fetch sender names
     sender_ids = list(set(str(m['sender_id']) for m in messages if m['sender_id']))
-    if sender_ids:
-        sender_users = await AuthDatabase.fetch(
-            "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
-            sender_ids
-        )
-        sender_names_map = {str(u['id']): u['name'] for u in sender_users}
-    else:
-        sender_names_map = {}
+    sender_names_map = await UserRepository.batch_get_names(sender_ids) if sender_ids else {}
 
     return [
         ChatMessageResponse(
@@ -211,15 +113,9 @@ async def send_chat_message(
 ):
     """Send a text message"""
     # TODO: Verify access
-    
-    query = """
-    INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type)
-    VALUES ($1, $2, $3, $4)
-    RETURNING id, created_at
-    """
-    
-    row = await Database.fetchrow(query, collaboration_id, user_id, request.content, request.message_type)
-    
+
+    row = await ChatRepository.send_message(collaboration_id, user_id, request.content, request.message_type)
+
     return ChatMessageResponse(
         id=str(row['id']),
         collaboration_id=collaboration_id,
@@ -230,8 +126,9 @@ async def send_chat_message(
         metadata=None,
         # Default sender info (frontend will often reload or have current user info)
         sender_name="Me",
-        sender_avatar=None 
+        sender_avatar=None
     )
+
 @router.post("/{collaboration_id}/read")
 async def mark_messages_as_read(
     collaboration_id: str,
@@ -242,14 +139,7 @@ async def mark_messages_as_read(
     Logic: Mark all messages where sender is NOT the current user (or is system/NULL).
     """
     try:
-        query = """
-        UPDATE chat_messages 
-        SET read_at = NOW() 
-        WHERE collaboration_id = $1 
-          AND (sender_id != $2 OR sender_id IS NULL)
-          AND read_at IS NULL
-        """
-        await Database.execute(query, collaboration_id, user_id)
+        await ChatRepository.mark_as_read(collaboration_id, user_id)
         return {"status": "success", "message": "Messages marked as read"}
     except Exception as e:
         logger.error(f"Error marking messages as read: {str(e)}")

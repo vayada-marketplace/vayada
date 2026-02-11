@@ -8,7 +8,11 @@ from decimal import Decimal
 import json
 import logging
 
-from app.database import Database, AuthDatabase
+from app.database import Database
+from app.repositories.user_repo import UserRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 from app.dependencies import get_current_user_id, get_current_user_id_allow_pending, get_current_creator_id
 from app.email_service import send_email, create_profile_completion_email_html
 from app.auth import create_email_verification_token
@@ -45,10 +49,7 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
     """
     try:
         # Verify user is a creator
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type, name FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
             raise HTTPException(
@@ -63,13 +64,8 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
             )
 
         # Get creator profile
-        creator = await Database.fetchrow(
-            """
-            SELECT id, location, short_description, portfolio_link, phone
-            FROM creators
-            WHERE user_id = $1
-            """,
-            user_id
+        creator = await CreatorRepository.get_by_user_id(
+            user_id, columns="id, location, short_description, portfolio_link, phone"
         )
 
         if not creator:
@@ -79,13 +75,8 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
             )
 
         # Check for platforms
-        platforms = await Database.fetch(
-            """
-            SELECT id, name, handle, followers, engagement_rate
-            FROM creator_platforms
-            WHERE creator_id = $1
-            """,
-            creator['id']
+        platforms = await CreatorRepository.get_platforms(
+            creator['id'], columns="id, name, handle, followers, engagement_rate"
         )
         
         # Determine missing fields
@@ -148,10 +139,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
     """
     try:
         # Verify user is a creator
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type, name, email, status FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name, email, status")
 
         if not user:
             raise HTTPException(
@@ -166,35 +154,21 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
             )
 
         # Get creator profile
-        creator = await Database.fetchrow(
-            """
-            SELECT id, location, short_description, portfolio_link, phone,
-                   profile_picture, creator_type, created_at, updated_at
-            FROM creators
-            WHERE user_id = $1
-            """,
-            user_id
+        creator = await CreatorRepository.get_by_user_id(
+            user_id,
+            columns="id, location, short_description, portfolio_link, phone, profile_picture, creator_type, created_at, updated_at"
         )
-        
+
         if not creator:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
-        
+
         creator_id = creator['id']
-        
+
         # Get platforms
-        platforms_data = await Database.fetch(
-            """
-            SELECT id, name, handle, followers, engagement_rate, 
-                   top_countries, top_age_groups, gender_split
-            FROM creator_platforms
-            WHERE creator_id = $1
-            ORDER BY name
-            """,
-            creator_id
-        )
+        platforms_data = await CreatorRepository.get_platforms(creator_id)
         
         platforms_response = [
             PlatformResponse(
@@ -210,17 +184,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
         ]
         
         # Get ratings and reviews
-        ratings_data = await Database.fetch(
-            """
-            SELECT cr.id, cr.hotel_id, cr.rating, cr.comment, cr.created_at,
-                   hp.name as hotel_name
-            FROM creator_ratings cr
-            LEFT JOIN hotel_profiles hp ON cr.hotel_id = hp.id
-            WHERE cr.creator_id = $1
-            ORDER BY cr.created_at DESC
-            """,
-            creator_id
-        )
+        ratings_data = await CreatorRepository.get_ratings(creator_id)
         
         total_reviews = len(ratings_data)
         average_rating = (
@@ -289,10 +253,7 @@ async def update_creator_profile(
     """
     try:
         # Verify user is a creator
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type, name FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
             raise HTTPException(
@@ -307,9 +268,8 @@ async def update_creator_profile(
             )
 
         # Get creator profile with completion status and current profile picture
-        creator = await Database.fetchrow(
-            "SELECT id, profile_complete, profile_picture FROM creators WHERE user_id = $1",
-            user_id
+        creator = await CreatorRepository.get_by_user_id(
+            user_id, columns="id, profile_complete, profile_picture"
         )
 
         if not creator:
@@ -321,14 +281,10 @@ async def update_creator_profile(
         creator_id = creator['id']
         was_complete_before = creator.get('profile_complete', False)
         old_profile_picture = creator.get('profile_picture')
-        
-        # Update user name on AuthDatabase (separate from business DB transaction)
+
+        # Update user name on auth database (separate from business DB transaction)
         if request.name is not None:
-            await AuthDatabase.execute(
-                "UPDATE users SET name = $1, updated_at = now() WHERE id = $2",
-                request.name,
-                user_id
-            )
+            await UserRepository.update_name(user_id, request.name)
 
         # Start transaction - update creator profile and platforms
         pool = await Database.get_pool()
@@ -423,19 +379,13 @@ async def update_creator_profile(
                 logger.warning(f"Failed to delete old profile picture from S3: {e}")
 
         # Fetch updated profile with platforms and check if profile became complete
-        creator_data = await Database.fetchrow(
-            """
-            SELECT id, location, short_description, portfolio_link, phone,
-                   profile_picture, creator_type, created_at, updated_at, profile_complete, user_id
-            FROM creators
-            WHERE id = $1
-            """,
-            creator_id
+        creator_data = await CreatorRepository.get_by_id(
+            creator_id,
+            columns="id, location, short_description, portfolio_link, phone, profile_picture, creator_type, created_at, updated_at, profile_complete, user_id"
         )
 
-        user_data = await AuthDatabase.fetchrow(
-            "SELECT name, email, status, email_verified FROM users WHERE id = $1",
-            creator_data['user_id']
+        user_data = await UserRepository.get_by_id(
+            creator_data['user_id'], columns="name, email, status, email_verified"
         )
 
         # Check if profile just became complete (transition from incomplete to complete)
@@ -477,16 +427,7 @@ async def update_creator_profile(
                 # Don't fail the request if email fails
                 logger.error(f"Error sending profile completion email: {str(e)}")
         
-        platforms_data = await Database.fetch(
-            """
-            SELECT id, name, handle, followers, engagement_rate, 
-                   top_countries, top_age_groups, gender_split
-            FROM creator_platforms
-            WHERE creator_id = $1
-            ORDER BY name
-            """,
-            creator_id
-        )
+        platforms_data = await CreatorRepository.get_platforms(creator_id)
         
         # Calculate audience size
         audience_size = sum(p['followers'] for p in platforms_data)
@@ -544,10 +485,7 @@ async def get_creator_collaborations(
     """
     try:
         # Verify user is a creator and get creator profile
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user or user['type'] != 'creator':
             raise HTTPException(
@@ -555,11 +493,8 @@ async def get_creator_collaborations(
                 detail="This endpoint is only available for creators"
             )
 
-        creator = await Database.fetchrow(
-            "SELECT id FROM creators WHERE user_id = $1",
-            user_id
-        )
-        
+        creator = await CreatorRepository.get_by_user_id(user_id, columns="id")
+
         if not creator:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -568,49 +503,13 @@ async def get_creator_collaborations(
         
         creator_id = str(creator['id'])
         
-        # Build query with filters
-        query = """
-            SELECT 
-                c.id, c.initiator_type, c.status, c.created_at,
-                c.why_great_fit, c.collaboration_type,
-                c.travel_date_from, c.travel_date_to,
-                c.free_stay_min_nights, c.free_stay_max_nights,
-                c.paid_amount, c.discount_percentage,
-                c.hotel_id, c.listing_id,
-                hp.name as hotel_name,
-                hp.picture as hotel_profile_picture,
-                hl.name as listing_name,
-                hl.location as listing_location,
-                hl.images as listing_images
-            FROM collaborations c
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.creator_id = $1
-        """
-        
-        params = [creator_id]
-        param_counter = 2
-        
-        if collab_status:
-            query += f" AND c.status = ${param_counter}"
-            params.append(collab_status)
-            param_counter += 1
-        
-        if initiated_by:
-            query += f" AND c.initiator_type = ${param_counter}"
-            params.append(initiated_by)
-            param_counter += 1
-        
-        query += " ORDER BY c.created_at DESC"
-        
-        collaborations_data = await Database.fetch(query, *params)
-        
+        collaborations_data = await CollaborationRepository.get_creator_collaborations(
+            creator_id, status=collab_status, initiator_type=initiated_by
+        )
+
         # Fetch all deliverables for these collaborations in one go
         collab_ids = [str(c['id']) for c in collaborations_data]
-        all_deliverables_rows = await Database.fetch(
-            "SELECT id, collaboration_id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = ANY($1::uuid[])",
-            collab_ids
-        )
+        all_deliverables_rows = await CollaborationRepository.get_deliverables_batch(collab_ids)
         
         # Group deliverables by collaboration_id
         collab_deliverables_map = {}
@@ -683,10 +582,7 @@ async def get_creator_collaboration_detail(
     """
     try:
         # Verify user is a creator
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user or user['type'] != 'creator':
             raise HTTPException(
@@ -694,11 +590,8 @@ async def get_creator_collaboration_detail(
                 detail="This endpoint is only available for creators"
             )
 
-        creator_profile = await Database.fetchrow(
-            "SELECT id FROM creators WHERE user_id = $1",
-            user_id
-        )
-        
+        creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
+
         if not creator_profile:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -708,44 +601,8 @@ async def get_creator_collaboration_detail(
         creator_id = str(creator_profile['id'])
         
         # Fetch collaboration details with full hotel and listing info
-        collab = await Database.fetchrow(
-            """
-            SELECT 
-                c.id, c.initiator_type, c.status, c.created_at, c.why_great_fit,
-                c.collaboration_type, c.free_stay_min_nights, c.free_stay_max_nights,
-                c.paid_amount, c.discount_percentage,
-                c.travel_date_from, c.travel_date_to,
-                c.preferred_date_from, c.preferred_date_to,
-                c.preferred_months, c.consent,
-                c.updated_at, c.responded_at, c.cancelled_at, c.completed_at,
-                c.hotel_id, c.listing_id,
-                hp.name as hotel_name,
-                hp.location as hotel_location,
-                hp.picture as hotel_profile_picture,
-                hp.website as hotel_website,
-                hp.about as hotel_about,
-                hp.phone as hotel_phone,
-                hl.name as listing_name,
-                hl.location as listing_location,
-                hl.images as listing_images,
-                lcr.id as req_id,
-                lcr.platforms as req_platforms,
-                lcr.min_followers as req_min_followers,
-                lcr.target_countries as req_target_countries,
-                lcr.target_age_min as req_target_age_min,
-                lcr.target_age_max as req_target_age_max,
-                lcr.target_age_groups as req_target_age_groups,
-                lcr.creator_types as req_creator_types,
-                lcr.created_at as req_created_at,
-                lcr.updated_at as req_updated_at
-            FROM collaborations c
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            LEFT JOIN listing_creator_requirements lcr ON lcr.listing_id = hl.id
-            WHERE c.id = $1 AND c.creator_id = $2
-            """,
-            collaboration_id,
-            creator_id
+        collab = await CollaborationRepository.get_creator_collaboration_detail(
+            collaboration_id, creator_id
         )
         
         if not collab:
@@ -754,11 +611,8 @@ async def get_creator_collaboration_detail(
                 detail="Collaboration not found"
             )
             
-        # Fetch deliverables from the new table
-        deliverables_rows = await Database.fetch(
-            "SELECT id, platform, type, quantity, status FROM collaboration_deliverables WHERE collaboration_id = $1 ORDER BY platform, type",
-            collaboration_id
-        )
+        # Fetch deliverables
+        deliverables_rows = await CollaborationRepository.get_deliverables(collaboration_id)
         
         deliverables = []
         platform_map = {}
@@ -776,11 +630,9 @@ async def get_creator_collaboration_detail(
         deliverables = [{"platform": p, "deliverables": dils} for p, dils in platform_map.items()]
 
         # Fetch allowed collaboration types from listing
-        allowed_types_rows = await Database.fetch(
-            "SELECT DISTINCT collaboration_type FROM listing_collaboration_offerings WHERE listing_id = $1",
+        allowed_collaboration_types = await HotelRepository.get_listing_collaboration_types(
             str(collab['listing_id'])
         )
-        allowed_collaboration_types = [row['collaboration_type'] for row in allowed_types_rows]
 
         # Prepare creator requirements if they exist
         creator_requirements = None

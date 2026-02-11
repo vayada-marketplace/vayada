@@ -4,8 +4,12 @@ Collaboration routes for creators and hotels
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from datetime import datetime
-from app.database import Database, AuthDatabase
+from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
+from app.repositories.user_repo import UserRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 import logging
 import json
 import uuid
@@ -36,15 +40,7 @@ async def get_collaboration_deliverables(collaboration_id: str) -> List[Platform
     Fetch deliverables for a collaboration from the collaboration_deliverables table
     and format them into the PlatformDeliverablesItem structure.
     """
-    rows = await Database.fetch(
-        """
-        SELECT id, platform, type, quantity, status
-        FROM collaboration_deliverables
-        WHERE collaboration_id = $1
-        ORDER BY platform, type
-        """,
-        collaboration_id
-    )
+    rows = await CollaborationRepository.get_deliverables(collaboration_id)
     
     if not rows:
         return []
@@ -85,10 +81,7 @@ async def create_collaboration(
         # Validate based on initiator_type
         if request.initiator_type == "creator":
             # Verify creator_id matches authenticated user
-            user = await AuthDatabase.fetchrow(
-                "SELECT id, type FROM users WHERE id = $1",
-                user_id
-            )
+            user = await UserRepository.get_by_id(user_id, columns="id, type")
 
             if not user or user['type'] != 'creator':
                 raise HTTPException(
@@ -97,10 +90,7 @@ async def create_collaboration(
                 )
             
             # Get creator profile
-            creator = await Database.fetchrow(
-                "SELECT id FROM creators WHERE user_id = $1",
-                user_id
-            )
+            creator = await CreatorRepository.get_by_user_id(user_id, columns="id")
             
             if not creator:
                 raise HTTPException(
@@ -112,10 +102,7 @@ async def create_collaboration(
             
         elif request.initiator_type == "hotel":
             # Verify user is a hotel
-            user = await AuthDatabase.fetchrow(
-                "SELECT id, type FROM users WHERE id = $1",
-                user_id
-            )
+            user = await UserRepository.get_by_id(user_id, columns="id, type")
 
             if not user or user['type'] != 'hotel':
                 raise HTTPException(
@@ -124,10 +111,7 @@ async def create_collaboration(
                 )
             
             # Get hotel profile
-            hotel_profile = await Database.fetchrow(
-                "SELECT id FROM hotel_profiles WHERE user_id = $1",
-                user_id
-            )
+            hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             
             if not hotel_profile:
                 raise HTTPException(
@@ -138,16 +122,7 @@ async def create_collaboration(
             authenticated_hotel_id = str(hotel_profile['id'])
         
         # Verify listing exists
-        listing = await Database.fetchrow(
-            """
-            SELECT hl.id, hl.hotel_profile_id, hl.name, hl.location, hl.status,
-                   hp.name as hotel_name
-            FROM hotel_listings hl
-            JOIN hotel_profiles hp ON hp.id = hl.hotel_profile_id
-            WHERE hl.id = $1
-            """,
-            request.listing_id
-        )
+        listing = await CollaborationRepository.get_listing_with_hotel(request.listing_id)
         
         if not listing:
             raise HTTPException(status_code=404, detail="Listing not found")
@@ -160,17 +135,11 @@ async def create_collaboration(
                 raise HTTPException(status_code=403, detail="Listing ownership mismatch")
         
         # Verify creator exists
-        creator_record = await Database.fetchrow(
-            "SELECT id, user_id, profile_picture FROM creators WHERE id = $1",
-            creator_id
-        )
+        creator_record = await CreatorRepository.get_by_id(creator_id, columns="id, user_id, profile_picture")
         if not creator_record:
             raise HTTPException(status_code=404, detail="Creator not found")
 
-        creator_user_info = await AuthDatabase.fetchrow(
-            "SELECT name, status FROM users WHERE id = $1",
-            creator_record['user_id']
-        )
+        creator_user_info = await UserRepository.get_by_id(creator_record['user_id'], columns="name, status")
         
         
         # Create collaboration
@@ -280,14 +249,11 @@ async def respond_to_collaboration_request(
     """
     try:
         # Fetch collaboration
-        collab = await Database.fetchrow(
-            "SELECT * FROM collaborations WHERE id = $1",
-            collaboration_id
-        )
-        
+        collab = await CollaborationRepository.get_by_id(collaboration_id)
+
         if not collab:
             raise HTTPException(status_code=404, detail="Collaboration not found")
-            
+
         if collab['status'] != 'pending':
             raise HTTPException(
                 status_code=400, 
@@ -300,19 +266,13 @@ async def respond_to_collaboration_request(
         
         if collab['initiator_type'] == "creator":
             # Initiated by creator -> recipient is the hotel
-            hotel_profile = await Database.fetchrow(
-                "SELECT id FROM hotel_profiles WHERE user_id = $1",
-                user_id
-            )
+            hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             if hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id']):
                 is_recipient = True
                 recipient_role = "Hotel"
         elif collab['initiator_type'] == "hotel":
             # Initiated by hotel -> recipient is the creator
-            creator_profile = await Database.fetchrow(
-                "SELECT id FROM creators WHERE user_id = $1",
-                user_id
-            )
+            creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
             if creator_profile and str(creator_profile['id']) == str(collab['creator_id']):
                 is_recipient = True
                 recipient_role = "Creator"
@@ -365,25 +325,10 @@ async def respond_to_collaboration_request(
                     await create_system_message(collaboration_id, msg, conn=conn)
 
         # Fetch full data for response
-        updated = await Database.fetchrow(
-            """
-            SELECT c.*, cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.id = $1
-            """,
-            collaboration_id
-        )
+        updated = await CollaborationRepository.get_full(collaboration_id)
 
-        # Fetch creator name from AuthDatabase
-        creator_user = await AuthDatabase.fetchrow(
-            "SELECT name FROM users WHERE id = $1",
-            updated['creator_user_id']
-        )
+        # Fetch creator name
+        creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
@@ -442,21 +387,21 @@ async def update_collaboration_terms(
     Suggest changes to the terms (Negotiation).
     """
     try:
-        current_collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        current_collab = await CollaborationRepository.get_by_id(collaboration_id)
         if not current_collab:
             raise HTTPException(status_code=404, detail="Collaboration not found")
-            
+
         is_creator = False
         is_hotel = False
         sender_name = "User"
-        
-        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+
+        creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
         if creator_profile and str(creator_profile['id']) == str(current_collab['creator_id']):
             is_creator = True
             sender_name = "Creator"
-            
+
         if not is_creator:
-            hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             if hotel_profile and str(hotel_profile['id']) == str(current_collab['hotel_id']):
                 is_hotel = True
                 sender_name = "Hotel"
@@ -606,25 +551,10 @@ async def update_collaboration_terms(
                 await create_system_message(collaboration_id, sys_msg, conn=conn)
 
         # Return updated
-        updated = await Database.fetchrow(
-            """
-            SELECT c.*, cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.id = $1
-            """,
-            collaboration_id
-        )
+        updated = await CollaborationRepository.get_full(collaboration_id)
 
-        # Fetch creator name from AuthDatabase
-        creator_user = await AuthDatabase.fetchrow(
-            "SELECT name FROM users WHERE id = $1",
-            updated['creator_user_id']
-        )
+        # Fetch creator name
+        creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
@@ -680,25 +610,25 @@ async def approve_collaboration_terms(
     Approve terms (Double Confirmation).
     """
     try:
-        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        collab = await CollaborationRepository.get_by_id(collaboration_id)
         if not collab:
             raise HTTPException(status_code=404, detail="Collaboration not found")
-            
+
         is_creator = False
         is_hotel = False
         sender_name = "User"
-        
-        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+
+        creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
         if creator_profile and str(creator_profile['id']) == str(collab['creator_id']):
             is_creator = True
             sender_name = "Creator"
-            
+
         if not is_creator:
-            hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+            hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             if hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id']):
                 is_hotel = True
                 sender_name = "Hotel"
-                
+
         if not is_creator and not is_hotel:
             raise HTTPException(status_code=403, detail="Not authorized")
 
@@ -726,25 +656,10 @@ async def approve_collaboration_terms(
                     await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
 
         # Return Updated
-        updated = await Database.fetchrow(
-            """
-            SELECT c.*, cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.id = $1
-            """,
-            collaboration_id
-        )
+        updated = await CollaborationRepository.get_full(collaboration_id)
 
-        # Fetch creator name from AuthDatabase
-        creator_user = await AuthDatabase.fetchrow(
-            "SELECT name FROM users WHERE id = $1",
-            updated['creator_user_id']
-        )
+        # Fetch creator name
+        creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
@@ -801,15 +716,15 @@ async def cancel_collaboration(
     Can be performed by either party at any stage before completion.
     """
     try:
-        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        collab = await CollaborationRepository.get_by_id(collaboration_id)
         if not collab:
             raise HTTPException(status_code=404, detail="Collaboration not found")
-            
+
         # Verify permissions
-        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
         is_creator = creator_profile and str(creator_profile['id']) == str(collab['creator_id'])
-        
-        hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+
+        hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
         is_hotel = hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id'])
         
         if not is_creator and not is_hotel:
@@ -839,25 +754,10 @@ async def cancel_collaboration(
                 await create_system_message(collaboration_id, msg, conn=conn)
 
         # Return Updated
-        updated = await Database.fetchrow(
-            """
-            SELECT c.*, cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.id = $1
-            """,
-            collaboration_id
-        )
+        updated = await CollaborationRepository.get_full(collaboration_id)
 
-        # Fetch creator name from AuthDatabase
-        creator_user = await AuthDatabase.fetchrow(
-            "SELECT name FROM users WHERE id = $1",
-            updated['creator_user_id']
-        )
+        # Fetch creator name
+        creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
@@ -913,60 +813,39 @@ async def toggle_deliverable(
     Toggle completion status of a deliverable.
     """
     try:
-        collab = await Database.fetchrow("SELECT * FROM collaborations WHERE id = $1", collaboration_id)
+        collab = await CollaborationRepository.get_by_id(collaboration_id)
         if not collab:
             raise HTTPException(status_code=404, detail="Collaboration not found")
-            
+
         # Auth (simplified for restoration)
-        creator_profile = await Database.fetchrow("SELECT id FROM creators WHERE user_id = $1", user_id)
+        creator_profile = await CreatorRepository.get_by_user_id(user_id, columns="id")
         is_creator = creator_profile and str(creator_profile['id']) == str(collab['creator_id'])
-        hotel_profile = await Database.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", user_id)
+        hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
         is_hotel = hotel_profile and str(hotel_profile['id']) == str(collab['hotel_id'])
         
         if not is_creator and not is_hotel:
             raise HTTPException(status_code=403, detail="Not authorized")
             
         # Toggle in the new table
-        row = await Database.fetchrow(
-            "SELECT type, status FROM collaboration_deliverables WHERE id = $1 AND collaboration_id = $2",
-            deliverable_id, collaboration_id
-        )
-        
+        row = await CollaborationRepository.get_deliverable(deliverable_id, collaboration_id)
+
         if not row:
             raise HTTPException(status_code=404, detail="Deliverable not found")
-            
+
         new_status = "completed" if row['status'] == "pending" else "pending"
         deliverable_name = row['type']
-        
-        await Database.execute(
-            "UPDATE collaboration_deliverables SET status = $1, updated_at = NOW() WHERE id = $2",
-            new_status, deliverable_id
-        )
+
+        await CollaborationRepository.update_deliverable_status(deliverable_id, new_status)
         
 
         status_text = "completed" if new_status == "completed" else "incomplete"
         await create_system_message(collaboration_id, f"{'✅' if new_status == 'completed' else '🔄'} Deliverable '{deliverable_name}' marked as {status_text}.")
         
         # Return Updated
-        updated = await Database.fetchrow(
-            """
-            SELECT c.*, cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name, hl.name as listing_name, hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE c.id = $1
-            """,
-            collaboration_id
-        )
+        updated = await CollaborationRepository.get_full(collaboration_id)
 
-        # Fetch creator name from AuthDatabase
-        creator_user = await AuthDatabase.fetchrow(
-            "SELECT name FROM users WHERE id = $1",
-            updated['creator_user_id']
-        )
+        # Fetch creator name
+        creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
@@ -1024,10 +903,7 @@ async def rate_collaboration(
     """
     try:
         # Verify user is a hotel
-        user = await AuthDatabase.fetchrow(
-            "SELECT id, type FROM users WHERE id = $1",
-            user_id
-        )
+        user = await UserRepository.get_by_id(user_id, columns="id, type")
 
         if not user or user['type'] != 'hotel':
             raise HTTPException(
@@ -1036,10 +912,7 @@ async def rate_collaboration(
             )
 
         # Get hotel profile
-        hotel_profile = await Database.fetchrow(
-            "SELECT id FROM hotel_profiles WHERE user_id = $1",
-            user_id
-        )
+        hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
 
         if not hotel_profile:
             raise HTTPException(
@@ -1050,10 +923,7 @@ async def rate_collaboration(
         hotel_profile_id = str(hotel_profile['id'])
 
         # Fetch collaboration
-        collab = await Database.fetchrow(
-            "SELECT * FROM collaborations WHERE id = $1",
-            collaboration_id
-        )
+        collab = await CollaborationRepository.get_by_id(collaboration_id)
 
         if not collab:
             raise HTTPException(
@@ -1076,10 +946,7 @@ async def rate_collaboration(
             )
 
         # Check if already rated
-        existing_rating = await Database.fetchrow(
-            "SELECT id FROM creator_ratings WHERE collaboration_id = $1",
-            collaboration_id
-        )
+        existing_rating = await CollaborationRepository.get_rating_by_collaboration(collaboration_id)
 
         if existing_rating:
             raise HTTPException(
@@ -1088,12 +955,7 @@ async def rate_collaboration(
             )
 
         # Insert rating
-        rating_row = await Database.fetchrow(
-            """
-            INSERT INTO creator_ratings (creator_id, hotel_id, collaboration_id, rating, comment)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, created_at
-            """,
+        rating_row = await CollaborationRepository.create_rating(
             str(collab['creator_id']),
             hotel_profile_id,
             collaboration_id,

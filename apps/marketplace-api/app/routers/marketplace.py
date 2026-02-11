@@ -4,7 +4,6 @@ Marketplace routes for public browsing
 from fastapi import APIRouter, HTTPException, status, Query
 from typing import List, Optional, Literal
 from datetime import datetime
-from app.database import Database, AuthDatabase
 import logging
 import json
 
@@ -14,6 +13,9 @@ from app.models.marketplace import (
     PlatformMarketplaceResponse,
     CreatorMarketplaceResponse,
 )
+from app.repositories.user_repo import UserRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
 
 logger = logging.getLogger(__name__)
 
@@ -28,38 +30,15 @@ async def get_all_listings():
     Includes hotel information, listing details, and collaboration offerings.
     """
     try:
-        # Pre-fetch verified user IDs from AuthDatabase
-        verified_users = await AuthDatabase.fetch(
-            "SELECT id FROM users WHERE status = 'verified'"
-        )
+        # Pre-fetch verified user IDs
+        verified_users = await UserRepository.get_verified_users()
         verified_ids = [r['id'] for r in verified_users]
 
         if not verified_ids:
             return []
 
         # Get all listings from hotels with complete profiles whose user_id is verified
-        listings_data = await Database.fetch(
-            """
-            SELECT
-                hl.id,
-                hl.hotel_profile_id,
-                hl.name,
-                hl.location,
-                hl.description,
-                hl.accommodation_type,
-                hl.images,
-                hl.status,
-                hl.created_at,
-                hp.name as hotel_name,
-                hp.picture as hotel_picture
-            FROM hotel_listings hl
-            JOIN hotel_profiles hp ON hp.id = hl.hotel_profile_id
-            WHERE hp.profile_complete = true
-            AND hp.user_id = ANY($1::uuid[])
-            ORDER BY hl.created_at DESC
-            """,
-            verified_ids
-        )
+        listings_data = await HotelRepository.get_marketplace_listings(verified_ids)
         
         if not listings_data:
             return []
@@ -68,19 +47,7 @@ async def get_all_listings():
         listing_ids = [str(l['id']) for l in listings_data]
         
         # Get all collaboration offerings for these listings
-        if listing_ids:
-            placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
-            offerings_query = f"""
-                SELECT id, listing_id, collaboration_type, availability_months, platforms,
-                       free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
-                       created_at, updated_at
-                FROM listing_collaboration_offerings
-                WHERE listing_id IN ({placeholders})
-                ORDER BY listing_id, created_at DESC
-            """
-            offerings_data = await Database.fetch(offerings_query, *listing_ids)
-        else:
-            offerings_data = []
+        offerings_data = await HotelRepository.get_offerings_for_listings(listing_ids)
         
         # Create a map of listing_id -> offerings
         offerings_map = {}
@@ -104,17 +71,7 @@ async def get_all_listings():
             ))
         
         # Get creator requirements for these listings
-        if listing_ids:
-            placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
-            requirements_query = f"""
-                SELECT id, listing_id, platforms, min_followers, target_countries,
-                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
-                FROM listing_creator_requirements
-                WHERE listing_id IN ({placeholders})
-            """
-            requirements_data = await Database.fetch(requirements_query, *listing_ids)
-        else:
-            requirements_data = []
+        requirements_data = await HotelRepository.get_requirements_for_listings(listing_ids)
 
         # Create a map of listing_id -> requirements
         requirements_map = {}
@@ -180,54 +137,18 @@ async def get_all_creators(
     - creator_type: Filter by creator type(s) - can pass multiple values (e.g., ?creator_type=Lifestyle&creator_type=Travel)
     """
     try:
-        # Pre-fetch verified user data from AuthDatabase
-        verified_users = await AuthDatabase.fetch(
-            "SELECT id, name, status FROM users WHERE status = 'verified'"
-        )
+        # Pre-fetch verified user data
+        verified_users = await UserRepository.get_verified_users(columns="id, name, status")
         verified_ids = [r['id'] for r in verified_users]
         users_map = {str(u['id']): u for u in verified_users}
 
         if not verified_ids:
             return []
 
-        # Build dynamic query with filters (no JOIN on users - auth data comes from AuthDatabase)
-        query = """
-            SELECT
-                c.id,
-                c.user_id,
-                c.location,
-                c.short_description,
-                c.portfolio_link,
-                c.profile_picture,
-                c.creator_type,
-                c.created_at,
-                COALESCE(rating_stats.average_rating, 0.0) as average_rating,
-                COALESCE(rating_stats.total_reviews, 0) as total_reviews
-            FROM creators c
-            LEFT JOIN (
-                SELECT
-                    creator_id,
-                    AVG(rating)::float as average_rating,
-                    COUNT(*)::int as total_reviews
-                FROM creator_ratings
-                GROUP BY creator_id
-            ) rating_stats ON rating_stats.creator_id = c.id
-            WHERE c.profile_complete = true
-            AND c.user_id = ANY($1::uuid[])
-        """
-
-        params = [verified_ids]
-        param_counter = 2
-
-        # Add creator_type filter if provided
-        if creator_type:
-            query += f" AND c.creator_type = ANY(${param_counter}::text[])"
-            params.append(creator_type)
-            param_counter += 1
-
-        query += " ORDER BY c.created_at DESC"
-
-        creators_data = await Database.fetch(query, *params)
+        # Fetch creators with complete profiles whose user_id is verified
+        creators_data = await CreatorRepository.get_complete_creators_by_user_ids(
+            verified_ids, creator_type_filter=creator_type
+        )
 
         if not creators_data:
             return []
@@ -236,18 +157,7 @@ async def get_all_creators(
         creator_ids = [c['id'] for c in creators_data]
         
         # Get all platforms for these creators
-        if creator_ids:
-            placeholders = ','.join([f'${i+1}' for i in range(len(creator_ids))])
-            platforms_query = f"""
-                SELECT id, creator_id, name, handle, followers, engagement_rate,
-                       top_countries, top_age_groups, gender_split
-                FROM creator_platforms
-                WHERE creator_id IN ({placeholders})
-                ORDER BY creator_id, name
-            """
-            platforms_data = await Database.fetch(platforms_query, *creator_ids)
-        else:
-            platforms_data = []
+        platforms_data = await CreatorRepository.get_platforms_for_creators(creator_ids)
         
         # Create a map of creator_id -> platforms
         platforms_map = {}
