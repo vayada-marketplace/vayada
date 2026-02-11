@@ -1,11 +1,14 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   PhotoIcon,
   XMarkIcon,
   ArrowPathIcon,
 } from '@heroicons/react/24/outline'
+import { settingsService } from '@/services/settings'
+
+const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
 type Tab = 'media' | 'colors' | 'fonts'
 
@@ -35,18 +38,19 @@ const FONT_PAIRINGS = [
     bodyFamily: "'Inter', sans-serif",
   },
   {
-    id: 'classic-sans',
-    name: 'Classic Sans',
-    fonts: 'Montserrat + Open Sans',
-    preview: 'Professional & Refined',
-    headingFamily: "'Montserrat', sans-serif",
-    bodyFamily: "'Open Sans', sans-serif",
+    id: 'grand-classic',
+    name: 'Grand Classic',
+    fonts: 'Lora + Source Sans Pro',
+    preview: 'Stately & Readable',
+    headingFamily: "'Lora', serif",
+    bodyFamily: "'Source Sans Pro', sans-serif",
   },
 ]
 
 export default function DesignStudioPage() {
   const [activeTab, setActiveTab] = useState<Tab>('media')
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   // Media & Content state
@@ -61,6 +65,22 @@ export default function DesignStudioPage() {
 
   // Fonts state
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
+
+  useEffect(() => {
+    settingsService.getDesignSettings()
+      .then((settings) => {
+        if (settings.hero_image) setHeroImage(settings.hero_image)
+        if (settings.hero_heading) setHeroHeading(settings.hero_heading)
+        if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext)
+        if (settings.primary_color) setPrimaryColor(settings.primary_color)
+        if (settings.accent_color) setAccentColor(settings.accent_color)
+        if (settings.font_pairing) setSelectedFont(settings.font_pairing)
+      })
+      .catch(() => {
+        // Keep attractive defaults on error
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -84,8 +104,14 @@ export default function DesignStudioPage() {
     try {
       setSaving(true)
       setFeedback(null)
-      // TODO: wire to backend API
-      await new Promise((r) => setTimeout(r, 500))
+      await settingsService.updateDesignSettings({
+        hero_image: heroImage,
+        hero_heading: heroHeading,
+        hero_subtext: heroSubtext,
+        primary_color: primaryColor,
+        accent_color: accentColor,
+        font_pairing: selectedFont,
+      })
       setFeedback({ type: 'success', message: 'Design settings saved successfully' })
     } catch {
       setFeedback({ type: 'error', message: 'Failed to save design settings' })
@@ -107,8 +133,19 @@ export default function DesignStudioPage() {
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
 
+  if (loading) {
+    return (
+      <div className="p-6 h-full flex items-center justify-center">
+        <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
+        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 h-full flex flex-col">
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
       <div className="shrink-0">
         <h1 className="text-xl font-bold text-gray-900">Design Studio</h1>
         <p className="text-sm text-gray-500 mt-0.5">Customize your booking engine&apos;s look and feel</p>
@@ -368,7 +405,7 @@ export default function DesignStudioPage() {
           </div>
 
           {/* Preview content — scrollable */}
-          <div className="flex-1 overflow-y-auto bg-white">
+          <div className="flex-1 overflow-y-auto bg-white" style={{ fontFamily: currentFont.bodyFamily }}>
 
             {/* ===== HERO SECTION ===== */}
             <div className="relative h-[280px] w-full">

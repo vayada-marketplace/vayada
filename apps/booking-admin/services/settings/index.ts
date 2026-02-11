@@ -17,6 +17,17 @@ export interface PropertySettings {
 
 export type PropertySettingsUpdate = Partial<PropertySettings>
 
+export interface DesignSettings {
+  hero_image: string
+  hero_heading: string
+  hero_subtext: string
+  primary_color: string
+  accent_color: string
+  font_pairing: string
+}
+
+export type DesignSettingsUpdate = Partial<DesignSettings>
+
 export const settingsService = {
   getPropertySettings: () =>
     apiClient.get<PropertySettings>('/admin/settings/property'),
@@ -26,4 +37,10 @@ export const settingsService = {
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post('/auth/change-password', { current_password, new_password }),
+
+  getDesignSettings: () =>
+    apiClient.get<DesignSettings>('/admin/settings/design'),
+
+  updateDesignSettings: (data: DesignSettingsUpdate) =>
+    apiClient.patch<DesignSettings>('/admin/settings/design', data),
 }
