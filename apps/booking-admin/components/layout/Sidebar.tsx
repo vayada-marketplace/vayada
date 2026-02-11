@@ -38,7 +38,7 @@ const navItems = [
   },
   {
     label: 'Settings',
-    href: '/dashboard/settings',
+    href: '/settings',
     icon: Cog6ToothIcon,
   },
 ]
