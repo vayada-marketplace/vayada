@@ -5,6 +5,24 @@ import { Hotel, RoomType, Addon } from '@/lib/types'
 import { hotelService } from '@/services/api/hotel'
 import { generateColorPalette } from '@/lib/utils/colors'
 
+const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamilies: string[] }> = {
+  'high-end-serif': {
+    heading: "'Playfair Display', serif",
+    body: "'Source Sans Pro', sans-serif",
+    googleFamilies: ['Playfair+Display:ital,wght@0,400;0,700;1,400', 'Source+Sans+Pro:wght@300;400;600;700'],
+  },
+  'modern-minimalist': {
+    heading: "'Inter', sans-serif",
+    body: "'Inter', sans-serif",
+    googleFamilies: ['Inter:wght@300;400;500;600;700'],
+  },
+  'grand-classic': {
+    heading: "'Lora', serif",
+    body: "'Source Sans Pro', sans-serif",
+    googleFamilies: ['Lora:ital,wght@0,400;0,700;1,400', 'Source+Sans+Pro:wght@300;400;600;700'],
+  },
+}
+
 interface HotelContextValue {
   hotel: Hotel | null
   rooms: RoomType[]
@@ -61,6 +79,29 @@ export function HotelProvider({ children, locale = 'en' }: { children: ReactNode
       }
     }
   }, [hotel?.branding?.primaryColor])
+
+  // Apply branding font pairing as CSS variables + load Google Fonts
+  useEffect(() => {
+    const pairingId = hotel?.branding?.fontPairing
+    if (pairingId && FONT_PAIRINGS[pairingId]) {
+      const { heading, body, googleFamilies } = FONT_PAIRINGS[pairingId]
+      const root = document.documentElement
+      root.style.setProperty('--font-heading', heading)
+      root.style.setProperty('--font-body', body)
+
+      // Load Google Fonts
+      const linkId = 'branding-fonts'
+      let link = document.getElementById(linkId) as HTMLLinkElement | null
+      if (!link) {
+        link = document.createElement('link')
+        link.id = linkId
+        link.rel = 'stylesheet'
+        document.head.appendChild(link)
+      }
+      const families = googleFamilies.join('&family=')
+      link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`
+    }
+  }, [hotel?.branding?.fontPairing])
 
   if (error) {
     return (

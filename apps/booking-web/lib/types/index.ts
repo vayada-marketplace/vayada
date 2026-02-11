@@ -14,6 +14,8 @@ export interface HotelSocialLinks {
 
 export interface HotelBranding {
   primaryColor: string
+  accentColor?: string
+  fontPairing?: string
   logoUrl?: string
   faviconUrl?: string
 }

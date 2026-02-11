@@ -37,7 +37,7 @@ export default function AvailabilityPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">
-          <h1 className="text-3xl md:text-4xl font-serif italic text-white">{t('title')}</h1>
+          <h1 className="text-3xl md:text-4xl font-heading italic text-white">{t('title')}</h1>
         </div>
       </div>
 

@@ -62,7 +62,7 @@ export default function AddonsPage() {
         <BookingNavigation />
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-serif italic text-white mb-4">
+          <h1 className="text-5xl md:text-6xl lg:text-7xl font-heading italic text-white mb-4">
             {hotel.name}
           </h1>
           <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
@@ -75,7 +75,7 @@ export default function AddonsPage() {
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-start justify-between mb-8 gap-6">
           <div>
-            <h1 className="text-3xl font-serif text-gray-900 mb-1">{t('title')}</h1>
+            <h1 className="text-3xl font-heading text-gray-900 mb-1">{t('title')}</h1>
             <p className="text-gray-500">{t('subtitle')}</p>
           </div>
 

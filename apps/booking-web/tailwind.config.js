@@ -70,6 +70,10 @@ module.exports = {
           dark: '#475569',
         },
       },
+      fontFamily: {
+        heading: 'var(--font-heading)',
+        body: 'var(--font-body)',
+      },
       animation: {
         'spin-slow': 'spin 3s linear infinite',
       }

@@ -29,7 +29,7 @@ export default function RoomsPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-          <h1 className="text-4xl md:text-5xl font-serif italic text-white mb-2">{t('title')}</h1>
+          <h1 className="text-4xl md:text-5xl font-heading italic text-white mb-2">{t('title')}</h1>
           <p className="text-white/80 text-lg">{t('subtitle')}</p>
         </div>
       </div>

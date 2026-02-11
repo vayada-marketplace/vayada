@@ -2,9 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-heading: 'Playfair Display', serif;
+  --font-body: 'Source Sans Pro', sans-serif;
+}
+
 body {
   color: #1a1a1a;
   background: #ffffff;
+  font-family: var(--font-body);
 }
 
 @layer utilities {
