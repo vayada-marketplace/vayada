@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
+import ImageUpload from '@/components/ImageUpload'
 
 export default function NewRoomPage() {
   const router = useRouter()
@@ -29,7 +30,6 @@ export default function NewRoomPage() {
 
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
-  const [imageInput, setImageInput] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -264,33 +264,13 @@ export default function NewRoomPage() {
         </div>
 
         {/* Images */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Images</h2>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={imageInput}
-              onChange={(e) => setImageInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToList('images', imageInput, setImageInput))}
-              placeholder="Image URL"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-            <button
-              type="button"
-              onClick={() => addToList('images', imageInput, setImageInput)}
-              className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
-            >
-              Add
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(form.images || []).map((img, i) => (
-              <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-xs rounded-full max-w-xs truncate">
-                {img}
-                <button type="button" onClick={() => removeFromList('images', i)} className="text-gray-400 hover:text-gray-600 shrink-0">&times;</button>
-              </span>
-            ))}
-          </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <ImageUpload
+            images={form.images || []}
+            onChange={(urls) => setForm({ ...form, images: urls })}
+            maxImages={10}
+            label="Room Images"
+          />
         </div>
 
         <div className="flex items-center justify-end gap-3">

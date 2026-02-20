@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
 import { checkPmsSetupStatus } from '@/lib/utils/setupStatus'
+import ImageUpload from '@/components/ImageUpload'
 
 const STEPS = [
   { number: 1, label: 'Your First Room' },
@@ -36,7 +37,6 @@ export default function PmsSetupPage() {
   const [images, setImages] = useState<string[]>([])
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
-  const [imageInput, setImageInput] = useState('')
 
   useEffect(() => {
     async function checkAuth() {
@@ -399,35 +399,14 @@ export default function PmsSetupPage() {
               </div>
 
               {/* Images */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
-                <label className="block text-[13px] font-medium text-gray-700">Images (URLs)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={imageInput}
-                    onChange={(e) => setImageInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToList(images, setImages, imageInput, setImageInput))}
-                    placeholder="https://example.com/room.jpg"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => addToList(images, setImages, imageInput, setImageInput)}
-                    className="px-3 py-2 bg-gray-100 text-gray-700 text-[13px] rounded-lg hover:bg-gray-200"
-                  >
-                    Add
-                  </button>
-                </div>
-                {images.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {images.map((img, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-[12px] rounded-full max-w-xs truncate">
-                        {img}
-                        <button onClick={() => removeFromList(images, setImages, i)} className="text-gray-400 hover:text-gray-600 shrink-0">&times;</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <ImageUpload
+                  images={images}
+                  onChange={setImages}
+                  maxImages={10}
+                  label="Room Images"
+                  compact
+                />
               </div>
             </div>
 
@@ -524,8 +503,17 @@ export default function PmsSetupPage() {
 
               {images.length > 0 && (
                 <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Images</p>
-                  <p className="text-[12px] text-gray-600">{images.length} image{images.length !== 1 ? 's' : ''} added</p>
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Images ({images.length})</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {images.slice(0, 4).map((url, i) => (
+                      <div key={i} className="aspect-square rounded-md overflow-hidden bg-gray-100">
+                        <img src={url} alt={`Room ${i + 1}`} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                  {images.length > 4 && (
+                    <p className="text-[11px] text-gray-400 mt-1">+{images.length - 4} more</p>
+                  )}
                 </div>
               )}
             </div>
