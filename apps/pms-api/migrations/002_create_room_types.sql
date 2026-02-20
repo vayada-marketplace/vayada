@@ -1,0 +1,20 @@
+CREATE TABLE room_types (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    hotel_id UUID NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    short_description TEXT NOT NULL DEFAULT '',
+    max_occupancy INTEGER NOT NULL DEFAULT 2,
+    size INTEGER NOT NULL DEFAULT 0,
+    base_rate NUMERIC(10,2) NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    amenities JSONB NOT NULL DEFAULT '[]',
+    images JSONB NOT NULL DEFAULT '[]',
+    bed_type TEXT NOT NULL DEFAULT '',
+    features JSONB NOT NULL DEFAULT '[]',
+    total_rooms INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

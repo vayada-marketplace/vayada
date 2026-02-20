@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  pms-db:
+    image: postgres:16-alpine
+    container_name: vayada-pms-db
+    environment:
+      POSTGRES_USER: vayada_pms_user
+      POSTGRES_PASSWORD: vayada_pms_password
+      POSTGRES_DB: vayada_pms_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - pms_data:/var/lib/postgresql/data
+
+volumes:
+  pms_data:
