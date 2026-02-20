@@ -4,16 +4,45 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { settingsService } from '@/services/settings'
+import { pmsClient } from '@/services/api/pmsClient'
 import { checkSetupStatus, isSetupComplete } from '@/lib/utils/setupStatus'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
-import { TIMEZONE_OPTIONS, CURRENCY_OPTIONS } from '@/lib/constants/options'
-import { PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { CURRENCY_OPTIONS } from '@/lib/constants/options'
+import { PhotoIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
 const STEPS = [
   { number: 1, label: 'Property Basics' },
   { number: 2, label: 'Design & Branding' },
+  { number: 3, label: 'PMS Selection' },
+]
+
+const PMS_OPTIONS = [
+  {
+    id: 'vayada',
+    name: 'Vayada PMS',
+    description: 'Built-in property management. Manage rooms, rates, and bookings directly.',
+    available: true,
+  },
+  {
+    id: 'cloudbeds',
+    name: 'Cloudbeds',
+    description: 'Cloud-based hospitality management suite.',
+    available: false,
+  },
+  {
+    id: 'mews',
+    name: 'Mews',
+    description: 'Modern property management platform.',
+    available: false,
+  },
+  {
+    id: 'opera',
+    name: 'Opera PMS',
+    description: 'Enterprise hotel management by Oracle.',
+    available: false,
+  },
 ]
 
 export default function SetupPage() {
@@ -29,8 +58,11 @@ export default function SetupPage() {
   const [reservationEmail, setReservationEmail] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [address, setAddress] = useState('')
-  const [timezone, setTimezone] = useState('Europe/London')
   const [currency, setCurrency] = useState('USD')
+  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([])
+
+  // Step 3: PMS Selection
+  const [selectedPms, setSelectedPms] = useState('vayada')
 
   // Step 2: Design & Branding
   const [primaryColor, setPrimaryColor] = useState('#4F46E5')
@@ -81,6 +113,9 @@ export default function SetupPage() {
     if (step === 2) {
       return !!(primaryColor && accentColor && selectedFont && heroImage.trim())
     }
+    if (step === 3) {
+      return !!selectedPms
+    }
     return false
   }
 
@@ -93,8 +128,8 @@ export default function SetupPage() {
         reservation_email: reservationEmail,
         phone_number: phoneNumber,
         address,
-        timezone,
         default_currency: currency,
+        supported_currencies: supportedCurrencies,
       })
 
       await settingsService.updateDesignSettings({
@@ -103,6 +138,21 @@ export default function SetupPage() {
         font_pairing: selectedFont,
         hero_image: heroImage,
       })
+
+      // Register hotel in PMS if Vayada PMS selected
+      if (selectedPms === 'vayada') {
+        const slug = propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        try {
+          await pmsClient.post('/admin/register-hotel', {
+            name: propertyName,
+            slug,
+            contactEmail: reservationEmail,
+          })
+        } catch {
+          // Non-fatal: hotel may already be registered (idempotent)
+        }
+        localStorage.setItem('pmsProvider', 'vayada')
+      }
 
       const complete = await isSetupComplete()
       if (complete) {
@@ -183,7 +233,7 @@ export default function SetupPage() {
           <div className="h-1 bg-gray-100">
             <div
               className="h-full bg-primary-500 transition-all duration-300"
-              style={{ width: `${(step / 2) * 100}%` }}
+              style={{ width: `${(step / 3) * 100}%` }}
             />
           </div>
         </div>
@@ -261,30 +311,62 @@ export default function SetupPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Timezone</label>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Primary Currency</label>
                   <select
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
+                    value={currency}
+                    onChange={(e) => {
+                      const newPrimary = e.target.value
+                      setCurrency(newPrimary)
+                      setSupportedCurrencies((prev) => prev.filter((c) => c !== newPrimary))
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
                   >
-                    {TIMEZONE_OPTIONS.filter((tz) => tz !== 'UTC').map((tz) => (
-                      <option key={tz} value={tz}>{tz}</option>
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code}>{c.label}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Currency</label>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Additional Currencies</label>
                   <select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSupportedCurrencies((prev) => [...prev, e.target.value])
+                      }
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
                   >
-                    {CURRENCY_OPTIONS.filter((c) => c.code !== 'EUR').map((c) => (
+                    <option value="">Select currencies...</option>
+                    {CURRENCY_OPTIONS.filter(
+                      (c) => c.code !== currency && !supportedCurrencies.includes(c.code)
+                    ).map((c) => (
                       <option key={c.code} value={c.code}>{c.label}</option>
                     ))}
                   </select>
                 </div>
               </div>
+              {supportedCurrencies.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {supportedCurrencies.map((code) => {
+                    const cur = CURRENCY_OPTIONS.find((c) => c.code === code)
+                    return (
+                      <span
+                        key={code}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[12px] font-medium rounded-full"
+                      >
+                        {cur?.code || code}
+                        <button
+                          onClick={() => setSupportedCurrencies((prev) => prev.filter((c) => c !== code))}
+                          className="ml-0.5 text-primary-400 hover:text-primary-600"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Error message */}
@@ -462,18 +544,11 @@ export default function SetupPage() {
                   Back
                 </button>
                 <button
-                  onClick={handleComplete}
-                  disabled={!canProceed() || saving}
+                  onClick={() => { setError(''); setStep(3) }}
+                  disabled={!canProceed()}
                   className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {saving ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Completing Setup...
-                    </>
-                  ) : (
-                    'Complete Setup'
-                  )}
+                  Next
                 </button>
               </div>
 
@@ -746,6 +821,77 @@ export default function SetupPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: PMS Selection */}
+      {step === 3 && (
+        <div className="flex-1 overflow-auto">
+          <div className="max-w-2xl mx-auto px-6 py-6">
+            <div className="text-center mb-6">
+              <h2 className="text-lg font-bold text-gray-900">Property Management System</h2>
+              <p className="text-[13px] text-gray-500 mt-1">Select a PMS to manage your rooms, rates, and bookings</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {PMS_OPTIONS.map((pms) => (
+                <button
+                  key={pms.id}
+                  onClick={() => pms.available && setSelectedPms(pms.id)}
+                  disabled={!pms.available}
+                  className={`relative text-left p-4 rounded-lg border-2 transition-all ${
+                    !pms.available
+                      ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                      : selectedPms === pms.id
+                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                        : 'border-gray-200 hover:border-gray-300 cursor-pointer'
+                  }`}
+                >
+                  {!pms.available && (
+                    <span className="absolute top-2 right-2 px-2 py-0.5 bg-gray-200 text-gray-500 text-[10px] font-medium rounded-full">
+                      Coming Soon
+                    </span>
+                  )}
+                  {pms.available && selectedPms === pms.id && (
+                    <span className="absolute top-2 right-2 w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center">
+                      <CheckIcon className="w-3 h-3 text-white" strokeWidth={3} />
+                    </span>
+                  )}
+                  <h3 className="text-[13px] font-semibold text-gray-900">{pms.name}</h3>
+                  <p className="text-[12px] text-gray-500 mt-1">{pms.description}</p>
+                </button>
+              ))}
+            </div>
+
+            {error && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-[12px] text-red-700 font-medium">{error}</p>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setStep(2)}
+                className="px-4 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleComplete}
+                disabled={!canProceed() || saving}
+                className="inline-flex items-center justify-center gap-1.5 px-6 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Completing Setup...
+                  </>
+                ) : (
+                  'Complete Setup'
+                )}
+              </button>
             </div>
           </div>
         </div>

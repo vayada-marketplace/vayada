@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon,
   Cog6ToothIcon,
   GlobeAltIcon,
+  ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
 
@@ -75,7 +76,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
         {navItems.map((item) => {
-          const isActive = pathname === item.href
+          const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
           return (
             <Link
               key={item.href}
@@ -103,6 +104,21 @@ export default function Sidebar() {
 
       {/* Bottom section */}
       <div className="px-2 pb-2 space-y-1.5">
+
+        {/* PMS link */}
+        <a
+          href="http://localhost:3004"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            'flex items-center gap-2 w-full px-2.5 py-1.5 text-[13px] text-primary-600 hover:text-primary-700 rounded-md hover:bg-primary-50 transition-colors',
+            collapsed && 'justify-center px-0'
+          )}
+          title={collapsed ? 'Vayada PMS' : undefined}
+        >
+          <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
+          {!collapsed && <span>Vayada PMS</span>}
+        </a>
 
         {/* Collapse toggle */}
         <button
@@ -158,6 +174,17 @@ function DesignStudioIcon({ className }: { className?: string }) {
       <path d="M12 17v4" />
       <path d="M3 12h4" />
       <path d="M17 12h4" />
+    </svg>
+  )
+}
+
+function RoomsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7" />
+      <path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
+      <path d="M3 7h18" />
+      <path d="M8 11h8" />
     </svg>
   )
 }
