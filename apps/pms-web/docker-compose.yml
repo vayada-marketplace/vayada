@@ -1,0 +1,15 @@
+services:
+  pms-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_AUTH_API_URL: http://localhost:8001
+        NEXT_PUBLIC_PMS_API_URL: http://localhost:8002
+    container_name: vayada-pms-frontend
+    ports:
+      - "3004:3004"
+    environment:
+      NEXT_PUBLIC_AUTH_API_URL: http://localhost:8001
+      NEXT_PUBLIC_PMS_API_URL: http://localhost:8002
+    restart: unless-stopped
