@@ -35,6 +35,26 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "noreply@vayada.com"
     SMTP_USE_TLS: bool = True
 
+    # S3 / Image Upload
+    AWS_REGION: str = "eu-west-1"
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    S3_BUCKET_NAME: str = ""
+    S3_ENDPOINT_URL: str = ""
+    S3_PUBLIC_URL: str = ""
+    S3_PUBLIC_URL_EXPIRY: int = 3600
+    S3_USE_PUBLIC_URLS: bool = True
+
+    # Image Processing
+    MAX_IMAGE_SIZE_MB: int = 5
+    ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif"]
+    MAX_IMAGE_WIDTH: int = 4000
+    MAX_IMAGE_HEIGHT: int = 4000
+    IMAGE_RESIZE_WIDTH: int = 1920
+    IMAGE_RESIZE_HEIGHT: int = 1920
+    GENERATE_THUMBNAILS: bool = True
+    THUMBNAIL_SIZE: int = 300
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

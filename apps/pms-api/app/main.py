@@ -9,6 +9,7 @@ from app.database import Database, AuthDatabase
 from app.routers.rooms import router as rooms_router
 from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
+from app.routers.upload import router as upload_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ app.add_middleware(
 app.include_router(rooms_router)
 app.include_router(bookings_router)
 app.include_router(admin_router)
+app.include_router(upload_router)
 
 
 @app.get("/health")

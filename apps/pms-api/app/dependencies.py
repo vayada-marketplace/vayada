@@ -46,7 +46,7 @@ async def get_current_user_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    if user["status"] != "verified":
+    if user["status"] in ("rejected", "suspended"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account not active",
