@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   pms-db:
     image: postgres:16-alpine
@@ -12,6 +10,30 @@ services:
       - "5436:5432"
     volumes:
       - pms_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vayada_pms_user -d vayada_pms_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pms-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vayada-pms-backend
+    ports:
+      - "8002:8002"
+    depends_on:
+      pms-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://vayada_pms_user:vayada_pms_password@pms-db:5432/vayada_pms_db
+    volumes:
+      - ./app:/app/app
+    restart: unless-stopped
 
 volumes:
   pms_data:
