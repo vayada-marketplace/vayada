@@ -13,9 +13,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Accept build argument for API URL
+# Accept build arguments for API URLs
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_PMS_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_PMS_URL=${NEXT_PUBLIC_PMS_URL}
 
 # Build the application
 RUN npm run build
