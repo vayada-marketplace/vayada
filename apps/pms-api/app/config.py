@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
+    CORS_ORIGIN_REGEX: str = ""
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"
