@@ -3,30 +3,18 @@
 import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
-import { useRouter, Link } from '@/i18n/navigation'
+import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { useHotel, useRooms } from '@/contexts/HotelContext'
-import { formatCurrency, calculateNights, formatDate } from '@/lib/utils'
+import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
+import { calculateNights, formatDate } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
+import { bookingService } from '@/services/api/booking'
 
 const COUNTRIES = [
   'Austria', 'Germany', 'Switzerland', 'United States', 'United Kingdom',
   'France', 'Italy', 'Netherlands', 'Spain', 'Australia', 'Canada', 'Japan',
-]
-
-const ARRIVAL_TIMES = [
-  'iDontKnow',
-  '12:00 - 13:00',
-  '13:00 - 14:00',
-  '14:00 - 15:00',
-  '15:00 - 16:00',
-  '16:00 - 17:00',
-  '17:00 - 18:00',
-  '18:00 - 19:00',
-  '19:00 - 20:00',
-  '20:00 - 21:00',
-  'After 21:00',
 ]
 
 function BookPageContent() {
@@ -37,24 +25,83 @@ function BookPageContent() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { formatPrice } = useCurrency()
   const searchParams = useSearchParams()
-  const roomId = searchParams.get('room') || 'room-2'
+  const roomId = searchParams.get('room') || ''
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
-  const currentStep = 3
+  const adultsParam = parseInt(searchParams.get('adults') || '2')
+  const childrenParam = parseInt(searchParams.get('children') || '0')
 
   const STEPS = [
     { number: 1, label: ts('rooms') },
-    { number: 2, label: ts('addons') },
-    { number: 3, label: ts('details') },
-    { number: 4, label: ts('payment') },
+    { number: 2, label: ts('details') },
+    { number: 3, label: ts('confirmation') },
   ]
+  const currentStep = 2
 
-  const room = rooms.find((r) => r.id === roomId) || rooms[1]
+  const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const roomTotal = room.baseRate * nights
-  const addonsTotal = 80 // mock: Airport Transfer
-  const total = roomTotal + addonsTotal
+  const roomTotal = room ? room.baseRate * nights : 0
+
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [specialRequests, setSpecialRequests] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const { slug } = useSlug()
+
+  const handleSubmit = async () => {
+    if (!firstName || !lastName || !email || !phone) {
+      setError(t('fillRequired'))
+      return
+    }
+    if (!room) {
+      setError('No room selected')
+      return
+    }
+
+    setSubmitting(true)
+    setError('')
+
+    try {
+      // Read referral cookie if present
+      const refCookie = document.cookie.match(/(^| )ref=([^;]+)/)
+      const referralCode = refCookie ? decodeURIComponent(refCookie[2]) : undefined
+
+      const booking = await bookingService.create(slug, {
+        roomTypeId: room.id,
+        guestFirstName: firstName,
+        guestLastName: lastName,
+        guestEmail: email,
+        guestPhone: phone,
+        specialRequests,
+        checkIn,
+        checkOut,
+        adults: adultsParam,
+        children: childrenParam,
+        referralCode,
+      })
+
+      // Store booking in sessionStorage for the confirmation page
+      sessionStorage.setItem('lastBooking', JSON.stringify(booking))
+      router.push(`/booking/${booking.bookingReference}`)
+    } catch (err: any) {
+      setError(err.message || 'Failed to create booking')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!room) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-500">No room selected. Please go back and select a room.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -117,6 +164,12 @@ function BookPageContent() {
           </div>
         </div>
 
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
@@ -136,17 +189,8 @@ function BookPageContent() {
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-bold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</p>
-                  <p className="text-xs text-gray-500">{formatCurrency(room.baseRate, room.currency, locale)} &times; {nights}</p>
-                </div>
-              </div>
-
-              {/* Add-ons row */}
-              <div className="py-4 border-b border-gray-100">
-                <p className="text-xs font-medium text-gray-500 mb-2">{t('addonsLabel')}</p>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-700">{t('airportTransfer')}</p>
-                  <p className="text-sm font-medium text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</p>
+                  <p className="text-sm font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
+                  <p className="text-xs text-gray-500">{formatPrice(room.baseRate, room.currency)} &times; {nights}</p>
                 </div>
               </div>
 
@@ -154,7 +198,7 @@ function BookPageContent() {
               <div className="flex items-center justify-between pt-4">
                 <p className="text-base font-bold text-gray-900">{tc('total')}</p>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                  <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
                   <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                 </div>
               </div>
@@ -173,6 +217,8 @@ function BookPageContent() {
                     </label>
                     <input
                       type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
                       placeholder="John"
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                     />
@@ -183,6 +229,8 @@ function BookPageContent() {
                     </label>
                     <input
                       type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
                       placeholder="Doe"
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                     />
@@ -196,6 +244,8 @@ function BookPageContent() {
                   </label>
                   <input
                     type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     placeholder="john.doe@example.com"
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                   />
@@ -209,13 +259,15 @@ function BookPageContent() {
                     </label>
                     <input
                       type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
                       placeholder="+1 234 567 8900"
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                      {t('country')} <span className="text-red-500">*</span>
+                      {t('country')}
                     </label>
                     <select className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.75rem_center] bg-no-repeat">
                       <option value="">{t('selectCountry')}</option>
@@ -226,19 +278,6 @@ function BookPageContent() {
                   </div>
                 </div>
 
-                {/* Estimated Arrival Time */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                    {t('estimatedArrival')}
-                  </label>
-                  <select className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.75rem_center] bg-no-repeat">
-                    <option value="">{t('selectArrival')}</option>
-                    {ARRIVAL_TIMES.map((time) => (
-                      <option key={time} value={time}>{time === 'iDontKnow' ? t('iDontKnow') : time}</option>
-                    ))}
-                  </select>
-                </div>
-
                 {/* Special Requests */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-900 mb-1.5">
@@ -246,6 +285,8 @@ function BookPageContent() {
                   </label>
                   <textarea
                     rows={4}
+                    value={specialRequests}
+                    onChange={(e) => setSpecialRequests(e.target.value)}
                     placeholder={t('specialRequestsPlaceholder')}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400 resize-y"
                   />
@@ -256,20 +297,21 @@ function BookPageContent() {
             {/* Bottom Action Bar */}
             <div className="flex items-center justify-between pt-2">
               <button
-                onClick={() => router.push('/addons')}
+                onClick={() => router.push('/availability')}
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                {t('backToAddons')}
+                {t('backToRooms') || 'Back to rooms'}
               </button>
-              <Link
-                href="/payment"
-                className="px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm disabled:opacity-50"
               >
-                {t('proceedToPayment')}
-              </Link>
+                {submitting ? t('booking') || 'Booking...' : t('completeBooking') || 'Complete Booking'}
+              </button>
             </div>
           </div>
 
@@ -283,10 +325,6 @@ function BookPageContent() {
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('roomLabel')}</span>
                   <span className="font-semibold text-gray-900 text-right">{room.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">{t('rate')}</span>
-                  <span className="font-semibold text-gray-900">{t('flexibleRate')}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('checkIn')}</span>
@@ -306,11 +344,7 @@ function BookPageContent() {
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('roomLabel')} ({tc('nights', { count: nights })})</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">{t('addonsLabel')}</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
               </div>
 
@@ -319,7 +353,7 @@ function BookPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>

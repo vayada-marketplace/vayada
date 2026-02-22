@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useHotel } from '@/contexts/HotelContext'
+import { useCurrency } from '@/contexts/CurrencyContext'
 import { useTranslations, useLocale } from 'next-intl'
 import { useRouter, usePathname } from '@/i18n/navigation'
 
@@ -13,13 +14,41 @@ const LANGUAGES = [
   { code: 'id', label: 'Indonesia' },
 ] as const
 
-const CURRENCIES = [
-  { code: 'USD', symbol: '$', label: 'US Dollar' },
-  { code: 'EUR', symbol: '€', label: 'Euro' },
-  { code: 'GBP', symbol: '£', label: 'British Pound' },
-  { code: 'IDR', symbol: 'Rp', label: 'Indonesian Rupiah' },
-  { code: 'AUD', symbol: 'A$', label: 'Australian Dollar' },
-]
+const CURRENCY_LABELS: Record<string, string> = {
+  USD: '$ US Dollar',
+  EUR: '\u20AC Euro',
+  GBP: '\u00A3 British Pound',
+  IDR: 'Rp Indonesian Rupiah',
+  AUD: 'A$ Australian Dollar',
+  CHF: 'CHF Swiss Franc',
+  JPY: '\u00A5 Japanese Yen',
+  CAD: 'C$ Canadian Dollar',
+  CNY: '\u00A5 Chinese Yuan',
+  SEK: 'kr Swedish Krona',
+  NOK: 'kr Norwegian Krone',
+  DKK: 'kr Danish Krone',
+  SGD: 'S$ Singapore Dollar',
+  HKD: 'HK$ Hong Kong Dollar',
+  THB: '\u0E3F Thai Baht',
+  MYR: 'RM Malaysian Ringgit',
+  NZD: 'NZ$ New Zealand Dollar',
+  ZAR: 'R South African Rand',
+  BRL: 'R$ Brazilian Real',
+  INR: '\u20B9 Indian Rupee',
+  KRW: '\u20A9 South Korean Won',
+  MXN: 'MX$ Mexican Peso',
+  TRY: '\u20BA Turkish Lira',
+  PLN: 'z\u0142 Polish Zloty',
+  CZK: 'K\u010D Czech Koruna',
+  HUF: 'Ft Hungarian Forint',
+  ILS: '\u20AA Israeli Shekel',
+  PHP: '\u20B1 Philippine Peso',
+  TWD: 'NT$ Taiwan Dollar',
+  ISK: 'kr Icelandic Krona',
+  BGN: '\u043B\u0432 Bulgarian Lev',
+  RON: 'lei Romanian Leu',
+  HRK: 'kn Croatian Kuna',
+}
 
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () => void) {
   useEffect(() => {
@@ -82,6 +111,8 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
 }
 
 // --- Refer a Guest Modal (3 steps) ---
+const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
+
 function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () => void; hotelSlug: string }) {
   const t = useTranslations('refer')
   const tc = useTranslations('common')
@@ -94,15 +125,45 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
   const [paypalEmail, setPaypalEmail] = useState('')
   const [bankIban, setBankIban] = useState('')
   const [copied, setCopied] = useState(false)
+  const [referralCode, setReferralCode] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [apiError, setApiError] = useState('')
 
-  const referralCode = fullName
-    ? fullName.toLowerCase().replace(/\s+/g, '_').slice(0, 10)
-    : 'ref_code'
+  const referralDomain = `${hotelSlug}.booking.vayada.com`
 
-  const referralDomain = `${hotelSlug}.vayada.com`
+  const handleGenerateLink = async () => {
+    setSubmitting(true)
+    setApiError('')
+    try {
+      const res = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName,
+          email,
+          socialMedia: social,
+          userType,
+          paymentMethod,
+          paypalEmail,
+          bankIban,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Registration failed' }))
+        throw new Error(err.detail || 'Registration failed')
+      }
+      const data = await res.json()
+      setReferralCode(data.referralCode)
+      setStep(3)
+    } catch (err: any) {
+      setApiError(err.message || 'Failed to register')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(`${referralDomain}/r/${referralCode}`)
+    navigator.clipboard.writeText(`${referralDomain}?ref=${referralCode}`)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -117,6 +178,8 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
     setPaypalEmail('')
     setBankIban('')
     setCopied(false)
+    setReferralCode('')
+    setApiError('')
   }
 
   if (!open) return null
@@ -326,18 +389,26 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 </div>
               )}
 
+              {apiError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  {apiError}
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => setStep(1)}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+                  disabled={submitting}
+                  className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
                   {tc('back')}
                 </button>
                 <button
-                  onClick={() => setStep(3)}
-                  className="flex-1 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors"
+                  onClick={handleGenerateLink}
+                  disabled={submitting}
+                  className="flex-1 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50"
                 >
-                  {t('generateLink')}
+                  {submitting ? '...' : t('generateLink')}
                 </button>
               </div>
             </div>
@@ -357,7 +428,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   <input
                     type="text"
                     readOnly
-                    value={`${referralDomain}/r/${referralCode}`}
+                    value={`${referralDomain}?ref=${referralCode}`}
                     className="flex-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm text-gray-700 font-mono"
                   />
                   <button
@@ -441,6 +512,7 @@ function Dropdown({
 // --- Main Navigation ---
 export default function BookingNavigation() {
   const { hotel } = useHotel()
+  const { selectedCurrency, setSelectedCurrency } = useCurrency()
   const t = useTranslations('nav')
   const locale = useLocale()
   const router = useRouter()
@@ -450,10 +522,16 @@ export default function BookingNavigation() {
   const [referOpen, setReferOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
   const [currOpen, setCurrOpen] = useState(false)
-  const [currency, setCurrency] = useState('EUR')
 
   const selectedLangLabel = LANGUAGES.find((l) => l.code === locale)?.label.slice(0, 2).toUpperCase() || 'EN'
-  const selectedCurrLabel = CURRENCIES.find((c) => c.code === currency)?.code || 'EUR'
+
+  const currencyItems = useMemo(() => {
+    const codes = [hotel.currency, ...(hotel.supportedCurrencies || []).filter((c: string) => c !== hotel.currency)]
+    return codes.map((code: string) => ({
+      value: code,
+      label: CURRENCY_LABELS[code] || code,
+    }))
+  }, [hotel.currency, hotel.supportedCurrencies])
 
   const closeAll = () => {
     setContactOpen(false)
@@ -529,24 +607,26 @@ export default function BookingNavigation() {
               </div>
 
               {/* Currency */}
-              <div className="relative">
-                <button
-                  onClick={() => { closeAll(); setCurrOpen(!currOpen) }}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white border-2 border-white/60 rounded-full hover:bg-white/10 transition-colors"
-                >
-                  {selectedCurrLabel}
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                <Dropdown
-                  open={currOpen}
-                  onClose={() => setCurrOpen(false)}
-                  items={CURRENCIES.map((c) => ({ value: c.code, label: `${c.symbol} ${c.label}` }))}
-                  selected={currency}
-                  onSelect={setCurrency}
-                />
-              </div>
+              {currencyItems.length > 1 && (
+                <div className="relative">
+                  <button
+                    onClick={() => { closeAll(); setCurrOpen(!currOpen) }}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white border-2 border-white/60 rounded-full hover:bg-white/10 transition-colors"
+                  >
+                    {selectedCurrency}
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  <Dropdown
+                    open={currOpen}
+                    onClose={() => setCurrOpen(false)}
+                    items={currencyItems}
+                    selected={selectedCurrency}
+                    onSelect={setSelectedCurrency}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Mobile Menu Button */}
