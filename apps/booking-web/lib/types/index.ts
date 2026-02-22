@@ -29,6 +29,7 @@ export interface Hotel {
   country: string
   starRating: number
   currency: string
+  supportedCurrencies: string[]
   heroImage: string
   images: string[]
   amenities: string[]
@@ -98,19 +99,17 @@ export interface Booking {
   bookingReference: string
   hotelName: string
   roomName: string
-  guestName: string
+  guestFirstName: string
+  guestLastName: string
   guestEmail: string
   checkIn: string
   checkOut: string
   nights: number
   adults: number
   children: number
-  subtotal: number
-  discount: number
-  total: number
+  nightlyRate: number
+  totalAmount: number
   currency: string
-  promoCode?: string
-  creatorCode?: string
   status: 'confirmed' | 'pending' | 'cancelled'
   createdAt: string
 }

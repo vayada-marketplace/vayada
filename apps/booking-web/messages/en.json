@@ -37,7 +37,8 @@
     "rooms": "Rooms",
     "addons": "Add-ons",
     "details": "Details",
-    "payment": "Payment"
+    "payment": "Payment",
+    "confirmation": "Confirmation"
   },
   "home": {
     "yourStay": "Your Stay",
@@ -109,7 +110,11 @@
     "specialRequests": "Special Requests",
     "specialRequestsPlaceholder": "Any special requests or preferences for your stay...",
     "backToAddons": "Back to Add-ons",
+    "backToRooms": "Back to rooms",
     "proceedToPayment": "Proceed to Payment",
+    "completeBooking": "Complete Booking",
+    "booking": "Booking...",
+    "fillRequired": "Please fill in all required fields.",
     "yourStay": "Your Stay",
     "roomLabel": "Room",
     "rate": "Rate",
@@ -161,6 +166,7 @@
     "reference": "Booking Reference",
     "emailAddress": "Email Address",
     "findBooking": "Find My Booking",
+    "notFound": "No booking found with that reference and email.",
     "bookingFound": "Booking Found",
     "confirmed": "Confirmed",
     "hotel": "Hotel",

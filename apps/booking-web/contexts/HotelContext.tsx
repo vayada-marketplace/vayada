@@ -30,6 +30,7 @@ interface HotelContextValue {
   loading: boolean
   error: string | null
   locale: string
+  slug: string
 }
 
 const HotelContext = createContext<HotelContextValue>({
@@ -39,9 +40,11 @@ const HotelContext = createContext<HotelContextValue>({
   loading: true,
   error: null,
   locale: 'en',
+  slug: '',
 })
 
-export function HotelProvider({ children, locale = 'en' }: { children: ReactNode; locale?: string }) {
+export function HotelProvider({ children, locale = 'en', slug: slugProp }: { children: ReactNode; locale?: string; slug?: string }) {
+  const slug = slugProp || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
   const [hotel, setHotel] = useState<Hotel | null>(null)
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
@@ -49,8 +52,6 @@ export function HotelProvider({ children, locale = 'en' }: { children: ReactNode
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const slug = process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
-
     setLoading(true)
     Promise.all([
       hotelService.getHotel(slug, locale),
@@ -67,7 +68,7 @@ export function HotelProvider({ children, locale = 'en' }: { children: ReactNode
         setError(err instanceof Error ? err.message : 'Failed to load hotel data')
         setLoading(false)
       })
-  }, [locale])
+  }, [locale, slug])
 
   // Apply branding colors as CSS variables
   useEffect(() => {
@@ -139,7 +140,7 @@ export function HotelProvider({ children, locale = 'en' }: { children: ReactNode
   }
 
   return (
-    <HotelContext.Provider value={{ hotel, rooms, addons, loading, error, locale }}>
+    <HotelContext.Provider value={{ hotel, rooms, addons, loading, error, locale, slug }}>
       {children}
     </HotelContext.Provider>
   )
@@ -158,4 +159,9 @@ export function useRooms() {
 export function useAddons() {
   const { addons, loading, error } = useContext(HotelContext)
   return { addons, loading, error }
+}
+
+export function useSlug() {
+  const { slug } = useContext(HotelContext)
+  return { slug }
 }

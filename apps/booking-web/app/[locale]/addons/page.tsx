@@ -2,22 +2,22 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import { useLocale, useTranslations } from 'next-intl'
+import { useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { ADDON_CATEGORIES } from '@/lib/mock/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
-import { formatCurrency } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
 
 export default function AddonsPage() {
   const router = useRouter()
-  const locale = useLocale()
   const t = useTranslations('addons')
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { addons } = useAddons()
+  const { formatPrice } = useCurrency()
   const [activeCategory, setActiveCategory] = useState('all')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const currentStep = 2
@@ -156,7 +156,7 @@ export default function AddonsPage() {
                   <h3 className="text-base font-bold text-gray-900 mb-1">{addon.name}</h3>
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{addon.description}</p>
                   <div className="flex items-center justify-between">
-                    <p className="text-lg font-bold text-gray-900">{formatCurrency(addon.price, addon.currency, locale)}</p>
+                    <p className="text-lg font-bold text-gray-900">{formatPrice(addon.price, addon.currency)}</p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className={`px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors ${
@@ -198,7 +198,7 @@ export default function AddonsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <p className="text-sm font-bold text-gray-900">{formatCurrency(addon.price, addon.currency, locale)}</p>
+                    <p className="text-sm font-bold text-gray-900">{formatPrice(addon.price, addon.currency)}</p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
@@ -212,10 +212,9 @@ export default function AddonsPage() {
             <div className="flex items-center justify-between pt-4 border-t border-primary-100">
               <p className="text-sm text-gray-500">{t('addonsTotal')}</p>
               <p className="text-xl font-bold text-gray-900">
-                {formatCurrency(
+                {formatPrice(
                   addons.filter((a) => addedIds.has(a.id)).reduce((sum, a) => sum + a.price, 0),
-                  hotel.currency,
-                  locale
+                  hotel.currency
                 )}
               </p>
             </div>

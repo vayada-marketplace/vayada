@@ -1,19 +1,19 @@
 'use client'
 
 import Image from 'next/image'
-import { useLocale, useTranslations } from 'next-intl'
+import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
-import { formatCurrency } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
 
 export default function RoomsPage() {
-  const locale = useLocale()
   const t = useTranslations('rooms')
   const tc = useTranslations('common')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { formatPrice } = useCurrency()
 
   return (
     <div className="min-h-screen bg-white">
@@ -88,7 +88,7 @@ export default function RoomsPage() {
                     <p className="text-sm text-gray-500">{tc('from')}</p>
                     <div className="flex items-baseline gap-1">
                       <span className="text-2xl font-bold text-gray-900">
-                        {formatCurrency(room.baseRate, room.currency, locale)}
+                        {formatPrice(room.baseRate, room.currency)}
                       </span>
                       <span className="text-sm text-gray-500">{tc('perNight')}</span>
                     </div>

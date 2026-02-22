@@ -1,11 +1,14 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import Image from 'next/image'
 import { useHotel } from '@/contexts/HotelContext'
+import { useCurrency } from '@/contexts/CurrencyContext'
+import { Booking } from '@/lib/types'
 
 export default function BookingConfirmationPage({
   params,
@@ -13,7 +16,24 @@ export default function BookingConfirmationPage({
   params: { reference: string }
 }) {
   const t = useTranslations('confirmation')
+  const tc = useTranslations('common')
   const { hotel } = useHotel()
+  const { formatPrice } = useCurrency()
+  const [booking, setBooking] = useState<Booking | null>(null)
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem('lastBooking')
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        if (parsed.bookingReference === params.reference) {
+          setBooking(parsed)
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [params.reference])
 
   return (
     <div className="min-h-screen bg-surface">
@@ -52,31 +72,37 @@ export default function BookingConfirmationPage({
           <div className="text-left space-y-0 divide-y divide-gray-100">
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('hotel')}</span>
-              <span className="font-medium text-gray-900">{hotel.name}</span>
+              <span className="font-medium text-gray-900">{booking?.hotelName || hotel.name}</span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('room')}</span>
-              <span className="font-medium text-gray-900">Superior Mountain View</span>
+              <span className="font-medium text-gray-900">{booking?.roomName || '—'}</span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('checkIn')}</span>
-              <span className="font-medium text-gray-900">13 Feb 2026</span>
+              <span className="font-medium text-gray-900">{booking?.checkIn || '—'}</span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('checkOut')}</span>
-              <span className="font-medium text-gray-900">18 Feb 2026</span>
+              <span className="font-medium text-gray-900">{booking?.checkOut || '—'}</span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('duration')}</span>
-              <span className="font-medium text-gray-900">5 nights</span>
+              <span className="font-medium text-gray-900">
+                {booking ? tc('nights', { count: booking.nights }) : '—'}
+              </span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('guests')}</span>
-              <span className="font-medium text-gray-900">2 Adults</span>
+              <span className="font-medium text-gray-900">
+                {booking ? `${booking.adults} ${booking.adults === 1 ? 'Adult' : 'Adults'}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? 'Child' : 'Children'}` : ''}` : '—'}
+              </span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('totalPaid')}</span>
-              <span className="font-bold text-gray-900 text-lg">&euro;900</span>
+              <span className="font-bold text-gray-900 text-lg">
+                {booking ? formatPrice(booking.totalAmount, booking.currency) : '—'}
+              </span>
             </div>
           </div>
 

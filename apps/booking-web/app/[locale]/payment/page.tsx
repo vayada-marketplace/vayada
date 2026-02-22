@@ -8,7 +8,8 @@ import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
-import { formatCurrency, calculateNights, formatDate } from '@/lib/utils'
+import { calculateNights, formatDate } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
 
 function PaymentPageContent() {
   const router = useRouter()
@@ -19,6 +20,7 @@ function PaymentPageContent() {
   const tb = useTranslations('book')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { formatPrice } = useCurrency()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || 'room-2'
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
@@ -205,7 +207,7 @@ function PaymentPageContent() {
                   {t.rich('agreeTerms', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('termsAndConditions')}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('cancellationPolicy')}</a>,
-                    amount: formatCurrency(total, room.currency, locale),
+                    amount: formatPrice(total, room.currency),
                   })}
                 </span>
               </label>
@@ -269,13 +271,13 @@ function PaymentPageContent() {
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(roomTotal, room.currency, locale)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
                 <div>
                   <p className="text-xs text-gray-400 mb-1">{t('addonsLabel')}</p>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 pl-2">{t('airportTransfer')}</span>
-                    <span className="font-semibold text-gray-900">{formatCurrency(addonsTotal, room.currency, locale)}</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(addonsTotal, room.currency)}</span>
                   </div>
                 </div>
               </div>
@@ -285,7 +287,7 @@ function PaymentPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatCurrency(total, room.currency, locale)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(total, room.currency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
@@ -300,7 +302,7 @@ function PaymentPageContent() {
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed pointer-events-none'
                 }`}
               >
-                {t('pay', { amount: formatCurrency(total, room.currency, locale) })}
+                {t('pay', { amount: formatPrice(total, room.currency) })}
               </Link>
               <p className="text-xs text-gray-500 text-center mt-2">{t('paymentSecure')}</p>
             </div>

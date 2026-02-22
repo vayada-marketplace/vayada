@@ -10,7 +10,8 @@ import DatePickerCalendar from '@/components/booking/DatePickerCalendar'
 import GuestSelector from '@/components/booking/GuestSelector'
 import RoomDetailModal from '@/components/booking/RoomDetailModal'
 import { useHotel, useRooms } from '@/contexts/HotelContext'
-import { formatCurrency, calculateNights, formatDateShort, formatDate } from '@/lib/utils'
+import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
 
 function PromoPopover({
   open,
@@ -70,6 +71,7 @@ export default function HomePage() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { formatPrice } = useCurrency()
   const [checkIn, setCheckIn] = useState('2026-02-13')
   const [checkOut, setCheckOut] = useState('2026-02-18')
   const [adults, setAdults] = useState(2)
@@ -454,8 +456,8 @@ export default function HomePage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatCurrency(flexibleTotal, room.currency, locale)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatCurrency(room.baseRate, room.currency, locale) })}</p>
+                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, room.currency)}</p>
+                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(room.baseRate, room.currency) })}</p>
                               </div>
                               <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'flexible' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -516,8 +518,8 @@ export default function HomePage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatCurrency(nonRefundableTotal, room.currency, locale)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatCurrency(nonRefundableNightly, room.currency, locale) })}</p>
+                                <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableTotal, room.currency)}</p>
+                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(nonRefundableNightly, room.currency) })}</p>
                               </div>
                               <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'nonrefundable' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

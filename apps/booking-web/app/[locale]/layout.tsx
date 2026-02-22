@@ -1,6 +1,7 @@
 import { NextIntlClientProvider, hasLocale } from 'next-intl'
 import { getMessages, setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { routing } from '@/i18n/routing'
 import Providers from './providers'
 
@@ -25,11 +26,14 @@ export default async function LocaleLayout({
 
   const messages = await getMessages()
 
+  const cookieStore = await cookies()
+  const slug = cookieStore.get('hotel-slug')?.value || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+
   return (
     <html lang={locale}>
       <body className="font-body">
         <NextIntlClientProvider messages={messages}>
-          <Providers locale={locale}>{children}</Providers>
+          <Providers locale={locale} slug={slug}>{children}</Providers>
         </NextIntlClientProvider>
       </body>
     </html>

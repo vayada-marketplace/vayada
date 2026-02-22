@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Image from 'next/image'
 import { RoomType } from '@/lib/types'
-import { formatCurrency } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
 
 interface RoomDetailModalProps {
   room: RoomType
@@ -29,6 +29,7 @@ export default function RoomDetailModal({
   const [imgIndex, setImgIndex] = useState(0)
   const [showAllAmenities, setShowAllAmenities] = useState(false)
   const [selectedRate, setSelectedRate] = useState<'flexible' | 'nonrefundable'>('flexible')
+  const { formatPrice } = useCurrency()
 
   if (!open) return null
 
@@ -160,7 +161,7 @@ export default function RoomDetailModal({
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-lg font-bold text-gray-900">{formatCurrency(room.baseRate, room.currency)}</p>
+                    <p className="text-lg font-bold text-gray-900">{formatPrice(room.baseRate, room.currency)}</p>
                     <p className="text-xs text-gray-500">/night</p>
                   </div>
                 </div>
@@ -183,7 +184,7 @@ export default function RoomDetailModal({
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-lg font-bold text-gray-900">{formatCurrency(nonRefundableNightly, room.currency)}</p>
+                    <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableNightly, room.currency)}</p>
                     <p className="text-xs text-gray-500">/night</p>
                   </div>
                 </div>

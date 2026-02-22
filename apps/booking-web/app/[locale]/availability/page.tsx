@@ -6,22 +6,46 @@ import { useLocale, useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { useHotel, useRooms } from '@/contexts/HotelContext'
-import { formatCurrency, calculateNights, formatDateShort, formatDate } from '@/lib/utils'
+import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
+import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
+import { useCurrency } from '@/contexts/CurrencyContext'
+import { hotelService } from '@/services/api/hotel'
+import { RoomType } from '@/lib/types'
 
 export default function AvailabilityPage() {
   const locale = useLocale()
   const t = useTranslations('availability')
   const tc = useTranslations('common')
   const { hotel } = useHotel()
-  const { rooms } = useRooms()
+  const { rooms: initialRooms } = useRooms()
+  const { formatPrice } = useCurrency()
   const [checkIn, setCheckIn] = useState('2026-02-13')
   const [checkOut, setCheckOut] = useState('2026-02-18')
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
-  const [hasSearched, setHasSearched] = useState(true)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [searchResults, setSearchResults] = useState<RoomType[]>([])
+  const [searching, setSearching] = useState(false)
+  const { slug } = useSlug()
 
   const nights = checkIn && checkOut ? calculateNights(checkIn, checkOut) : 0
+
+  const handleSearch = async () => {
+    setSearching(true)
+    try {
+      const rooms = await hotelService.getRooms(slug, checkIn, checkOut)
+      setSearchResults(rooms)
+      setHasSearched(true)
+    } catch (err) {
+      console.error('Failed to search rooms:', err)
+      setSearchResults(initialRooms)
+      setHasSearched(true)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const displayRooms = hasSearched ? searchResults : initialRooms
 
   return (
     <div className="min-h-screen bg-surface">
@@ -126,10 +150,11 @@ export default function AvailabilityPage() {
 
             {/* Search Button */}
             <button
-              onClick={() => setHasSearched(true)}
-              className="w-full px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
+              onClick={handleSearch}
+              disabled={searching}
+              className="w-full px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors disabled:opacity-50"
             >
-              {tc('search')}
+              {searching ? '...' : tc('search')}
             </button>
           </div>
 
@@ -142,18 +167,19 @@ export default function AvailabilityPage() {
         </div>
 
         {/* Results */}
-        {hasSearched && (
+        {displayRooms.length > 0 && (
           <>
             <h2 className="text-xl font-bold text-gray-900 mb-4">
-              {t('roomsAvailable', { count: rooms.length })}
+              {t('roomsAvailable', { count: displayRooms.filter(r => r.remainingRooms > 0).length })}
             </h2>
             <div className="space-y-4">
-              {rooms.map((room) => {
+              {displayRooms.map((room) => {
                 const total = room.baseRate * nights
+                const soldOut = room.remainingRooms === 0
                 return (
                   <div
                     key={room.id}
-                    className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow"
+                    className={`bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow ${soldOut ? 'opacity-60' : ''}`}
                   >
                     <div className="flex flex-col md:flex-row">
                       <div className="relative w-full md:w-64 h-48 md:h-auto flex-shrink-0">
@@ -163,11 +189,15 @@ export default function AvailabilityPage() {
                           fill
                           className="object-cover"
                         />
-                        {room.remainingRooms <= 3 && (
+                        {soldOut ? (
+                          <div className="absolute top-3 left-3 bg-gray-700 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+                            Sold Out
+                          </div>
+                        ) : room.remainingRooms <= 3 ? (
                           <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
                             {tc('left', { count: room.remainingRooms })}
                           </div>
-                        )}
+                        ) : null}
                       </div>
                       <div className="flex-1 p-5 flex flex-col">
                         <div className="flex-1">
@@ -189,19 +219,27 @@ export default function AvailabilityPage() {
                         <div className="flex items-end justify-between pt-4 mt-4 border-t border-gray-100">
                           <div>
                             <span className="text-2xl font-bold text-gray-900">
-                              {formatCurrency(room.baseRate, room.currency, locale)}
+                              {formatPrice(room.baseRate, room.currency)}
                             </span>
                             <span className="text-sm text-gray-500 ml-1">{tc('perNight')}</span>
-                            <p className="text-sm text-gray-500">
-                              {t('totalLabel', { amount: formatCurrency(total, room.currency, locale) })}
-                            </p>
+                            {nights > 0 && (
+                              <p className="text-sm text-gray-500">
+                                {t('totalLabel', { amount: formatPrice(total, room.currency) })}
+                              </p>
+                            )}
                           </div>
-                          <Link
-                            href={`/book?room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}`}
-                            className="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
-                          >
-                            {tc('bookNow')}
-                          </Link>
+                          {soldOut ? (
+                            <span className="px-6 py-2.5 bg-gray-300 text-gray-500 font-semibold rounded-full text-sm cursor-not-allowed">
+                              Sold Out
+                            </span>
+                          ) : (
+                            <Link
+                              href={`/book?room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`}
+                              className="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
+                            >
+                              {tc('bookNow')}
+                            </Link>
+                          )}
                         </div>
                       </div>
                     </div>

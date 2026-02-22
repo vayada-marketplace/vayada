@@ -10,6 +10,7 @@ export const MOCK_HOTEL: Hotel = {
   country: 'Austria',
   starRating: 4,
   currency: 'EUR',
+  supportedCurrencies: ['EUR', 'USD', 'GBP', 'CHF'],
   heroImage: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&q=80',
   images: [
     'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&q=80',
