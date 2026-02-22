@@ -8,6 +8,7 @@ export interface PropertySettings {
   address: string
   timezone: string
   default_currency: string
+  supported_currencies: string[]
   supported_languages: string[]
   email_notifications: boolean
   new_booking_alerts: boolean

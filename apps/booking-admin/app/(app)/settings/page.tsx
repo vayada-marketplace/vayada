@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   address: '',
   timezone: 'UTC',
   default_currency: 'EUR',
+  supported_currencies: [],
   supported_languages: ['en'],
   email_notifications: true,
   new_booking_alerts: true,
@@ -60,6 +61,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false)
+  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false)
 
   // Password form state
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
@@ -135,6 +137,23 @@ export default function SettingsPage() {
     setSettings({
       ...settings,
       supported_languages: settings.supported_languages.filter((l) => l !== code),
+    })
+  }
+
+  const addCurrency = (code: string) => {
+    if (!settings.supported_currencies.includes(code)) {
+      setSettings({
+        ...settings,
+        supported_currencies: [...settings.supported_currencies, code],
+      })
+    }
+    setShowCurrencyDropdown(false)
+  }
+
+  const removeCurrency = (code: string) => {
+    setSettings({
+      ...settings,
+      supported_currencies: settings.supported_currencies.filter((c) => c !== code),
     })
   }
 
@@ -309,13 +328,67 @@ export default function SettingsPage() {
                         </label>
                         <select
                           value={settings.default_currency}
-                          onChange={(e) => setSettings({ ...settings, default_currency: e.target.value })}
+                          onChange={(e) => {
+                            const newPrimary = e.target.value
+                            setSettings({
+                              ...settings,
+                              default_currency: newPrimary,
+                              supported_currencies: settings.supported_currencies.filter((c) => c !== newPrimary),
+                            })
+                          }}
                           className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                         >
                           {CURRENCY_OPTIONS.map((c) => (
                             <option key={c.code} value={c.code}>{c.label}</option>
                           ))}
                         </select>
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
+                          Supported Currencies
+                        </label>
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          {settings.supported_currencies.map((code) => {
+                            const cur = CURRENCY_OPTIONS.find((c) => c.code === code)
+                            return (
+                              <span
+                                key={code}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[13px] rounded-full"
+                              >
+                                {cur?.label || code}
+                                <button
+                                  onClick={() => removeCurrency(code)}
+                                  className="ml-0.5 text-primary-400 hover:text-primary-600"
+                                >
+                                  &times;
+                                </button>
+                              </span>
+                            )
+                          })}
+                          <div className="relative">
+                            <button
+                              onClick={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 border border-dashed border-gray-300 text-gray-500 text-[13px] rounded-full hover:border-gray-400 hover:text-gray-700"
+                            >
+                              + Add
+                            </button>
+                            {showCurrencyDropdown && (
+                              <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-44 overflow-y-auto">
+                                {CURRENCY_OPTIONS.filter(
+                                  (c) => c.code !== settings.default_currency && !settings.supported_currencies.includes(c.code)
+                                ).map((cur) => (
+                                  <button
+                                    key={cur.code}
+                                    onClick={() => addCurrency(cur.code)}
+                                    className="block w-full text-left px-2.5 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50"
+                                  >
+                                    {cur.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                       <div>
                         <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
