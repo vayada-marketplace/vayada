@@ -4,11 +4,14 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { roomsService, RoomType } from '@/services/rooms'
 import { bookingsService, Booking } from '@/services/bookings'
+import { affiliatesService } from '@/services/affiliates'
 
 export default function DashboardPage() {
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [pendingBookings, setPendingBookings] = useState<Booking[]>([])
   const [totalBookings, setTotalBookings] = useState(0)
+  const [totalAffiliates, setTotalAffiliates] = useState(0)
+  const [pendingAffiliates, setPendingAffiliates] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -16,11 +19,15 @@ export default function DashboardPage() {
       roomsService.list(),
       bookingsService.list({ status: 'pending', limit: 5 }),
       bookingsService.list({ limit: 1 }),
+      affiliatesService.list({ limit: 1 }).catch(() => ({ total: 0 })),
+      affiliatesService.list({ status: 'pending', limit: 1 }).catch(() => ({ total: 0 })),
     ])
-      .then(([roomsList, pendingRes, allRes]) => {
+      .then(([roomsList, pendingRes, allRes, affRes, affPendingRes]) => {
         setRooms(roomsList)
         setPendingBookings(pendingRes.bookings)
         setTotalBookings(allRes.total)
+        setTotalAffiliates(affRes.total)
+        setPendingAffiliates(affPendingRes.total)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -31,7 +38,8 @@ export default function DashboardPage() {
       <div className="p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
+            <div className="h-24 bg-gray-200 rounded" />
             <div className="h-24 bg-gray-200 rounded" />
             <div className="h-24 bg-gray-200 rounded" />
             <div className="h-24 bg-gray-200 rounded" />
@@ -49,7 +57,7 @@ export default function DashboardPage() {
       <h1 className="text-xl font-bold text-gray-900 mb-6">Dashboard</h1>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-sm text-gray-500">Room Types</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">{rooms.length}</p>
@@ -65,6 +73,11 @@ export default function DashboardPage() {
           <p className="text-2xl font-bold text-yellow-600 mt-1">{pendingBookings.length}</p>
           <p className="text-xs text-gray-500 mt-1">awaiting confirmation</p>
         </div>
+        <Link href="/affiliates" className="bg-white border border-gray-200 rounded-xl p-5 hover:border-primary-200 transition-colors">
+          <p className="text-sm text-gray-500">Affiliates</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{totalAffiliates}</p>
+          <p className="text-xs text-gray-500 mt-1">{pendingAffiliates} pending review</p>
+        </Link>
       </div>
 
       {/* Quick Actions */}

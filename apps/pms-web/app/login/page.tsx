@@ -191,7 +191,7 @@ export default function LoginPage() {
           <p className="text-center text-[13px] text-gray-500">
             Need to set up your booking engine?{' '}
             <a
-              href="http://localhost:3003"
+              href={process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary-600 hover:text-primary-700 font-medium"

@@ -9,6 +9,8 @@ import {
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
 
+const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
+
 const navItems = [
   {
     label: 'Dashboard',
@@ -24,6 +26,11 @@ const navItems = [
     label: 'Bookings',
     href: '/bookings',
     icon: BookingsIcon,
+  },
+  {
+    label: 'Affiliates',
+    href: '/affiliates',
+    icon: AffiliatesIcon,
   },
 ]
 
@@ -89,7 +96,7 @@ export default function Sidebar() {
       <div className="px-2 pb-2 space-y-1.5">
         {/* Booking Engine link */}
         <a
-          href="http://localhost:3003"
+          href={BOOKING_ADMIN_URL}
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
@@ -154,6 +161,17 @@ function BookingsIcon({ className }: { className?: string }) {
       <rect x="9" y="3" width="6" height="4" rx="1" />
       <path d="M9 12h6" />
       <path d="M9 16h6" />
+    </svg>
+  )
+}
+
+function AffiliatesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   )
 }
