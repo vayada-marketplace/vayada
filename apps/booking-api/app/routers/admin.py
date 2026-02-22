@@ -71,7 +71,7 @@ _SETUP_FIELD_MAP = {
 }
 
 # DB defaults that count as "not set"
-_SETUP_DEFAULTS = {"timezone": "UTC", "currency": "EUR"}
+_SETUP_DEFAULTS = {}
 
 _ALL_SETUP_FIELDS = list(_SETUP_FIELD_MAP.values())
 
@@ -146,7 +146,11 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
     languages = hotel.get('supported_languages') or ['en']
     if isinstance(languages, str):
         languages = json.loads(languages)
+    currencies = hotel.get('supported_currencies') or []
+    if isinstance(currencies, str):
+        currencies = json.loads(currencies)
     return PropertySettingsResponse(
+        slug=hotel.get('slug') or '',
         property_name=hotel.get('name') or '',
         reservation_email=hotel.get('contact_email') or '',
         phone_number=hotel.get('contact_phone') or '',
@@ -154,6 +158,7 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         address=hotel.get('contact_address') or '',
         timezone=hotel.get('timezone') or 'UTC',
         default_currency=hotel.get('currency') or 'EUR',
+        supported_currencies=currencies,
         supported_languages=languages,
         email_notifications=hotel.get('email_notifications', True),
         new_booking_alerts=hotel.get('new_booking_alerts', True),
@@ -170,6 +175,7 @@ async def get_property_settings(user_id: str = Depends(require_hotel_admin)):
 
         if not hotel:
             return PropertySettingsResponse(
+                slug='',
                 property_name='',
                 reservation_email='',
                 phone_number='',
@@ -177,6 +183,7 @@ async def get_property_settings(user_id: str = Depends(require_hotel_admin)):
                 address='',
                 timezone='UTC',
                 default_currency='EUR',
+                supported_currencies=[],
                 supported_languages=['en'],
                 email_notifications=True,
                 new_booking_alerts=True,
@@ -230,6 +237,8 @@ async def update_property_settings(
                 updates["timezone"] = data.timezone
             if data.default_currency is not None:
                 updates["currency"] = data.default_currency
+            if data.supported_currencies is not None:
+                updates["supported_currencies"] = data.supported_currencies
             if data.supported_languages is not None:
                 updates["supported_languages"] = data.supported_languages
             if data.email_notifications is not None:
@@ -259,6 +268,7 @@ async def update_property_settings(
                 currency=data.default_currency or 'EUR',
                 supported_languages=data.supported_languages or ['en'],
                 user_id=user_id,
+                supported_currencies=data.supported_currencies or [],
                 contact_whatsapp=data.whatsapp_number or '',
                 contact_address=data.address or '',
                 email_notifications=data.email_notifications if data.email_notifications is not None else True,
