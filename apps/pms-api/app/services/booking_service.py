@@ -6,7 +6,7 @@ from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.models.booking import BookingCreate, BookingResponse
-from app.services.email_service import send_hotel_notification, send_guest_confirmation
+from app.services.email_service import send_hotel_notification
 
 logger = logging.getLogger(__name__)
 
@@ -107,12 +107,9 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     booking = await BookingRepository.get_by_id(str(booking_row["id"]))
     response = _booking_to_response(booking)
 
-    # Fire-and-forget emails
+    # Fire-and-forget: notify hotel owner only (guest gets email when hotel confirms)
     asyncio.create_task(
         send_hotel_notification(hotel["contact_email"], booking)
-    )
-    asyncio.create_task(
-        send_guest_confirmation(data.guest_email, booking)
     )
 
     return response

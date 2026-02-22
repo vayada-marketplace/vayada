@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Optional, List
@@ -21,6 +22,7 @@ from app.models.affiliate import (
     AffiliateStatusUpdate,
     AffiliateCommissionUpdate,
 )
+from app.services.email_service import send_guest_confirmation, send_guest_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +278,17 @@ async def update_booking_status(
 
     await BookingRepository.update_status(booking_id, data.status)
     updated = await BookingRepository.get_by_id(booking_id)
+
+    # Fire-and-forget: notify guest of status change
+    if data.status == "confirmed":
+        asyncio.create_task(
+            send_guest_confirmation(updated["guest_email"], updated)
+        )
+    elif data.status == "cancelled":
+        asyncio.create_task(
+            send_guest_cancellation(updated["guest_email"], updated)
+        )
+
     return _booking_to_admin(updated)
 
 
