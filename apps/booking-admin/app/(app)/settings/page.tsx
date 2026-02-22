@@ -39,6 +39,7 @@ const LANGUAGE_OPTIONS = [
 ]
 
 const DEFAULT_SETTINGS: PropertySettings = {
+  slug: '',
   property_name: '',
   reservation_email: '',
   phone_number: '',
