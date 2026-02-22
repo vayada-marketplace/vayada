@@ -6,10 +6,11 @@ import { usePathname } from 'next/navigation'
 import {
   ChevronLeftIcon,
   Cog6ToothIcon,
-  GlobeAltIcon,
   ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
+
+const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
 
 const navItems = [
   {
@@ -18,24 +19,9 @@ const navItems = [
     icon: DashboardIcon,
   },
   {
-    label: 'Global Demand',
-    href: '/global-demand',
-    icon: GlobeAltIcon,
-  },
-  {
-    label: 'Integrations',
-    href: '/integrations',
-    icon: IntegrationsIcon,
-  },
-  {
     label: 'Design Studio',
     href: '/design-studio',
     icon: DesignStudioIcon,
-  },
-  {
-    label: 'Booking Flow',
-    href: '/booking-flow',
-    icon: BookingFlowIcon,
   },
   {
     label: 'Settings',
@@ -107,7 +93,7 @@ export default function Sidebar() {
 
         {/* PMS link */}
         <a
-          href="http://localhost:3004"
+          href={PMS_FRONTEND_URL}
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
@@ -154,18 +140,6 @@ function DashboardIcon({ className }: { className?: string }) {
   )
 }
 
-function IntegrationsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7 8V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" />
-      <path d="M7 16v2a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2" />
-      <path d="M3 12h4" />
-      <path d="M17 12h4" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  )
-}
-
 function DesignStudioIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -178,24 +152,3 @@ function DesignStudioIcon({ className }: { className?: string }) {
   )
 }
 
-function RoomsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 7v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7" />
-      <path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
-      <path d="M3 7h18" />
-      <path d="M8 11h8" />
-    </svg>
-  )
-}
-
-function BookingFlowIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
-      <rect x="9" y="3" width="6" height="4" rx="1" />
-      <path d="M9 12h6" />
-      <path d="M9 16h6" />
-    </svg>
-  )
-}
