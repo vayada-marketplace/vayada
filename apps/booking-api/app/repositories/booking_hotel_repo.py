@@ -15,7 +15,7 @@ class BookingHotelRepository:
     async def get_by_user_id(
         user_id: str,
         *,
-        columns: str = "name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports",
+        columns: str = "slug, name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
         query = f"SELECT {columns} FROM booking_hotels WHERE user_id = $1"
@@ -70,6 +70,7 @@ class BookingHotelRepository:
         supported_languages: list,
         user_id: str,
         *,
+        supported_currencies: list | None = None,
         contact_whatsapp: str = '',
         contact_address: str = '',
         email_notifications: bool = True,
@@ -79,12 +80,13 @@ class BookingHotelRepository:
         conn: Optional[asyncpg.Connection] = None,
     ) -> dict:
         query = """
-            INSERT INTO booking_hotels (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_languages, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14)
-            RETURNING name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports
+            INSERT INTO booking_hotels (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15)
+            RETURNING slug, name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports
         """
+        currencies_json = json.dumps(supported_currencies or [])
         languages_json = json.dumps(supported_languages)
-        args = (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, languages_json, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports)
+        args = (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, currencies_json, languages_json, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports)
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -110,7 +112,7 @@ class BookingHotelRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col == "supported_languages":
+            if col in ("supported_languages", "supported_currencies"):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
