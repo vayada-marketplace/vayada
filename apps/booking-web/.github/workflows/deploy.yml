@@ -43,6 +43,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=https://booking-api.vayada.com
+            NEXT_PUBLIC_PMS_URL=https://pms-api.vayada.com
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
