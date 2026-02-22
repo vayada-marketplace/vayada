@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
+    CORS_ORIGIN_REGEX: str = Field(default="", description="Regex for wildcard origin matching (e.g. https://.*\\.booking\\.vayada\\.com)")
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"
