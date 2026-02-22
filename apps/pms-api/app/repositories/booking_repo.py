@@ -31,9 +31,10 @@ class BookingRepository:
                 hotel_id, room_type_id, booking_reference,
                 guest_first_name, guest_last_name, guest_email, guest_phone,
                 special_requests, check_in, check_out,
-                adults, children, nightly_rate, total_amount, currency
+                adults, children, nightly_rate, total_amount, currency,
+                affiliate_id, referral_code
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -51,6 +52,8 @@ class BookingRepository:
             data["nightly_rate"],
             data["total_amount"],
             data["currency"],
+            data.get("affiliate_id"),
+            data.get("referral_code"),
         )
         return dict(row)
 

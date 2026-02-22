@@ -21,6 +21,7 @@ class BookingCreate(BaseModel):
     check_out: date
     adults: int = 1
     children: int = 0
+    referral_code: Optional[str] = None
 
 
 class BookingResponse(BaseModel):

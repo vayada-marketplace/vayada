@@ -71,6 +71,17 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     nightly_rate = float(room["base_rate"])
     total_amount = nightly_rate * nights
 
+    # Resolve affiliate from referral code
+    affiliate_id = None
+    if data.referral_code:
+        affiliate = await Database.fetchrow(
+            "SELECT id FROM affiliates WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
+            hotel_id,
+            data.referral_code,
+        )
+        if affiliate:
+            affiliate_id = str(affiliate["id"])
+
     # Create booking
     booking_data = {
         "hotel_id": hotel_id,
@@ -87,6 +98,8 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
         "nightly_rate": nightly_rate,
         "total_amount": total_amount,
         "currency": room["currency"],
+        "referral_code": data.referral_code,
+        "affiliate_id": affiliate_id,
     }
     booking_row = await BookingRepository.create(booking_data)
 
