@@ -1,6 +1,7 @@
 import { apiClient } from '../api/client'
 
 export interface PropertySettings {
+  slug: string
   property_name: string
   reservation_email: string
   phone_number: string

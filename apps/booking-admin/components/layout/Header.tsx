@@ -11,6 +11,7 @@ import {
   UserPlusIcon,
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
+import { settingsService } from '@/services/settings'
 
 // TODO: Replace with real data from API
 const listings = [
@@ -54,6 +55,7 @@ export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [hotelSlug, setHotelSlug] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -77,6 +79,9 @@ export default function Header() {
   useEffect(() => {
     setUserName(localStorage.getItem('userName') || '')
     setUserEmail(localStorage.getItem('userEmail') || '')
+    settingsService.getPropertySettings().then((s) => {
+      if (s.slug) setHotelSlug(s.slug)
+    }).catch(() => {})
   }, [])
 
   const initials = userName
@@ -146,7 +151,15 @@ export default function Header() {
       {/* Right section: Preview + Notifications + Profile */}
       <div className="flex items-center gap-2">
         {/* Preview Button */}
-        <button className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors">
+        <button
+          onClick={() => {
+            if (hotelSlug) {
+              window.open(`https://${hotelSlug}.booking.vayada.com`, '_blank')
+            }
+          }}
+          disabled={!hotelSlug}
+          className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
           Preview
         </button>
