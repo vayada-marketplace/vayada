@@ -24,6 +24,7 @@ export default function PmsSetupPage() {
   const [roomName, setRoomName] = useState('')
   const [bedType, setBedType] = useState('')
   const [baseRate, setBaseRate] = useState(0)
+  const [nonRefundableRate, setNonRefundableRate] = useState<number | null>(null)
   const [currency, setCurrency] = useState('EUR')
   const [maxOccupancy, setMaxOccupancy] = useState(2)
   const [size, setSize] = useState(0)
@@ -95,6 +96,7 @@ export default function PmsSetupPage() {
         name: roomName,
         bedType,
         baseRate,
+        nonRefundableRate,
         currency,
         maxOccupancy,
         size,
@@ -218,10 +220,10 @@ export default function PmsSetupPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[13px] font-medium text-gray-700 mb-1">
-                    Base Rate <span className="text-red-500">*</span>
+                    Flexible Rate <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -230,6 +232,19 @@ export default function PmsSetupPage() {
                     onChange={(e) => setBaseRate(parseFloat(e.target.value) || 0)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
                     placeholder="120.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">
+                    Non-Refundable
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={nonRefundableRate ?? ''}
+                    onChange={(e) => setNonRefundableRate(e.target.value ? parseFloat(e.target.value) : null)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                    placeholder="102.00"
                   />
                 </div>
                 <div>
@@ -452,6 +467,9 @@ export default function PmsSetupPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold text-gray-900">{currency} {baseRate.toFixed(2)}</p>
+                  {nonRefundableRate != null && (
+                    <p className="text-[12px] text-gray-500">Non-refundable: {currency} {nonRefundableRate.toFixed(2)}</p>
+                  )}
                   <p className="text-[12px] text-gray-500">per night</p>
                 </div>
               </div>

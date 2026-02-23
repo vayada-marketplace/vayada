@@ -31,6 +31,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           maxOccupancy: r.maxOccupancy,
           size: r.size,
           baseRate: r.baseRate,
+          nonRefundableRate: r.nonRefundableRate,
           currency: r.currency,
           bedType: r.bedType,
           totalRooms: r.totalRooms,
@@ -180,12 +181,23 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Base Rate</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Flexible Rate</label>
               <input
                 type="number"
                 step="0.01"
                 value={form.baseRate ?? 0}
                 onChange={(e) => setForm({ ...form, baseRate: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Non-Refundable Rate</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.nonRefundableRate ?? ''}
+                onChange={(e) => setForm({ ...form, nonRefundableRate: e.target.value ? parseFloat(e.target.value) : null })}
+                placeholder="Optional"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
             </div>

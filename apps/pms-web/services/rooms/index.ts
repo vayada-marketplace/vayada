@@ -9,6 +9,7 @@ export interface RoomType {
   maxOccupancy: number
   size: number
   baseRate: number
+  nonRefundableRate: number | null
   currency: string
   amenities: string[]
   images: string[]
@@ -28,6 +29,7 @@ export interface RoomTypeCreate {
   maxOccupancy?: number
   size?: number
   baseRate?: number
+  nonRefundableRate?: number | null
   currency?: string
   amenities?: string[]
   images?: string[]

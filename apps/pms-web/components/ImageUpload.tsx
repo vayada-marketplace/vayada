@@ -29,6 +29,8 @@ export default function ImageUpload({
 }: ImageUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [overIndex, setOverIndex] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,6 +80,35 @@ export default function ImageUpload({
     onChange(updated)
   }, [images, onChange])
 
+  const handleDragStart = useCallback((index: number) => {
+    setDragIndex(index)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault()
+    setOverIndex(index)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault()
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDragIndex(null)
+      setOverIndex(null)
+      return
+    }
+    const reordered = [...images]
+    const [moved] = reordered.splice(dragIndex, 1)
+    reordered.splice(dropIndex, 0, moved)
+    onChange(reordered)
+    setDragIndex(null)
+    setOverIndex(null)
+  }, [dragIndex, images, onChange])
+
+  const handleDragEnd = useCallback(() => {
+    setDragIndex(null)
+    setOverIndex(null)
+  }, [])
+
   return (
     <div className="space-y-3">
       {label && (
@@ -90,11 +121,25 @@ export default function ImageUpload({
       {images.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
           {images.map((url, i) => (
-            <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+            <div
+              key={url + i}
+              draggable
+              onDragStart={() => handleDragStart(i)}
+              onDragOver={(e) => handleDragOver(e, i)}
+              onDrop={(e) => handleDrop(e, i)}
+              onDragEnd={handleDragEnd}
+              className={`relative group aspect-square rounded-lg overflow-hidden border-2 bg-gray-50 cursor-grab active:cursor-grabbing transition-all ${
+                dragIndex === i
+                  ? 'opacity-40 border-primary-300'
+                  : overIndex === i && dragIndex !== null
+                    ? 'border-primary-500 scale-[1.03]'
+                    : 'border-gray-200'
+              }`}
+            >
               <img
                 src={url}
                 alt={`Room image ${i + 1}`}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover pointer-events-none"
               />
               <button
                 type="button"
@@ -103,6 +148,11 @@ export default function ImageUpload({
               >
                 <XMarkIcon className="w-3 h-3" />
               </button>
+              {i === 0 && (
+                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 text-white text-[10px] font-medium rounded">
+                  Cover
+                </span>
+              )}
             </div>
           ))}
         </div>
