@@ -7,6 +7,10 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Vayada PMS',
   description: 'Property Management System for Vayada hotels',
+  icons: {
+    icon: [{ url: '/vayada-logo.png' }],
+    apple: [{ url: '/vayada-logo.png' }],
+  },
 }
 
 export default function RootLayout({
