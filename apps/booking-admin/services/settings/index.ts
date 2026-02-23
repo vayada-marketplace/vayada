@@ -7,7 +7,6 @@ export interface PropertySettings {
   phone_number: string
   whatsapp_number: string
   address: string
-  timezone: string
   default_currency: string
   supported_currencies: string[]
   supported_languages: string[]
@@ -66,6 +65,9 @@ export const settingsService = {
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post('/auth/change-password', { current_password, new_password }),
+
+  changeEmail: (new_email: string, password: string) =>
+    apiClient.post<{ message: string; email: string }>('/auth/change-email', { new_email, password }),
 
   getDesignSettings: () =>
     apiClient.get<DesignSettings>('/admin/settings/design'),

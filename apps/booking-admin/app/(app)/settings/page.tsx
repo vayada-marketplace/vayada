@@ -15,7 +15,7 @@ import {
   EyeSlashIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type PropertySettings } from '@/services/settings'
-import { TIMEZONE_OPTIONS, CURRENCY_OPTIONS } from '@/lib/constants/options'
+import { CURRENCY_OPTIONS } from '@/lib/constants/options'
 
 type Tab = 'property' | 'notifications' | 'security' | 'billing'
 
@@ -45,7 +45,6 @@ const DEFAULT_SETTINGS: PropertySettings = {
   phone_number: '',
   whatsapp_number: '',
   address: '',
-  timezone: 'UTC',
   default_currency: 'EUR',
   supported_currencies: [],
   supported_languages: ['en'],
@@ -64,6 +63,12 @@ export default function SettingsPage() {
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false)
   const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false)
 
+  // Email form state
+  const [emailForm, setEmailForm] = useState({ new_email: '', password: '' })
+  const [changingEmail, setChangingEmail] = useState(false)
+  const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [showEmailPassword, setShowEmailPassword] = useState(false)
+
   // Password form state
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
   const [changingPassword, setChangingPassword] = useState(false)
@@ -71,6 +76,21 @@ export default function SettingsPage() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false)
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
+  const handleChangeEmail = async () => {
+    try {
+      setChangingEmail(true)
+      setEmailFeedback(null)
+      await settingsService.changeEmail(emailForm.new_email, emailForm.password)
+      setEmailFeedback({ type: 'success', message: 'Email updated successfully' })
+      setEmailForm({ new_email: '', password: '' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update email'
+      setEmailFeedback({ type: 'error', message })
+    } finally {
+      setChangingEmail(false)
+    }
+  }
 
   const handleChangePassword = async () => {
     if (passwordForm.new_password !== passwordForm.confirm_password) {
@@ -214,7 +234,7 @@ export default function SettingsPage() {
                   <div className="bg-white rounded-lg border border-gray-200 p-5">
                     <h2 className="text-sm font-semibold text-gray-900">Property Information</h2>
                     <p className="text-[13px] text-gray-500 mt-0.5 mb-3">Basic details about your property</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-3">
                       <div>
                         <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
                           Property Name
@@ -228,20 +248,6 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Timezone
-                        </label>
-                        <select
-                          value={settings.timezone}
-                          onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                        >
-                          {TIMEZONE_OPTIONS.map((tz) => (
-                            <option key={tz} value={tz}>{tz}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="md:col-span-2">
                         <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
                           Address
                         </label>
@@ -571,6 +577,82 @@ export default function SettingsPage() {
           {/* Security tab */}
           {activeTab === 'security' && (
             <div className="mt-5 space-y-4">
+              {/* Change Email card */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <EnvelopeIcon className="w-4 h-4 text-gray-700" />
+                  <h2 className="text-sm font-semibold text-gray-900">Change Email</h2>
+                </div>
+                <p className="text-[13px] text-gray-500 mb-4">Update your account email address</p>
+
+                <div className="space-y-3 max-w-sm">
+                  <div>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
+                      New Email
+                    </label>
+                    <div className="relative">
+                      <EnvelopeIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                      <input
+                        type="email"
+                        value={emailForm.new_email}
+                        onChange={(e) => setEmailForm({ ...emailForm, new_email: e.target.value })}
+                        className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="Enter new email address"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
+                      Current Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showEmailPassword ? 'text' : 'password'}
+                        value={emailForm.password}
+                        onChange={(e) => setEmailForm({ ...emailForm, password: e.target.value })}
+                        className="w-full px-2.5 py-1.5 pr-9 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="Confirm with your password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowEmailPassword(!showEmailPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {showEmailPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {emailFeedback && (
+                  <div
+                    className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] max-w-sm ${
+                      emailFeedback.type === 'success'
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : 'bg-red-50 text-red-800 border border-red-200'
+                    }`}
+                  >
+                    {emailFeedback.message}
+                  </div>
+                )}
+
+                <div className="flex justify-end mt-4">
+                  <button
+                    onClick={handleChangeEmail}
+                    disabled={changingEmail || !emailForm.new_email || !emailForm.password}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                  >
+                    {changingEmail ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <EnvelopeIcon className="w-3.5 h-3.5" />
+                    )}
+                    Update Email
+                  </button>
+                </div>
+              </div>
+
+              {/* Change Password card */}
               <div className="bg-white rounded-lg border border-gray-200 p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <LockClosedIcon className="w-4 h-4 text-gray-700" />
@@ -655,22 +737,21 @@ export default function SettingsPage() {
                     {passwordFeedback.message}
                   </div>
                 )}
-              </div>
 
-              {/* Update Password button */}
-              <div className="flex justify-end">
-                <button
-                  onClick={handleChangePassword}
-                  disabled={changingPassword || !passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-                >
-                  {changingPassword ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <LockClosedIcon className="w-3.5 h-3.5" />
-                  )}
-                  Update Password
-                </button>
+                <div className="flex justify-end mt-4">
+                  <button
+                    onClick={handleChangePassword}
+                    disabled={changingPassword || !passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                  >
+                    {changingPassword ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <LockClosedIcon className="w-3.5 h-3.5" />
+                    )}
+                    Update Password
+                  </button>
+                </div>
               </div>
             </div>
           )}
