@@ -7,6 +7,10 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Vayada Booking Engine - Admin',
   description: 'Hotel admin dashboard for Vayada Booking Engine',
+  icons: {
+    icon: [{ url: '/vayada-logo.png' }],
+    apple: [{ url: '/vayada-logo.png' }],
+  },
 }
 
 export default function RootLayout({
