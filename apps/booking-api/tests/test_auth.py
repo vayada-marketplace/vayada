@@ -363,3 +363,63 @@ class TestChangePassword:
             },
         )
         assert resp.status_code == 403
+
+
+class TestChangeEmail:
+    async def test_change_email_success(self, client, cleanup_database):
+        user = await create_test_user(password="MyPass123!")
+        new_email = generate_test_email()
+        resp = await client.post(
+            "/auth/change-email",
+            json={"new_email": new_email, "password": "MyPass123!"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["email"] == new_email
+        assert body["message"] == "Email updated successfully"
+
+        # Can login with new email
+        login_resp = await client.post(
+            "/auth/login",
+            json={"email": new_email, "password": "MyPass123!"},
+        )
+        assert login_resp.status_code == 200
+
+    async def test_change_email_wrong_password(self, client, cleanup_database):
+        user = await create_test_user(password="CorrectPass123!")
+        resp = await client.post(
+            "/auth/change-email",
+            json={"new_email": generate_test_email(), "password": "WrongPass123!"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400
+        assert "Password is incorrect" in resp.json()["detail"]
+
+    async def test_change_email_same_email(self, client, cleanup_database):
+        user = await create_test_user(password="MyPass123!")
+        resp = await client.post(
+            "/auth/change-email",
+            json={"new_email": user["email"], "password": "MyPass123!"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400
+        assert "same as the current email" in resp.json()["detail"]
+
+    async def test_change_email_already_in_use(self, client, cleanup_database):
+        user1 = await create_test_user(password="Pass123!")
+        user2 = await create_test_user(password="Pass456!")
+        resp = await client.post(
+            "/auth/change-email",
+            json={"new_email": user2["email"], "password": "Pass123!"},
+            headers=get_auth_headers(user1["token"]),
+        )
+        assert resp.status_code == 409
+        assert "already in use" in resp.json()["detail"]
+
+    async def test_change_email_no_auth(self, client):
+        resp = await client.post(
+            "/auth/change-email",
+            json={"new_email": "new@example.com", "password": "Pass123!"},
+        )
+        assert resp.status_code == 403

@@ -79,3 +79,13 @@ class ChangePasswordRequest(BaseModel):
 
 class ChangePasswordResponse(BaseModel):
     message: str
+
+
+class ChangeEmailRequest(BaseModel):
+    new_email: EmailStr
+    password: str = Field(..., description="Current password for verification")
+
+
+class ChangeEmailResponse(BaseModel):
+    message: str
+    email: str

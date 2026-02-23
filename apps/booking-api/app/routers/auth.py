@@ -26,6 +26,8 @@ from app.models.auth import (
     ResetPasswordResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    ChangeEmailRequest,
+    ChangeEmailResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -353,4 +355,59 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to change password"
+        )
+
+
+@router.post("/change-email", response_model=ChangeEmailResponse, status_code=status.HTTP_200_OK)
+async def change_email(
+    request: ChangeEmailRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Change the current user's email address.
+
+    Requires the current password for verification.
+    The new email must not already be in use.
+    """
+    try:
+        user = await UserRepository.get_by_id(user_id, columns="id, email, password_hash")
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if not verify_password(request.password, user['password_hash']):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is incorrect"
+            )
+
+        if user['email'] == request.new_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New email is the same as the current email"
+            )
+
+        if await UserRepository.exists_by_email(request.new_email):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already in use"
+            )
+
+        updated = await UserRepository.update_email(user_id, request.new_email)
+
+        return ChangeEmailResponse(
+            message="Email updated successfully",
+            email=updated['email'],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error changing email: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to change email"
         )

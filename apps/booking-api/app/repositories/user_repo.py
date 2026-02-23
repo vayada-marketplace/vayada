@@ -90,3 +90,22 @@ class UserRepository:
             await conn.execute(query, password_hash, user_id)
         else:
             await AuthDatabase.execute(query, password_hash, user_id)
+
+    @staticmethod
+    async def update_email(
+        user_id: str,
+        new_email: str,
+        *,
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> Optional[dict]:
+        query = """
+            UPDATE users
+            SET email = $1, updated_at = now()
+            WHERE id = $2
+            RETURNING id, email, name, type, status
+        """
+        if conn:
+            row = await conn.fetchrow(query, new_email, user_id)
+        else:
+            row = await AuthDatabase.fetchrow(query, new_email, user_id)
+        return dict(row) if row else None
