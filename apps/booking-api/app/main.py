@@ -58,3 +58,4 @@ async def health_db():
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(hotels.router)
+app.include_router(hotels.exchange_router)

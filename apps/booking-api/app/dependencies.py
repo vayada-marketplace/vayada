@@ -1,10 +1,12 @@
 """
 Dependencies for FastAPI routes
 """
-from fastapi import HTTPException, status, Depends
+from typing import Optional
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.jwt_utils import decode_access_token, is_token_expired
 from app.repositories.user_repo import UserRepository
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 
 security = HTTPBearer()
 
@@ -67,3 +69,39 @@ async def require_hotel_admin(user_id: str = Depends(get_current_user_id)) -> st
         )
 
     return user_id
+
+
+async def get_current_hotel(
+    request: Request,
+    user_id: str = Depends(require_hotel_admin),
+) -> Optional[dict]:
+    """
+    Resolve hotel context from X-Hotel-Id header.
+    Falls back to first hotel if header is absent (backwards compat).
+    """
+    hotel_id = request.headers.get("x-hotel-id")
+
+    if hotel_id:
+        hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
+        if not hotel:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hotel not found or access denied",
+            )
+        return hotel
+
+    # Fallback: return first hotel for old clients
+    hotels = await BookingHotelRepository.list_by_user_id(user_id)
+    return hotels[0] if hotels else None
+
+
+async def require_current_hotel(
+    hotel: Optional[dict] = Depends(get_current_hotel),
+) -> dict:
+    """Wraps get_current_hotel, raises 404 if no hotel resolved."""
+    if not hotel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hotel found. Please complete property setup first.",
+        )
+    return hotel

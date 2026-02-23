@@ -60,6 +60,15 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     images = json.loads(row["images"]) if isinstance(row["images"], str) else row["images"]
     amenities = json.loads(raw_amenities) if isinstance(raw_amenities, str) else raw_amenities
 
+    raw_supported_currencies = row.get("supported_currencies")
+    if raw_supported_currencies:
+        supported_currencies = json.loads(raw_supported_currencies) if isinstance(raw_supported_currencies, str) else raw_supported_currencies
+    else:
+        supported_currencies = []
+
+    raw_filters = row.get("booking_filters")
+    booking_filters = json.loads(raw_filters) if isinstance(raw_filters, str) else (raw_filters or [])
+
     return HotelResponse(
         id=str(row["id"]),
         name=name,
@@ -69,6 +78,8 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         country=country,
         star_rating=row["star_rating"],
         currency=row["currency"],
+        supported_currencies=supported_currencies,
+        booking_filters=booking_filters,
         hero_image=row["hero_image"],
         images=images,
         amenities=amenities,

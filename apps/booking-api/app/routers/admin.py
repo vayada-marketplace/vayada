@@ -6,7 +6,7 @@ import logging
 import re
 import json
 
-from app.dependencies import require_hotel_admin
+from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
@@ -18,6 +18,20 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/hotels")
+async def list_hotels(user_id: str = Depends(require_hotel_admin)):
+    """List all hotels owned by the current admin."""
+    try:
+        hotels = await BookingHotelRepository.list_by_user_id(user_id)
+        return hotels
+    except Exception as e:
+        logger.error(f"Error listing hotels: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list hotels"
+        )
 
 
 @router.get("/me")
@@ -101,14 +115,26 @@ async def _get_marketplace_prefill(user_id: str) -> SetupPrefillData | None:
 
 
 @router.get("/settings/setup-status", response_model=SetupStatusResponse)
-async def get_setup_status(user_id: str = Depends(require_hotel_admin)):
+async def get_setup_status(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict | None = Depends(get_current_hotel),
+):
     """Check whether the hotel admin has completed onboarding setup."""
     try:
-        hotel = await BookingHotelRepository.get_by_user_id(
-            user_id, columns=_SETUP_COLUMNS
+        if not hotel:
+            prefill = await _get_marketplace_prefill(user_id)
+            return SetupStatusResponse(
+                setup_complete=False,
+                missing_fields=_ALL_SETUP_FIELDS,
+                prefill_data=prefill,
+            )
+
+        # Re-fetch with setup columns specifically
+        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
+            hotel["id"], user_id, columns=_SETUP_COLUMNS
         )
 
-        if not hotel:
+        if not hotel_data:
             prefill = await _get_marketplace_prefill(user_id)
             return SetupStatusResponse(
                 setup_complete=False,
@@ -118,7 +144,7 @@ async def get_setup_status(user_id: str = Depends(require_hotel_admin)):
 
         missing = []
         for db_col, api_name in _SETUP_FIELD_MAP.items():
-            value = hotel.get(db_col)
+            value = hotel_data.get(db_col)
             if not value or value == _SETUP_DEFAULTS.get(db_col):
                 missing.append(api_name)
 
@@ -168,11 +194,12 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
 
 
 @router.get("/settings/property", response_model=PropertySettingsResponse)
-async def get_property_settings(user_id: str = Depends(require_hotel_admin)):
+async def get_property_settings(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict | None = Depends(get_current_hotel),
+):
     """Get property settings for the current hotel admin's hotel."""
     try:
-        hotel = await BookingHotelRepository.get_by_user_id(user_id)
-
         if not hotel:
             return PropertySettingsResponse(
                 slug='',
@@ -191,7 +218,8 @@ async def get_property_settings(user_id: str = Depends(require_hotel_admin)):
                 weekly_reports=False,
             )
 
-        return _hotel_to_property_settings(hotel)
+        full_hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel["id"], user_id)
+        return _hotel_to_property_settings(full_hotel)
 
     except HTTPException:
         raise
@@ -215,12 +243,11 @@ def _slugify(text: str) -> str:
 async def update_property_settings(
     data: PropertySettingsUpdate,
     user_id: str = Depends(require_hotel_admin),
+    hotel: dict | None = Depends(get_current_hotel),
 ):
     """Update property settings (upsert — creates hotel if none exists)."""
     try:
-        existing = await BookingHotelRepository.get_by_user_id(user_id, columns="id")
-
-        if existing:
+        if hotel:
             # Build updates dict from provided fields
             updates = {}
             if data.property_name is not None:
@@ -251,15 +278,15 @@ async def update_property_settings(
                 updates["weekly_reports"] = data.weekly_reports
 
             if updates:
-                hotel = await BookingHotelRepository.partial_update(user_id, updates)
+                result = await BookingHotelRepository.partial_update(hotel["id"], updates)
             else:
-                hotel = await BookingHotelRepository.get_by_user_id(user_id)
+                result = await BookingHotelRepository.get_by_id_and_user_id(hotel["id"], user_id)
         else:
             # INSERT new hotel
             name = data.property_name or ''
             slug = _slugify(name) if name else f"hotel-{user_id[:8]}"
 
-            hotel = await BookingHotelRepository.create(
+            result = await BookingHotelRepository.create(
                 name=name,
                 slug=slug,
                 contact_email=data.reservation_email or '',
@@ -277,7 +304,7 @@ async def update_property_settings(
                 weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
             )
 
-        return _hotel_to_property_settings(hotel)
+        return _hotel_to_property_settings(result)
 
     except HTTPException:
         raise
@@ -291,7 +318,7 @@ async def update_property_settings(
 
 # ── Design Settings ──────────────────────────────────────────────────
 
-_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing"
+_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing, booking_filters"
 
 _DESIGN_DEFAULTS = DesignSettingsResponse(
     hero_image='',
@@ -300,6 +327,7 @@ _DESIGN_DEFAULTS = DesignSettingsResponse(
     primary_color='',
     accent_color='',
     font_pairing='',
+    booking_filters=[],
 )
 
 # API field name → DB column name
@@ -310,10 +338,14 @@ _DESIGN_FIELD_MAP = {
     "primary_color": "branding_primary_color",
     "accent_color": "branding_accent_color",
     "font_pairing": "branding_font_pairing",
+    "booking_filters": "booking_filters",
 }
 
 
 def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
+    filters = hotel.get('booking_filters') or []
+    if isinstance(filters, str):
+        filters = json.loads(filters)
     return DesignSettingsResponse(
         hero_image=hotel.get('hero_image') or '',
         hero_heading=hotel.get('name') or '',
@@ -321,19 +353,26 @@ def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
         primary_color=hotel.get('branding_primary_color') or '',
         accent_color=hotel.get('branding_accent_color') or '',
         font_pairing=hotel.get('branding_font_pairing') or '',
+        booking_filters=filters,
     )
 
 
 @router.get("/settings/design", response_model=DesignSettingsResponse)
-async def get_design_settings(user_id: str = Depends(require_hotel_admin)):
+async def get_design_settings(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict | None = Depends(get_current_hotel),
+):
     """Get design settings for the current hotel admin's hotel."""
     try:
-        hotel = await BookingHotelRepository.get_by_user_id(
-            user_id, columns=_DESIGN_COLUMNS
-        )
         if not hotel:
             return _DESIGN_DEFAULTS
-        return _hotel_to_design_settings(hotel)
+
+        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
+            hotel["id"], user_id, columns=_DESIGN_COLUMNS
+        )
+        if not hotel_data:
+            return _DESIGN_DEFAULTS
+        return _hotel_to_design_settings(hotel_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -348,16 +387,10 @@ async def get_design_settings(user_id: str = Depends(require_hotel_admin)):
 async def update_design_settings(
     data: DesignSettingsUpdate,
     user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
     """Update design settings for the current hotel admin's hotel."""
     try:
-        existing = await BookingHotelRepository.get_by_user_id(user_id, columns="id")
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No hotel found. Please complete property setup first."
-            )
-
         updates = {}
         for api_field, db_col in _DESIGN_FIELD_MAP.items():
             value = getattr(data, api_field)
@@ -365,12 +398,12 @@ async def update_design_settings(
                 updates[db_col] = value
 
         if updates:
-            await BookingHotelRepository.partial_update(user_id, updates)
+            await BookingHotelRepository.partial_update(hotel["id"], updates)
 
-        hotel = await BookingHotelRepository.get_by_user_id(
-            user_id, columns=_DESIGN_COLUMNS
+        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
+            hotel["id"], user_id, columns=_DESIGN_COLUMNS
         )
-        return _hotel_to_design_settings(hotel)
+        return _hotel_to_design_settings(hotel_data)
 
     except HTTPException:
         raise

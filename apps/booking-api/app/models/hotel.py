@@ -46,6 +46,7 @@ class HotelResponse(BaseModel):
     country: str
     star_rating: int
     currency: str
+    supported_currencies: List[str] = []
     hero_image: str
     images: List[str]
     amenities: List[str]
@@ -53,6 +54,7 @@ class HotelResponse(BaseModel):
     check_out_time: str
     contact: HotelContact
     social_links: Optional[HotelSocialLinks] = None
+    booking_filters: List[str] = []
     branding: Optional[HotelBranding] = None
 
 

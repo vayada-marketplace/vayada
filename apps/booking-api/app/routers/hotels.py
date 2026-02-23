@@ -1,16 +1,18 @@
 import logging
 from typing import List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from app.models.hotel import HotelResponse, RoomTypeResponse, AddonResponse
 from app.services.hotel_service import (
     get_hotel_by_slug,
     get_rooms_by_hotel_slug,
     get_addons_by_hotel_slug,
 )
+from app.services.exchange_rate_service import get_rates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/hotels", tags=["hotels"])
+exchange_router = APIRouter(prefix="/api", tags=["exchange-rates"])
 
 
 @router.get("/{slug}", response_model=HotelResponse)
@@ -47,3 +49,14 @@ async def get_addons(slug: str):
         raise HTTPException(status_code=500, detail="Internal server error")
 
     return addons
+
+
+@exchange_router.get("/exchange-rates")
+async def exchange_rates(base: str = Query(default="EUR")):
+    try:
+        rates = await get_rates(base)
+    except Exception as e:
+        logger.error(f"Error fetching exchange rates for {base}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    return {"base": base.upper(), "rates": rates}

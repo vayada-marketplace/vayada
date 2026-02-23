@@ -60,6 +60,35 @@ class BookingHotelRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def list_by_user_id(
+        user_id: str,
+        *,
+        columns: str = "id, name, slug, location, country",
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> list[dict]:
+        query = f"SELECT {columns} FROM booking_hotels WHERE user_id = $1 ORDER BY created_at ASC"
+        if conn:
+            rows = await conn.fetch(query, user_id)
+        else:
+            rows = await Database.fetch(query, user_id)
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    async def get_by_id_and_user_id(
+        hotel_id: str,
+        user_id: str,
+        *,
+        columns: str = "*",
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> Optional[dict]:
+        query = f"SELECT {columns} FROM booking_hotels WHERE id = $1 AND user_id = $2"
+        if conn:
+            row = await conn.fetchrow(query, hotel_id, user_id)
+        else:
+            row = await Database.fetchrow(query, hotel_id, user_id)
+        return dict(row) if row else None
+
+    @staticmethod
     async def create(
         name: str,
         slug: str,
@@ -95,7 +124,7 @@ class BookingHotelRepository:
 
     @staticmethod
     async def partial_update(
-        user_id: str,
+        hotel_id: str,
         updates: dict,
         *,
         conn: Optional[asyncpg.Connection] = None,
@@ -112,7 +141,7 @@ class BookingHotelRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col in ("supported_languages", "supported_currencies"):
+            if col in ("supported_languages", "supported_currencies", "booking_filters"):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
@@ -123,10 +152,10 @@ class BookingHotelRepository:
         set_clauses.append("updated_at = now()")
         query = (
             f"UPDATE booking_hotels SET {', '.join(set_clauses)} "
-            f"WHERE user_id = ${idx} "
+            f"WHERE id = ${idx} "
             f"RETURNING *"
         )
-        values.append(user_id)
+        values.append(hotel_id)
 
         if conn:
             row = await conn.fetchrow(query, *values)

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class DesignSettingsResponse(BaseModel):
@@ -9,6 +9,7 @@ class DesignSettingsResponse(BaseModel):
     primary_color: str
     accent_color: str
     font_pairing: str
+    booking_filters: List[str] = []
 
 
 class DesignSettingsUpdate(BaseModel):
@@ -18,3 +19,4 @@ class DesignSettingsUpdate(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     font_pairing: Optional[str] = None
+    booking_filters: Optional[List[str]] = None
