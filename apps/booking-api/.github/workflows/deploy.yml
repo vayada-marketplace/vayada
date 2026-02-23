@@ -13,9 +13,144 @@ env:
   ECS_SERVICE: vayada-booking-backend-service
 
 jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: vayada_booking_user
+          POSTGRES_PASSWORD: vayada_booking_password
+          POSTGRES_DB: vayada_booking_db
+        options: >-
+          --health-cmd "pg_isready -U vayada_booking_user -d vayada_booking_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5434:5432
+
+      auth-postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: vayada_auth_user
+          POSTGRES_PASSWORD: vayada_auth_password
+          POSTGRES_DB: vayada_auth_db
+        options: >-
+          --health-cmd "pg_isready -U vayada_auth_user -d vayada_auth_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5435:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up auth database schema
+        run: |
+          echo "Waiting for auth PostgreSQL..."
+          for i in {1..30}; do
+            if PGPASSWORD=vayada_auth_password psql -h localhost -p 5435 -U vayada_auth_user -d vayada_auth_db -c '\q' 2>/dev/null; then
+              echo "Auth PostgreSQL is ready!"
+              break
+            fi
+            echo "Attempt $i/30: Waiting..."
+            sleep 2
+          done
+          PGPASSWORD=vayada_auth_password psql -h localhost -p 5435 -U vayada_auth_user -d vayada_auth_db <<'EOSQL'
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE TABLE IF NOT EXISTS public.users (
+            id uuid NOT NULL DEFAULT uuid_generate_v4(),
+            email text NOT NULL UNIQUE,
+            password_hash text NOT NULL,
+            name text NOT NULL,
+            type text NOT NULL CHECK (type = ANY (ARRAY['hotel','creator','admin'])),
+            status text NOT NULL DEFAULT 'pending' CHECK (status = ANY (ARRAY['pending','verified','rejected','suspended'])),
+            avatar text,
+            email_verified boolean NOT NULL DEFAULT false,
+            terms_accepted_at timestamp with time zone,
+            privacy_accepted_at timestamp with time zone,
+            terms_version text,
+            privacy_version text,
+            marketing_consent boolean DEFAULT false,
+            marketing_consent_at timestamp with time zone,
+            created_at timestamp with time zone NOT NULL DEFAULT now(),
+            updated_at timestamp with time zone NOT NULL DEFAULT now(),
+            CONSTRAINT users_pkey PRIMARY KEY (id)
+          );
+          CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
+            id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+            user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            token text NOT NULL UNIQUE,
+            expires_at timestamp with time zone NOT NULL,
+            used boolean NOT NULL DEFAULT false,
+            created_at timestamp with time zone NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS public.consent_history (
+            id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+            consent_type text NOT NULL,
+            consent_given boolean NOT NULL,
+            version text,
+            ip_address text,
+            user_agent text,
+            created_at timestamp with time zone DEFAULT now() NOT NULL
+          );
+          EOSQL
+
+      - name: Run booking database migrations
+        run: |
+          echo "Waiting for booking PostgreSQL..."
+          for i in {1..30}; do
+            if PGPASSWORD=vayada_booking_password psql -h localhost -p 5434 -U vayada_booking_user -d vayada_booking_db -c '\q' 2>/dev/null; then
+              echo "Booking PostgreSQL is ready!"
+              break
+            fi
+            echo "Attempt $i/30: Waiting..."
+            sleep 2
+          done
+          echo "Running migrations..."
+          for f in migrations/*.sql; do
+            echo "Running $f..."
+            PGPASSWORD=vayada_booking_password psql -h localhost -p 5434 -U vayada_booking_user -d vayada_booking_db -f "$f"
+          done
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+        env:
+          DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@localhost:5434/vayada_booking_db
+          AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db
+          MARKETPLACE_DATABASE_URL: ""
+          CORS_ORIGINS: "http://localhost:3000,http://localhost:3003"
+          JWT_SECRET_KEY: "test-secret-key-for-testing-only"
+          DEBUG: "true"
+          ENVIRONMENT: "test"
+
   build-and-deploy:
     name: Build, Push & Deploy
     runs-on: ubuntu-latest
+    needs: test
 
     steps:
       - name: Checkout code
