@@ -1,0 +1,384 @@
+"""
+Pytest fixtures and configuration for PMS backend tests.
+"""
+import os
+
+# Set environment variables BEFORE importing any app modules
+os.environ.setdefault("DATABASE_URL", "postgresql://vayada_pms_user:vayada_pms_password@localhost:5436/vayada_pms_db")
+os.environ.setdefault("AUTH_DATABASE_URL", "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db")
+os.environ.setdefault("CORS_ORIGINS", "http://localhost:3002,http://localhost:3003,http://localhost:3004")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
+os.environ.setdefault("DEBUG", "true")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("SMTP_HOST", "")
+# S3 config for tests — required so /upload/images doesn't return 503
+os.environ.setdefault("S3_BUCKET_NAME", "test-bucket")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "test-access-key")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+import pytest
+import uuid
+import jwt
+from datetime import datetime, timedelta, timezone
+from typing import AsyncGenerator, Dict, Optional
+from unittest.mock import patch
+
+import bcrypt
+from httpx import AsyncClient, ASGITransport
+
+from app.main import app
+from app.database import Database, AuthDatabase
+from app.config import settings
+
+
+# Test data patterns for cleanup
+TEST_EMAIL_PATTERN = "pmstest%@example.com"
+TEST_SLUG_PATTERN = "pmstest-%"
+
+
+@pytest.fixture(scope="session")
+async def init_database():
+    """Initialize database pools for tests."""
+    await Database.get_pool()
+    await AuthDatabase.get_pool()
+    yield
+    await AuthDatabase.close_pool()
+    await Database.close_pool()
+
+
+@pytest.fixture
+async def client(init_database) -> AsyncGenerator[AsyncClient, None]:
+    """Create an async HTTP client for testing."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def cleanup_database(init_database):
+    """
+    Cleanup test data after each test.
+    Deletes in FK-safe order: bookings -> room_types -> hotels (PMS DB),
+    then users (Auth DB).
+    """
+    yield
+
+    # Delete PMS data for test hotels
+    test_hotels = await Database.fetch(
+        "SELECT id FROM hotels WHERE slug LIKE $1", TEST_SLUG_PATTERN
+    )
+    test_hotel_ids = [row["id"] for row in test_hotels]
+
+    if test_hotel_ids:
+        await Database.execute(
+            "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM affiliates WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM room_blocks WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM room_types WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM hotels WHERE id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+
+    # Also clean up any hotels created by test users (use auth pool directly)
+    auth_pool = await AuthDatabase.get_pool()
+    async with auth_pool.acquire() as conn:
+        test_users = await conn.fetch(
+            "SELECT id FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN
+        )
+    test_user_ids = [row["id"] for row in test_users]
+
+    if test_user_ids:
+        user_hotels = await Database.fetch(
+            "SELECT id FROM hotels WHERE user_id = ANY($1::uuid[])",
+            test_user_ids,
+        )
+        user_hotel_ids = [row["id"] for row in user_hotels]
+        if user_hotel_ids:
+            await Database.execute(
+                "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM affiliates WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM room_blocks WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM room_types WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM hotels WHERE id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+
+    # Clean auth users
+    async with auth_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN
+        )
+
+
+@pytest.fixture(autouse=True)
+def mock_s3_operations():
+    """Mock all S3 operations. Applied to all tests automatically."""
+    uploaded_files = []
+    deleted_files = []
+
+    async def mock_upload(
+        file_content: bytes,
+        file_key: str,
+        content_type: str = "image/jpeg",
+        make_public: bool = True,
+    ):
+        uploaded_files.append(
+            {"content_length": len(file_content), "key": file_key, "content_type": content_type}
+        )
+        return f"https://test-bucket.s3.amazonaws.com/{file_key}"
+
+    async def mock_delete(file_key: str):
+        deleted_files.append(file_key)
+        return True
+
+    with (
+        patch("app.s3_service.upload_file_to_s3", side_effect=mock_upload),
+        patch("app.s3_service.delete_file_from_s3", side_effect=mock_delete),
+        patch("app.routers.upload.upload_file_to_s3", side_effect=mock_upload),
+    ):
+        yield {"uploaded": uploaded_files, "deleted": deleted_files}
+
+
+# ── Helper functions ──────────────────────────────────────────────
+
+
+def generate_test_email(prefix: str = "pmstest") -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}@example.com"
+
+
+def generate_test_slug(prefix: str = "pmstest") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def create_jwt_token(user_id: str, email: str = "test@example.com", user_type: str = "hotel") -> str:
+    """Create a JWT token matching what the booking engine issues."""
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "type": user_type,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def get_auth_headers(token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def create_test_user(
+    email: Optional[str] = None,
+    password: str = "TestPassword123!",
+    name: str = "Test Hotel User",
+    user_type: str = "hotel",
+    user_status: str = "verified",
+) -> Dict:
+    """Create a test user in the auth database."""
+    email = email or generate_test_email()
+    password_hash = hash_password(password)
+
+    user = await AuthDatabase.fetchrow(
+        """
+        INSERT INTO users (email, password_hash, name, type, status, email_verified)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, email, name, type, status
+        """,
+        email, password_hash, name, user_type, user_status, user_status == "verified",
+    )
+    user = dict(user)
+    user["token"] = create_jwt_token(str(user["id"]), user["email"], user["type"])
+    return user
+
+
+async def create_test_hotel(
+    user_id: str,
+    name: str = "Test Hotel",
+    slug: Optional[str] = None,
+    contact_email: str = "contact@testhotel.com",
+) -> Dict:
+    """Create a hotel in the PMS database."""
+    slug = slug or generate_test_slug()
+    row = await Database.fetchrow(
+        """
+        INSERT INTO hotels (slug, name, contact_email, user_id)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, slug, name, contact_email, user_id, created_at
+        """,
+        slug, name, contact_email, user_id,
+    )
+    return dict(row)
+
+
+async def create_test_room_type(
+    hotel_id: str,
+    name: str = "Deluxe Suite",
+    base_rate: float = 150.0,
+    total_rooms: int = 5,
+    is_active: bool = True,
+) -> Dict:
+    """Create a room type in the PMS database."""
+    import json
+
+    row = await Database.fetchrow(
+        """
+        INSERT INTO room_types (
+            hotel_id, name, description, short_description,
+            max_occupancy, size, base_rate, currency,
+            amenities, images, bed_type, features,
+            total_rooms, is_active, sort_order
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9::jsonb, $10::jsonb, $11, $12::jsonb,
+            $13, $14, $15
+        ) RETURNING *
+        """,
+        hotel_id, name, "A spacious suite", "Spacious and comfortable",
+        2, 45, base_rate, "EUR",
+        json.dumps(["WiFi", "Mini Bar"]), json.dumps([]), "King",
+        json.dumps(["Mountain View"]),
+        total_rooms, is_active, 0,
+    )
+    return dict(row)
+
+
+async def create_test_booking(
+    hotel_id: str,
+    room_type_id: str,
+    check_in: str = "2026-06-01",
+    check_out: str = "2026-06-05",
+    guest_email: str = "guest@example.com",
+    nightly_rate: float = 150.0,
+    status: str = "pending",
+) -> Dict:
+    """Create a booking in the PMS database."""
+    from datetime import date as date_type
+
+    ci = date_type.fromisoformat(check_in)
+    co = date_type.fromisoformat(check_out)
+    nights = (co - ci).days
+    total = nightly_rate * nights
+
+    row = await Database.fetchrow(
+        """
+        INSERT INTO bookings (
+            hotel_id, room_type_id, booking_reference,
+            guest_first_name, guest_last_name, guest_email, guest_phone,
+            special_requests, check_in, check_out,
+            adults, children, nightly_rate, total_amount, currency, status
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+        ) RETURNING *
+        """,
+        hotel_id, room_type_id, f"VAY-T{uuid.uuid4().hex[:5].upper()}",
+        "John", "Doe", guest_email, "+1234567890",
+        "", ci, co,
+        2, 0, nightly_rate, total, "EUR", status,
+    )
+    return dict(row)
+
+
+async def create_test_affiliate(
+    hotel_id: str,
+    full_name: str = "Test Affiliate",
+    email: Optional[str] = None,
+) -> Dict:
+    """Create an affiliate in the PMS database."""
+    import secrets, string
+    email = email or generate_test_email("pmstest-aff")
+    code = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    row = await Database.fetchrow(
+        """
+        INSERT INTO affiliates (
+            hotel_id, referral_code, full_name, email,
+            social_media, user_type, payment_method,
+            paypal_email, bank_iban
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+        """,
+        hotel_id, code, full_name, email,
+        "https://instagram.com/test", "guest", "paypal",
+        email, "",
+    )
+    return dict(row)
+
+
+async def create_test_room_block(
+    hotel_id: str,
+    room_type_id: str,
+    start_date: str = "2026-07-01",
+    end_date: str = "2026-07-05",
+    blocked_count: int = 1,
+    reason: str = "Maintenance",
+) -> Dict:
+    """Create a room block in the PMS database."""
+    from datetime import date as date_type
+    sd = date_type.fromisoformat(start_date)
+    ed = date_type.fromisoformat(end_date)
+    row = await Database.fetchrow(
+        """
+        INSERT INTO room_blocks (hotel_id, room_type_id, start_date, end_date, blocked_count, reason)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *
+        """,
+        hotel_id, room_type_id, sd, ed, blocked_count, reason,
+    )
+    return dict(row)
+
+
+# ── Composite fixtures ────────────────────────────────────────────
+
+
+@pytest.fixture
+async def hotel_user(cleanup_database):
+    """Create a hotel-type user in auth DB."""
+    return await create_test_user()
+
+
+@pytest.fixture
+async def hotel_with_rooms(cleanup_database):
+    """Create a user + hotel + room type. Returns dict with all data."""
+    user = await create_test_user()
+    hotel = await create_test_hotel(str(user["id"]))
+    room = await create_test_room_type(str(hotel["id"]))
+    return {"user": user, "hotel": hotel, "room": room}
+
+
+@pytest.fixture
+async def hotel_with_booking(hotel_with_rooms):
+    """Create a user + hotel + room + booking."""
+    data = hotel_with_rooms
+    booking = await create_test_booking(
+        str(data["hotel"]["id"]),
+        str(data["room"]["id"]),
+    )
+    data["booking"] = booking
+    return data

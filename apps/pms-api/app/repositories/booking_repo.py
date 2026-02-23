@@ -136,6 +136,27 @@ class BookingRepository:
         return count or 0
 
     @staticmethod
+    async def list_by_hotel_in_range(
+        hotel_id: str, start_date, end_date
+    ) -> List[dict]:
+        rows = await Database.fetch(
+            """
+            SELECT b.*, rt.name AS room_name
+            FROM bookings b
+            JOIN room_types rt ON rt.id = b.room_type_id
+            WHERE b.hotel_id = $1
+              AND b.status IN ('pending', 'confirmed')
+              AND b.check_in < $3
+              AND b.check_out > $2
+            ORDER BY b.check_in
+            """,
+            hotel_id,
+            start_date,
+            end_date,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def update_status(booking_id: str, new_status: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """

@@ -41,7 +41,10 @@ async def get_rooms_for_guest(
             booked = await RoomTypeRepository.count_booked(
                 str(room["id"]), check_in, check_out
             )
-            remaining = max(0, total - booked)
+            blocked = await RoomTypeRepository.count_blocked(
+                str(room["id"]), check_in, check_out
+            )
+            remaining = max(0, total - booked - blocked)
         else:
             remaining = total
 

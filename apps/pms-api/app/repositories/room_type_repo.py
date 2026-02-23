@@ -107,3 +107,21 @@ class RoomTypeRepository:
             check_out,
         )
         return count or 0
+
+    @staticmethod
+    async def count_blocked(
+        room_type_id: str, start_date: date, end_date: date
+    ) -> int:
+        """Sum blocked_count for overlapping room blocks."""
+        count = await Database.fetchval(
+            """
+            SELECT COALESCE(SUM(blocked_count), 0) FROM room_blocks
+            WHERE room_type_id = $1
+              AND start_date < $3
+              AND end_date > $2
+            """,
+            room_type_id,
+            start_date,
+            end_date,
+        )
+        return count or 0

@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Optional, List
 
+from datetime import date, timedelta
+
 from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
@@ -10,6 +12,7 @@ from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.room_block_repo import RoomBlockRepository
 from app.models.room_type import (
     RoomTypeCreate,
     RoomTypeUpdate,
@@ -22,6 +25,7 @@ from app.models.affiliate import (
     AffiliateStatusUpdate,
     AffiliateCommissionUpdate,
 )
+from app.models.room_block import RoomBlockCreate, RoomBlockResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation
 
 logger = logging.getLogger(__name__)
@@ -290,6 +294,116 @@ async def update_booking_status(
         )
 
     return _booking_to_admin(updated)
+
+
+# ── Calendar ───────────────────────────────────────────────────────
+
+
+@router.get("/calendar")
+async def get_calendar(
+    start: date = Query(...),
+    end: date = Query(...),
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
+    bookings = await BookingRepository.list_by_hotel_in_range(hotel_id, start, end)
+    blocks = await RoomBlockRepository.list_by_hotel_in_range(hotel_id, start, end)
+
+    return {
+        "roomTypes": [
+            {
+                "id": str(rt["id"]),
+                "name": rt["name"],
+                "totalRooms": rt["total_rooms"],
+            }
+            for rt in room_types
+        ],
+        "bookings": [
+            {
+                "id": str(b["id"]),
+                "roomTypeId": str(b["room_type_id"]),
+                "roomName": b["room_name"],
+                "guestFirstName": b["guest_first_name"],
+                "guestLastName": b["guest_last_name"],
+                "checkIn": str(b["check_in"]),
+                "checkOut": str(b["check_out"]),
+                "status": b["status"],
+            }
+            for b in bookings
+        ],
+        "blocks": [
+            {
+                "id": str(bl["id"]),
+                "roomTypeId": str(bl["room_type_id"]),
+                "startDate": str(bl["start_date"]),
+                "endDate": str(bl["end_date"]),
+                "blockedCount": bl["blocked_count"],
+                "reason": bl["reason"],
+                "createdAt": bl["created_at"].isoformat(),
+            }
+            for bl in blocks
+        ],
+    }
+
+
+# ── Room Blocks ────────────────────────────────────────────────────
+
+
+@router.post("/room-blocks", response_model=RoomBlockResponse, status_code=201)
+async def create_room_block(
+    data: RoomBlockCreate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+
+    # Validate room type belongs to hotel
+    room = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room type not found")
+
+    if data.blocked_count < 1 or data.blocked_count > room["total_rooms"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"blocked_count must be between 1 and {room['total_rooms']}",
+        )
+
+    if data.end_date <= data.start_date:
+        raise HTTPException(
+            status_code=400, detail="end_date must be after start_date"
+        )
+
+    block = await RoomBlockRepository.create(
+        {
+            "hotel_id": hotel_id,
+            "room_type_id": data.room_type_id,
+            "start_date": data.start_date,
+            "end_date": data.end_date,
+            "blocked_count": data.blocked_count,
+            "reason": data.reason,
+        }
+    )
+    return RoomBlockResponse(
+        id=str(block["id"]),
+        room_type_id=str(block["room_type_id"]),
+        start_date=str(block["start_date"]),
+        end_date=str(block["end_date"]),
+        blocked_count=block["blocked_count"],
+        reason=block["reason"],
+        created_at=block["created_at"].isoformat(),
+    )
+
+
+@router.delete("/room-blocks/{block_id}", status_code=204)
+async def delete_room_block(
+    block_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    block = await RoomBlockRepository.get_by_id(block_id)
+    if not block or str(block["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room block not found")
+    await RoomBlockRepository.delete(block_id)
 
 
 # ── Affiliates ─────────────────────────────────────────────────────

@@ -60,7 +60,10 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     booked = await RoomTypeRepository.count_booked(
         data.room_type_id, data.check_in, data.check_out
     )
-    if booked >= room["total_rooms"]:
+    blocked = await RoomTypeRepository.count_blocked(
+        data.room_type_id, data.check_in, data.check_out
+    )
+    if booked + blocked >= room["total_rooms"]:
         raise ValueError("No rooms available for the selected dates")
 
     # Calculate pricing
