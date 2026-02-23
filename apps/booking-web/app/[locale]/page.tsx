@@ -9,7 +9,7 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import DatePickerCalendar from '@/components/booking/DatePickerCalendar'
 import GuestSelector from '@/components/booking/GuestSelector'
 import RoomDetailModal from '@/components/booking/RoomDetailModal'
-import { useHotel, useRooms } from '@/contexts/HotelContext'
+import { useHotel, useRooms, useAddons } from '@/contexts/HotelContext'
 import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 
@@ -71,6 +71,7 @@ export default function HomePage() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const [checkIn, setCheckIn] = useState('2026-02-13')
   const [checkOut, setCheckOut] = useState('2026-02-18')
@@ -91,12 +92,19 @@ export default function HomePage() {
 
   const FILTERS = (hotel?.bookingFilters || []).map((key) => t(key))
 
-  const STEPS = [
-    { number: 1, label: ts('rooms') },
-    { number: 2, label: ts('addons') },
-    { number: 3, label: ts('details') },
-    { number: 4, label: ts('payment') },
-  ]
+  const hasAddons = addons.length > 0
+  const STEPS = hasAddons
+    ? [
+        { number: 1, label: ts('rooms') },
+        { number: 2, label: ts('addons') },
+        { number: 3, label: ts('details') },
+        { number: 4, label: ts('payment') },
+      ]
+    : [
+        { number: 1, label: ts('rooms') },
+        { number: 2, label: ts('details') },
+        { number: 3, label: ts('confirmation') },
+      ]
 
   const toggleFilter = (filter: string) => {
     setActiveFilters((prev) =>
@@ -481,7 +489,10 @@ export default function HomePage() {
                                 </p>
                               </div>
                               <button
-                                onClick={() => router.push('/addons')}
+                                onClick={() => {
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`
+                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+                                }}
                                 className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
                               >
                                 {t('selectThisRate')}
@@ -543,7 +554,10 @@ export default function HomePage() {
                                 </p>
                               </div>
                               <button
-                                onClick={() => router.push('/addons')}
+                                onClick={() => {
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`
+                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+                                }}
                                 className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
                               >
                                 {t('selectThisRate')}

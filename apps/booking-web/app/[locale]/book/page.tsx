@@ -7,7 +7,7 @@ import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
+import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
@@ -25,6 +25,7 @@ function BookPageContent() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || ''
@@ -33,12 +34,20 @@ function BookPageContent() {
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
 
-  const STEPS = [
-    { number: 1, label: ts('rooms') },
-    { number: 2, label: ts('details') },
-    { number: 3, label: ts('confirmation') },
-  ]
-  const currentStep = 2
+  const hasAddons = addons.length > 0
+  const STEPS = hasAddons
+    ? [
+        { number: 1, label: ts('rooms') },
+        { number: 2, label: ts('addons') },
+        { number: 3, label: ts('details') },
+        { number: 4, label: ts('payment') },
+      ]
+    : [
+        { number: 1, label: ts('rooms') },
+        { number: 2, label: ts('details') },
+        { number: 3, label: ts('confirmation') },
+      ]
+  const currentStep = hasAddons ? 3 : 2
 
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)

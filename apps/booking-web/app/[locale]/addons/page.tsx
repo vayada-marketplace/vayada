@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
@@ -12,6 +13,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 
 export default function AddonsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const t = useTranslations('addons')
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
@@ -233,7 +235,7 @@ export default function AddonsPage() {
             {t('backToRooms')}
           </button>
           <button
-            onClick={() => router.push('/book')}
+            onClick={() => router.push(`/book?${searchParams.toString()}`)}
             className="px-8 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
           >
             {t('proceedToGuest')}
