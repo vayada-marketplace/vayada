@@ -16,6 +16,7 @@ class RoomTypeCreate(BaseModel):
     max_occupancy: int = 2
     size: int = 0
     base_rate: float = 0
+    non_refundable_rate: Optional[float] = None
     currency: str = "EUR"
     amenities: List[str] = []
     images: List[str] = []
@@ -35,6 +36,7 @@ class RoomTypeUpdate(BaseModel):
     max_occupancy: Optional[int] = None
     size: Optional[int] = None
     base_rate: Optional[float] = None
+    non_refundable_rate: Optional[float] = None
     currency: Optional[str] = None
     amenities: Optional[List[str]] = None
     images: Optional[List[str]] = None
@@ -56,6 +58,7 @@ class RoomTypeResponse(BaseModel):
     max_occupancy: int
     size: int
     base_rate: float
+    non_refundable_rate: Optional[float] = None
     currency: str
     amenities: List[str]
     images: List[str]
@@ -75,6 +78,7 @@ class RoomTypeAdminResponse(BaseModel):
     max_occupancy: int
     size: int
     base_rate: float
+    non_refundable_rate: Optional[float] = None
     currency: str
     amenities: List[str]
     images: List[str]

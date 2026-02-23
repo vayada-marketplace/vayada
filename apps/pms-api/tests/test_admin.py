@@ -226,6 +226,84 @@ class TestAdminRoomTypes:
         assert len(rooms) == 1
         assert rooms[0]["name"] == "Deluxe Suite"
 
+    async def test_create_room_type_with_non_refundable_rate(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "NR Room",
+                "description": "Room with non-refundable rate",
+                "baseRate": 200.0,
+                "nonRefundableRate": 170.0,
+                "maxOccupancy": 2,
+                "totalRooms": 5,
+                "bedType": "King",
+                "amenities": ["WiFi"],
+                "features": [],
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["nonRefundableRate"] == 170.0
+
+    async def test_create_room_type_without_non_refundable_rate(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Flex Only Room",
+                "description": "Room without non-refundable rate",
+                "baseRate": 100.0,
+                "maxOccupancy": 2,
+                "totalRooms": 3,
+                "bedType": "Queen",
+                "amenities": [],
+                "features": [],
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["nonRefundableRate"] is None
+
+    async def test_update_non_refundable_rate(self, client, hotel_with_rooms):
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.patch(
+            f"/admin/room-types/{room['id']}",
+            json={"nonRefundableRate": 120.0},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["nonRefundableRate"] == 120.0
+
+    async def test_clear_non_refundable_rate(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), non_refundable_rate=130.0)
+
+        # Verify it was set
+        resp = await client.get(
+            f"/admin/room-types/{room['id']}",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.json()["nonRefundableRate"] == 130.0
+
+        # Clear it by setting to null
+        resp2 = await client.patch(
+            f"/admin/room-types/{room['id']}",
+            json={"nonRefundableRate": None},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["nonRefundableRate"] is None
+
     async def test_cannot_access_other_hotels_room(self, client, hotel_with_rooms):
         """A second hotel user cannot access the first hotel's rooms."""
         other_user = await create_test_user()

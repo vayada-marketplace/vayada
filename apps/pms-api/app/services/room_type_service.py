@@ -48,6 +48,7 @@ async def get_rooms_for_guest(
         else:
             remaining = total
 
+        nr_rate = room.get("non_refundable_rate")
         result.append(
             RoomTypeResponse(
                 id=str(room["id"]),
@@ -57,6 +58,7 @@ async def get_rooms_for_guest(
                 max_occupancy=room["max_occupancy"],
                 size=room["size"],
                 base_rate=float(room["base_rate"]),
+                non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
                 currency=room["currency"],
                 amenities=_parse_jsonb(room["amenities"]),
                 images=_parse_jsonb(room["images"]),

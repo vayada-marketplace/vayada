@@ -29,13 +29,13 @@ class RoomTypeRepository:
             """
             INSERT INTO room_types (
                 hotel_id, name, description, short_description,
-                max_occupancy, size, base_rate, currency,
+                max_occupancy, size, base_rate, non_refundable_rate, currency,
                 amenities, images, bed_type, features,
                 total_rooms, is_active, sort_order
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8,
-                $9::jsonb, $10::jsonb, $11, $12::jsonb,
-                $13, $14, $15
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10::jsonb, $11::jsonb, $12, $13::jsonb,
+                $14, $15, $16
             ) RETURNING *
             """,
             hotel_id,
@@ -45,6 +45,7 @@ class RoomTypeRepository:
             data.get("max_occupancy", 2),
             data.get("size", 0),
             data.get("base_rate", 0),
+            data.get("non_refundable_rate"),
             data.get("currency", "EUR"),
             json.dumps(data.get("amenities", [])),
             json.dumps(data.get("images", [])),

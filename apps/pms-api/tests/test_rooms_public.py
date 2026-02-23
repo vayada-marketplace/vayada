@@ -100,6 +100,7 @@ class TestPublicRooms:
         assert "maxOccupancy" in room
         assert "size" in room
         assert "baseRate" in room
+        assert "nonRefundableRate" in room
         assert "currency" in room
         assert "amenities" in room
         assert "images" in room
@@ -112,3 +113,23 @@ class TestPublicRooms:
         assert "totalRooms" not in room
         assert "isActive" not in room
         assert "sortOrder" not in room
+
+    async def test_rooms_with_non_refundable_rate(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(str(hotel["id"]), name="NR Room", non_refundable_rate=120.0)
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+        rooms = resp.json()
+        assert len(rooms) == 1
+        assert rooms[0]["nonRefundableRate"] == 120.0
+
+    async def test_rooms_without_non_refundable_rate(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(str(hotel["id"]), name="Flex Room")
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+        rooms = resp.json()
+        assert len(rooms) == 1
+        assert rooms[0]["nonRefundableRate"] is None

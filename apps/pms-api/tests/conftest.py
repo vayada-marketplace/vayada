@@ -244,6 +244,7 @@ async def create_test_room_type(
     base_rate: float = 150.0,
     total_rooms: int = 5,
     is_active: bool = True,
+    non_refundable_rate: Optional[float] = None,
 ) -> Dict:
     """Create a room type in the PMS database."""
     import json
@@ -252,17 +253,17 @@ async def create_test_room_type(
         """
         INSERT INTO room_types (
             hotel_id, name, description, short_description,
-            max_occupancy, size, base_rate, currency,
+            max_occupancy, size, base_rate, non_refundable_rate, currency,
             amenities, images, bed_type, features,
             total_rooms, is_active, sort_order
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8,
-            $9::jsonb, $10::jsonb, $11, $12::jsonb,
-            $13, $14, $15
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10::jsonb, $11::jsonb, $12, $13::jsonb,
+            $14, $15, $16
         ) RETURNING *
         """,
         hotel_id, name, "A spacious suite", "Spacious and comfortable",
-        2, 45, base_rate, "EUR",
+        2, 45, base_rate, non_refundable_rate, "EUR",
         json.dumps(["WiFi", "Mini Bar"]), json.dumps([]), "King",
         json.dumps(["Mountain View"]),
         total_rooms, is_active, 0,

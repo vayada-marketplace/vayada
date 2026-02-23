@@ -49,6 +49,7 @@ async def _get_hotel_id(user_id: str) -> str:
 
 
 def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
+    nr_rate = room.get("non_refundable_rate")
     return RoomTypeAdminResponse(
         id=str(room["id"]),
         hotel_id=str(room["hotel_id"]),
@@ -58,6 +59,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         max_occupancy=room["max_occupancy"],
         size=room["size"],
         base_rate=float(room["base_rate"]),
+        non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
         currency=room["currency"],
         amenities=_parse_jsonb(room["amenities"]),
         images=_parse_jsonb(room["images"]),
@@ -205,7 +207,7 @@ async def update_room_type(
     if not existing or str(existing["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Room type not found")
 
-    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    updates = data.model_dump(exclude_unset=True)
     room = await RoomTypeRepository.update(room_type_id, updates)
     return _room_to_admin(room)
 
