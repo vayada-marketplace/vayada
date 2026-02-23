@@ -402,7 +402,7 @@ export default function DesignStudioPage() {
                         }}
                         className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
                           enabled
-                            ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                            ? 'border-primary-500 bg-primary-50/30'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
