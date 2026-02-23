@@ -89,13 +89,7 @@ export default function HomePage() {
 
   const nights = calculateNights(checkIn, checkOut)
 
-  const FILTERS = [
-    t('includeBreakfast'),
-    t('freeCancellation'),
-    t('payAtHotel'),
-    t('bestRated'),
-    t('mountainView'),
-  ]
+  const FILTERS = (hotel?.bookingFilters || []).map((key) => t(key))
 
   const STEPS = [
     { number: 1, label: ts('rooms') },
@@ -321,8 +315,9 @@ export default function HomePage() {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
             const flexibleTotal = room.baseRate * nights
-            const nonRefundableNightly = Math.round(room.baseRate * 0.85)
+            const nonRefundableNightly = room.nonRefundableRate ?? Math.round(room.baseRate * 0.85)
             const nonRefundableTotal = nonRefundableNightly * nights
+            const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 
             return (
               <div
@@ -331,7 +326,7 @@ export default function HomePage() {
               >
                 <div className="flex flex-col md:flex-row">
                   {/* Image Carousel — fills full card height */}
-                  <div className="relative w-full md:w-[420px] md:min-h-[320px] flex-shrink-0 cursor-pointer" onClick={() => setDetailModalIndex(roomIndex)}>
+                  <div className="relative w-full md:w-[420px] md:min-h-[320px] flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => setDetailModalIndex(roomIndex)}>
                     <Image
                       src={room.images[imgIdx]}
                       alt={room.name}
@@ -369,7 +364,7 @@ export default function HomePage() {
                     )}
                     {/* Thumbnail strip */}
                     {room.images.length > 1 && (
-                      <div className="absolute bottom-3 left-3 right-3 flex gap-1.5 z-10">
+                      <div className="absolute bottom-3 left-3 right-3 flex gap-1.5 z-10 overflow-x-auto">
                         {room.images.map((img, i) => (
                           <button
                             key={i}

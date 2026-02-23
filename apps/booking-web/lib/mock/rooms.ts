@@ -10,6 +10,7 @@ export const MOCK_ROOMS: RoomType[] = [
     maxOccupancy: 2,
     size: 22,
     baseRate: 120,
+    nonRefundableRate: 102,
     currency: 'EUR',
     amenities: ['Free WiFi', 'Flat Screen TV', 'Mini Bar', 'Safe', 'Hair Dryer', 'Heating'],
     images: [
@@ -29,6 +30,7 @@ export const MOCK_ROOMS: RoomType[] = [
     maxOccupancy: 2,
     size: 28,
     baseRate: 180,
+    nonRefundableRate: 153,
     currency: 'EUR',
     amenities: [
       'Free WiFi',
@@ -56,6 +58,7 @@ export const MOCK_ROOMS: RoomType[] = [
     maxOccupancy: 3,
     size: 42,
     baseRate: 280,
+    nonRefundableRate: 238,
     currency: 'EUR',
     amenities: [
       'Free WiFi',
@@ -85,6 +88,7 @@ export const MOCK_ROOMS: RoomType[] = [
     maxOccupancy: 4,
     size: 65,
     baseRate: 450,
+    nonRefundableRate: 383,
     currency: 'EUR',
     amenities: [
       'Free WiFi',

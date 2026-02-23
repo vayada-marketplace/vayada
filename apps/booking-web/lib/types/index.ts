@@ -36,6 +36,7 @@ export interface Hotel {
   checkInTime: string
   checkOutTime: string
   contact: HotelContact
+  bookingFilters: string[]
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
 }
@@ -48,6 +49,7 @@ export interface RoomType {
   maxOccupancy: number
   size: number
   baseRate: number
+  nonRefundableRate: number | null
   currency: string
   amenities: string[]
   images: string[]

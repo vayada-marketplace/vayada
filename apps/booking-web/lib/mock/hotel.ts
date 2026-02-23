@@ -31,6 +31,7 @@ export const MOCK_HOTEL: Hotel = {
   ],
   checkInTime: '15:00',
   checkOutTime: '11:00',
+  bookingFilters: [],
   contact: {
     address: 'Alpengasse 12, 6020 Innsbruck, Austria',
     phone: '+43 512 123 456',

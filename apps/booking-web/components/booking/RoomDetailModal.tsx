@@ -34,8 +34,9 @@ export default function RoomDetailModal({
   if (!open) return null
 
   const flexibleTotal = room.baseRate * nights
-  const nonRefundableTotal = Math.round(room.baseRate * 0.85) * nights
-  const nonRefundableNightly = Math.round(room.baseRate * 0.85)
+  const nonRefundableNightly = room.nonRefundableRate ?? Math.round(room.baseRate * 0.85)
+  const nonRefundableTotal = nonRefundableNightly * nights
+  const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -178,7 +179,7 @@ export default function RoomDetailModal({
                     <div>
                       <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                         Non-Refundable Rate
-                        <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">-15% OFF</span>
+                        {discount > 0 && <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">-{discount}% OFF</span>}
                       </p>
                       <p className="text-xs text-gray-500">Non-refundable</p>
                     </div>
