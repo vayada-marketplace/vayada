@@ -9,6 +9,7 @@ import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { isSetupComplete } from '@/lib/utils/setupStatus'
+import { settingsService } from '@/services/settings'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -60,6 +61,16 @@ export default function LoginPage() {
         router.push('/setup')
         return
       }
+
+      // Pre-load hotel selection
+      const hotelList = await settingsService.listHotels()
+      if (hotelList.length > 0) {
+        const savedId = localStorage.getItem('selectedHotelId')
+        if (!hotelList.find(h => h.id === savedId)) {
+          localStorage.setItem('selectedHotelId', hotelList[0].id)
+        }
+      }
+
       localStorage.setItem('setupComplete', 'true')
       router.push('/dashboard')
     } catch (error) {

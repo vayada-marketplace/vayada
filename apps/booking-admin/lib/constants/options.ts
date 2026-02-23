@@ -46,6 +46,7 @@ export const CURRENCY_OPTIONS = [
   { code: 'SGD', label: 'SGD - Singapore Dollar' },
   { code: 'AED', label: 'AED - UAE Dirham' },
   { code: 'THB', label: 'THB - Thai Baht' },
+  { code: 'IDR', label: 'IDR - Indonesian Rupiah' },
   { code: 'INR', label: 'INR - Indian Rupee' },
   { code: 'BRL', label: 'BRL - Brazilian Real' },
   { code: 'MXN', label: 'MXN - Mexican Peso' },

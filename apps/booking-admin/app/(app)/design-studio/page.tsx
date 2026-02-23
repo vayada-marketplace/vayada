@@ -11,7 +11,15 @@ import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
-type Tab = 'media' | 'colors' | 'fonts'
+const AVAILABLE_FILTERS = [
+  { key: 'includeBreakfast', label: 'Include Breakfast' },
+  { key: 'freeCancellation', label: 'Free Cancellation' },
+  { key: 'payAtHotel', label: 'Pay at Hotel' },
+  { key: 'bestRated', label: 'Best Rated' },
+  { key: 'mountainView', label: 'Mountain View' },
+]
+
+type Tab = 'media' | 'colors' | 'fonts' | 'filters'
 
 export default function DesignStudioPage() {
   const [activeTab, setActiveTab] = useState<Tab>('media')
@@ -32,6 +40,9 @@ export default function DesignStudioPage() {
   // Fonts state
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
 
+  // Filters state
+  const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel', 'bestRated', 'mountainView'])
+
   useEffect(() => {
     settingsService.getDesignSettings()
       .then((settings) => {
@@ -41,6 +52,7 @@ export default function DesignStudioPage() {
         if (settings.primary_color) setPrimaryColor(settings.primary_color)
         if (settings.accent_color) setAccentColor(settings.accent_color)
         if (settings.font_pairing) setSelectedFont(settings.font_pairing)
+        if (settings.booking_filters) setBookingFilters(settings.booking_filters)
       })
       .catch(() => {
         // Keep attractive defaults on error
@@ -48,11 +60,42 @@ export default function DesignStudioPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploading, setUploading] = useState(false)
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const url = URL.createObjectURL(file)
-      setHeroImage(url)
+    if (!file) return
+
+    // Show local preview immediately
+    const previewUrl = URL.createObjectURL(file)
+    setHeroImage(previewUrl)
+
+    // Upload to S3 via PMS API
+    try {
+      setUploading(true)
+      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'http://localhost:8002'
+      const token = localStorage.getItem('access_token')
+      const formData = new FormData()
+      formData.append('files', file)
+
+      const res = await fetch(`${pmsUrl}/upload/images`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      })
+
+      if (!res.ok) throw new Error('Upload failed')
+
+      const data = await res.json()
+      if (data.images?.[0]?.url) {
+        URL.revokeObjectURL(previewUrl)
+        setHeroImage(data.images[0].url)
+      }
+    } catch (err) {
+      console.error('Image upload failed:', err)
+      setFeedback({ type: 'error', message: 'Image upload failed. Please try again.' })
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -77,6 +120,7 @@ export default function DesignStudioPage() {
         primary_color: primaryColor,
         accent_color: accentColor,
         font_pairing: selectedFont,
+        booking_filters: bookingFilters,
       })
       setFeedback({ type: 'success', message: 'Design settings saved successfully' })
     } catch {
@@ -95,6 +139,7 @@ export default function DesignStudioPage() {
     { id: 'media' as const, label: 'Media & Content', icon: MediaIcon },
     { id: 'colors' as const, label: 'Colors', icon: ColorsIcon },
     { id: 'fonts' as const, label: 'Fonts', icon: FontsIcon },
+    { id: 'filters' as const, label: 'Filters', icon: FiltersIcon },
   ]
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
@@ -136,7 +181,7 @@ export default function DesignStudioPage() {
         {/* LEFT: Controls panel */}
         <div className="w-[380px] shrink-0 flex flex-col min-h-0">
           {/* Tab bar */}
-          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0">
+          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-4 shrink-0">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -335,13 +380,49 @@ export default function DesignStudioPage() {
                 </div>
               </div>
             )}
+
+            {/* Filters tab */}
+            {activeTab === 'filters' && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <h2 className="text-[13px] font-semibold text-gray-900">Booking Filters</h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which filters guests see on your booking page</p>
+
+                <div className="space-y-2">
+                  {AVAILABLE_FILTERS.map((filter) => {
+                    const enabled = bookingFilters.includes(filter.key)
+                    return (
+                      <button
+                        key={filter.key}
+                        onClick={() => {
+                          setBookingFilters((prev) =>
+                            enabled
+                              ? prev.filter((k) => k !== filter.key)
+                              : [...prev, filter.key]
+                          )
+                        }}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                          enabled
+                            ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
+                        <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Save button — always visible at bottom */}
           <div className="pt-3 shrink-0 border-t border-gray-100">
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || uploading}
               className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
             >
               {saving ? (
@@ -782,6 +863,14 @@ function FontsIcon({ className }: { className?: string }) {
       <path d="M4 7V4h16v3" />
       <path d="M12 4v16" />
       <path d="M8 20h8" />
+    </svg>
+  )
+}
+
+function FiltersIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
     </svg>
   )
 }

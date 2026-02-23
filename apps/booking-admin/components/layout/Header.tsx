@@ -11,14 +11,7 @@ import {
   UserPlusIcon,
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
-import { settingsService } from '@/services/settings'
-
-// TODO: Replace with real data from API
-const listings = [
-  { id: '1', name: 'Sundancer Lombok', location: 'Sekotong, Indonesia' },
-  { id: '2', name: 'Coral Bay Resort', location: 'Gili Islands, Indonesia' },
-  { id: '3', name: 'Azure Beach Club', location: 'Bali, Indonesia' },
-]
+import { settingsService, HotelSummary } from '@/services/settings'
 
 const notifications = [
   {
@@ -49,13 +42,13 @@ const notifications = [
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedListing, setSelectedListing] = useState(listings[0])
+  const [hotels, setHotels] = useState<HotelSummary[]>([])
+  const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
-  const [hotelSlug, setHotelSlug] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -79,8 +72,15 @@ export default function Header() {
   useEffect(() => {
     setUserName(localStorage.getItem('userName') || '')
     setUserEmail(localStorage.getItem('userEmail') || '')
-    settingsService.getPropertySettings().then((s) => {
-      if (s.slug) setHotelSlug(s.slug)
+    settingsService.listHotels().then((list) => {
+      setHotels(list)
+      if (list.length > 0) {
+        const savedId = localStorage.getItem('selectedHotelId')
+        const saved = list.find((h) => h.id === savedId)
+        const selected = saved || list[0]
+        setSelectedHotel(selected)
+        localStorage.setItem('selectedHotelId', selected.id)
+      }
     }).catch(() => {})
   }, [])
 
@@ -98,21 +98,24 @@ export default function Header() {
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
           >
-            <span className="font-medium">{selectedListing.name}</span>
+            <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
             <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
           </button>
 
-          {dropdownOpen && (
+          {dropdownOpen && hotels.length > 0 && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
               <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
               <div className="px-1.5">
-                {listings.map((listing) => {
-                  const isSelected = selectedListing.id === listing.id
+                {hotels.map((hotel) => {
+                  const isSelected = selectedHotel?.id === hotel.id
                   return (
                     <button
-                      key={listing.id}
+                      key={hotel.id}
                       onClick={() => {
-                        setSelectedListing(listing)
+                        if (!isSelected) {
+                          localStorage.setItem('selectedHotelId', hotel.id)
+                          window.location.reload()
+                        }
                         setDropdownOpen(false)
                       }}
                       className={`w-full text-left px-2.5 py-2 rounded-md transition-colors ${
@@ -122,10 +125,10 @@ export default function Header() {
                       }`}
                     >
                       <p className={`text-[13px] font-semibold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
-                        {listing.name}
+                        {hotel.name}
                       </p>
                       <p className={`text-[11px] ${isSelected ? 'text-primary-100' : 'text-gray-500'}`}>
-                        {listing.location}
+                        {hotel.location}
                       </p>
                     </button>
                   )
@@ -153,11 +156,11 @@ export default function Header() {
         {/* Preview Button */}
         <button
           onClick={() => {
-            if (hotelSlug) {
-              window.open(`https://${hotelSlug}.booking.vayada.com`, '_blank')
+            if (selectedHotel?.slug) {
+              window.open(`https://${selectedHotel.slug}.booking.vayada.com`, '_blank')
             }
           }}
-          disabled={!hotelSlug}
+          disabled={!selectedHotel?.slug}
           className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />

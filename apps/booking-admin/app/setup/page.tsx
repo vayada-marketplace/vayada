@@ -10,6 +10,14 @@ import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
 import { CURRENCY_OPTIONS } from '@/lib/constants/options'
 import { PhotoIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
 
+const AVAILABLE_FILTERS = [
+  { key: 'includeBreakfast', label: 'Include Breakfast' },
+  { key: 'freeCancellation', label: 'Free Cancellation' },
+  { key: 'payAtHotel', label: 'Pay at Hotel' },
+  { key: 'bestRated', label: 'Best Rated' },
+  { key: 'mountainView', label: 'Mountain View' },
+]
+
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
 const STEPS = [
@@ -69,6 +77,7 @@ export default function SetupPage() {
   const [accentColor, setAccentColor] = useState('#F5F5F4')
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
   const [heroImage, setHeroImage] = useState('')
+  const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel', 'bestRated', 'mountainView'])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -98,11 +107,42 @@ export default function SetupPage() {
     checkAuth()
   }, [router])
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploading, setUploading] = useState(false)
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const url = URL.createObjectURL(file)
-      setHeroImage(url)
+    if (!file) return
+
+    // Show local preview immediately
+    const previewUrl = URL.createObjectURL(file)
+    setHeroImage(previewUrl)
+
+    // Upload to S3 via PMS API
+    try {
+      setUploading(true)
+      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'http://localhost:8002'
+      const token = localStorage.getItem('access_token')
+      const formData = new FormData()
+      formData.append('files', file)
+
+      const res = await fetch(`${pmsUrl}/upload/images`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      })
+
+      if (!res.ok) throw new Error('Upload failed')
+
+      const data = await res.json()
+      if (data.images?.[0]?.url) {
+        URL.revokeObjectURL(previewUrl)
+        setHeroImage(data.images[0].url)
+      }
+    } catch (err) {
+      console.error('Image upload failed:', err)
+      // Keep preview but warn user
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -137,6 +177,7 @@ export default function SetupPage() {
         accent_color: accentColor,
         font_pairing: selectedFont,
         hero_image: heroImage,
+        booking_filters: bookingFilters,
       })
 
       // Register hotel in PMS if Vayada PMS selected
@@ -152,6 +193,13 @@ export default function SetupPage() {
           // Non-fatal: hotel may already be registered (idempotent)
         }
         localStorage.setItem('pmsProvider', 'vayada')
+      }
+
+      // Auto-select the newly created hotel
+      const hotelList = await settingsService.listHotels()
+      if (hotelList.length > 0) {
+        const newHotel = hotelList[hotelList.length - 1]
+        localStorage.setItem('selectedHotelId', newHotel.id)
       }
 
       const complete = await isSetupComplete()
@@ -533,6 +581,40 @@ export default function SetupPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Booking Filters */}
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <h2 className="text-[13px] font-semibold text-gray-900">Booking Filters</h2>
+                  <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which filters guests see on your booking page</p>
+
+                  <div className="space-y-2">
+                    {AVAILABLE_FILTERS.map((filter) => {
+                      const enabled = bookingFilters.includes(filter.key)
+                      return (
+                        <button
+                          key={filter.key}
+                          onClick={() => {
+                            setBookingFilters((prev) =>
+                              enabled
+                                ? prev.filter((k) => k !== filter.key)
+                                : [...prev, filter.key]
+                            )
+                          }}
+                          className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                            enabled
+                              ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
+                          <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Bottom buttons */}
@@ -880,7 +962,7 @@ export default function SetupPage() {
               </button>
               <button
                 onClick={handleComplete}
-                disabled={!canProceed() || saving}
+                disabled={!canProceed() || saving || uploading}
                 className="inline-flex items-center justify-center gap-1.5 px-6 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? (

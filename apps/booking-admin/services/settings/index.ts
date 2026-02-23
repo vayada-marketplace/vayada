@@ -26,6 +26,7 @@ export interface DesignSettings {
   primary_color: string
   accent_color: string
   font_pairing: string
+  booking_filters: string[]
 }
 
 export type DesignSettingsUpdate = Partial<DesignSettings>
@@ -44,7 +45,19 @@ export interface SetupStatusResponse {
   prefill_data?: SetupPrefillData | null
 }
 
+export interface HotelSummary {
+  id: string
+  name: string
+  slug: string
+  location: string
+  country: string
+}
+
 export const settingsService = {
+  listHotels: () =>
+    apiClient.get<HotelSummary[]>('/admin/hotels'),
+
+
   getPropertySettings: () =>
     apiClient.get<PropertySettings>('/admin/settings/property'),
 

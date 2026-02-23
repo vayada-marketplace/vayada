@@ -89,6 +89,7 @@ function clearAuthData(): void {
   localStorage.removeItem('userType')
   localStorage.removeItem('userStatus')
   localStorage.removeItem('user')
+  localStorage.removeItem('selectedHotelId')
   localStorage.setItem('isLoggedIn', 'false')
 }
 

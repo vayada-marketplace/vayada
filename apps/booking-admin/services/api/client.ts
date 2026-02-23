@@ -99,6 +99,12 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`
     }
 
+    // Add hotel context header if selected
+    const hotelId = typeof window !== 'undefined' ? localStorage.getItem('selectedHotelId') : null
+    if (hotelId) {
+      headers['X-Hotel-Id'] = hotelId
+    }
+
     const config: RequestInit = {
       ...options,
       headers,
