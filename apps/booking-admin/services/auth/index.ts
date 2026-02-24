@@ -22,6 +22,7 @@ export interface LoginResponse {
   token_type: string
   expires_in: number
   message: string
+  is_superadmin?: boolean
 }
 
 export interface RegisterRequest {
@@ -56,7 +57,7 @@ function storeToken(token: string, expiresIn: number): void {
 /**
  * Store user data in localStorage
  */
-function storeUserData(data: { id: string; email: string; name: string; type: string; status: string }): void {
+function storeUserData(data: { id: string; email: string; name: string; type: string; status: string; is_superadmin?: boolean }): void {
   if (typeof window === 'undefined') return
 
   localStorage.setItem('isLoggedIn', 'true')
@@ -65,6 +66,7 @@ function storeUserData(data: { id: string; email: string; name: string; type: st
   localStorage.setItem('userName', data.name)
   localStorage.setItem('userType', data.type)
   localStorage.setItem('userStatus', data.status)
+  localStorage.setItem('isSuperAdmin', data.is_superadmin ? 'true' : 'false')
 
   localStorage.setItem('user', JSON.stringify({
     id: data.id,
@@ -72,6 +74,7 @@ function storeUserData(data: { id: string; email: string; name: string; type: st
     name: data.name,
     type: data.type,
     status: data.status,
+    is_superadmin: data.is_superadmin || false,
   }))
 }
 
@@ -90,6 +93,7 @@ function clearAuthData(): void {
   localStorage.removeItem('userStatus')
   localStorage.removeItem('user')
   localStorage.removeItem('selectedHotelId')
+  localStorage.removeItem('isSuperAdmin')
   localStorage.setItem('isLoggedIn', 'false')
 }
 
@@ -137,13 +141,13 @@ export const authService = {
   },
 
   /**
-   * Login user (hotel admin)
+   * Login user (hotel admin or super admin)
    */
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     const response = await apiClient.post<LoginResponse>('/auth/login', data)
 
-    // Verify user is hotel admin
-    if (response.type !== 'hotel') {
+    // Verify user is hotel admin or super admin
+    if (response.type !== 'hotel' && !response.is_superadmin) {
       throw new Error('Access denied. Hotel admin account required.')
     }
 
@@ -155,6 +159,7 @@ export const authService = {
       name: response.name,
       type: response.type,
       status: response.status,
+      is_superadmin: response.is_superadmin,
     })
 
     return response
@@ -193,6 +198,14 @@ export const authService = {
     if (typeof window === 'undefined') return false
     const userType = localStorage.getItem('userType')
     return userType === 'hotel'
+  },
+
+  /**
+   * Check if current user is super admin
+   */
+  isSuperAdmin: (): boolean => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('isSuperAdmin') === 'true'
   },
 
   /**

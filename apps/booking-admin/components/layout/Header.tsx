@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   MagnifyingGlassIcon,
   BellIcon,
@@ -11,7 +12,7 @@ import {
   UserPlusIcon,
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
-import { settingsService, HotelSummary } from '@/services/settings'
+import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
 
 const notifications = [
   {
@@ -41,14 +42,16 @@ const notifications = [
 ]
 
 export default function Header() {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
-  const [hotels, setHotels] = useState<HotelSummary[]>([])
-  const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
+  const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([])
+  const [selectedHotel, setSelectedHotel] = useState<(HotelSummary | SuperAdminHotel) | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -72,7 +75,14 @@ export default function Header() {
   useEffect(() => {
     setUserName(localStorage.getItem('userName') || '')
     setUserEmail(localStorage.getItem('userEmail') || '')
-    settingsService.listHotels().then((list) => {
+    const superAdmin = authService.isSuperAdmin()
+    setIsSuperAdmin(superAdmin)
+
+    const fetchHotels = superAdmin
+      ? settingsService.listAllHotels()
+      : settingsService.listHotels()
+
+    fetchHotels.then((list) => {
       setHotels(list)
       if (list.length > 0) {
         const savedId = localStorage.getItem('selectedHotelId')
@@ -88,9 +98,12 @@ export default function Header() {
     ? userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : '?'
 
+  // Check if the selected hotel is owned by another user (super admin managing someone else's hotel)
+  const isManagingOtherHotel = isSuperAdmin && selectedHotel && 'owner_email' in selectedHotel
+
   return (
     <header className="h-12 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
-      {/* Left section: Property Selector + Search */}
+      {/* Left section: Property Selector + Super Admin Badge + Search */}
       <div className="flex items-center gap-4">
         {/* Property Selector Dropdown */}
         <div className="relative" ref={dropdownRef}>
@@ -105,7 +118,18 @@ export default function Header() {
           {dropdownOpen && hotels.length > 0 && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
               <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
-              <div className="px-1.5">
+              {isSuperAdmin && (
+                <button
+                  onClick={() => {
+                    setDropdownOpen(false)
+                    router.push('/manage-hotels')
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-primary-600 hover:bg-primary-50 transition-colors border-b border-gray-100 mb-1"
+                >
+                  View all hotels...
+                </button>
+              )}
+              <div className="px-1.5 max-h-60 overflow-y-auto">
                 {hotels.map((hotel) => {
                   const isSelected = selectedHotel?.id === hotel.id
                   return (
@@ -137,6 +161,13 @@ export default function Header() {
             </div>
           )}
         </div>
+
+        {/* Super Admin Badge */}
+        {isManagingOtherHotel && (
+          <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
+            Super Admin
+          </span>
+        )}
 
         {/* Search Bar */}
         <div className="relative">
@@ -233,6 +264,11 @@ export default function Header() {
               <div className="px-3.5 py-2.5">
                 <p className="text-[13px] font-semibold text-gray-900">{userName || 'User'}</p>
                 <p className="text-xs text-gray-500">{userEmail}</p>
+                {isSuperAdmin && (
+                  <span className="inline-flex items-center mt-1 px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded">
+                    Super Admin
+                  </span>
+                )}
               </div>
               <div className="border-t border-gray-100" />
               {/* Menu items */}

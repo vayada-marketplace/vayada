@@ -52,9 +52,34 @@ export interface HotelSummary {
   country: string
 }
 
+export interface AddonItem {
+  id: string
+  name: string
+  description: string
+  price: number
+  currency: string
+  category: string
+  image: string
+  duration?: string
+  perPerson?: boolean
+}
+
+export interface SuperAdminHotel extends HotelSummary {
+  owner_name: string
+  owner_email: string
+}
+
+export interface AddonSettings {
+  showAddonsStep: boolean
+  groupAddonsByCategory: boolean
+}
+
 export const settingsService = {
   listHotels: () =>
     apiClient.get<HotelSummary[]>('/admin/hotels'),
+
+  listAllHotels: () =>
+    apiClient.get<SuperAdminHotel[]>('/admin/superadmin/hotels'),
 
 
   getPropertySettings: () =>
@@ -77,4 +102,22 @@ export const settingsService = {
 
   getSetupStatus: () =>
     apiClient.get<SetupStatusResponse>('/admin/settings/setup-status'),
+
+  listAddons: () =>
+    apiClient.get<AddonItem[]>('/admin/addons'),
+
+  createAddon: (data: Omit<AddonItem, 'id'>) =>
+    apiClient.post<AddonItem>('/admin/addons', data),
+
+  updateAddon: (id: string, data: Partial<AddonItem>) =>
+    apiClient.patch<AddonItem>(`/admin/addons/${id}`, data),
+
+  deleteAddon: (id: string) =>
+    apiClient.delete(`/admin/addons/${id}`),
+
+  getAddonSettings: () =>
+    apiClient.get<AddonSettings>('/admin/settings/addons'),
+
+  updateAddonSettings: (data: Partial<AddonSettings>) =>
+    apiClient.patch<AddonSettings>('/admin/settings/addons', data),
 }

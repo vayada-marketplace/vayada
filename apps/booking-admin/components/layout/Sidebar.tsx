@@ -8,12 +8,14 @@ import {
   ChevronDownIcon,
   CheckIcon,
   Cog6ToothIcon,
+  BuildingOffice2Icon,
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
+import { authService } from '@/services/auth'
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
 
-const navItems = [
+const baseNavItems = [
   {
     label: 'Dashboard',
     href: '/',
@@ -25,17 +27,30 @@ const navItems = [
     icon: DesignStudioIcon,
   },
   {
+    label: 'Booking Flow',
+    href: '/booking-flow',
+    icon: BookingFlowIcon,
+  },
+  {
     label: 'Settings',
     href: '/settings',
     icon: Cog6ToothIcon,
   },
 ]
 
+const superAdminNavItem = {
+  label: 'Manage Hotels',
+  href: '/manage-hotels',
+  icon: BuildingOffice2Icon,
+}
+
 export default function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
   const switcherRef = useRef<HTMLDivElement>(null)
+  const isSuperAdmin = authService.isSuperAdmin()
+  const navItems = isSuperAdmin ? [superAdminNavItem, ...baseNavItems] : baseNavItems
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -202,6 +217,22 @@ function DesignStudioIcon({ className }: { className?: string }) {
       <path d="M12 17v4" />
       <path d="M3 12h4" />
       <path d="M17 12h4" />
+    </svg>
+  )
+}
+
+function BookingFlowIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="4" height="4" rx="1" />
+      <rect x="10" y="4" width="4" height="4" rx="1" />
+      <rect x="17" y="4" width="4" height="4" rx="1" />
+      <path d="M5 8v3" />
+      <path d="M12 8v3" />
+      <path d="M19 8v3" />
+      <path d="M5 11h14" />
+      <path d="M12 11v5" />
+      <rect x="9" y="16" width="6" height="4" rx="1" />
     </svg>
   )
 }
