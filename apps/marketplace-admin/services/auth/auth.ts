@@ -188,5 +188,29 @@ export const authService = {
   getToken: (): string | null => {
     return getToken()
   },
+
+  /**
+   * Request password reset
+   */
+  forgotPassword: async (email: string): Promise<{ message: string }> => {
+    try {
+      const response = await apiClient.post<{ message: string }>('/auth/forgot-password', { email })
+      return { message: response.message }
+    } catch {
+      // Always return success for security (anti-enumeration)
+      return { message: 'If an account with that email exists, a password reset link has been sent.' }
+    }
+  },
+
+  /**
+   * Reset password with token
+   */
+  resetPassword: async (token: string, newPassword: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>('/auth/reset-password', {
+      token,
+      new_password: newPassword,
+    })
+    return response
+  },
 }
 
