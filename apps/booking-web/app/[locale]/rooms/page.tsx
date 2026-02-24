@@ -94,7 +94,7 @@ export default function RoomsPage() {
                     </div>
                   </div>
                   <Link
-                    href={`/?room=${room.id}`}
+                    href={`/availability?room=${room.id}`}
                     className="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
                   >
                     {tc('checkAvailability')}
