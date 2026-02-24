@@ -2,59 +2,26 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
-import { Input } from '@/components/ui/Input'
-import { Button } from '@/components/ui/Button'
-import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { isSetupComplete } from '@/lib/utils/setupStatus'
 import { settingsService } from '@/services/settings'
+import LoginForm from '@/components/auth/LoginForm'
 
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  })
-  const [showPassword, setShowPassword] = useState(false)
-  const [emailError, setEmailError] = useState('')
   const [submitError, setSubmitError] = useState(
     searchParams.get('expired') === 'true' ? 'Your session has expired. Please sign in again.' : ''
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
-
-    if (name === 'email' && emailError) {
-      setEmailError('')
-    }
-    if (submitError) {
-      setSubmitError('')
-    }
-  }
-
-  const validateEmail = (email: string): boolean => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setEmailError('')
+  const handleLogin = async (email: string, password: string) => {
     setSubmitError('')
-
-    if (!validateEmail(formData.email)) {
-      setEmailError('Please enter a valid email address')
-      return
-    }
-
     setIsSubmitting(true)
 
     try {
-      const loginResponse = await authService.login({ email: formData.email, password: formData.password })
+      const loginResponse = await authService.login({ email, password })
 
       // Super admins skip setup check and go straight to manage hotels
       if (loginResponse.is_superadmin) {
@@ -102,7 +69,6 @@ export default function LoginPage() {
       } else {
         setSubmitError('An unexpected error occurred. Please try again.')
       }
-      setFormData(prev => ({ ...prev, password: '' }))
     } finally {
       setIsSubmitting(false)
     }
@@ -120,85 +86,12 @@ export default function LoginPage() {
           <p className="text-[13px] text-gray-500 mt-1">Sign in to the admin panel</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Email */}
-          <Input
-            id="email"
-            type="email"
-            name="email"
-            label="Email address"
-            value={formData.email}
-            onChange={handleChange}
-            required
-            placeholder="admin@example.com"
-            autoComplete="email"
-            error={emailError}
-          />
-
-          {/* Password */}
-          <div>
-            <label htmlFor="password" className="block text-[13px] font-medium text-gray-700 mb-1.5">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-10 text-[13px] text-gray-900"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? (
-                  <EyeSlashIcon className="w-4 h-4" />
-                ) : (
-                  <EyeIcon className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Forgot password */}
-          <div className="text-right">
-            <Link href="/forgot-password" className="text-[13px] text-primary-600 hover:text-primary-700 font-medium">
-              Forgot password?
-            </Link>
-          </div>
-
-          {/* Submit Error */}
-          {submitError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-[12px] text-red-700 font-medium">{submitError}</p>
-            </div>
-          )}
-
-          {/* Submit */}
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Signing In...' : 'Sign In'}
-          </Button>
-
-          {/* Register link */}
-          <p className="text-center text-[13px] text-gray-500">
-            Don&apos;t have an account?{' '}
-            <Link href="/register" className="text-primary-600 hover:text-primary-700 font-medium">
-              Sign up
-            </Link>
-          </p>
-        </form>
+        <LoginForm
+          onSubmit={handleLogin}
+          isSubmitting={isSubmitting}
+          submitError={submitError}
+          onErrorClear={() => setSubmitError('')}
+        />
       </div>
     </div>
   )
