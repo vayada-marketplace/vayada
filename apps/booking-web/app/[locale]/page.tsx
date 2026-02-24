@@ -73,8 +73,16 @@ export default function HomePage() {
   const { rooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
-  const [checkIn, setCheckIn] = useState('2026-02-13')
-  const [checkOut, setCheckOut] = useState('2026-02-18')
+  const [checkIn, setCheckIn] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  })
+  const [checkOut, setCheckOut] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 4)
+    return d.toISOString().split('T')[0]
+  })
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
   const [roomCount] = useState(1)

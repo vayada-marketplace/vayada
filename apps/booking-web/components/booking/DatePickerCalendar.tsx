@@ -73,21 +73,11 @@ function MonthGrid({
   const firstDay = getFirstDayOfMonth(year, month)
   const today = getTodayString()
 
-  // Previous month days (grayed out)
-  const prevMonth = month === 0 ? 11 : month - 1
-  const prevYear = month === 0 ? year - 1 : year
-  const daysInPrevMonth = getDaysInMonth(prevYear, prevMonth)
-
   const cells: { day: number; dateStr: string; isCurrentMonth: boolean }[] = []
 
-  // Fill in previous month trailing days
-  for (let i = firstDay - 1; i >= 0; i--) {
-    const d = daysInPrevMonth - i
-    cells.push({
-      day: d,
-      dateStr: toDateString(prevYear, prevMonth, d),
-      isCurrentMonth: false,
-    })
+  // Empty cells for days before the 1st
+  for (let i = 0; i < firstDay; i++) {
+    cells.push({ day: 0, dateStr: '', isCurrentMonth: false })
   }
 
   // Current month days
@@ -99,17 +89,11 @@ function MonthGrid({
     })
   }
 
-  // Fill remaining to complete last row
+  // Empty cells to complete last row
   const remaining = 7 - (cells.length % 7)
   if (remaining < 7) {
-    const nextMonth = month === 11 ? 0 : month + 1
-    const nextYear = month === 11 ? year + 1 : year
-    for (let d = 1; d <= remaining; d++) {
-      cells.push({
-        day: d,
-        dateStr: toDateString(nextYear, nextMonth, d),
-        isCurrentMonth: false,
-      })
+    for (let i = 0; i < remaining; i++) {
+      cells.push({ day: 0, dateStr: '', isCurrentMonth: false })
     }
   }
 
@@ -135,6 +119,11 @@ function MonthGrid({
       {/* Day cells */}
       <div className="grid grid-cols-7">
         {cells.map((cell, idx) => {
+          // Empty placeholder cell
+          if (!cell.isCurrentMonth) {
+            return <div key={idx} className="w-9 h-9" />
+          }
+
           const isPast = isBeforeToday(cell.dateStr) && !isSameDay(cell.dateStr, today)
           const isToday = isSameDay(cell.dateStr, today)
           const isCheckIn = checkIn ? isSameDay(cell.dateStr, checkIn) : false
@@ -144,15 +133,15 @@ function MonthGrid({
             checkIn && rangeEnd && !isBeforeDate(rangeEnd, checkIn)
               ? isBetween(cell.dateStr, checkIn, rangeEnd)
               : false
-          const isDisabled = isPast || !cell.isCurrentMonth
+          const isDisabled = isPast
 
           return (
             <div
               key={idx}
               className={`relative flex items-center justify-center ${
-                isInRange && cell.isCurrentMonth ? 'bg-primary-50' : ''
-              } ${isCheckIn && cell.isCurrentMonth ? 'rounded-l-full bg-primary-50' : ''} ${
-                (isCheckOut || (checkIn && !checkOut && hoverDate && isSameDay(cell.dateStr, hoverDate))) && cell.isCurrentMonth
+                isInRange ? 'bg-primary-50' : ''
+              } ${isCheckIn ? 'rounded-l-full bg-primary-50' : ''} ${
+                (isCheckOut || (checkIn && !checkOut && hoverDate && isSameDay(cell.dateStr, hoverDate)))
                   ? 'rounded-r-full bg-primary-50'
                   : ''
               }`}
@@ -160,18 +149,16 @@ function MonthGrid({
               <button
                 disabled={isDisabled}
                 onClick={() => !isDisabled && onDayClick(cell.dateStr)}
-                onMouseEnter={() => !isDisabled && cell.isCurrentMonth && onDayHover(cell.dateStr)}
+                onMouseEnter={() => !isDisabled && onDayHover(cell.dateStr)}
                 onMouseLeave={() => onDayHover(null)}
                 className={`w-9 h-9 flex items-center justify-center text-sm rounded-full transition-colors relative z-10 ${
                   isDisabled
-                    ? 'text-gray-300 cursor-default'
-                    : isSelected && cell.isCurrentMonth
+                    ? 'text-gray-300 cursor-default line-through decoration-gray-400'
+                    : isSelected
                     ? 'bg-primary-600 text-white font-bold'
-                    : isToday && cell.isCurrentMonth
+                    : isToday
                     ? 'border-2 border-primary-400 text-primary-700 font-semibold'
-                    : cell.isCurrentMonth
-                    ? 'text-gray-800 hover:bg-primary-100 cursor-pointer font-medium'
-                    : 'text-gray-300 cursor-default'
+                    : 'text-gray-800 hover:bg-primary-100 cursor-pointer font-medium'
                 }`}
               >
                 {cell.day}
@@ -207,12 +194,22 @@ export default function DatePickerCalendar({
   const secondMonth = baseMonth === 11 ? 0 : baseMonth + 1
   const secondYear = baseMonth === 11 ? baseYear + 1 : baseYear
 
-  // Reset temp state when opening
+  // Reset temp state and navigate to correct month when opening
   useEffect(() => {
     if (open) {
       setTempCheckIn(checkIn)
       setTempCheckOut(checkOut)
       setSelectionState(checkIn && checkOut ? 'selectCheckIn' : checkIn ? 'selectCheckOut' : 'selectCheckIn')
+      // Navigate calendar to the check-in month (or current month if no check-in)
+      if (checkIn) {
+        const d = new Date(checkIn)
+        setBaseMonth(d.getMonth())
+        setBaseYear(d.getFullYear())
+      } else {
+        const now = new Date()
+        setBaseMonth(now.getMonth())
+        setBaseYear(now.getFullYear())
+      }
     }
   }, [open, checkIn, checkOut])
 
@@ -251,6 +248,11 @@ export default function DatePickerCalendar({
   }
 
   const handlePrev = () => {
+    const now = new Date()
+    const currentMonth = now.getMonth()
+    const currentYear = now.getFullYear()
+    // Don't navigate before current month
+    if (baseYear === currentYear && baseMonth === currentMonth) return
     if (baseMonth === 0) {
       setBaseMonth(11)
       setBaseYear(baseYear - 1)
