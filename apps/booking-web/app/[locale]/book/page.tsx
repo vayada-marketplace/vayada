@@ -306,7 +306,7 @@ function BookPageContent() {
             {/* Bottom Action Bar */}
             <div className="flex items-center justify-between pt-2">
               <button
-                onClick={() => router.push('/availability')}
+                onClick={() => router.push('/')}
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
