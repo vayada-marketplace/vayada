@@ -54,7 +54,15 @@ export default function LoginPage() {
     setIsSubmitting(true)
 
     try {
-      await authService.login({ email: formData.email, password: formData.password })
+      const loginResponse = await authService.login({ email: formData.email, password: formData.password })
+
+      // Super admins skip setup check and go straight to manage hotels
+      if (loginResponse.is_superadmin) {
+        localStorage.setItem('setupComplete', 'true')
+        router.push('/manage-hotels')
+        return
+      }
+
       const complete = await isSetupComplete()
       if (!complete) {
         localStorage.setItem('setupComplete', 'false')
