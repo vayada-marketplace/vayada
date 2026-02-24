@@ -13,12 +13,14 @@ from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.affiliate_repo import AffiliateRepository
 from app.repositories.room_block_repo import RoomBlockRepository
+from app.repositories.room_repo import RoomRepository
 from app.models.room_type import (
     RoomTypeCreate,
     RoomTypeUpdate,
     RoomTypeAdminResponse,
 )
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate
+from app.models.booking import BookingAdminResponse, BookingStatusUpdate, AdminBookingCreate
+from app.models.room import RoomCreate, RoomUpdate, RoomResponse
 from app.models.hotel import HotelRegister, HotelResponse, SetupStatusResponse
 from app.models.affiliate import (
     AffiliateAdminResponse,
@@ -77,6 +79,7 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
     ci = b["check_in"]
     co = b["check_out"]
     nights = (co - ci).days
+    room_id = b.get("room_id")
     return BookingAdminResponse(
         id=str(b["id"]),
         booking_reference=b["booking_reference"],
@@ -96,8 +99,26 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
         total_amount=float(b["total_amount"]),
         currency=b["currency"],
         status=b["status"],
+        room_id=str(room_id) if room_id else None,
+        room_number=b.get("room_number"),
+        channel=b.get("channel", "direct"),
         created_at=b["created_at"].isoformat(),
         updated_at=b["updated_at"].isoformat(),
+    )
+
+
+def _room_to_response(r: dict) -> RoomResponse:
+    return RoomResponse(
+        id=str(r["id"]),
+        hotel_id=str(r["hotel_id"]),
+        room_type_id=str(r["room_type_id"]),
+        room_type_name=r["room_type_name"],
+        room_number=r["room_number"],
+        floor=r["floor"],
+        status=r["status"],
+        sort_order=r["sort_order"],
+        created_at=r["created_at"].isoformat(),
+        updated_at=r["updated_at"].isoformat(),
     )
 
 
@@ -231,7 +252,157 @@ async def delete_room_type(
         )
 
 
+# ── Rooms (individual) ─────────────────────────────────────────────
+
+
+@router.get("/rooms", response_model=List[RoomResponse])
+async def list_rooms(user_id: str = Depends(require_hotel_admin)):
+    hotel_id = await _get_hotel_id(user_id)
+    rooms = await RoomRepository.list_by_hotel_id(hotel_id)
+    return [_room_to_response(r) for r in rooms]
+
+
+@router.post("/rooms", response_model=RoomResponse, status_code=201)
+async def create_room(
+    data: RoomCreate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+
+    # Validate room type belongs to hotel
+    room_type = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room_type or str(room_type["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room type not found")
+
+    if data.status not in ("available", "maintenance", "out_of_order"):
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be 'available', 'maintenance', or 'out_of_order'",
+        )
+
+    try:
+        room = await RoomRepository.create(
+            {
+                "hotel_id": hotel_id,
+                "room_type_id": data.room_type_id,
+                "room_number": data.room_number,
+                "floor": data.floor,
+                "status": data.status,
+                "sort_order": data.sort_order,
+            }
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=409,
+            detail="A room with this number already exists",
+        )
+    return _room_to_response(room)
+
+
+@router.patch("/rooms/{room_id}", response_model=RoomResponse)
+async def update_room(
+    room_id: str,
+    data: RoomUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    existing = await RoomRepository.get_by_id(room_id)
+    if not existing or str(existing["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    updates = data.model_dump(exclude_unset=True)
+    if "status" in updates and updates["status"] not in (
+        "available", "maintenance", "out_of_order"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be 'available', 'maintenance', or 'out_of_order'",
+        )
+
+    room = await RoomRepository.update(room_id, updates)
+    return _room_to_response(room)
+
+
+@router.delete("/rooms/{room_id}", status_code=204)
+async def delete_room(
+    room_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    existing = await RoomRepository.get_by_id(room_id)
+    if not existing or str(existing["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    try:
+        await RoomRepository.delete(room_id)
+    except Exception:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete room with existing bookings",
+        )
+
+
 # ── Bookings ────────────────────────────────────────────────────────
+
+
+@router.post("/bookings", response_model=BookingAdminResponse, status_code=201)
+async def create_admin_booking(
+    data: AdminBookingCreate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+
+    # Validate room belongs to hotel
+    room = await RoomRepository.get_by_id(data.room_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # Validate dates
+    if data.check_out <= data.check_in:
+        raise HTTPException(
+            status_code=400, detail="check_out must be after check_in"
+        )
+
+    # Check room availability
+    available = await BookingRepository.is_room_available(
+        data.room_id, data.check_in, data.check_out
+    )
+    if not available:
+        raise HTTPException(
+            status_code=409, detail="Room is not available for the selected dates"
+        )
+
+    # Get room type for pricing
+    room_type = await RoomTypeRepository.get_by_id(str(room["room_type_id"]))
+    nightly_rate = data.nightly_rate if data.nightly_rate is not None else float(room_type["base_rate"])
+    nights = (data.check_out - data.check_in).days
+    total_amount = nightly_rate * nights
+
+    booking = await BookingRepository.create(
+        {
+            "hotel_id": hotel_id,
+            "room_type_id": str(room["room_type_id"]),
+            "guest_first_name": data.guest_first_name,
+            "guest_last_name": data.guest_last_name,
+            "guest_email": data.guest_email,
+            "guest_phone": data.guest_phone,
+            "special_requests": data.special_requests,
+            "check_in": data.check_in,
+            "check_out": data.check_out,
+            "adults": data.adults,
+            "children": data.children,
+            "nightly_rate": nightly_rate,
+            "total_amount": total_amount,
+            "currency": room_type["currency"],
+            "room_id": data.room_id,
+            "channel": data.channel,
+            "status": "confirmed",
+        }
+    )
+
+    # Re-fetch with JOINs for full response
+    full_booking = await BookingRepository.get_by_id(str(booking["id"]))
+    return _booking_to_admin(full_booking)
 
 
 @router.get("/bookings")
@@ -309,6 +480,7 @@ async def get_calendar(
 ):
     hotel_id = await _get_hotel_id(user_id)
     room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
+    rooms = await RoomRepository.list_by_hotel_id(hotel_id)
     bookings = await BookingRepository.list_by_hotel_in_range(hotel_id, start, end)
     blocks = await RoomBlockRepository.list_by_hotel_in_range(hotel_id, start, end)
 
@@ -318,8 +490,21 @@ async def get_calendar(
                 "id": str(rt["id"]),
                 "name": rt["name"],
                 "totalRooms": rt["total_rooms"],
+                "baseRate": float(rt["base_rate"]),
+                "currency": rt["currency"],
             }
             for rt in room_types
+        ],
+        "rooms": [
+            {
+                "id": str(r["id"]),
+                "roomTypeId": str(r["room_type_id"]),
+                "roomTypeName": r["room_type_name"],
+                "roomNumber": r["room_number"],
+                "floor": r["floor"],
+                "status": r["status"],
+            }
+            for r in rooms
         ],
         "bookings": [
             {
@@ -331,6 +516,10 @@ async def get_calendar(
                 "checkIn": str(b["check_in"]),
                 "checkOut": str(b["check_out"]),
                 "status": b["status"],
+                "roomId": str(b["room_id"]) if b.get("room_id") else None,
+                "roomNumber": b.get("room_number"),
+                "channel": b.get("channel", "direct"),
+                "bookingReference": b["booking_reference"],
             }
             for b in bookings
         ],

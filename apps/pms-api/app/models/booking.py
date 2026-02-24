@@ -47,6 +47,23 @@ class BookingResponse(BaseModel):
     created_at: str
 
 
+class AdminBookingCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    room_id: str
+    guest_first_name: str
+    guest_last_name: str
+    guest_email: EmailStr
+    guest_phone: str = ""
+    special_requests: str = ""
+    check_in: date
+    check_out: date
+    adults: int = 1
+    children: int = 0
+    nightly_rate: Optional[float] = None
+    channel: str = "direct"
+
+
 class BookingAdminResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -68,6 +85,9 @@ class BookingAdminResponse(BaseModel):
     total_amount: float
     currency: str
     status: str
+    room_id: Optional[str] = None
+    room_number: Optional[str] = None
+    channel: str = "direct"
     created_at: str
     updated_at: str
 

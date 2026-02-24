@@ -32,9 +32,11 @@ class BookingRepository:
                 guest_first_name, guest_last_name, guest_email, guest_phone,
                 special_requests, check_in, check_out,
                 adults, children, nightly_rate, total_amount, currency,
-                affiliate_id, referral_code
+                affiliate_id, referral_code,
+                room_id, channel, status
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -54,6 +56,9 @@ class BookingRepository:
             data["currency"],
             data.get("affiliate_id"),
             data.get("referral_code"),
+            data.get("room_id"),
+            data.get("channel", "direct"),
+            data.get("status", "pending"),
         )
         return dict(row)
 
@@ -61,10 +66,12 @@ class BookingRepository:
     async def get_by_id(booking_id: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """
-            SELECT b.*, rt.name AS room_name, h.name AS hotel_name
+            SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
+                   rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             JOIN hotels h ON h.id = b.hotel_id
+            LEFT JOIN rooms rm ON rm.id = b.room_id
             WHERE b.id = $1
             """,
             booking_id,
@@ -75,10 +82,12 @@ class BookingRepository:
     async def lookup(booking_reference: str, guest_email: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """
-            SELECT b.*, rt.name AS room_name, h.name AS hotel_name
+            SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
+                   rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             JOIN hotels h ON h.id = b.hotel_id
+            LEFT JOIN rooms rm ON rm.id = b.room_id
             WHERE b.booking_reference = $1
               AND LOWER(b.guest_email) = LOWER($2)
             """,
@@ -108,9 +117,10 @@ class BookingRepository:
         args.extend([limit, offset])
         rows = await Database.fetch(
             f"""
-            SELECT b.*, rt.name AS room_name
+            SELECT b.*, rt.name AS room_name, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
+            LEFT JOIN rooms rm ON rm.id = b.room_id
             WHERE {where}
             ORDER BY b.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
@@ -141,9 +151,10 @@ class BookingRepository:
     ) -> List[dict]:
         rows = await Database.fetch(
             """
-            SELECT b.*, rt.name AS room_name
+            SELECT b.*, rt.name AS room_name, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
+            LEFT JOIN rooms rm ON rm.id = b.room_id
             WHERE b.hotel_id = $1
               AND b.status IN ('pending', 'confirmed')
               AND b.check_in < $3
@@ -155,6 +166,24 @@ class BookingRepository:
             end_date,
         )
         return [dict(r) for r in rows]
+
+    @staticmethod
+    async def is_room_available(
+        room_id: str, check_in, check_out
+    ) -> bool:
+        count = await Database.fetchval(
+            """
+            SELECT COUNT(*) FROM bookings
+            WHERE room_id = $1
+              AND status IN ('pending', 'confirmed')
+              AND check_in < $3
+              AND check_out > $2
+            """,
+            room_id,
+            check_in,
+            check_out,
+        )
+        return (count or 0) == 0
 
     @staticmethod
     async def update_status(booking_id: str, new_status: str) -> Optional[dict]:
