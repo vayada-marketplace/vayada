@@ -19,6 +19,9 @@ export interface Booking {
   totalAmount: number
   currency: string
   status: 'pending' | 'confirmed' | 'cancelled'
+  roomId: string | null
+  roomNumber: string | null
+  channel: string
   createdAt: string
   updatedAt: string
 }
