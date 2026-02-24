@@ -94,6 +94,7 @@ jobs:
             privacy_version text,
             marketing_consent boolean DEFAULT false,
             marketing_consent_at timestamp with time zone,
+            is_superadmin boolean NOT NULL DEFAULT false,
             created_at timestamp with time zone NOT NULL DEFAULT now(),
             updated_at timestamp with time zone NOT NULL DEFAULT now(),
             CONSTRAINT users_pkey PRIMARY KEY (id)
