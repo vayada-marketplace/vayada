@@ -44,6 +44,7 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     message: str
+    is_superadmin: bool = False
 
 
 class TokenValidationResponse(BaseModel):

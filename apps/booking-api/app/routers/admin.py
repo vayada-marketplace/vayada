@@ -6,12 +6,17 @@ import logging
 import re
 import json
 
-from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
+from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel, require_superadmin
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.repositories.booking_addon_repo import BookingAddonRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
 from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
 from app.models.setup import SetupStatusResponse, SetupPrefillData
+from app.models.hotel import (
+    AddonResponse, CreateAddonRequest, UpdateAddonRequest,
+    AddonSettingsResponse, AddonSettingsUpdate,
+)
 from app.database import MarketplaceDatabase
 from app.config import settings
 
@@ -130,8 +135,8 @@ async def get_setup_status(
             )
 
         # Re-fetch with setup columns specifically
-        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
-            hotel["id"], user_id, columns=_SETUP_COLUMNS
+        hotel_data = await BookingHotelRepository.get_by_id(
+            str(hotel["id"]), columns=_SETUP_COLUMNS
         )
 
         if not hotel_data:
@@ -218,7 +223,7 @@ async def get_property_settings(
                 weekly_reports=False,
             )
 
-        full_hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel["id"], user_id)
+        full_hotel = await BookingHotelRepository.get_by_id(str(hotel["id"]))
         return _hotel_to_property_settings(full_hotel)
 
     except HTTPException:
@@ -280,7 +285,7 @@ async def update_property_settings(
             if updates:
                 result = await BookingHotelRepository.partial_update(hotel["id"], updates)
             else:
-                result = await BookingHotelRepository.get_by_id_and_user_id(hotel["id"], user_id)
+                result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
         else:
             # INSERT new hotel
             name = data.property_name or ''
@@ -367,8 +372,8 @@ async def get_design_settings(
         if not hotel:
             return _DESIGN_DEFAULTS
 
-        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
-            hotel["id"], user_id, columns=_DESIGN_COLUMNS
+        hotel_data = await BookingHotelRepository.get_by_id(
+            str(hotel["id"]), columns=_DESIGN_COLUMNS
         )
         if not hotel_data:
             return _DESIGN_DEFAULTS
@@ -400,8 +405,8 @@ async def update_design_settings(
         if updates:
             await BookingHotelRepository.partial_update(hotel["id"], updates)
 
-        hotel_data = await BookingHotelRepository.get_by_id_and_user_id(
-            hotel["id"], user_id, columns=_DESIGN_COLUMNS
+        hotel_data = await BookingHotelRepository.get_by_id(
+            str(hotel["id"]), columns=_DESIGN_COLUMNS
         )
         return _hotel_to_design_settings(hotel_data)
 
@@ -412,4 +417,211 @@ async def update_design_settings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update design settings"
+        )
+
+
+# ── Addon CRUD ──────────────────────────────────────────────────────
+
+
+def _addon_to_response(row: dict) -> AddonResponse:
+    return AddonResponse(
+        id=str(row["id"]),
+        name=row["name"],
+        description=row["description"],
+        price=float(row["price"]),
+        currency=row["currency"],
+        category=row["category"],
+        image=row["image"],
+        duration=row.get("duration"),
+        per_person=row.get("per_person"),
+    )
+
+
+@router.get("/addons", response_model=list[AddonResponse])
+async def list_addons(hotel: dict = Depends(require_current_hotel)):
+    """List all addons for the current hotel."""
+    try:
+        rows = await BookingAddonRepository.list_by_hotel_id(str(hotel["id"]))
+        return [_addon_to_response(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error listing addons: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list addons"
+        )
+
+
+@router.post("/addons", response_model=AddonResponse, status_code=status.HTTP_201_CREATED)
+async def create_addon(
+    data: CreateAddonRequest,
+    hotel: dict = Depends(require_current_hotel),
+):
+    """Create a new addon for the current hotel."""
+    try:
+        row = await BookingAddonRepository.create(
+            hotel_id=str(hotel["id"]),
+            name=data.name,
+            description=data.description,
+            price=data.price,
+            currency=data.currency,
+            category=data.category,
+            image=data.image,
+            duration=data.duration,
+            per_person=data.per_person,
+        )
+        return _addon_to_response(row)
+    except Exception as e:
+        logger.error(f"Error creating addon: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create addon"
+        )
+
+
+@router.patch("/addons/{addon_id}", response_model=AddonResponse)
+async def update_addon(
+    addon_id: str,
+    data: UpdateAddonRequest,
+    hotel: dict = Depends(require_current_hotel),
+):
+    """Update an addon for the current hotel."""
+    try:
+        hotel_id = str(hotel["id"])
+        existing = await BookingAddonRepository.get_by_id(addon_id, hotel_id)
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Addon not found"
+            )
+
+        updates = {}
+        for field in ("name", "description", "price", "currency", "category", "image", "duration", "per_person"):
+            value = getattr(data, field)
+            if value is not None:
+                updates[field] = value
+
+        if updates:
+            row = await BookingAddonRepository.update(addon_id, hotel_id, updates)
+        else:
+            row = existing
+
+        return _addon_to_response(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating addon: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update addon"
+        )
+
+
+@router.delete("/addons/{addon_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_addon(
+    addon_id: str,
+    hotel: dict = Depends(require_current_hotel),
+):
+    """Delete an addon for the current hotel."""
+    try:
+        deleted = await BookingAddonRepository.delete(addon_id, str(hotel["id"]))
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Addon not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting addon: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete addon"
+        )
+
+
+# ── Addon Display Settings ──────────────────────────────────────────
+
+
+@router.get("/settings/addons", response_model=AddonSettingsResponse)
+async def get_addon_settings(
+    hotel: dict = Depends(require_current_hotel),
+):
+    """Get addon display settings for the current hotel."""
+    return AddonSettingsResponse(
+        show_addons_step=hotel.get("show_addons_step", True),
+        group_addons_by_category=hotel.get("group_addons_by_category", True),
+    )
+
+
+@router.patch("/settings/addons", response_model=AddonSettingsResponse)
+async def update_addon_settings(
+    data: AddonSettingsUpdate,
+    hotel: dict = Depends(require_current_hotel),
+):
+    """Update addon display settings for the current hotel."""
+    try:
+        updates = {}
+        if data.show_addons_step is not None:
+            updates["show_addons_step"] = data.show_addons_step
+        if data.group_addons_by_category is not None:
+            updates["group_addons_by_category"] = data.group_addons_by_category
+
+        if updates:
+            result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
+        else:
+            result = hotel
+
+        return AddonSettingsResponse(
+            show_addons_step=result.get("show_addons_step", True),
+            group_addons_by_category=result.get("group_addons_by_category", True),
+        )
+    except Exception as e:
+        logger.error(f"Error updating addon settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update addon settings"
+        )
+
+
+# ── Super Admin Endpoints ──────────────────────────────────────────
+
+
+@router.get("/superadmin/check")
+async def superadmin_check(user_id: str = Depends(require_superadmin)):
+    """Check if the current user is a super admin."""
+    return {"is_superadmin": True}
+
+
+@router.get("/superadmin/hotels")
+async def superadmin_list_hotels(user_id: str = Depends(require_superadmin)):
+    """List all hotels with owner info. Super admin only."""
+    try:
+        hotels = await BookingHotelRepository.list_all(
+            columns="id, name, slug, location, country, user_id"
+        )
+
+        # Enrich with owner info
+        result = []
+        for hotel in hotels:
+            owner = await UserRepository.get_by_id(
+                str(hotel["user_id"]), columns="id, name, email"
+            )
+            result.append({
+                "id": str(hotel["id"]),
+                "name": hotel["name"],
+                "slug": hotel["slug"],
+                "location": hotel.get("location") or "",
+                "country": hotel.get("country") or "",
+                "owner_name": owner["name"] if owner else "",
+                "owner_email": owner["email"] if owner else "",
+            })
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing all hotels for superadmin: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list hotels"
         )

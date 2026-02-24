@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Optional, List
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.repositories.booking_addon_repo import BookingAddonRepository
 from app.models.hotel import (
     HotelResponse,
     HotelContact,
@@ -98,6 +99,21 @@ async def get_rooms_by_hotel_slug(slug: str) -> List[RoomTypeResponse]:
 
 
 async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
-    # Addons will come from PMS integration later.
-    # For now, return empty list.
-    return []
+    hotel = await BookingHotelRepository.get_by_slug(slug)
+    if not hotel or not hotel.get("show_addons_step", True):
+        return []
+    rows = await BookingAddonRepository.list_by_hotel_id(str(hotel["id"]))
+    return [
+        AddonResponse(
+            id=str(row["id"]),
+            name=row["name"],
+            description=row["description"],
+            price=float(row["price"]),
+            currency=row["currency"],
+            category=row["category"],
+            image=row["image"],
+            duration=row.get("duration"),
+            per_person=row.get("per_person"),
+        )
+        for row in rows
+    ]

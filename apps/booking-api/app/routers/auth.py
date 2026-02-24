@@ -158,7 +158,8 @@ async def login(request: LoginRequest):
             status=user['status'],
             access_token=access_token,
             expires_in=get_token_expiration_seconds(),
-            message="Login successful"
+            message="Login successful",
+            is_superadmin=bool(user.get('is_superadmin', False)),
         )
 
     except HTTPException:

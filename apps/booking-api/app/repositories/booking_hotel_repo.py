@@ -74,6 +74,33 @@ class BookingHotelRepository:
         return [dict(row) for row in rows]
 
     @staticmethod
+    async def get_by_id(
+        hotel_id: str,
+        *,
+        columns: str = "*",
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> Optional[dict]:
+        query = f"SELECT {columns} FROM booking_hotels WHERE id = $1"
+        if conn:
+            row = await conn.fetchrow(query, hotel_id)
+        else:
+            row = await Database.fetchrow(query, hotel_id)
+        return dict(row) if row else None
+
+    @staticmethod
+    async def list_all(
+        *,
+        columns: str = "id, name, slug, location, country, user_id",
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> list[dict]:
+        query = f"SELECT {columns} FROM booking_hotels ORDER BY created_at ASC"
+        if conn:
+            rows = await conn.fetch(query)
+        else:
+            rows = await Database.fetch(query)
+        return [dict(row) for row in rows]
+
+    @staticmethod
     async def get_by_id_and_user_id(
         hotel_id: str,
         user_id: str,
