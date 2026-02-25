@@ -456,6 +456,8 @@ function StripePaymentPage({
   checkIn,
   checkOut,
   nights,
+  adults,
+  children,
   roomTotal,
   guestDetails,
   bookingId,
