@@ -80,7 +80,7 @@ export default function BookingConfirmationPage({
           setStatus(result.status)
           // Update stored booking
           if (booking) {
-            const updated = { ...booking, status: result.status }
+            const updated = { ...booking, status: result.status as Booking['status'] }
             setBooking(updated)
             sessionStorage.setItem('lastBooking', JSON.stringify(updated))
           }
