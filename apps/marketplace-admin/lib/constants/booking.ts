@@ -1,0 +1,63 @@
+export const COLOR_PRESETS = [
+  { name: 'Indigo', primary: '#4F46E5', accent: '#F5F5F4' },
+  { name: 'Emerald', primary: '#059669', accent: '#F0FDF4' },
+  { name: 'Amber', primary: '#D97706', accent: '#FFFBEB' },
+  { name: 'Rose', primary: '#E11D48', accent: '#FFF1F2' },
+  { name: 'Slate', primary: '#475569', accent: '#F8FAFC' },
+]
+
+export const FONT_PAIRINGS = [
+  {
+    id: 'high-end-serif',
+    name: 'High-end Serif',
+    fonts: 'Playfair Display + Source Sans Pro',
+    preview: 'Elegant & Timeless',
+    headingFamily: "'Playfair Display', serif",
+    bodyFamily: "'Source Sans Pro', sans-serif",
+  },
+  {
+    id: 'modern-minimalist',
+    name: 'Modern Minimalist',
+    fonts: 'Inter + Inter',
+    preview: 'Clean & Contemporary',
+    headingFamily: "'Inter', sans-serif",
+    bodyFamily: "'Inter', sans-serif",
+  },
+  {
+    id: 'grand-classic',
+    name: 'Grand Classic',
+    fonts: 'Lora + Source Sans Pro',
+    preview: 'Stately & Readable',
+    headingFamily: "'Lora', serif",
+    bodyFamily: "'Source Sans Pro', sans-serif",
+  },
+]
+
+export const CURRENCY_OPTIONS = [
+  { code: 'EUR', label: 'EUR - Euro' },
+  { code: 'USD', label: 'USD - US Dollar' },
+  { code: 'GBP', label: 'GBP - British Pound' },
+  { code: 'CHF', label: 'CHF - Swiss Franc' },
+  { code: 'SEK', label: 'SEK - Swedish Krona' },
+  { code: 'NOK', label: 'NOK - Norwegian Krone' },
+  { code: 'DKK', label: 'DKK - Danish Krone' },
+  { code: 'PLN', label: 'PLN - Polish Zloty' },
+  { code: 'CZK', label: 'CZK - Czech Koruna' },
+  { code: 'HUF', label: 'HUF - Hungarian Forint' },
+  { code: 'RON', label: 'RON - Romanian Leu' },
+  { code: 'BGN', label: 'BGN - Bulgarian Lev' },
+  { code: 'HRK', label: 'HRK - Croatian Kuna' },
+  { code: 'TRY', label: 'TRY - Turkish Lira' },
+  { code: 'RUB', label: 'RUB - Russian Ruble' },
+  { code: 'JPY', label: 'JPY - Japanese Yen' },
+  { code: 'CNY', label: 'CNY - Chinese Yuan' },
+  { code: 'AUD', label: 'AUD - Australian Dollar' },
+  { code: 'CAD', label: 'CAD - Canadian Dollar' },
+  { code: 'SGD', label: 'SGD - Singapore Dollar' },
+  { code: 'AED', label: 'AED - UAE Dirham' },
+  { code: 'THB', label: 'THB - Thai Baht' },
+  { code: 'IDR', label: 'IDR - Indonesian Rupiah' },
+  { code: 'INR', label: 'INR - Indian Rupee' },
+  { code: 'BRL', label: 'BRL - Brazilian Real' },
+  { code: 'MXN', label: 'MXN - Mexican Peso' },
+]
