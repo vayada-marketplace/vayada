@@ -7,6 +7,7 @@ import re
 import json
 
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel, require_superadmin
+from app.auth import hash_password
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.repositories.booking_addon_repo import BookingAddonRepository
@@ -694,4 +695,40 @@ async def superadmin_create_hotel(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create hotel",
+        )
+
+
+@router.post("/superadmin/set-password")
+async def superadmin_set_password(
+    data: dict,
+    user_id: str = Depends(require_superadmin),
+):
+    """Force-set a user's password. Super admin only."""
+    try:
+        email = data.get("email")
+        new_password = data.get("password")
+        if not email or not new_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="email and password are required",
+            )
+
+        user = await UserRepository.get_by_email(email, columns="id")
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
+        pw_hash = hash_password(new_password)
+        await UserRepository.update_password(str(user["id"]), pw_hash)
+
+        return {"message": f"Password updated for {email}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting password for superadmin: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to set password",
         )
