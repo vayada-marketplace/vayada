@@ -64,6 +64,12 @@ export const bookingSettingsService = {
   listAllHotels: () =>
     bookingApiClient.get<SuperAdminHotel[]>('/admin/superadmin/hotels'),
 
+  createHotelForUser: (userId: string, name: string) =>
+    bookingApiClient.post<{ id: string; name: string; slug: string }>(
+      '/admin/superadmin/hotels',
+      { user_id: userId, name },
+    ),
+
   getPropertySettings: (hotelId: string) =>
     bookingApiClient.get<PropertySettings>('/admin/settings/property', hotelHeaders(hotelId)),
 

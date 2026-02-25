@@ -4,23 +4,98 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { MagnifyingGlassIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
+import { usersService } from '@/services/api'
+
+interface HotelRow {
+  id: string
+  name: string
+  slug: string
+  location: string
+  country: string
+  owner_name: string
+  owner_email: string
+  /** marketplace user ID — present for uninitialized hotels */
+  marketplace_user_id?: string
+  /** true when a booking_hotels row already exists */
+  initialized: boolean
+}
 
 export default function HotelsPage() {
   const router = useRouter()
-  const [hotels, setHotels] = useState<SuperAdminHotel[]>([])
+  const [hotels, setHotels] = useState<HotelRow[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [settingUp, setSettingUp] = useState<string | null>(null)
 
   useEffect(() => {
-    bookingSettingsService.listAllHotels()
-      .then(setHotels)
-      .catch((err) => {
-        console.error('Failed to load hotels:', err)
-        setError('Failed to load hotels. Please check your connection and try again.')
-      })
-      .finally(() => setLoading(false))
+    loadHotels()
   }, [])
+
+  const loadHotels = async () => {
+    try {
+      setLoading(true)
+      setError('')
+
+      // Fetch both sources in parallel
+      const [bookingHotels, marketplaceRes] = await Promise.all([
+        bookingSettingsService.listAllHotels().catch(() => [] as SuperAdminHotel[]),
+        usersService.getAllUsers({ type: 'hotel', page: 1, page_size: 500 }),
+      ])
+
+      // Build a set of marketplace user emails that already have a booking hotel
+      const initializedEmails = new Set(
+        bookingHotels.map((h) => h.owner_email.toLowerCase()),
+      )
+
+      // Start with all booking hotels (already initialized)
+      const rows: HotelRow[] = bookingHotels.map((h) => ({
+        ...h,
+        initialized: true,
+      }))
+
+      // Add marketplace hotel users that are NOT yet in booking_hotels
+      for (const user of marketplaceRes.users || []) {
+        if (!initializedEmails.has(user.email.toLowerCase())) {
+          rows.push({
+            id: user.id,
+            name: user.name,
+            slug: '',
+            location: '',
+            country: '',
+            owner_name: user.name,
+            owner_email: user.email,
+            marketplace_user_id: user.id,
+            initialized: false,
+          })
+        }
+      }
+
+      setHotels(rows)
+    } catch (err) {
+      console.error('Failed to load hotels:', err)
+      setError('Failed to load hotels. Please check your connection and try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSetup = async (row: HotelRow) => {
+    if (!row.marketplace_user_id) return
+    try {
+      setSettingUp(row.marketplace_user_id)
+      const created = await bookingSettingsService.createHotelForUser(
+        row.marketplace_user_id,
+        row.name,
+      )
+      router.push(`/dashboard/hotels/${created.id}`)
+    } catch (err) {
+      console.error('Failed to create hotel:', err)
+      setError('Failed to initialize hotel. Please try again.')
+    } finally {
+      setSettingUp(null)
+    }
+  }
 
   const filtered = hotels.filter((h) => {
     const q = search.toLowerCase()
@@ -103,6 +178,9 @@ export default function HotelsPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Email
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Action
                     </th>
@@ -111,7 +189,7 @@ export default function HotelsPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
                         {search ? 'No hotels match your search.' : 'No hotels found.'}
                       </td>
                     </tr>
@@ -120,20 +198,43 @@ export default function HotelsPage() {
                       <tr key={hotel.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4">
                           <p className="text-sm font-medium text-gray-900">{hotel.name}</p>
-                          <p className="text-xs text-gray-500">{hotel.slug}</p>
+                          {hotel.slug && <p className="text-xs text-gray-500">{hotel.slug}</p>}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
-                          {hotel.location}{hotel.country ? `, ${hotel.country}` : ''}
+                          {hotel.location || hotel.country
+                            ? `${hotel.location}${hotel.country ? `, ${hotel.country}` : ''}`
+                            : <span className="text-gray-400">-</span>}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">{hotel.owner_name}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{hotel.owner_email}</td>
+                        <td className="px-6 py-4">
+                          {hotel.initialized ? (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">
+                              Not set up
+                            </span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
-                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
-                          >
-                            Configure
-                          </button>
+                          {hotel.initialized ? (
+                            <button
+                              onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
+                            >
+                              Configure
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSetup(hotel)}
+                              disabled={settingUp === hotel.marketplace_user_id}
+                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-primary-600 border border-primary-600 rounded-md hover:bg-primary-700 transition-colors disabled:opacity-50"
+                            >
+                              {settingUp === hotel.marketplace_user_id ? 'Setting up...' : 'Set Up'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
