@@ -12,7 +12,17 @@ from tests.conftest import (
 
 
 class TestCreateBooking:
-    async def test_create_booking(self, client, hotel_with_rooms):
+    @patch("app.services.stripe_service.create_payment_intent", new_callable=AsyncMock)
+    @patch("app.services.email_service.send_booking_request_notification", new_callable=AsyncMock)
+    @patch("app.services.email_service.send_guest_booking_requested", new_callable=AsyncMock)
+    async def test_create_booking(
+        self, mock_guest_email, mock_host_email, mock_stripe, client, hotel_with_rooms
+    ):
+        mock_stripe.return_value = {
+            "id": "pi_test_123",
+            "client_secret": "pi_test_123_secret_abc",
+            "status": "requires_confirmation",
+        }
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
 
@@ -32,15 +42,18 @@ class TestCreateBooking:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["guestFirstName"] == "Jane"
-        assert body["guestLastName"] == "Smith"
-        assert body["hotelName"] == "Test Hotel"
-        assert body["roomName"] == "Deluxe Suite"
-        assert body["nights"] == 5
-        assert body["nightlyRate"] == 150.0
-        assert body["totalAmount"] == 750.0
-        assert body["status"] == "pending"
-        assert body["bookingReference"].startswith("VAY-")
+        booking = body["booking"]
+        assert booking["guestFirstName"] == "Jane"
+        assert booking["guestLastName"] == "Smith"
+        assert booking["hotelName"] == "Test Hotel"
+        assert booking["roomName"] == "Deluxe Suite"
+        assert booking["nights"] == 5
+        assert booking["nightlyRate"] == 150.0
+        assert booking["totalAmount"] == 750.0
+        assert booking["status"] == "pending"
+        assert booking["bookingReference"].startswith("VAY-")
+        assert body["clientSecret"] == "pi_test_123_secret_abc"
+        assert body["paymentMethod"] == "card"
 
     async def test_create_booking_invalid_room(self, client, hotel_with_rooms):
         hotel = hotel_with_rooms["hotel"]

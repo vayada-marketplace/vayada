@@ -1,14 +1,33 @@
 import asyncio
 import logging
-from datetime import date
+import math
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.payment_repo import PaymentRepository
+from app.repositories.payout_repo import PayoutRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 from app.models.booking import BookingCreate, BookingResponse
-from app.services.email_service import send_hotel_notification
+from app.services import stripe_service
+from app.services.payout_service import calculate_split, schedule_payouts
+from app.services.email_service import (
+    send_hotel_notification,
+    send_booking_request_notification,
+    send_guest_booking_requested,
+    send_guest_booking_accepted,
+    send_guest_booking_rejected,
+    send_guest_booking_expired,
+    send_host_booking_withdrawn,
+    send_guest_cancellation_refund,
+)
 
 logger = logging.getLogger(__name__)
+
+HOST_RESPONSE_HOURS = 24
 
 
 def _nights(check_in: date, check_out: date) -> int:
@@ -18,6 +37,7 @@ def _nights(check_in: date, check_out: date) -> int:
 def _booking_to_response(booking: dict) -> BookingResponse:
     ci = booking["check_in"]
     co = booking["check_out"]
+    deadline = booking.get("host_response_deadline")
     return BookingResponse(
         id=str(booking["id"]),
         booking_reference=booking["booking_reference"],
@@ -35,12 +55,15 @@ def _booking_to_response(booking: dict) -> BookingResponse:
         total_amount=float(booking["total_amount"]),
         currency=booking["currency"],
         status=booking["status"],
+        payment_method=booking.get("payment_method"),
+        payment_status=booking.get("payment_status"),
+        host_response_deadline=deadline.isoformat() if deadline else None,
         created_at=booking["created_at"].isoformat(),
     )
 
 
 async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
-    # Resolve hotel
+    """Legacy create_booking — still used for admin-created bookings without payment flow."""
     hotel = await Database.fetchrow(
         "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
     )
@@ -48,15 +71,12 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
         raise ValueError("Hotel not found")
 
     hotel_id = str(hotel["id"])
-
-    # Validate room type
     room = await RoomTypeRepository.get_by_id(data.room_type_id)
     if not room or str(room["hotel_id"]) != hotel_id:
         raise ValueError("Room type not found")
     if not room["is_active"]:
         raise ValueError("Room type is not available")
 
-    # Check availability
     booked = await RoomTypeRepository.count_booked(
         data.room_type_id, data.check_in, data.check_out
     )
@@ -66,7 +86,6 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     if booked + blocked >= room["total_rooms"]:
         raise ValueError("No rooms available for the selected dates")
 
-    # Calculate pricing
     nights = _nights(data.check_in, data.check_out)
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
@@ -74,7 +93,6 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     nightly_rate = float(room["base_rate"])
     total_amount = nightly_rate * nights
 
-    # Resolve affiliate from referral code
     affiliate_id = None
     if data.referral_code:
         affiliate = await Database.fetchrow(
@@ -85,7 +103,6 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
         if affiliate:
             affiliate_id = str(affiliate["id"])
 
-    # Create booking
     booking_data = {
         "hotel_id": hotel_id,
         "room_type_id": data.room_type_id,
@@ -105,17 +122,428 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
         "affiliate_id": affiliate_id,
     }
     booking_row = await BookingRepository.create(booking_data)
-
-    # Fetch with JOINed names
     booking = await BookingRepository.get_by_id(str(booking_row["id"]))
     response = _booking_to_response(booking)
 
-    # Fire-and-forget: notify hotel owner only (guest gets email when hotel confirms)
     asyncio.create_task(
         send_hotel_notification(hotel["contact_email"], booking)
     )
 
     return response
+
+
+async def create_booking_request(slug: str, data: BookingCreate) -> dict:
+    """
+    New guest-facing flow: creates booking + payment intent (if card).
+    Returns booking data + client_secret for Stripe.
+    """
+    hotel = await Database.fetchrow(
+        "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel:
+        raise ValueError("Hotel not found")
+
+    hotel_id = str(hotel["id"])
+    room = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise ValueError("Room type not found")
+    if not room["is_active"]:
+        raise ValueError("Room type is not available")
+
+    booked = await RoomTypeRepository.count_booked(
+        data.room_type_id, data.check_in, data.check_out
+    )
+    blocked = await RoomTypeRepository.count_blocked(
+        data.room_type_id, data.check_in, data.check_out
+    )
+    if booked + blocked >= room["total_rooms"]:
+        raise ValueError("No rooms available for the selected dates")
+
+    nights = _nights(data.check_in, data.check_out)
+    if nights <= 0:
+        raise ValueError("Check-out must be after check-in")
+
+    nightly_rate = float(room["base_rate"])
+    total_amount = nightly_rate * nights
+
+    # Resolve affiliate
+    affiliate_id = None
+    if data.referral_code:
+        affiliate = await Database.fetchrow(
+            "SELECT id FROM affiliates WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
+            hotel_id,
+            data.referral_code,
+        )
+        if affiliate:
+            affiliate_id = str(affiliate["id"])
+
+    # Validate payment method
+    payment_method = data.payment_method
+    if payment_method == "pay_at_property":
+        settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        if not settings or not settings["pay_at_property_enabled"]:
+            raise ValueError("Pay at property is not enabled for this hotel")
+
+    deadline = datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
+
+    booking_data = {
+        "hotel_id": hotel_id,
+        "room_type_id": data.room_type_id,
+        "guest_first_name": data.guest_first_name,
+        "guest_last_name": data.guest_last_name,
+        "guest_email": data.guest_email,
+        "guest_phone": data.guest_phone,
+        "special_requests": data.special_requests,
+        "check_in": data.check_in,
+        "check_out": data.check_out,
+        "adults": data.adults,
+        "children": data.children,
+        "nightly_rate": nightly_rate,
+        "total_amount": total_amount,
+        "currency": room["currency"],
+        "referral_code": data.referral_code,
+        "affiliate_id": affiliate_id,
+        "payment_method": payment_method,
+        "payment_status": "unpaid",
+        "host_response_deadline": deadline,
+    }
+    booking_row = await BookingRepository.create(booking_data)
+    booking_id = str(booking_row["id"])
+
+    client_secret = None
+
+    if payment_method == "card":
+        # Get hotel Stripe Connect account if available
+        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        stripe_account = None
+        if hotel_settings and hotel_settings.get("stripe_connect_account_id"):
+            stripe_account = hotel_settings["stripe_connect_account_id"]
+
+        # Create Stripe PaymentIntent (manual capture = authorization hold)
+        amount_cents = int(math.ceil(total_amount * 100))
+        pi = await stripe_service.create_payment_intent(
+            amount=amount_cents,
+            currency=room["currency"],
+            metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+            stripe_account=stripe_account,
+        )
+        client_secret = pi["client_secret"]
+
+        # Create payment record
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=room["currency"],
+            payment_method="card",
+            stripe_pi_id=pi["id"],
+        )
+    else:
+        # Pay at property
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=room["currency"],
+            payment_method="pay_at_property",
+        )
+        # Update booking payment status
+        await BookingRepository.update_payment_status(booking_id, "pay_at_property")
+        # Notify host immediately for pay-at-property
+        booking = await BookingRepository.get_by_id(booking_id)
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
+    # Fetch full booking for response
+    booking = await BookingRepository.get_by_id(booking_id)
+    response = _booking_to_response(booking)
+
+    # Send guest confirmation of request
+    asyncio.create_task(
+        send_guest_booking_requested(data.guest_email, booking)
+    )
+
+    return {
+        "booking": response.model_dump(by_alias=True),
+        "clientSecret": client_secret,
+        "paymentMethod": payment_method,
+    }
+
+
+async def confirm_payment_authorized(booking_id: str) -> dict:
+    """Called after Stripe confirms the card authorization."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+
+    # Update payment status
+    payment = await PaymentRepository.get_by_booking_id(booking_id)
+    if payment:
+        await PaymentRepository.update_status(str(payment["id"]), "authorized")
+
+    await BookingRepository.update_payment_status(booking_id, "authorized")
+
+    # Notify host with accept/reject
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
+    return {"status": "authorized"}
+
+
+async def host_accept_booking(booking_id: str, user_id: str) -> dict:
+    """Host accepts a pending booking — captures payment if card."""
+    hotel_id = await _get_hotel_id_for_user(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+
+    payment_method = booking.get("payment_method", "card")
+
+    if payment_method == "card":
+        # Capture payment via Stripe
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            await stripe_service.capture_payment_intent(
+                payment["stripe_payment_intent_id"]
+            )
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
+            )
+
+    # Calculate split
+    hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    fee_type = hotel_settings["platform_fee_type"] if hotel_settings else "percentage"
+    fee_value = float(hotel_settings["platform_fee_value"]) if hotel_settings else 8.00
+    fee_with_affiliate = float(hotel_settings["platform_fee_with_affiliate"]) if hotel_settings else 2.00
+
+    has_affiliate = booking.get("affiliate_id") is not None
+    affiliate_commission_pct = 0.0
+    affiliate_id = None
+    if has_affiliate:
+        affiliate_id = str(booking["affiliate_id"])
+        aff = await Database.fetchrow(
+            "SELECT commission_pct FROM affiliates WHERE id = $1", booking["affiliate_id"]
+        )
+        if aff:
+            affiliate_commission_pct = float(aff["commission_pct"])
+
+    total_amount = float(booking["total_amount"])
+    split = calculate_split(
+        total_amount, fee_type, fee_value, fee_with_affiliate,
+        has_affiliate, affiliate_commission_pct,
+    )
+
+    # Update booking
+    new_payment_status = "captured" if payment_method == "card" else "pay_at_property"
+    await BookingRepository.update_booking_accepted(
+        booking_id,
+        platform_fee=split["platform_fee"],
+        affiliate_commission=split["affiliate_commission"],
+        property_payout=split["property_payout"],
+        payment_status=new_payment_status,
+    )
+
+    # Schedule payouts
+    if payment_method == "card":
+        await schedule_payouts(
+            booking_id=booking_id,
+            hotel_id=hotel_id,
+            total_amount=total_amount,
+            currency=booking["currency"],
+            affiliate_id=affiliate_id,
+            affiliate_commission=split["affiliate_commission"],
+            property_payout=split["property_payout"],
+            check_out=booking["check_out"],
+        )
+
+    # Send guest confirmation
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_booking_accepted(updated["guest_email"], updated)
+    )
+
+    return updated
+
+
+async def host_reject_booking(booking_id: str, user_id: str) -> dict:
+    """Host rejects a pending booking — releases hold if card."""
+    hotel_id = await _get_hotel_id_for_user(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+
+    # Release payment hold if card
+    if booking.get("payment_method") == "card":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+    await PayoutRepository.cancel_by_booking(booking_id)
+
+    # Notify guest
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_booking_rejected(updated["guest_email"], updated)
+    )
+
+    return updated
+
+
+async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
+    """Guest withdraws a pending booking request."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    # Release payment hold if card
+    if booking.get("payment_method") == "card":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+    await Database.execute(
+        "UPDATE bookings SET guest_withdrawn = true WHERE id = $1", booking_id
+    )
+
+    # Notify host
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    updated = await BookingRepository.get_by_id(booking_id)
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_withdrawn(hotel["contact_email"], updated)
+        )
+
+    return updated
+
+
+async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
+    """Guest cancels a confirmed booking — applies cancellation policy."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "confirmed":
+        raise ValueError("Only confirmed bookings can be cancelled")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    hotel_id = str(booking["hotel_id"])
+    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+    free_days = policy["free_cancellation_days"] if policy else 7
+    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
+
+    check_in = booking["check_in"]
+    days_until = (check_in - date.today()).days
+
+    total_amount = float(booking["total_amount"])
+    refund_amount = 0.0
+    refund_pct = 0.0
+
+    if days_until >= free_days:
+        refund_amount = total_amount
+        refund_pct = 100.0
+    elif partial_pct > 0:
+        refund_amount = round(total_amount * partial_pct / 100, 2)
+        refund_pct = partial_pct
+
+    # Process refund if card payment
+    if booking.get("payment_method") == "card" and refund_amount > 0:
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                refund_cents = int(math.ceil(refund_amount * 100)) if refund_pct < 100 else None
+                await stripe_service.create_refund(
+                    payment["stripe_payment_intent_id"],
+                    amount=refund_cents,
+                )
+                new_status = "refunded" if refund_pct >= 100 else "partially_refunded"
+                await PaymentRepository.update_status(
+                    str(payment["id"]),
+                    new_status,
+                    refunded_at=datetime.now(timezone.utc),
+                    refund_amount=refund_amount,
+                )
+            except Exception as e:
+                logger.error("Failed to refund booking %s: %s", booking_id, e)
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    new_payment_status = "refunded" if refund_pct >= 100 else (
+        "partially_refunded" if refund_amount > 0 else booking.get("payment_status", "captured")
+    )
+    await BookingRepository.update_payment_status(booking_id, new_payment_status)
+    await PayoutRepository.cancel_by_booking(booking_id)
+
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_cancellation_refund(
+            updated["guest_email"], updated, refund_amount, refund_pct
+        )
+    )
+
+    return updated
+
+
+async def expire_booking(booking_id: str) -> None:
+    """Called by scheduler when host doesn't respond within 24h."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or booking["status"] != "pending":
+        return
+
+    # Release payment hold if card
+    if booking.get("payment_method") == "card":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for expired booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "expired")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+
+    # Notify both parties
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
+    if hotel:
+        from app.services.email_service import send_host_booking_expired
+        asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
 
 
 async def lookup_booking(
@@ -124,10 +552,35 @@ async def lookup_booking(
     booking = await BookingRepository.lookup(booking_reference, guest_email)
     if not booking:
         return None
-    # Verify it belongs to this hotel
     hotel = await Database.fetchrow(
         "SELECT id FROM hotels WHERE slug = $1", slug
     )
     if not hotel or str(booking["hotel_id"]) != str(hotel["id"]):
         return None
     return _booking_to_response(booking)
+
+
+async def get_booking_status(slug: str, booking_reference: str, guest_email: str) -> Optional[dict]:
+    """Get booking status for frontend polling."""
+    booking = await BookingRepository.lookup(booking_reference, guest_email)
+    if not booking:
+        return None
+    hotel = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel or str(booking["hotel_id"]) != str(hotel["id"]):
+        return None
+    return {
+        "status": booking["status"],
+        "paymentStatus": booking.get("payment_status"),
+        "hostResponseDeadline": booking["host_response_deadline"].isoformat() if booking.get("host_response_deadline") else None,
+    }
+
+
+async def _get_hotel_id_for_user(user_id: str) -> str:
+    row = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE user_id = $1", user_id
+    )
+    if not row:
+        raise ValueError("No hotel found for this account")
+    return str(row["id"])

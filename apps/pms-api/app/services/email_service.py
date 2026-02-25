@@ -16,7 +16,10 @@ STYLE = """
   .detail strong { color: #1a1a2e; }
   .divider { border: none; border-top: 1px solid #e8e8ed; margin: 20px 0; }
   .btn { display: inline-block; padding: 12px 28px; background: #1a1a2e; color: #ffffff !important; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px; margin-top: 16px; }
+  .btn-accept { background: #16a34a; }
+  .btn-reject { background: #dc2626; margin-left: 12px; }
   .footer { text-align: center; color: #888; font-size: 12px; margin-top: 24px; }
+  .alert { background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 14px; color: #92400e; }
 </style>
 """
 
@@ -67,6 +70,8 @@ async def _send_email(to: str, subject: str, html_body: str):
         logger.warning("Failed to send email to %s: %s", to, e)
 
 
+# ── Legacy (still used for admin-created bookings) ────────────────
+
 async def send_hotel_notification(hotel_email: str, booking: dict):
     if not hotel_email:
         return
@@ -108,6 +113,163 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
+    <p class="detail">If you have any questions, please contact the hotel directly.</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+# ── New payment flow emails ───────────────────────────────────────
+
+async def send_booking_request_notification(hotel_email: str, booking: dict):
+    """Notify host of new booking request with Accept/Reject actions."""
+    if not hotel_email:
+        return
+
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+    payment_method = booking.get("payment_method", "card")
+    payment_label = "Card (authorization hold)" if payment_method == "card" else "Pay at property"
+
+    subject = f"New Booking Request: {booking['booking_reference']}"
+    content = f"""
+    <h2>New Booking Request</h2>
+    <p class="detail"><strong>Guest:</strong> {booking['guest_first_name']} {booking['guest_last_name']}</p>
+    <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
+    <p class="detail"><strong>Payment:</strong> {payment_label}</p>
+    {_booking_details_html(booking)}
+    <div class="alert">
+        You have <strong>24 hours</strong> to accept or reject this booking.
+        If no action is taken, the booking will expire automatically.
+    </div>
+    <hr class="divider">
+    <a href="{pms_link}" class="btn btn-accept">Review &amp; Respond</a>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
+async def send_guest_booking_requested(guest_email: str, booking: dict):
+    """Confirm to guest that their booking request has been submitted."""
+    subject = f"Booking Request Submitted — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Request Submitted</h2>
+    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has been submitted successfully.</p>
+    <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">You will receive an email once the host responds. You can also check your booking status using your reference number.</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_guest_booking_accepted(guest_email: str, booking: dict):
+    """Notify guest that their booking has been accepted and payment captured."""
+    subject = f"Booking Confirmed — {booking['booking_reference']}"
+    payment_method = booking.get("payment_method", "card")
+    payment_note = "Your card has been charged." if payment_method == "card" else "Please pay at the property upon arrival."
+
+    content = f"""
+    <h2>Your Booking is Confirmed!</h2>
+    <p class="detail">Great news — your booking at <strong>{booking['hotel_name']}</strong> has been accepted by the host.</p>
+    <p class="detail">{payment_note}</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">We look forward to welcoming you!</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_guest_booking_rejected(guest_email: str, booking: dict):
+    """Notify guest that their booking has been declined."""
+    payment_method = booking.get("payment_method", "card")
+    refund_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+
+    subject = f"Booking Request Declined — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Request Declined</h2>
+    <p class="detail">Unfortunately, your booking request at <strong>{booking['hotel_name']}</strong> was declined by the host.</p>
+    {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">We encourage you to search for alternative dates or properties.</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_guest_booking_expired(guest_email: str, booking: dict):
+    """Notify guest that their booking request expired (host didn't respond)."""
+    payment_method = booking.get("payment_method", "card")
+    refund_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+
+    subject = f"Booking Request Expired — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Request Expired</h2>
+    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has expired because the host did not respond within 24 hours.</p>
+    {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">We apologize for the inconvenience. Please try booking again or explore other properties.</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_host_booking_withdrawn(hotel_email: str, booking: dict):
+    """Notify host that guest withdrew their booking request."""
+    if not hotel_email:
+        return
+
+    subject = f"Booking Withdrawn: {booking['booking_reference']}"
+    content = f"""
+    <h2>Guest Withdrew Booking Request</h2>
+    <p class="detail">The guest <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has withdrawn their booking request.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">No action is needed on your part.</p>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
+async def send_host_booking_expired(hotel_email: str, booking: dict):
+    """Notify host that a booking expired because they didn't respond."""
+    if not hotel_email:
+        return
+
+    subject = f"Booking Expired: {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Request Expired</h2>
+    <p class="detail">A booking request from <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has expired because no action was taken within 24 hours.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <div class="alert">
+        Please ensure you review and respond to booking requests promptly to avoid losing potential guests.
+    </div>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
+async def send_guest_cancellation_refund(
+    guest_email: str, booking: dict, refund_amount: float, refund_pct: float
+):
+    """Notify guest of cancellation with refund details."""
+    if refund_pct >= 100:
+        refund_text = f"A full refund of <strong>{booking['currency']} {refund_amount:.2f}</strong> will be processed to your original payment method."
+    elif refund_amount > 0:
+        refund_text = f"A partial refund of <strong>{booking['currency']} {refund_amount:.2f}</strong> ({refund_pct:.0f}%) will be processed to your original payment method."
+    else:
+        refund_text = "Based on the cancellation policy, no refund is applicable for this cancellation."
+
+    subject = f"Booking Cancelled — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Cancelled</h2>
+    <p class="detail">Your booking at <strong>{booking['hotel_name']}</strong> has been cancelled.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">{refund_text}</p>
     <p class="detail">If you have any questions, please contact the hotel directly.</p>
     """
     await _send_email(guest_email, subject, _wrap_html(content))

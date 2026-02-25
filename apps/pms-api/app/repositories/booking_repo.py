@@ -33,10 +33,12 @@ class BookingRepository:
                 special_requests, check_in, check_out,
                 adults, children, nightly_rate, total_amount, currency,
                 affiliate_id, referral_code,
-                room_id, channel, status
+                room_id, channel, status,
+                payment_method, payment_status, host_response_deadline
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                $21, $22, $23
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -59,6 +61,9 @@ class BookingRepository:
             data.get("room_id"),
             data.get("channel", "direct"),
             data.get("status", "pending"),
+            data.get("payment_method", "card"),
+            data.get("payment_status", "unpaid"),
+            data.get("host_response_deadline"),
         )
         return dict(row)
 
@@ -197,3 +202,58 @@ class BookingRepository:
             new_status,
         )
         return dict(row) if row else None
+
+    @staticmethod
+    async def update_payment_status(booking_id: str, payment_status: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings SET payment_status = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            payment_status,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def update_booking_accepted(
+        booking_id: str,
+        platform_fee: float,
+        affiliate_commission: float,
+        property_payout: float,
+        payment_status: str,
+    ) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings SET
+                status = 'confirmed',
+                payment_status = $2,
+                platform_fee_amount = $3,
+                affiliate_commission_amount = $4,
+                property_payout_amount = $5,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            payment_status,
+            platform_fee,
+            affiliate_commission,
+            property_payout,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def list_expired_pending(before_date) -> List[dict]:
+        """Find bookings where host response deadline has passed."""
+        rows = await Database.fetch(
+            """
+            SELECT id FROM bookings
+            WHERE status = 'pending'
+              AND host_response_deadline IS NOT NULL
+              AND host_response_deadline < $1
+            """,
+            before_date,
+        )
+        return [dict(r) for r in rows]

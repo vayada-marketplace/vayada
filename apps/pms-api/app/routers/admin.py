@@ -29,6 +29,20 @@ from app.models.affiliate import (
 )
 from app.models.room_block import RoomBlockCreate, RoomBlockResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation
+from app.services.booking_service import host_accept_booking, host_reject_booking
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.payment_repo import PaymentRepository
+from app.repositories.payout_repo import PayoutRepository
+from app.models.payment import (
+    HotelPaymentSettings,
+    HotelPaymentSettingsUpdate,
+    CancellationPolicy,
+    CancellationPolicyUpdate,
+    PayoutResponse,
+    StripeConnectAccountRequest,
+)
+from app.services import stripe_service
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +94,10 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
     co = b["check_out"]
     nights = (co - ci).days
     room_id = b.get("room_id")
+    deadline = b.get("host_response_deadline")
+    pf = b.get("platform_fee_amount")
+    ac = b.get("affiliate_commission_amount")
+    pp = b.get("property_payout_amount")
     return BookingAdminResponse(
         id=str(b["id"]),
         booking_reference=b["booking_reference"],
@@ -102,6 +120,13 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
         room_id=str(room_id) if room_id else None,
         room_number=b.get("room_number"),
         channel=b.get("channel", "direct"),
+        payment_method=b.get("payment_method"),
+        payment_status=b.get("payment_status"),
+        host_response_deadline=deadline.isoformat() if deadline else None,
+        platform_fee_amount=float(pf) if pf is not None else None,
+        affiliate_commission_amount=float(ac) if ac is not None else None,
+        property_payout_amount=float(pp) if pp is not None else None,
+        guest_withdrawn=b.get("guest_withdrawn", False),
         created_at=b["created_at"].isoformat(),
         updated_at=b["updated_at"].isoformat(),
     )
@@ -467,6 +492,155 @@ async def update_booking_status(
         )
 
     return _booking_to_admin(updated)
+
+
+# ── Accept / Reject (new payment flow) ────────────────────────────
+
+
+@router.post("/bookings/{booking_id}/accept", response_model=BookingAdminResponse)
+async def accept_booking(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    try:
+        updated = await host_accept_booking(booking_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _booking_to_admin(updated)
+
+
+@router.post("/bookings/{booking_id}/reject", response_model=BookingAdminResponse)
+async def reject_booking(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    try:
+        updated = await host_reject_booking(booking_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _booking_to_admin(updated)
+
+
+# ── Payment Settings ──────────────────────────────────────────────
+
+
+@router.get("/payment-settings")
+async def get_payment_settings(
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+
+    return {
+        "paymentSettings": HotelPaymentSettings(
+            stripe_connect_account_id=settings["stripe_connect_account_id"] if settings else None,
+            stripe_connect_onboarded=settings["stripe_connect_onboarded"] if settings else False,
+            platform_fee_type=settings["platform_fee_type"] if settings else "percentage",
+            platform_fee_value=float(settings["platform_fee_value"]) if settings else 8.00,
+            platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"]) if settings else 2.00,
+            pay_at_property_enabled=settings["pay_at_property_enabled"] if settings else False,
+        ).model_dump(by_alias=True),
+        "cancellationPolicy": CancellationPolicy(
+            free_cancellation_days=policy["free_cancellation_days"] if policy else 7,
+            partial_refund_pct=float(policy["partial_refund_pct"]) if policy else 0.00,
+        ).model_dump(by_alias=True),
+    }
+
+
+@router.patch("/payment-settings")
+async def update_payment_settings(
+    data: HotelPaymentSettingsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    updates = data.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
+    return {"status": "updated"}
+
+
+@router.patch("/cancellation-policy")
+async def update_cancellation_policy(
+    data: CancellationPolicyUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    updates = data.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await CancellationPolicyRepository.upsert(hotel_id, updates)
+    return {"status": "updated"}
+
+
+# ── Stripe Connect ────────────────────────────────────────────────
+
+
+@router.post("/stripe/connect-account")
+async def create_stripe_connect_account(
+    data: StripeConnectAccountRequest,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    account = await stripe_service.create_connect_account(data.email, data.country)
+    await HotelPaymentSettingsRepository.upsert(
+        hotel_id, {"stripe_connect_account_id": account["id"]}
+    )
+    return {"accountId": account["id"]}
+
+
+@router.get("/stripe/connect-onboarding-link")
+async def get_stripe_onboarding_link(
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    if not settings or not settings.get("stripe_connect_account_id"):
+        raise HTTPException(status_code=400, detail="No Stripe Connect account found")
+
+    url = await stripe_service.create_connect_account_link(
+        settings["stripe_connect_account_id"],
+        return_url="https://pms.vayada.com/settings?stripe=success",
+        refresh_url="https://pms.vayada.com/settings?stripe=refresh",
+    )
+    return {"url": url}
+
+
+# ── Payouts ───────────────────────────────────────────────────────
+
+
+@router.get("/payouts")
+async def list_payouts(
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    payouts = await PayoutRepository.list_by_hotel(
+        hotel_id, status=status, limit=limit, offset=offset
+    )
+    total = await PayoutRepository.count_by_hotel(hotel_id, status=status)
+    return {
+        "payouts": [
+            PayoutResponse(
+                id=str(p["id"]),
+                booking_id=str(p["booking_id"]),
+                booking_reference=p.get("booking_reference"),
+                recipient_type=p["recipient_type"],
+                amount=float(p["amount"]),
+                currency=p["currency"],
+                status=p["status"],
+                scheduled_for=p["scheduled_for"].isoformat(),
+                completed_at=p["completed_at"].isoformat() if p.get("completed_at") else None,
+            ).model_dump(by_alias=True)
+            for p in payouts
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 # ── Calendar ───────────────────────────────────────────────────────

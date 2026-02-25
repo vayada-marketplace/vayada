@@ -12,6 +12,9 @@ os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SMTP_HOST", "")
 # S3 config for tests — required so /upload/images doesn't return 503
+os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_fake")
+os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_fake")
+os.environ.setdefault("STRIPE_PLATFORM_ACCOUNT_ID", "")
 os.environ.setdefault("S3_BUCKET_NAME", "test-bucket")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "test-access-key")
@@ -71,8 +74,31 @@ async def cleanup_database(init_database):
     test_hotel_ids = [row["id"] for row in test_hotels]
 
     if test_hotel_ids:
+        # Get booking IDs for FK-safe deletion of payments/payouts
+        test_bookings = await Database.fetch(
+            "SELECT id FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        test_booking_ids = [row["id"] for row in test_bookings]
+        if test_booking_ids:
+            await Database.execute(
+                "DELETE FROM payouts WHERE booking_id = ANY($1::uuid[])",
+                test_booking_ids,
+            )
+            await Database.execute(
+                "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
+                test_booking_ids,
+            )
         await Database.execute(
             "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM cancellation_policies WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM hotel_payment_settings WHERE hotel_id = ANY($1::uuid[])",
             test_hotel_ids,
         )
         await Database.execute(
@@ -107,8 +133,30 @@ async def cleanup_database(init_database):
         )
         user_hotel_ids = [row["id"] for row in user_hotels]
         if user_hotel_ids:
+            user_bookings = await Database.fetch(
+                "SELECT id FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            user_booking_ids = [row["id"] for row in user_bookings]
+            if user_booking_ids:
+                await Database.execute(
+                    "DELETE FROM payouts WHERE booking_id = ANY($1::uuid[])",
+                    user_booking_ids,
+                )
+                await Database.execute(
+                    "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
+                    user_booking_ids,
+                )
             await Database.execute(
                 "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM cancellation_policies WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM hotel_payment_settings WHERE hotel_id = ANY($1::uuid[])",
                 user_hotel_ids,
             )
             await Database.execute(
@@ -351,6 +399,102 @@ async def create_test_room_block(
         RETURNING *
         """,
         hotel_id, room_type_id, sd, ed, blocked_count, reason,
+    )
+    return dict(row)
+
+
+async def create_test_payment_settings(
+    hotel_id: str,
+    platform_fee_type: str = "percentage",
+    platform_fee_value: float = 8.0,
+    platform_fee_with_affiliate: float = 2.0,
+    pay_at_property_enabled: bool = False,
+    stripe_connect_account_id: Optional[str] = None,
+) -> Dict:
+    """Create payment settings for a hotel."""
+    row = await Database.fetchrow(
+        """
+        INSERT INTO hotel_payment_settings (
+            hotel_id, platform_fee_type, platform_fee_value,
+            platform_fee_with_affiliate, pay_at_property_enabled,
+            stripe_connect_account_id
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (hotel_id) DO UPDATE SET
+            platform_fee_type = EXCLUDED.platform_fee_type,
+            platform_fee_value = EXCLUDED.platform_fee_value,
+            platform_fee_with_affiliate = EXCLUDED.platform_fee_with_affiliate,
+            pay_at_property_enabled = EXCLUDED.pay_at_property_enabled,
+            stripe_connect_account_id = EXCLUDED.stripe_connect_account_id
+        RETURNING *
+        """,
+        hotel_id, platform_fee_type, platform_fee_value,
+        platform_fee_with_affiliate, pay_at_property_enabled,
+        stripe_connect_account_id,
+    )
+    return dict(row)
+
+
+async def create_test_cancellation_policy(
+    hotel_id: str,
+    free_cancellation_days: int = 7,
+    partial_refund_pct: float = 0.0,
+) -> Dict:
+    """Create a cancellation policy for a hotel."""
+    row = await Database.fetchrow(
+        """
+        INSERT INTO cancellation_policies (hotel_id, free_cancellation_days, partial_refund_pct)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (hotel_id) DO UPDATE SET
+            free_cancellation_days = EXCLUDED.free_cancellation_days,
+            partial_refund_pct = EXCLUDED.partial_refund_pct
+        RETURNING *
+        """,
+        hotel_id, free_cancellation_days, partial_refund_pct,
+    )
+    return dict(row)
+
+
+async def create_test_booking_with_payment(
+    hotel_id: str,
+    room_type_id: str,
+    check_in: str = "2026-06-01",
+    check_out: str = "2026-06-05",
+    guest_email: str = "guest@example.com",
+    nightly_rate: float = 150.0,
+    status: str = "pending",
+    payment_method: str = "card",
+    payment_status: str = "authorized",
+    host_response_deadline: Optional[datetime] = None,
+) -> Dict:
+    """Create a booking with payment fields set."""
+    from datetime import date as date_type
+
+    ci = date_type.fromisoformat(check_in)
+    co = date_type.fromisoformat(check_out)
+    nights = (co - ci).days
+    total = nightly_rate * nights
+
+    if host_response_deadline is None:
+        host_response_deadline = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    row = await Database.fetchrow(
+        """
+        INSERT INTO bookings (
+            hotel_id, room_type_id, booking_reference,
+            guest_first_name, guest_last_name, guest_email, guest_phone,
+            special_requests, check_in, check_out,
+            adults, children, nightly_rate, total_amount, currency, status,
+            payment_method, payment_status, host_response_deadline
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+            $17, $18, $19
+        ) RETURNING *
+        """,
+        hotel_id, room_type_id, f"VAY-T{uuid.uuid4().hex[:5].upper()}",
+        "John", "Doe", guest_email, "+1234567890",
+        "", ci, co,
+        2, 0, nightly_rate, total, "EUR", status,
+        payment_method, payment_status, host_response_deadline,
     )
     return dict(row)
 

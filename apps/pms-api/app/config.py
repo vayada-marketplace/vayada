@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     GENERATE_THUMBNAILS: bool = True
     THUMBNAIL_SIZE: int = 300
 
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PLATFORM_ACCOUNT_ID: str = ""
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

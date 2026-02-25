@@ -11,16 +11,23 @@ from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
 from app.routers.upload import router as upload_router
 from app.routers.affiliates import router as affiliates_router
+from app.routers.webhooks import router as webhooks_router
+from app.services.scheduler import setup_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+scheduler = setup_scheduler()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Vayada PMS...")
+    scheduler.start()
+    logger.info("Scheduler started")
     yield
     logger.info("Shutting down Vayada PMS...")
+    scheduler.shutdown()
     await Database.close_pool()
     await AuthDatabase.close_pool()
 
@@ -47,6 +54,7 @@ app.include_router(bookings_router)
 app.include_router(admin_router)
 app.include_router(upload_router)
 app.include_router(affiliates_router)
+app.include_router(webhooks_router)
 
 
 @app.get("/health")

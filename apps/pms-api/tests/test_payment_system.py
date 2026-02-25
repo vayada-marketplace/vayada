@@ -1,0 +1,745 @@
+"""
+Tests for the payment system: Stripe integration, host approval flow,
+payment settings, cancellation policies, and payouts.
+"""
+import pytest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, AsyncMock, MagicMock
+from tests.conftest import (
+    create_test_user,
+    create_test_hotel,
+    create_test_room_type,
+    create_test_booking,
+    create_test_booking_with_payment,
+    create_test_payment_settings,
+    create_test_cancellation_policy,
+    create_test_affiliate,
+    get_auth_headers,
+)
+from app.database import Database
+
+
+# ── Mock Stripe responses ────────────────────────────────────────
+
+
+def mock_create_payment_intent(**kwargs):
+    return {
+        "id": "pi_test_123456",
+        "client_secret": "pi_test_123456_secret_abc",
+        "status": "requires_payment_method",
+    }
+
+
+def mock_capture_payment_intent(pi_id, **kwargs):
+    return {"id": pi_id, "status": "succeeded"}
+
+
+def mock_cancel_payment_intent(pi_id):
+    return {"id": pi_id, "status": "canceled"}
+
+
+def mock_create_refund(pi_id, amount=None):
+    return {"id": "re_test_123", "status": "succeeded", "amount": amount or 10000}
+
+
+STRIPE_MOCKS = {
+    "app.services.stripe_service.create_payment_intent": AsyncMock(side_effect=mock_create_payment_intent),
+    "app.services.stripe_service.capture_payment_intent": AsyncMock(side_effect=mock_capture_payment_intent),
+    "app.services.stripe_service.cancel_payment_intent": AsyncMock(side_effect=mock_cancel_payment_intent),
+    "app.services.stripe_service.create_refund": AsyncMock(side_effect=mock_create_refund),
+}
+
+
+def stripe_patches():
+    """Return a list of patch context managers for all Stripe calls."""
+    return [patch(k, v) for k, v in STRIPE_MOCKS.items()]
+
+
+# ── Booking Request (Public) ─────────────────────────────────────
+
+
+class TestCreateBookingRequest:
+    """Tests for POST /api/hotels/{slug}/bookings (new payment flow)."""
+
+    async def test_create_booking_card_payment(self, client, hotel_with_rooms):
+        """Card booking creates a payment intent and returns client_secret."""
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+
+        with patch("app.services.stripe_service.create_payment_intent", new_callable=AsyncMock) as mock_pi:
+            mock_pi.return_value = {
+                "id": "pi_test_card",
+                "client_secret": "pi_test_card_secret_xyz",
+                "status": "requires_payment_method",
+            }
+
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Alice",
+                    "guestLastName": "Tester",
+                    "guestEmail": "alice@test.com",
+                    "guestPhone": "+1234567890",
+                    "checkIn": "2026-09-01",
+                    "checkOut": "2026-09-04",
+                    "adults": 2,
+                    "children": 0,
+                    "paymentMethod": "card",
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["paymentMethod"] == "card"
+        assert body["clientSecret"] == "pi_test_card_secret_xyz"
+        assert body["booking"]["status"] == "pending"
+        assert body["booking"]["guestFirstName"] == "Alice"
+        assert body["booking"]["totalAmount"] == 450.0  # 150 * 3 nights
+        mock_pi.assert_called_once()
+
+    async def test_create_booking_pay_at_property(self, client, cleanup_database):
+        """Pay-at-property booking requires the setting to be enabled."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Bob",
+                "guestLastName": "Property",
+                "guestEmail": "bob@test.com",
+                "guestPhone": "+9876543210",
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-12",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["paymentMethod"] == "pay_at_property"
+        assert body["clientSecret"] is None
+        assert body["booking"]["status"] == "pending"
+
+    async def test_pay_at_property_rejected_when_disabled(self, client, hotel_with_rooms):
+        """Pay-at-property fails if not enabled for the hotel."""
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Fail",
+                "guestLastName": "Test",
+                "guestEmail": "fail@test.com",
+                "guestPhone": "+111",
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-12",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 400
+
+
+# ── Confirm Authorization ────────────────────────────────────────
+
+
+class TestConfirmAuthorization:
+    """Tests for POST /api/hotels/{slug}/bookings/{id}/confirm-authorization."""
+
+    async def test_confirm_authorization(self, client, cleanup_database):
+        """Confirming authorization updates payment status."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="card", payment_status="unpaid",
+        )
+
+        # Insert a payment record
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_auth", "pending",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/confirm-authorization"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "authorized"
+
+    async def test_confirm_authorization_non_pending(self, client, cleanup_database):
+        """Cannot confirm authorization on non-pending booking."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            status="confirmed", payment_status="captured",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/confirm-authorization"
+        )
+        assert resp.status_code == 400
+
+
+# ── Host Accept/Reject (Admin) ──────────────────────────────────
+
+
+class TestHostAcceptReject:
+    """Tests for POST /admin/bookings/{id}/accept and /reject."""
+
+    async def test_host_accept_captures_payment(self, client, cleanup_database):
+        """Accepting a booking captures the Stripe payment."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="card", payment_status="authorized",
+        )
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_capture", "authorized",
+        )
+
+        with patch("app.services.stripe_service.capture_payment_intent", new_callable=AsyncMock) as mock_capture:
+            mock_capture.return_value = {"id": "pi_test_capture", "status": "succeeded"}
+
+            resp = await client.post(
+                f"/admin/bookings/{booking['id']}/accept",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "confirmed"
+        assert body["paymentStatus"] == "captured"
+        assert body["platformFeeAmount"] is not None
+        assert body["propertyPayoutAmount"] is not None
+        mock_capture.assert_called_once_with("pi_test_capture")
+
+    async def test_host_accept_pay_at_property(self, client, cleanup_database):
+        """Accepting a pay-at-property booking just confirms it."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="pay_at_property", payment_status="pay_at_property",
+        )
+
+        resp = await client.post(
+            f"/admin/bookings/{booking['id']}/accept",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "confirmed"
+
+    async def test_host_reject_releases_hold(self, client, cleanup_database):
+        """Rejecting a booking cancels the Stripe payment intent."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="card", payment_status="authorized",
+        )
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_reject", "authorized",
+        )
+
+        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+            mock_cancel.return_value = {"id": "pi_test_reject", "status": "canceled"}
+
+            resp = await client.post(
+                f"/admin/bookings/{booking['id']}/reject",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "cancelled"
+        mock_cancel.assert_called_once_with("pi_test_reject")
+
+    async def test_accept_non_pending_fails(self, client, cleanup_database):
+        """Cannot accept a booking that's already confirmed."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            status="confirmed", payment_status="captured",
+        )
+
+        resp = await client.post(
+            f"/admin/bookings/{booking['id']}/accept",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400
+
+    async def test_reject_requires_auth(self, client, cleanup_database):
+        """Reject endpoint requires authentication."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+        )
+
+        resp = await client.post(f"/admin/bookings/{booking['id']}/reject")
+        assert resp.status_code == 403
+
+
+# ── Guest Withdraw ───────────────────────────────────────────────
+
+
+class TestGuestWithdraw:
+    """Tests for POST /api/hotels/{slug}/bookings/{id}/withdraw."""
+
+    async def test_guest_withdraw(self, client, cleanup_database):
+        """Guest can withdraw a pending booking."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="card", payment_status="authorized",
+            guest_email="withdraw@test.com",
+        )
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_withdraw", "authorized",
+        )
+
+        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+            mock_cancel.return_value = {"id": "pi_test_withdraw", "status": "canceled"}
+
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/withdraw",
+                json={"guest_email": "withdraw@test.com"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "withdrawn"
+        mock_cancel.assert_called_once()
+
+    async def test_withdraw_wrong_email(self, client, cleanup_database):
+        """Cannot withdraw with wrong email."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            guest_email="correct@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/withdraw",
+            json={"guest_email": "wrong@test.com"},
+        )
+        assert resp.status_code == 400
+
+    async def test_withdraw_confirmed_booking_fails(self, client, cleanup_database):
+        """Cannot withdraw a confirmed booking."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            status="confirmed", payment_status="captured",
+            guest_email="guest@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/withdraw",
+            json={"guest_email": "guest@test.com"},
+        )
+        assert resp.status_code == 400
+
+
+# ── Guest Cancellation ───────────────────────────────────────────
+
+
+class TestGuestCancellation:
+    """Tests for POST /api/hotels/{slug}/bookings/{id}/cancel."""
+
+    async def test_cancel_confirmed_booking_full_refund(self, client, cleanup_database):
+        """Cancel far in advance triggers full refund."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=7)
+
+        # Check-in far away (30 days) → full refund
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            check_in="2026-09-01", check_out="2026-09-05",
+            status="confirmed", payment_method="card", payment_status="captured",
+            guest_email="cancel@test.com",
+        )
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_refund", "captured",
+        )
+
+        with patch("app.services.stripe_service.create_refund", new_callable=AsyncMock) as mock_refund:
+            mock_refund.return_value = {"id": "re_test", "status": "succeeded", "amount": 60000}
+
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel",
+                json={"guest_email": "cancel@test.com"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+        mock_refund.assert_called_once()
+
+    async def test_cancel_pending_fails(self, client, cleanup_database):
+        """Cannot cancel a pending booking (use withdraw instead)."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            guest_email="cancel@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel",
+            json={"guest_email": "cancel@test.com"},
+        )
+        assert resp.status_code == 400
+
+
+# ── Booking Status Polling ───────────────────────────────────────
+
+
+class TestBookingStatus:
+    """Tests for GET /api/hotels/{slug}/bookings/status."""
+
+    async def test_get_booking_status(self, client, cleanup_database):
+        """Polling endpoint returns current status."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            guest_email="poll@test.com",
+            payment_method="card", payment_status="authorized",
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/bookings/status",
+            params={
+                "reference": booking["booking_reference"],
+                "email": "poll@test.com",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "pending"
+        assert body["paymentStatus"] == "authorized"
+        assert body["hostResponseDeadline"] is not None
+
+    async def test_status_not_found(self, client, hotel_with_rooms):
+        """Status endpoint returns 404 for unknown booking."""
+        hotel = hotel_with_rooms["hotel"]
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/bookings/status",
+            params={"reference": "VAY-NONEXIST", "email": "nobody@test.com"},
+        )
+        assert resp.status_code == 404
+
+
+# ── Payment Settings (Public) ────────────────────────────────────
+
+
+class TestPaymentSettingsPublic:
+    """Tests for GET /api/hotels/{slug}/payment-settings."""
+
+    async def test_payment_settings_defaults(self, client, hotel_with_rooms):
+        """Returns defaults when no settings configured."""
+        hotel = hotel_with_rooms["hotel"]
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/payment-settings"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["payAtPropertyEnabled"] is False
+        assert body["freeCancellationDays"] == 7
+
+    async def test_payment_settings_with_config(self, client, cleanup_database):
+        """Returns configured values."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=14)
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/payment-settings"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["payAtPropertyEnabled"] is True
+        assert body["freeCancellationDays"] == 14
+
+    async def test_payment_settings_unknown_hotel(self, client, init_database):
+        resp = await client.get("/api/hotels/nonexistent-slug/payment-settings")
+        assert resp.status_code == 404
+
+
+# ── Payment Settings (Admin) ─────────────────────────────────────
+
+
+class TestPaymentSettingsAdmin:
+    """Tests for GET/PATCH /admin/payment-settings."""
+
+    async def test_get_payment_settings(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_payment_settings(str(hotel["id"]))
+
+        resp = await client.get(
+            "/admin/payment-settings",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        ps = body["paymentSettings"]
+        assert ps["platformFeeType"] == "percentage"
+        assert ps["platformFeeValue"] == 8.0
+        cp = body["cancellationPolicy"]
+        assert cp["freeCancellationDays"] == 7
+
+    async def test_update_payment_settings(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        resp = await client.patch(
+            "/admin/payment-settings",
+            headers=get_auth_headers(user["token"]),
+            json={
+                "platformFeeType": "flat",
+                "platformFeeValue": 25.0,
+                "payAtPropertyEnabled": True,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "updated"
+
+        # Verify via GET
+        resp2 = await client.get(
+            "/admin/payment-settings",
+            headers=get_auth_headers(user["token"]),
+        )
+        ps = resp2.json()["paymentSettings"]
+        assert ps["platformFeeType"] == "flat"
+        assert ps["platformFeeValue"] == 25.0
+        assert ps["payAtPropertyEnabled"] is True
+
+    async def test_payment_settings_requires_auth(self, client):
+        resp = await client.get("/admin/payment-settings")
+        assert resp.status_code == 403
+
+
+# ── Cancellation Policy (Admin) ──────────────────────────────────
+
+
+class TestCancellationPolicyAdmin:
+    """Tests for PATCH /admin/cancellation-policy."""
+
+    async def test_update_cancellation_policy(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        resp = await client.patch(
+            "/admin/cancellation-policy",
+            headers=get_auth_headers(user["token"]),
+            json={
+                "freeCancellationDays": 14,
+                "partialRefundPct": 50.0,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "updated"
+
+        # Verify via GET
+        resp2 = await client.get(
+            "/admin/payment-settings",
+            headers=get_auth_headers(user["token"]),
+        )
+        cp = resp2.json()["cancellationPolicy"]
+        assert cp["freeCancellationDays"] == 14
+        assert cp["partialRefundPct"] == 50.0
+
+
+# ── Payouts (Admin) ──────────────────────────────────────────────
+
+
+class TestPayoutsAdmin:
+    """Tests for GET /admin/payouts."""
+
+    async def test_list_payouts_empty(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        resp = await client.get(
+            "/admin/payouts",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["payouts"] == []
+        assert body["total"] == 0
+
+    async def test_payouts_requires_auth(self, client):
+        resp = await client.get("/admin/payouts")
+        assert resp.status_code == 403
+
+
+# ── Payout Service Unit Tests ────────────────────────────────────
+
+
+class TestPayoutService:
+    """Unit tests for calculate_split."""
+
+    async def test_split_percentage_no_affiliate(self, init_database):
+        from app.services.payout_service import calculate_split
+
+        result = calculate_split(
+            total_amount=1000.0,
+            fee_type="percentage",
+            fee_value=8.0,
+            fee_with_affiliate=2.0,
+            has_affiliate=False,
+            affiliate_commission_pct=0.0,
+        )
+        assert result["platform_fee"] == 80.0  # 8% of 1000
+        assert result["affiliate_commission"] == 0.0
+        assert result["property_payout"] == 920.0  # 1000 - 80
+
+    async def test_split_percentage_with_affiliate(self, init_database):
+        from app.services.payout_service import calculate_split
+
+        result = calculate_split(
+            total_amount=1000.0,
+            fee_type="percentage",
+            fee_value=8.0,
+            fee_with_affiliate=2.0,
+            has_affiliate=True,
+            affiliate_commission_pct=5.0,
+        )
+        assert result["platform_fee"] == 20.0  # 2% of 1000 (reduced fee)
+        assert result["affiliate_commission"] == 50.0  # 5% of 1000
+        assert result["property_payout"] == 930.0  # 1000 - 20 - 50
+
+    async def test_split_flat_fee(self, init_database):
+        from app.services.payout_service import calculate_split
+
+        result = calculate_split(
+            total_amount=500.0,
+            fee_type="flat",
+            fee_value=25.0,
+            fee_with_affiliate=10.0,
+            has_affiliate=False,
+            affiliate_commission_pct=0.0,
+        )
+        assert result["platform_fee"] == 25.0
+        assert result["property_payout"] == 475.0  # 500 - 25
+
+    async def test_split_10pct_affiliate_commission(self, init_database):
+        """Example: €1000 booking, 10% creator commission, 2% platform fee."""
+        from app.services.payout_service import calculate_split
+
+        result = calculate_split(
+            total_amount=1000.0,
+            fee_type="percentage",
+            fee_value=8.0,
+            fee_with_affiliate=2.0,
+            has_affiliate=True,
+            affiliate_commission_pct=10.0,
+        )
+        assert result["platform_fee"] == 20.0       # 2% of 1000
+        assert result["affiliate_commission"] == 100.0  # 10% of 1000
+        assert result["property_payout"] == 880.0    # 1000 - 20 - 100
+        # Total: 20 + 100 + 880 = 1000 ✓
+
+
+# ── Expire Booking (Scheduler) ──────────────────────────────────
+
+
+class TestExpireBooking:
+    """Tests for the booking expiry service function."""
+
+    async def test_expire_pending_booking(self, cleanup_database):
+        """Expired booking gets status=expired and hold released."""
+        from app.services.booking_service import expire_booking
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+
+        # Booking with deadline in the past
+        expired_deadline = datetime.now(timezone.utc) - timedelta(hours=1)
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            payment_method="card", payment_status="authorized",
+            host_response_deadline=expired_deadline,
+        )
+        await Database.execute(
+            """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            str(booking["id"]), 600.0, "EUR", "card", "pi_test_expire", "authorized",
+        )
+
+        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+            mock_cancel.return_value = {"id": "pi_test_expire", "status": "canceled"}
+            await expire_booking(str(booking["id"]))
+
+        # Verify booking is expired
+        updated = await Database.fetchrow(
+            "SELECT status, payment_status FROM bookings WHERE id = $1",
+            booking["id"],
+        )
+        assert updated["status"] == "expired"
+        assert updated["payment_status"] == "cancelled"
+        mock_cancel.assert_called_once_with("pi_test_expire")
+
+    async def test_expire_already_confirmed_noop(self, cleanup_database):
+        """Expiring a confirmed booking is a no-op."""
+        from app.services.booking_service import expire_booking
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            status="confirmed", payment_status="captured",
+        )
+
+        await expire_booking(str(booking["id"]))
+
+        updated = await Database.fetchrow(
+            "SELECT status FROM bookings WHERE id = $1", booking["id"]
+        )
+        assert updated["status"] == "confirmed"  # unchanged

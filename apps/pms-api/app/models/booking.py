@@ -22,6 +22,7 @@ class BookingCreate(BaseModel):
     adults: int = 1
     children: int = 0
     referral_code: Optional[str] = None
+    payment_method: str = "card"
 
 
 class BookingResponse(BaseModel):
@@ -44,6 +45,9 @@ class BookingResponse(BaseModel):
     total_amount: float
     currency: str
     status: str
+    payment_method: Optional[str] = None
+    payment_status: Optional[str] = None
+    host_response_deadline: Optional[str] = None
     created_at: str
 
 
@@ -88,6 +92,13 @@ class BookingAdminResponse(BaseModel):
     room_id: Optional[str] = None
     room_number: Optional[str] = None
     channel: str = "direct"
+    payment_method: Optional[str] = None
+    payment_status: Optional[str] = None
+    host_response_deadline: Optional[str] = None
+    platform_fee_amount: Optional[float] = None
+    affiliate_commission_amount: Optional[float] = None
+    property_payout_amount: Optional[float] = None
+    guest_withdrawn: bool = False
     created_at: str
     updated_at: str
 
