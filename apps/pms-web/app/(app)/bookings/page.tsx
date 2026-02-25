@@ -9,12 +9,20 @@ const STATUS_TABS = [
   { label: 'Pending', value: 'pending' },
   { label: 'Confirmed', value: 'confirmed' },
   { label: 'Cancelled', value: 'cancelled' },
+  { label: 'Expired', value: 'expired' },
 ]
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-700',
   confirmed: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-600',
+  expired: 'bg-gray-100 text-gray-600',
+}
+
+function isDeadlineUrgent(deadline: string | null): boolean {
+  if (!deadline) return false
+  const diff = new Date(deadline).getTime() - Date.now()
+  return diff > 0 && diff < 4 * 60 * 60 * 1000 // Less than 4 hours
 }
 
 export default function BookingsPage() {
@@ -86,6 +94,7 @@ export default function BookingsPage() {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Dates</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-600">Total</th>
                   <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-600">Payment</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
                 </tr>
               </thead>
@@ -93,7 +102,14 @@ export default function BookingsPage() {
                 {bookings.map((b) => (
                   <tr key={b.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <span className="font-mono font-medium text-gray-900">{b.bookingReference}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-medium text-gray-900">{b.bookingReference}</span>
+                        {b.status === 'pending' && b.hostResponseDeadline && isDeadlineUrgent(b.hostResponseDeadline) && (
+                          <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-600 animate-pulse">
+                            URGENT
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div>
@@ -111,6 +127,11 @@ export default function BookingsPage() {
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[b.status] || ''}`}>
                         {b.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="text-xs text-gray-500">
+                        {b.paymentMethod === 'card' ? 'Card' : b.paymentMethod === 'pay_at_property' ? 'Property' : '—'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
