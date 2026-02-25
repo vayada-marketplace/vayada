@@ -112,7 +112,10 @@ export interface Booking {
   nightlyRate: number
   totalAmount: number
   currency: string
-  status: 'confirmed' | 'pending' | 'cancelled'
+  status: 'confirmed' | 'pending' | 'cancelled' | 'expired'
+  paymentMethod?: string | null
+  paymentStatus?: string | null
+  hostResponseDeadline?: string | null
   createdAt: string
 }
 

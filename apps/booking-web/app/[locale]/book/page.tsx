@@ -10,7 +10,6 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { bookingService } from '@/services/api/booking'
 
 const COUNTRIES = [
   'Austria', 'Germany', 'Switzerland', 'United States', 'United Kingdom',
@@ -45,7 +44,7 @@ function BookPageContent() {
     : [
         { number: 1, label: ts('rooms') },
         { number: 2, label: ts('details') },
-        { number: 3, label: ts('confirmation') },
+        { number: 3, label: ts('payment') },
       ]
   const currentStep = hasAddons ? 3 : 2
 
@@ -60,7 +59,6 @@ function BookPageContent() {
   const [specialRequests, setSpecialRequests] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const { slug } = useSlug()
 
   const handleSubmit = async () => {
     if (!firstName || !lastName || !email || !phone) {
@@ -80,25 +78,28 @@ function BookPageContent() {
       const refCookie = document.cookie.match(/(^| )ref=([^;]+)/)
       const referralCode = refCookie ? decodeURIComponent(refCookie[2]) : undefined
 
-      const booking = await bookingService.create(slug, {
+      // Store guest details in sessionStorage for the payment page
+      sessionStorage.setItem('guestDetails', JSON.stringify({
         roomTypeId: room.id,
         guestFirstName: firstName,
         guestLastName: lastName,
         guestEmail: email,
         guestPhone: phone,
         specialRequests,
+        referralCode,
+      }))
+
+      // Redirect to payment page with booking params
+      const params = new URLSearchParams({
+        room: room.id,
         checkIn,
         checkOut,
-        adults: adultsParam,
-        children: childrenParam,
-        referralCode,
+        adults: String(adultsParam),
+        children: String(childrenParam),
       })
-
-      // Store booking in sessionStorage for the confirmation page
-      sessionStorage.setItem('lastBooking', JSON.stringify(booking))
-      router.push(`/booking/${booking.bookingReference}`)
+      router.push(`/payment?${params.toString()}`)
     } catch (err: any) {
-      setError(err.message || 'Failed to create booking')
+      setError(err.message || 'Something went wrong')
     } finally {
       setSubmitting(false)
     }
@@ -319,7 +320,7 @@ function BookPageContent() {
                 disabled={submitting}
                 className="px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm disabled:opacity-50"
               >
-                {submitting ? t('booking') || 'Booking...' : t('completeBooking') || 'Complete Booking'}
+                {submitting ? t('booking') || 'Processing...' : t('continueToPayment') || 'Continue to Payment'}
               </button>
             </div>
           </div>

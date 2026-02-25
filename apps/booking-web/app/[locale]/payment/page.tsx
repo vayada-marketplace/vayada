@@ -1,15 +1,63 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
-import { useRouter, Link } from '@/i18n/navigation'
+import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
+import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { useHotel, useRooms } from '@/contexts/HotelContext'
+import StripeProvider from '@/components/StripeProvider'
+import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
+import { bookingService } from '@/services/api/booking'
+
+interface GuestDetails {
+  roomTypeId: string
+  guestFirstName: string
+  guestLastName: string
+  guestEmail: string
+  guestPhone: string
+  specialRequests: string
+  referralCode?: string
+}
+
+function CardPaymentForm({
+  onSubmit,
+  submitting,
+  agreedToTerms,
+  buttonLabel,
+}: {
+  onSubmit: () => void
+  submitting: boolean
+  agreedToTerms: boolean
+  buttonLabel: string
+}) {
+  const stripe = useStripe()
+  const elements = useElements()
+
+  return (
+    <div className="space-y-5">
+      <PaymentElement />
+      <div className="flex items-center gap-4 mt-5 pt-5 border-t border-gray-100">
+        <div className="flex items-center gap-1.5 text-sm text-gray-500">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          SSL Encrypted
+        </div>
+        <div className="flex items-center gap-1.5 text-sm text-gray-500">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          Secure Payment
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function PaymentPageContent() {
   const router = useRouter()
@@ -21,10 +69,14 @@ function PaymentPageContent() {
   const { hotel } = useHotel()
   const { rooms } = useRooms()
   const { formatPrice } = useCurrency()
+  const { slug } = useSlug()
   const searchParams = useSearchParams()
-  const roomId = searchParams.get('room') || 'room-2'
-  const checkIn = searchParams.get('checkIn') || '2026-02-13'
-  const checkOut = searchParams.get('checkOut') || '2026-02-18'
+
+  const roomId = searchParams.get('room') || ''
+  const checkIn = searchParams.get('checkIn') || ''
+  const checkOut = searchParams.get('checkOut') || ''
+  const adultsParam = parseInt(searchParams.get('adults') || '2')
+  const childrenParam = parseInt(searchParams.get('children') || '0')
   const currentStep = 4
 
   const STEPS = [
@@ -34,13 +86,105 @@ function PaymentPageContent() {
     { number: 4, label: ts('payment') },
   ]
 
-  const room = rooms.find((r) => r.id === roomId) || rooms[1]
+  const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const roomTotal = room.baseRate * nights
-  const addonsTotal = 80
-  const total = roomTotal + addonsTotal
+  const roomTotal = room ? room.baseRate * nights : 0
 
+  const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
+  const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [bookingId, setBookingId] = useState<string | null>(null)
+  const [bookingReference, setBookingReference] = useState<string | null>(null)
+
+  // Load guest details from sessionStorage
+  useEffect(() => {
+    const stored = sessionStorage.getItem('guestDetails')
+    if (stored) {
+      try {
+        setGuestDetails(JSON.parse(stored))
+      } catch {
+        router.push('/book')
+      }
+    } else {
+      router.push('/book')
+    }
+  }, [router])
+
+  // Check if pay-at-property is enabled
+  useEffect(() => {
+    if (slug) {
+      bookingService.getPaymentSettings(slug).then((settings) => {
+        setPayAtPropertyEnabled(settings.payAtPropertyEnabled)
+      })
+    }
+  }, [slug])
+
+  const handleSubmit = async () => {
+    if (!agreedToTerms || !guestDetails || !room) return
+
+    setSubmitting(true)
+    setError('')
+
+    try {
+      const result = await bookingService.create(slug, {
+        ...guestDetails,
+        checkIn,
+        checkOut,
+        adults: adultsParam,
+        children: childrenParam,
+        paymentMethod,
+      })
+
+      const booking = result.booking
+      setBookingId(booking.id)
+      setBookingReference(booking.bookingReference)
+
+      if (paymentMethod === 'card' && result.clientSecret) {
+        setClientSecret(result.clientSecret)
+        // The Stripe form will be rendered, user confirms payment there
+      } else {
+        // Pay at property — redirect to confirmation
+        sessionStorage.setItem('lastBooking', JSON.stringify(booking))
+        router.push(`/booking/${booking.bookingReference}`)
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to create booking')
+      setSubmitting(false)
+    }
+  }
+
+  if (!guestDetails || !room) {
+    return <div className="min-h-screen bg-gray-50" />
+  }
+
+  // If we have a client secret, render the Stripe payment form
+  if (clientSecret && bookingId) {
+    return (
+      <StripeProvider clientSecret={clientSecret}>
+        <StripePaymentPage
+          hotel={hotel}
+          room={room}
+          checkIn={checkIn}
+          checkOut={checkOut}
+          nights={nights}
+          adults={adultsParam}
+          children={childrenParam}
+          roomTotal={roomTotal}
+          guestDetails={guestDetails}
+          bookingId={bookingId}
+          bookingReference={bookingReference!}
+          slug={slug}
+          formatPrice={formatPrice}
+          formatDate={formatDate}
+          locale={locale}
+        />
+      </StripeProvider>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -69,7 +213,6 @@ function PaymentPageContent() {
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
           <h2 className="text-3xl font-heading text-gray-900">{t('securePayment')}</h2>
-
           <div className="flex items-center gap-2 flex-shrink-0">
             {STEPS.map((step, index) => (
               <div key={step.number} className="flex items-center">
@@ -106,8 +249,8 @@ function PaymentPageContent() {
         {/* Guest confirmation banner */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <p className="text-base font-bold text-gray-900">John Doe</p>
-            <p className="text-sm text-gray-500">john.doe@example.com</p>
+            <p className="text-base font-bold text-gray-900">{guestDetails.guestFirstName} {guestDetails.guestLastName}</p>
+            <p className="text-sm text-gray-500">{guestDetails.guestEmail}</p>
           </div>
           <div className="flex items-center gap-1.5 text-sm text-primary-600 font-medium">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -117,10 +260,16 @@ function PaymentPageContent() {
           </div>
         </div>
 
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Payment Details Card */}
+            {/* Payment Method Selection */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <div className="flex items-center gap-2.5 mb-6">
                 <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -129,63 +278,54 @@ function PaymentPageContent() {
                 <h3 className="text-lg font-bold text-gray-900">{t('paymentDetails')}</h3>
               </div>
 
-              <div className="space-y-5">
-                {/* Cardholder Name */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cardholderName')}</label>
-                  <input
-                    type="text"
-                    placeholder={t('nameOnCard')}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                  />
-                </div>
-
-                {/* Card Number */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cardNumber')}</label>
-                  <input
-                    type="text"
-                    placeholder={t('cardPlaceholder')}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                  />
-                </div>
-
-                {/* Expiry + CVC */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('expiryDate')}</label>
-                    <input
-                      type="text"
-                      placeholder={t('expiryPlaceholder')}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                    />
+              {/* Payment method tabs */}
+              <div className="flex gap-3 mb-6">
+                <button
+                  onClick={() => setPaymentMethod('card')}
+                  className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                    paymentMethod === 'card'
+                      ? 'border-primary-600 bg-primary-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <span className="font-semibold text-sm text-gray-900">{t('payWithCard') || 'Pay with Card'}</span>
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">{t('cvc')}</label>
-                    <input
-                      type="text"
-                      placeholder={t('cvcPlaceholder')}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                    />
-                  </div>
-                </div>
+                  <p className="text-xs text-gray-500">{t('cardAuthNote') || 'An authorization hold will be placed on your card'}</p>
+                </button>
+                {payAtPropertyEnabled && (
+                  <button
+                    onClick={() => setPaymentMethod('pay_at_property')}
+                    className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                      paymentMethod === 'pay_at_property'
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                      <span className="font-semibold text-sm text-gray-900">{t('payAtProperty') || 'Pay at Property'}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">{t('payAtPropertyNote') || 'Pay when you arrive at the hotel'}</p>
+                  </button>
+                )}
               </div>
 
-              {/* Security badges */}
-              <div className="flex items-center gap-4 mt-5 pt-5 border-t border-gray-100">
-                <div className="flex items-center gap-1.5 text-sm text-gray-500">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                  {t('sslEncrypted')}
+              {/* Card info note or property info */}
+              {paymentMethod === 'card' ? (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                  {t('cardAuthExplanation') || 'Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires.'}
                 </div>
-                <div className="flex items-center gap-1.5 text-sm text-gray-500">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  {t('securePaymentBadge')}
+              ) : (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                  {t('payAtPropertyExplanation') || 'No payment is required now. You will pay directly at the property upon check-in. The host will review your booking request.'}
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Terms Agreement */}
@@ -207,7 +347,7 @@ function PaymentPageContent() {
                   {t.rich('agreeTerms', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('termsAndConditions')}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{t('cancellationPolicy')}</a>,
-                    amount: formatPrice(total, room.currency),
+                    amount: formatPrice(roomTotal, room?.currency || 'EUR'),
                   })}
                 </span>
               </label>
@@ -221,8 +361,8 @@ function PaymentPageContent() {
               </p>
             </div>
 
-            {/* Back button */}
-            <div className="pt-2">
+            {/* Action buttons */}
+            <div className="flex items-center justify-between pt-2">
               <button
                 onClick={() => router.push('/book')}
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors border border-gray-300 rounded-full px-5 py-2.5"
@@ -231,6 +371,20 @@ function PaymentPageContent() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
                 {t('backToDetails')}
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!agreedToTerms || submitting}
+                className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm ${
+                  agreedToTerms && !submitting
+                    ? 'bg-primary-600 text-white hover:bg-primary-700'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {submitting
+                  ? (t('processing') || 'Processing...')
+                  : (t('submitRequest') || 'Submit Booking Request')
+                }
               </button>
             </div>
           </div>
@@ -273,40 +427,155 @@ function PaymentPageContent() {
                   <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400 mb-1">{t('addonsLabel')}</p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500 pl-2">{t('airportTransfer')}</span>
-                    <span className="font-semibold text-gray-900">{formatPrice(addonsTotal, room.currency)}</span>
-                  </div>
-                </div>
               </div>
 
               {/* Total */}
-              <div className="pt-5 mb-5">
+              <div className="pt-5">
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatPrice(total, room.currency)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
               </div>
-
-              {/* Pay button */}
-              <Link
-                href="/booking/VBK-A1B2C3"
-                className={`block w-full py-3 text-center font-semibold rounded-lg transition-colors text-sm ${
-                  agreedToTerms
-                    ? 'bg-primary-600 text-white hover:bg-primary-700'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed pointer-events-none'
-                }`}
-              >
-                {t('pay', { amount: formatPrice(total, room.currency) })}
-              </Link>
-              <p className="text-xs text-gray-500 text-center mt-2">{t('paymentSecure')}</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <BookingFooter />
+    </div>
+  )
+}
+
+/** Stripe payment confirmation page — rendered inside Elements provider */
+function StripePaymentPage({
+  hotel,
+  room,
+  checkIn,
+  checkOut,
+  nights,
+  roomTotal,
+  guestDetails,
+  bookingId,
+  bookingReference,
+  slug,
+  formatPrice,
+  formatDate,
+  locale,
+}: any) {
+  const stripe = useStripe()
+  const elements = useElements()
+  const router = useRouter()
+  const t = useTranslations('payment')
+  const tc = useTranslations('common')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleConfirmPayment = async () => {
+    if (!stripe || !elements) return
+
+    setSubmitting(true)
+    setError('')
+
+    try {
+      const { error: stripeError } = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+      })
+
+      if (stripeError) {
+        setError(stripeError.message || 'Payment failed')
+        setSubmitting(false)
+        return
+      }
+
+      // Payment authorized — confirm with backend
+      await bookingService.confirmAuthorization(slug, bookingId)
+
+      // Store booking for confirmation page
+      sessionStorage.setItem('lastBooking', JSON.stringify({
+        id: bookingId,
+        bookingReference,
+        hotelName: hotel.name,
+        roomName: room.name,
+        guestFirstName: guestDetails.guestFirstName,
+        guestLastName: guestDetails.guestLastName,
+        guestEmail: guestDetails.guestEmail,
+        checkIn,
+        checkOut,
+        nights,
+        adults,
+        children,
+        totalAmount: roomTotal,
+        currency: room.currency,
+        status: 'pending',
+        paymentMethod: 'card',
+        paymentStatus: 'authorized',
+      }))
+
+      router.push(`/booking/${bookingReference}`)
+    } catch (err: any) {
+      setError(err.message || 'Payment confirmation failed')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="relative h-32 w-full">
+        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
+        <BookingNavigation />
+      </div>
+
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="bg-white rounded-2xl border border-gray-200 p-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">{t('confirmPayment') || 'Confirm Payment'}</h2>
+          <p className="text-gray-600 mb-6">
+            {t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.'}
+          </p>
+
+          <div className="mb-6 p-4 bg-gray-50 rounded-xl">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-gray-500">{room.name}</span>
+              <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">{formatDate(checkIn, locale)} — {formatDate(checkOut, locale)}</span>
+              <span className="text-gray-500">{tc('nights', { count: nights })}</span>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="mb-6">
+            <PaymentElement />
+          </div>
+
+          <button
+            onClick={handleConfirmPayment}
+            disabled={!stripe || submitting}
+            className={`w-full py-3 text-center font-semibold rounded-lg transition-colors text-sm ${
+              !stripe || submitting
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-primary-600 text-white hover:bg-primary-700'
+            }`}
+          >
+            {submitting
+              ? (t('processing') || 'Processing...')
+              : (t('authorizePayment') || `Authorize ${formatPrice(roomTotal, room.currency)}`)
+            }
+          </button>
+
+          <p className="text-xs text-gray-500 text-center mt-3">
+            {t('authorizationNote') || 'Your card will only be charged if the host accepts your booking within 24 hours.'}
+          </p>
         </div>
       </div>
 
