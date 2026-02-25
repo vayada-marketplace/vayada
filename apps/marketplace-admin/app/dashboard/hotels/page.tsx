@@ -40,7 +40,7 @@ export default function HotelsPage() {
       // Fetch both sources in parallel
       const [bookingHotels, marketplaceRes] = await Promise.all([
         bookingSettingsService.listAllHotels().catch(() => [] as SuperAdminHotel[]),
-        usersService.getAllUsers({ type: 'hotel', page: 1, page_size: 500 }),
+        usersService.getAllUsers({ type: 'hotel', page: 1, page_size: 100 }),
       ])
 
       // Build a set of marketplace user emails that already have a booking hotel
