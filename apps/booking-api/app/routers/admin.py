@@ -625,3 +625,73 @@ async def superadmin_list_hotels(user_id: str = Depends(require_superadmin)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list hotels"
         )
+
+
+@router.post("/superadmin/hotels", status_code=status.HTTP_201_CREATED)
+async def superadmin_create_hotel(
+    data: dict,
+    user_id: str = Depends(require_superadmin),
+):
+    """Create a booking hotel entry for a marketplace user. Super admin only."""
+    try:
+        target_user_id = data.get("user_id")
+        hotel_name = data.get("name", "")
+        if not target_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id is required",
+            )
+
+        # Check if hotel already exists for this user
+        existing = await BookingHotelRepository.get_by_user_id(
+            target_user_id, columns="id"
+        )
+        if existing:
+            return {
+                "id": str(existing["id"]),
+                "message": "Hotel already exists for this user",
+            }
+
+        # Resolve name from auth DB if not provided
+        if not hotel_name:
+            owner = await UserRepository.get_by_id(
+                target_user_id, columns="id, name"
+            )
+            hotel_name = owner["name"] if owner else f"Hotel {target_user_id[:8]}"
+
+        slug = _slugify(hotel_name)
+
+        # Ensure slug uniqueness
+        existing_slug = await BookingHotelRepository.get_by_slug(slug)
+        if existing_slug:
+            slug = f"{slug}-{target_user_id[:8]}"
+
+        result = await BookingHotelRepository.create(
+            name=hotel_name,
+            slug=slug,
+            contact_email="",
+            contact_phone="",
+            timezone="UTC",
+            currency="EUR",
+            supported_languages=["en"],
+            user_id=target_user_id,
+        )
+
+        # Fetch the created hotel to get its ID
+        created = await BookingHotelRepository.get_by_user_id(
+            target_user_id, columns="id, name, slug"
+        )
+
+        return {
+            "id": str(created["id"]),
+            "name": created["name"],
+            "slug": created["slug"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating hotel for superadmin: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create hotel",
+        )
