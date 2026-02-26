@@ -7,7 +7,7 @@ import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import { useHotel, useSlug } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { bookingService } from '@/services/api/booking'
+import { bookingService, CancelPreview } from '@/services/api/booking'
 import { Booking } from '@/lib/types'
 
 export default function MyBookingPage() {
@@ -22,11 +22,18 @@ export default function MyBookingPage() {
   const [error, setError] = useState('')
   const { slug } = useSlug()
 
+  const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
+
   const handleSearch = async () => {
     if (!reference || !email) return
     setSearching(true)
     setError('')
     setBooking(null)
+    setSuccessMessage('')
 
     try {
       const result = await bookingService.lookup(slug, reference, email)
@@ -36,6 +43,61 @@ export default function MyBookingPage() {
     } finally {
       setSearching(false)
     }
+  }
+
+  const isPending = booking?.status === 'pending'
+  const isConfirmed = booking?.status === 'confirmed'
+  const isFutureCheckIn = booking ? new Date(booking.checkIn) > new Date() : false
+  const canCancel = (isPending || isConfirmed) && isFutureCheckIn
+
+  const handleCancelClick = async () => {
+    if (!booking) return
+
+    if (isPending) {
+      setShowConfirmDialog(true)
+      return
+    }
+
+    setLoadingPreview(true)
+    setError('')
+    try {
+      const preview = await bookingService.cancelPreview(slug, booking.id, email)
+      setCancelPreview(preview)
+      setShowConfirmDialog(true)
+    } catch (err: any) {
+      setError(err.message || 'Failed to load cancellation details')
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  const handleConfirmCancel = async () => {
+    if (!booking) return
+    setCancelling(true)
+    setError('')
+
+    try {
+      if (isPending) {
+        await bookingService.withdraw(slug, booking.id, email)
+        setBooking({ ...booking, status: 'cancelled' })
+        setSuccessMessage(t('bookingWithdrawn'))
+      } else {
+        await bookingService.cancel(slug, booking.id, email)
+        setBooking({ ...booking, status: 'cancelled' })
+        setSuccessMessage(t('bookingCancelled'))
+      }
+      setShowConfirmDialog(false)
+      setCancelPreview(null)
+    } catch (err: any) {
+      setError(err.message || 'Cancellation failed')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  const handleCloseDialog = () => {
+    setShowConfirmDialog(false)
+    setCancelPreview(null)
   }
 
   const statusColor: Record<string, string> = {
@@ -107,19 +169,37 @@ export default function MyBookingPage() {
           )}
         </div>
 
+        {/* Success Message */}
+        {successMessage && (
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex items-center gap-2">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            {successMessage}
+          </div>
+        )}
+
         {/* Result */}
         {booking && (
           <div className="mt-6 bg-white rounded-2xl border border-gray-200 p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-success-100 rounded-full flex items-center justify-center">
-                <svg className="w-5 h-5 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                booking.status === 'cancelled' ? 'bg-red-100' : 'bg-success-100'
+              }`}>
+                {booking.status === 'cancelled' ? (
+                  <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
               </div>
               <div>
                 <p className="font-bold text-gray-900">{t('bookingFound')}</p>
                 <p className={`text-sm font-medium capitalize ${statusColor[booking.status] || ''}`}>
-                  {booking.status}
+                  {booking.status === 'cancelled' ? t('cancelled') : booking.status}
                 </p>
               </div>
             </div>
@@ -159,9 +239,85 @@ export default function MyBookingPage() {
                 </span>
               </div>
             </div>
+
+            {/* Cancel / Withdraw Button */}
+            {canCancel && (
+              <button
+                onClick={handleCancelClick}
+                disabled={loadingPreview}
+                className="w-full mt-6 py-3 border-2 border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                {loadingPreview
+                  ? '...'
+                  : isPending
+                    ? t('withdrawBooking')
+                    : t('cancelBooking')
+                }
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Confirmation Dialog Overlay */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-3">
+              {isPending ? t('withdrawConfirmTitle') : t('cancelConfirmTitle')}
+            </h3>
+
+            {/* Refund info for confirmed bookings */}
+            {cancelPreview && !isPending && (
+              <div className="mb-4 space-y-2">
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                  cancelPreview.refundPercentage >= 100
+                    ? 'bg-green-100 text-green-700'
+                    : cancelPreview.refundPercentage > 0
+                      ? 'bg-yellow-100 text-yellow-700'
+                      : 'bg-red-100 text-red-700'
+                }`}>
+                  {cancelPreview.refundPercentage >= 100
+                    ? t('freeCancellation')
+                    : t('cancellationFeeApplies')
+                  }
+                </div>
+                <p className="text-sm text-gray-700">
+                  {cancelPreview.refundPercentage >= 100
+                    ? t('fullRefund', { amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency) })
+                    : cancelPreview.refundPercentage > 0
+                      ? t('partialRefund', {
+                          amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency),
+                          percentage: cancelPreview.refundPercentage,
+                        })
+                      : t('noRefund')
+                  }
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={handleCloseDialog}
+                disabled={cancelling}
+                className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
+              >
+                {t('goBack')}
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                disabled={cancelling}
+                className="flex-1 py-3 bg-red-600 text-white font-semibold rounded-full hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {cancelling
+                  ? (isPending ? t('withdrawing') : t('cancelling'))
+                  : (isPending ? t('confirmWithdraw') : t('confirmCancel'))
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BookingFooter />
     </div>

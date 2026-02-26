@@ -19,6 +19,14 @@ export interface BookingStatus {
   hostResponseDeadline: string | null
 }
 
+export interface CancelPreview {
+  refundAmount: number
+  refundPercentage: number
+  freeCancellationDays: number
+  daysUntilCheckIn: number
+  currency: string
+}
+
 export const bookingService = {
   async create(slug: string, data: {
     roomTypeId: string
@@ -67,6 +75,19 @@ export const bookingService = {
       const err = await res.json().catch(() => ({ detail: 'Withdrawal failed' }))
       throw new Error(err.detail || 'Withdrawal failed')
     }
+  },
+
+  async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
+    const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/cancel-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guestEmail }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Preview failed' }))
+      throw new Error(err.detail || 'Preview failed')
+    }
+    return res.json()
   },
 
   async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
