@@ -41,6 +41,7 @@ from app.models.payment import (
     CancellationPolicyUpdate,
     PayoutResponse,
     StripeConnectAccountRequest,
+    XenditBankDetailsRequest,
 )
 from app.services import stripe_service
 
@@ -540,6 +541,10 @@ async def get_payment_settings(
             platform_fee_value=float(settings["platform_fee_value"]) if settings else 8.00,
             platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"]) if settings else 2.00,
             pay_at_property_enabled=settings["pay_at_property_enabled"] if settings else False,
+            payment_provider=settings["payment_provider"] if settings else "stripe",
+            xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
+            xendit_account_number=settings.get("xendit_account_number") if settings else None,
+            xendit_account_holder_name=settings.get("xendit_account_holder_name") if settings else None,
         ).model_dump(by_alias=True),
         "cancellationPolicy": CancellationPolicy(
             free_cancellation_days=policy["free_cancellation_days"] if policy else 7,
@@ -792,6 +797,11 @@ def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
         status=a["status"],
         created_at=a["created_at"].isoformat(),
         updated_at=a["updated_at"].isoformat(),
+        stripe_connect_account_id=a.get("stripe_connect_account_id"),
+        stripe_connect_onboarded=a.get("stripe_connect_onboarded", False),
+        xendit_channel_code=a.get("xendit_channel_code"),
+        xendit_account_number=a.get("xendit_account_number"),
+        xendit_account_holder_name=a.get("xendit_account_holder_name"),
         booking_count=int(a.get("booking_count", 0) or 0),
         total_revenue=revenue,
         total_commission=round(revenue * commission_pct / 100, 2),
@@ -876,6 +886,72 @@ async def update_affiliate_commission(
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
     await AffiliateRepository.update_commission(affiliate_id, data.commission_pct)
+    # Re-fetch with stats
+    affiliates = await AffiliateRepository.list_by_hotel_id(hotel_id, limit=1000)
+    matched = next((a for a in affiliates if str(a["id"]) == affiliate_id), None)
+    return _affiliate_to_admin(matched)
+
+
+@router.post("/affiliates/{affiliate_id}/stripe/connect-account")
+async def create_affiliate_stripe_account(
+    affiliate_id: str,
+    data: StripeConnectAccountRequest,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    affiliate = await AffiliateRepository.get_by_id(affiliate_id)
+    if not affiliate or str(affiliate["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Affiliate not found")
+
+    if affiliate["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Affiliate must be approved before setting up Stripe")
+
+    if affiliate.get("stripe_connect_account_id"):
+        raise HTTPException(status_code=409, detail="Stripe account already exists for this affiliate")
+
+    account = await stripe_service.create_connect_account(data.email, data.country)
+    await AffiliateRepository.update_stripe_connect(affiliate_id, account["id"])
+    return {"accountId": account["id"]}
+
+
+@router.get("/affiliates/{affiliate_id}/stripe/connect-onboarding-link")
+async def get_affiliate_stripe_onboarding_link(
+    affiliate_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    affiliate = await AffiliateRepository.get_by_id(affiliate_id)
+    if not affiliate or str(affiliate["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Affiliate not found")
+
+    if not affiliate.get("stripe_connect_account_id"):
+        raise HTTPException(status_code=400, detail="No Stripe Connect account found for this affiliate")
+
+    url = await stripe_service.create_connect_account_link(
+        affiliate["stripe_connect_account_id"],
+        return_url=f"https://pms.vayada.com/affiliates/{affiliate_id}?stripe=success",
+        refresh_url=f"https://pms.vayada.com/affiliates/{affiliate_id}?stripe=refresh",
+    )
+    return {"url": url}
+
+
+@router.post("/affiliates/{affiliate_id}/xendit/bank-details", response_model=AffiliateAdminResponse)
+async def save_affiliate_xendit_bank_details(
+    affiliate_id: str,
+    data: XenditBankDetailsRequest,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await _get_hotel_id(user_id)
+    affiliate = await AffiliateRepository.get_by_id(affiliate_id)
+    if not affiliate or str(affiliate["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Affiliate not found")
+
+    if affiliate["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Affiliate must be approved before setting up Xendit")
+
+    await AffiliateRepository.update_xendit_details(
+        affiliate_id, data.channel_code, data.account_number, data.account_holder_name
+    )
     # Re-fetch with stats
     affiliates = await AffiliateRepository.list_by_hotel_id(hotel_id, limit=1000)
     matched = next((a for a in affiliates if str(a["id"]) == affiliate_id), None)

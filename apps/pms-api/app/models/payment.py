@@ -39,6 +39,10 @@ class HotelPaymentSettings(BaseModel):
     platform_fee_value: float = 8.00
     platform_fee_with_affiliate: float = 2.00
     pay_at_property_enabled: bool = False
+    payment_provider: str = "stripe"
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
 
 
 class HotelPaymentSettingsUpdate(BaseModel):
@@ -48,6 +52,10 @@ class HotelPaymentSettingsUpdate(BaseModel):
     platform_fee_value: Optional[float] = None
     platform_fee_with_affiliate: Optional[float] = None
     pay_at_property_enabled: Optional[bool] = None
+    payment_provider: Optional[str] = None
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
 
 
 class CancellationPolicy(BaseModel):
@@ -83,3 +91,11 @@ class StripeConnectAccountRequest(BaseModel):
 
     email: str
     country: str = "AT"
+
+
+class XenditBankDetailsRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    channel_code: str
+    account_number: str
+    account_holder_name: str

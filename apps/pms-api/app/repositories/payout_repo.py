@@ -67,7 +67,10 @@ class PayoutRepository:
 
     @staticmethod
     async def update_status(
-        payout_id: str, status: str, stripe_transfer_id: Optional[str] = None
+        payout_id: str,
+        status: str,
+        stripe_transfer_id: Optional[str] = None,
+        xendit_payout_id: Optional[str] = None,
     ) -> dict:
         if stripe_transfer_id:
             row = await Database.fetchrow(
@@ -82,6 +85,20 @@ class PayoutRepository:
                 payout_id,
                 status,
                 stripe_transfer_id,
+            )
+        elif xendit_payout_id:
+            row = await Database.fetchrow(
+                """
+                UPDATE payouts
+                SET status = $2, xendit_payout_id = $3,
+                    completed_at = CASE WHEN $2 = 'completed' THEN now() ELSE completed_at END,
+                    updated_at = now()
+                WHERE id = $1
+                RETURNING *
+                """,
+                payout_id,
+                status,
+                xendit_payout_id,
             )
         else:
             row = await Database.fetchrow(

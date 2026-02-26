@@ -53,6 +53,11 @@ class AffiliateAdminResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    stripe_connect_account_id: Optional[str] = None
+    stripe_connect_onboarded: bool = False
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
     # Stats from LEFT JOIN
     booking_count: int = 0
     total_revenue: float = 0.0

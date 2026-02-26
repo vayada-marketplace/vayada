@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PLATFORM_ACCOUNT_ID: str = ""
 
+    # Xendit
+    XENDIT_SECRET_KEY: str = ""
+    XENDIT_WEBHOOK_SECRET: str = ""
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

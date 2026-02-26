@@ -147,3 +147,63 @@ class AffiliateRepository:
             commission_pct,
         )
         return dict(row) if row else None
+
+    @staticmethod
+    async def update_stripe_connect(affiliate_id: str, account_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE affiliates
+            SET stripe_connect_account_id = $2, payment_method = 'stripe', updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            affiliate_id,
+            account_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def mark_stripe_onboarded(stripe_connect_account_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE affiliates
+            SET stripe_connect_onboarded = true, updated_at = now()
+            WHERE stripe_connect_account_id = $1
+            RETURNING *
+            """,
+            stripe_connect_account_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def get_by_stripe_account_id(account_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            "SELECT * FROM affiliates WHERE stripe_connect_account_id = $1",
+            account_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def update_xendit_details(
+        affiliate_id: str,
+        channel_code: str,
+        account_number: str,
+        account_holder_name: str,
+    ) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE affiliates
+            SET xendit_channel_code = $2,
+                xendit_account_number = $3,
+                xendit_account_holder_name = $4,
+                payment_method = 'xendit',
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            affiliate_id,
+            channel_code,
+            account_number,
+            account_holder_name,
+        )
+        return dict(row) if row else None

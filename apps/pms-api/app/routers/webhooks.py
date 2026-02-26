@@ -1,11 +1,16 @@
+import hmac
+import hashlib
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.config import settings
 from app.services import stripe_service
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.affiliate_repo import AffiliateRepository
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +93,60 @@ async def stripe_webhook(request: Request):
                     str(row["hotel_id"]),
                     {"stripe_connect_onboarded": True},
                 )
-                logger.info("Stripe Connect account onboarded: %s", account_id)
+                logger.info("Stripe Connect account onboarded (hotel): %s", account_id)
+            else:
+                # Check if this is an affiliate Connect account
+                affiliate = await AffiliateRepository.get_by_stripe_account_id(account_id)
+                if affiliate:
+                    await AffiliateRepository.mark_stripe_onboarded(account_id)
+                    logger.info("Stripe Connect account onboarded (affiliate): %s", account_id)
+
+    return {"status": "ok"}
+
+
+@router.post("/webhooks/xendit")
+async def xendit_webhook(request: Request):
+    """Handle Xendit webhook events for payout status updates."""
+    payload = await request.body()
+    callback_token = request.headers.get("x-callback-token")
+
+    if not callback_token:
+        raise HTTPException(status_code=400, detail="Missing x-callback-token header")
+
+    if not hmac.compare_digest(callback_token, settings.XENDIT_WEBHOOK_SECRET):
+        logger.warning("Xendit webhook token verification failed")
+        raise HTTPException(status_code=400, detail="Invalid callback token")
+
+    import json
+    data = json.loads(payload)
+    event_type = data.get("event")
+    payout_data = data.get("data", {})
+    xendit_payout_id = payout_data.get("id")
+    status = payout_data.get("status")
+
+    if not xendit_payout_id:
+        return {"status": "ok"}
+
+    if event_type == "payout.succeeded" or status == "SUCCEEDED":
+        from app.database import Database
+        row = await Database.fetchrow(
+            "SELECT id FROM payouts WHERE xendit_payout_id = $1",
+            xendit_payout_id,
+        )
+        if row:
+            await PayoutRepository.update_status(
+                str(row["id"]), "completed", xendit_payout_id=xendit_payout_id
+            )
+            logger.info("Xendit payout completed: %s", xendit_payout_id)
+
+    elif event_type == "payout.failed" or status == "FAILED":
+        from app.database import Database
+        row = await Database.fetchrow(
+            "SELECT id FROM payouts WHERE xendit_payout_id = $1",
+            xendit_payout_id,
+        )
+        if row:
+            await PayoutRepository.update_status(str(row["id"]), "failed")
+            logger.warning("Xendit payout failed: %s", xendit_payout_id)
 
     return {"status": "ok"}
