@@ -448,6 +448,44 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     return updated
 
 
+async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
+    """Calculate refund details without actually cancelling."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "confirmed":
+        raise ValueError("Only confirmed bookings can be previewed for cancellation")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    hotel_id = str(booking["hotel_id"])
+    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+    free_days = policy["free_cancellation_days"] if policy else 7
+    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
+
+    check_in = booking["check_in"]
+    days_until = (check_in - date.today()).days
+
+    total_amount = float(booking["total_amount"])
+    refund_amount = 0.0
+    refund_pct = 0.0
+
+    if days_until >= free_days:
+        refund_amount = total_amount
+        refund_pct = 100.0
+    elif partial_pct > 0:
+        refund_amount = round(total_amount * partial_pct / 100, 2)
+        refund_pct = partial_pct
+
+    return {
+        "refundAmount": refund_amount,
+        "refundPercentage": refund_pct,
+        "freeCancellationDays": free_days,
+        "daysUntilCheckIn": days_until,
+        "currency": booking["currency"],
+    }
+
+
 async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     """Guest cancels a confirmed booking — applies cancellation policy."""
     booking = await BookingRepository.get_by_id(booking_id)

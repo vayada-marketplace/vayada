@@ -8,6 +8,7 @@ from app.services.booking_service import (
     create_booking_request,
     confirm_payment_authorized,
     guest_withdraw_booking,
+    get_cancellation_preview,
     handle_guest_cancellation,
     lookup_booking,
     get_booking_status,
@@ -62,6 +63,19 @@ async def post_withdraw(slug: str, booking_id: str, data: GuestActionRequest):
         logger.error("Error withdrawing booking %s: %s", booking_id, e)
         raise HTTPException(status_code=500, detail="Internal server error")
     return {"status": "withdrawn"}
+
+
+@router.post("/{slug}/bookings/{booking_id}/cancel-preview")
+async def post_cancel_preview(slug: str, booking_id: str, data: GuestActionRequest):
+    """Preview cancellation refund details without actually cancelling."""
+    try:
+        result = await get_cancellation_preview(booking_id, data.guest_email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error previewing cancellation for %s: %s", booking_id, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return result
 
 
 @router.post("/{slug}/bookings/{booking_id}/cancel")
