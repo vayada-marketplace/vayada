@@ -56,7 +56,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
     Promise.all([
       hotelService.getHotel(slug, locale),
       hotelService.getRooms(slug),
-      hotelService.getAddons(slug),
+      hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
       .then(([hotelData, roomsData, addonsData]) => {
         setHotel(hotelData)
