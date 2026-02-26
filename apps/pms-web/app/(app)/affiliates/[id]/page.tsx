@@ -20,6 +20,13 @@ export default function AffiliateDetailPage({ params }: { params: { id: string }
   const [success, setSuccess] = useState('')
   const [editingCommission, setEditingCommission] = useState(false)
   const [commissionInput, setCommissionInput] = useState('')
+  const [stripeEmail, setStripeEmail] = useState('')
+  const [stripeCountry, setStripeCountry] = useState('AT')
+  const [stripeLoading, setStripeLoading] = useState(false)
+  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
+  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
+  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
+  const [xenditLoading, setXenditLoading] = useState(false)
 
   useEffect(() => {
     affiliatesService.get(params.id)
@@ -62,6 +69,63 @@ export default function AffiliateDetailPage({ params }: { params: { id: string }
       setError(err.message || 'Failed to update commission')
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const createStripeAccount = async () => {
+    if (!stripeEmail) {
+      setError('Email is required')
+      return
+    }
+    setStripeLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      await affiliatesService.createStripeAccount(params.id, stripeEmail, stripeCountry)
+      const updated = await affiliatesService.get(params.id)
+      setAffiliate(updated)
+      setSuccess('Stripe account created. Opening onboarding...')
+      // Auto-open onboarding link
+      const { url } = await affiliatesService.getStripeOnboardingLink(params.id)
+      window.open(url, '_blank')
+    } catch (err: any) {
+      setError(err.message || 'Failed to create Stripe account')
+    } finally {
+      setStripeLoading(false)
+    }
+  }
+
+  const openOnboardingLink = async () => {
+    setStripeLoading(true)
+    setError('')
+    try {
+      const { url } = await affiliatesService.getStripeOnboardingLink(params.id)
+      window.open(url, '_blank')
+    } catch (err: any) {
+      setError(err.message || 'Failed to get onboarding link')
+    } finally {
+      setStripeLoading(false)
+    }
+  }
+
+  const saveXenditBankDetails = async () => {
+    if (!xenditAccountNumber || !xenditAccountHolderName) {
+      setError('Account number and holder name are required')
+      return
+    }
+    setXenditLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const updated = await affiliatesService.saveXenditBankDetails(
+        params.id, xenditChannelCode, xenditAccountNumber, xenditAccountHolderName
+      )
+      setAffiliate(updated)
+      setSuccess('Xendit bank details saved successfully')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save Xendit bank details')
+    } finally {
+      setXenditLoading(false)
     }
   }
 
@@ -161,6 +225,150 @@ export default function AffiliateDetailPage({ params }: { params: { id: string }
             )}
           </div>
         </div>
+
+        {/* Stripe Connect */}
+        {affiliate.status === 'approved' && (
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">Stripe Connect</h2>
+
+            {!affiliate.stripeConnectAccountId && (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-500">Set up Stripe Connect to enable automated payouts for this affiliate.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={stripeEmail}
+                      onChange={(e) => setStripeEmail(e.target.value)}
+                      placeholder={affiliate.email}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Country</label>
+                    <input
+                      type="text"
+                      value={stripeCountry}
+                      onChange={(e) => setStripeCountry(e.target.value)}
+                      placeholder="AT"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={createStripeAccount}
+                  disabled={stripeLoading}
+                  className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {stripeLoading ? 'Creating...' : 'Create Stripe Account'}
+                </button>
+              </div>
+            )}
+
+            {affiliate.stripeConnectAccountId && !affiliate.stripeConnectOnboarded && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                    Pending Onboarding
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">{affiliate.stripeConnectAccountId}</span>
+                </div>
+                <p className="text-sm text-gray-500">The affiliate needs to complete Stripe onboarding to receive payouts.</p>
+                <button
+                  onClick={openOnboardingLink}
+                  disabled={stripeLoading}
+                  className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {stripeLoading ? 'Loading...' : 'Open Onboarding Link'}
+                </button>
+              </div>
+            )}
+
+            {affiliate.stripeConnectAccountId && affiliate.stripeConnectOnboarded && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    Connected
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">{affiliate.stripeConnectAccountId}</span>
+                </div>
+                <p className="text-sm text-gray-500">Payouts will be transferred automatically via Stripe.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Xendit Payout */}
+        {affiliate.status === 'approved' && !affiliate.stripeConnectAccountId && (
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">Xendit Payout</h2>
+
+            {affiliate.xenditAccountNumber ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    Connected
+                  </span>
+                  <span className="text-sm text-gray-600">{affiliate.xenditChannelCode}</span>
+                </div>
+                <div className="text-sm text-gray-500">
+                  <p>Account: {affiliate.xenditAccountNumber}</p>
+                  <p>Holder: {affiliate.xenditAccountHolderName}</p>
+                </div>
+                <p className="text-sm text-gray-500">Payouts will be sent via Xendit to this bank account.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-500">Set up Xendit bank details for Indonesian bank payouts.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Bank Channel</label>
+                    <select
+                      value={xenditChannelCode}
+                      onChange={(e) => setXenditChannelCode(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="ID_BCA">BCA</option>
+                      <option value="ID_MANDIRI">Mandiri</option>
+                      <option value="ID_BNI">BNI</option>
+                      <option value="ID_BRI">BRI</option>
+                      <option value="ID_PERMATA">Permata</option>
+                      <option value="ID_CIMB">CIMB Niaga</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      value={xenditAccountNumber}
+                      onChange={(e) => setXenditAccountNumber(e.target.value)}
+                      placeholder="1234567890"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Account Holder Name</label>
+                  <input
+                    type="text"
+                    value={xenditAccountHolderName}
+                    onChange={(e) => setXenditAccountHolderName(e.target.value)}
+                    placeholder="Full name as on bank account"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <button
+                  onClick={saveXenditBankDetails}
+                  disabled={xenditLoading}
+                  className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {xenditLoading ? 'Saving...' : 'Save Bank Details'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Commission & Stats */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">

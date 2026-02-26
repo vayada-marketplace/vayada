@@ -22,6 +22,12 @@ export default function SettingsPage() {
   const [connectCountry, setConnectCountry] = useState('AT')
   const [creatingAccount, setCreatingAccount] = useState(false)
 
+  // Payment provider
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
+  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
+  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
+  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
+
   // Cancellation policy
   const [freeDays, setFreeDays] = useState(7)
   const [partialRefundPct, setPartialRefundPct] = useState(0)
@@ -36,6 +42,10 @@ export default function SettingsPage() {
         setPayAtProperty(ps.payAtPropertyEnabled)
         setStripeAccountId(ps.stripeConnectAccountId)
         setStripeOnboarded(ps.stripeConnectOnboarded)
+        setPaymentProvider(ps.paymentProvider || 'stripe')
+        setXenditChannelCode(ps.xenditChannelCode || 'ID_BCA')
+        setXenditAccountNumber(ps.xenditAccountNumber || '')
+        setXenditAccountHolderName(ps.xenditAccountHolderName || '')
 
         const cp = res.cancellationPolicy
         setFreeDays(cp.freeCancellationDays)
@@ -55,6 +65,12 @@ export default function SettingsPage() {
         platformFeeValue: feeValue,
         platformFeeWithAffiliate: feeWithAffiliate,
         payAtPropertyEnabled: payAtProperty,
+        paymentProvider,
+        ...(paymentProvider === 'xendit' ? {
+          xenditChannelCode,
+          xenditAccountNumber,
+          xenditAccountHolderName,
+        } : {}),
       })
       setSuccess('Payment settings saved')
     } catch (err: any) {
@@ -196,6 +212,79 @@ export default function SettingsPage() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* Payment Provider */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Payout Provider</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">Provider for hotel payouts</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={paymentProvider === 'stripe'}
+                    onChange={() => setPaymentProvider('stripe')}
+                    className="text-primary-600"
+                  />
+                  <span className="text-sm text-gray-700">Stripe</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={paymentProvider === 'xendit'}
+                    onChange={() => setPaymentProvider('xendit')}
+                    className="text-primary-600"
+                  />
+                  <span className="text-sm text-gray-700">Xendit (Indonesia)</span>
+                </label>
+              </div>
+            </div>
+
+            {paymentProvider === 'xendit' && (
+              <div className="space-y-3 pt-2 border-t border-gray-100">
+                <p className="text-sm text-gray-500">Enter your Indonesian bank account details for Xendit payouts.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Bank Channel</label>
+                    <select
+                      value={xenditChannelCode}
+                      onChange={(e) => setXenditChannelCode(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="ID_BCA">BCA</option>
+                      <option value="ID_MANDIRI">Mandiri</option>
+                      <option value="ID_BNI">BNI</option>
+                      <option value="ID_BRI">BRI</option>
+                      <option value="ID_PERMATA">Permata</option>
+                      <option value="ID_CIMB">CIMB Niaga</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      value={xenditAccountNumber}
+                      onChange={(e) => setXenditAccountNumber(e.target.value)}
+                      placeholder="1234567890"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
+                  <input
+                    type="text"
+                    value={xenditAccountHolderName}
+                    onChange={(e) => setXenditAccountHolderName(e.target.value)}
+                    placeholder="Full name as on bank account"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Platform Fee Settings */}
