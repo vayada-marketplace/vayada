@@ -129,7 +129,7 @@ export default function HotelsPage() {
         </div>
       </header>
 
-      <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-6xl mx-auto">
+      <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto">
         {/* Search */}
         <div className="mb-6 bg-white p-4 rounded-lg shadow">
           <div className="relative">
@@ -162,7 +162,7 @@ export default function HotelsPage() {
           </div>
         ) : (
           <>
-            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+            <div className="bg-white shadow overflow-x-auto sm:rounded-lg">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
@@ -175,21 +175,18 @@ export default function HotelsPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Owner
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Action
+                      Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
+                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
                         {search ? 'No hotels match your search.' : 'No hotels found.'}
                       </td>
                     </tr>
@@ -205,9 +202,11 @@ export default function HotelsPage() {
                             ? `${hotel.location}${hotel.country ? `, ${hotel.country}` : ''}`
                             : <span className="text-gray-400">-</span>}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">{hotel.owner_name}</td>
-                        <td className="px-6 py-4 text-sm text-gray-600">{hotel.owner_email}</td>
                         <td className="px-6 py-4">
+                          <p className="text-sm text-gray-900">{hotel.owner_name}</p>
+                          <p className="text-xs text-gray-500">{hotel.owner_email}</p>
+                        </td>
+                        <td className="px-6 py-4 text-center">
                           {hotel.initialized ? (
                             <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                               Active
@@ -218,7 +217,7 @@ export default function HotelsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-right space-x-2">
+                        <td className="px-6 py-4 text-right whitespace-nowrap space-x-2">
                           {hotel.initialized ? (
                             <>
                               {hotel.slug && (
