@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { MagnifyingGlassIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon, ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
 import { usersService } from '@/services/api'
 
@@ -218,14 +218,27 @@ export default function HotelsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-6 py-4 text-right space-x-2">
                           {hotel.initialized ? (
-                            <button
-                              onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
-                              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
-                            >
-                              Configure
-                            </button>
+                            <>
+                              {hotel.slug && (
+                                <a
+                                  href={`https://${hotel.slug}.booking.vayada.com`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
+                                >
+                                  Preview
+                                  <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
+                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
+                              >
+                                Configure
+                              </button>
+                            </>
                           ) : (
                             <button
                               onClick={() => handleSetup(hotel)}
