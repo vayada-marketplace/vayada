@@ -782,6 +782,9 @@ async def delete_room_block(
 def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
     revenue = float(a.get("total_revenue", 0) or 0)
     commission_pct = float(a["commission_pct"])
+    booking_count = int(a.get("booking_count", 0) or 0)
+    click_count = int(a.get("click_count", 0) or 0)
+    conversion_rate = round(booking_count / click_count * 100, 2) if click_count > 0 else 0.0
     return AffiliateAdminResponse(
         id=str(a["id"]),
         hotel_id=str(a["hotel_id"]),
@@ -802,9 +805,11 @@ def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
         xendit_channel_code=a.get("xendit_channel_code"),
         xendit_account_number=a.get("xendit_account_number"),
         xendit_account_holder_name=a.get("xendit_account_holder_name"),
-        booking_count=int(a.get("booking_count", 0) or 0),
+        booking_count=booking_count,
         total_revenue=revenue,
         total_commission=round(revenue * commission_pct / 100, 2),
+        click_count=click_count,
+        conversion_rate=conversion_rate,
     )
 
 

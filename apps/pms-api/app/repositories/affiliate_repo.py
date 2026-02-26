@@ -88,7 +88,8 @@ class AffiliateRepository:
             f"""
             SELECT a.*,
                    COALESCE(s.booking_count, 0) AS booking_count,
-                   COALESCE(s.total_revenue, 0) AS total_revenue
+                   COALESCE(s.total_revenue, 0) AS total_revenue,
+                   COALESCE(c.click_count, 0) AS click_count
             FROM affiliates a
             LEFT JOIN (
                 SELECT affiliate_id,
@@ -98,6 +99,12 @@ class AffiliateRepository:
                 WHERE affiliate_id IS NOT NULL
                 GROUP BY affiliate_id
             ) s ON s.affiliate_id = a.id
+            LEFT JOIN (
+                SELECT affiliate_id,
+                       COUNT(*) AS click_count
+                FROM affiliate_clicks
+                GROUP BY affiliate_id
+            ) c ON c.affiliate_id = a.id
             WHERE {where}
             ORDER BY a.created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
@@ -105,6 +112,24 @@ class AffiliateRepository:
             *args,
         )
         return [dict(r) for r in rows]
+
+    @staticmethod
+    async def record_click(
+        affiliate_id: str,
+        hotel_id: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> None:
+        await Database.execute(
+            """
+            INSERT INTO affiliate_clicks (affiliate_id, hotel_id, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4)
+            """,
+            affiliate_id,
+            hotel_id,
+            ip_address,
+            user_agent,
+        )
 
     @staticmethod
     async def count_by_hotel_id(

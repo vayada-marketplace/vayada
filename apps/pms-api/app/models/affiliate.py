@@ -62,6 +62,8 @@ class AffiliateAdminResponse(BaseModel):
     booking_count: int = 0
     total_revenue: float = 0.0
     total_commission: float = 0.0
+    click_count: int = 0
+    conversion_rate: float = 0.0
 
 
 class AffiliateStatusUpdate(BaseModel):

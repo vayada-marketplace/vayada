@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.database import Database
 from app.repositories.affiliate_repo import AffiliateRepository
@@ -57,3 +57,26 @@ async def register_affiliate(slug: str, data: AffiliateRegister):
     except Exception as e:
         logger.error("Failed to create affiliate: %s", e)
         raise HTTPException(status_code=500, detail="Failed to create affiliate")
+
+
+@router.post("/{slug}/affiliates/{referral_code}/click", status_code=204)
+async def record_affiliate_click(slug: str, referral_code: str, request: Request):
+    hotel = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    hotel_id = str(hotel["id"])
+
+    affiliate = await AffiliateRepository.get_by_code(hotel_id, referral_code)
+    if not affiliate or affiliate["status"] != "approved":
+        raise HTTPException(status_code=404, detail="Affiliate not found")
+
+    ip_address = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
+    user_agent = request.headers.get("user-agent")
+
+    await AffiliateRepository.record_click(
+        str(affiliate["id"]), hotel_id, ip_address, user_agent
+    )
+    return Response(status_code=204)
