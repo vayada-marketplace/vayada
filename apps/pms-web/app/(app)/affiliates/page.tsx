@@ -91,7 +91,9 @@ export default function AffiliatesPage() {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Code</th>
                   <th className="text-center px-4 py-3 font-medium text-gray-600">Type</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">Clicks</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-600">Bookings</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">Conv. Rate</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-600">Revenue</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-600">Commission</th>
                   <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
@@ -116,7 +118,11 @@ export default function AffiliatesPage() {
                         {a.userType}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900">{a.clickCount}</td>
                     <td className="px-4 py-3 text-right font-medium text-gray-900">{a.bookingCount}</td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900">
+                      {a.conversionRate > 0 ? `${a.conversionRate}%` : '-'}
+                    </td>
                     <td className="px-4 py-3 text-right font-medium text-gray-900">
                       {a.totalRevenue > 0 ? `EUR ${a.totalRevenue.toFixed(2)}` : '-'}
                     </td>

@@ -373,16 +373,20 @@ export default function AffiliateDetailPage({ params }: { params: { id: string }
         {/* Commission & Stats */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Commission & Performance</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-gray-50 rounded-lg p-4 text-center">
+              <p className="text-2xl font-bold text-gray-900">{affiliate.clickCount}</p>
+              <p className="text-xs text-gray-500 mt-1">Link Clicks</p>
+            </div>
             <div className="bg-gray-50 rounded-lg p-4 text-center">
               <p className="text-2xl font-bold text-gray-900">{affiliate.bookingCount}</p>
               <p className="text-xs text-gray-500 mt-1">Referred Bookings</p>
             </div>
             <div className="bg-gray-50 rounded-lg p-4 text-center">
               <p className="text-2xl font-bold text-gray-900">
-                {affiliate.totalRevenue > 0 ? `EUR ${affiliate.totalRevenue.toFixed(2)}` : '-'}
+                {affiliate.conversionRate > 0 ? `${affiliate.conversionRate}%` : '-'}
               </p>
-              <p className="text-xs text-gray-500 mt-1">Total Revenue</p>
+              <p className="text-xs text-gray-500 mt-1">Conversion Rate</p>
             </div>
             <div className="bg-gray-50 rounded-lg p-4 text-center">
               <p className="text-2xl font-bold text-primary-600">

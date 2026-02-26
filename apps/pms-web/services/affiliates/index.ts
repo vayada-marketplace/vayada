@@ -18,6 +18,8 @@ export interface Affiliate {
   bookingCount: number
   totalRevenue: number
   totalCommission: number
+  clickCount: number
+  conversionRate: number
   stripeConnectAccountId: string | null
   stripeConnectOnboarded: boolean
   xenditChannelCode: string | null
