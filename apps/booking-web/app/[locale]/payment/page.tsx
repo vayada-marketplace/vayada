@@ -318,8 +318,16 @@ function PaymentPageContent() {
 
               {/* Card info note or property info */}
               {paymentMethod === 'card' ? (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                  {t('cardAuthExplanation') || 'Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires.'}
+                <div className="space-y-3">
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                    {t('cardAuthExplanation') || 'Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires.'}
+                  </div>
+                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm text-gray-600">
+                    <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    {t('cardNextStep') || 'You will enter your card details in the next step.'}
+                  </div>
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
@@ -375,16 +383,30 @@ function PaymentPageContent() {
               <button
                 onClick={handleSubmit}
                 disabled={!agreedToTerms || submitting}
-                className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm ${
+                className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm flex items-center gap-2 ${
                   agreedToTerms && !submitting
                     ? 'bg-primary-600 text-white hover:bg-primary-700'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                {submitting
-                  ? (t('processing') || 'Processing...')
-                  : (t('submitRequest') || 'Submit Booking Request')
-                }
+                {submitting ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    {t('processing') || 'Processing...'}
+                  </>
+                ) : paymentMethod === 'card' ? (
+                  <>
+                    {t('continueToPayment') || 'Continue to Payment'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </>
+                ) : (
+                  t('submitRequest') || 'Submit Booking Request'
+                )}
               </button>
             </div>
           </div>

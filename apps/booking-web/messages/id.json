@@ -149,13 +149,15 @@
     "payAtProperty": "Bayar di Properti",
     "payAtPropertyNote": "Bayar saat Anda tiba di hotel",
     "cardAuthExplanation": "Kartu Anda akan diotorisasi tetapi tidak dikenakan biaya sampai tuan rumah menerima pemesanan Anda. Otorisasi akan dilepaskan jika pemesanan ditolak atau kedaluwarsa.",
+    "cardNextStep": "Anda akan memasukkan detail kartu Anda di langkah berikutnya.",
     "payAtPropertyExplanation": "Tidak diperlukan pembayaran sekarang. Anda akan membayar langsung di properti saat check-in. Tuan rumah akan meninjau permintaan pemesanan Anda.",
     "submitRequest": "Kirim Permintaan Pemesanan",
     "processing": "Memproses...",
     "confirmPayment": "Konfirmasi Pembayaran",
     "confirmPaymentDesc": "Selesaikan pembayaran Anda untuk mengirim permintaan pemesanan. Kartu Anda akan diotorisasi tetapi tidak dikenakan biaya sampai tuan rumah menerima.",
     "authorizePayment": "Otorisasi Pembayaran",
-    "authorizationNote": "Kartu Anda hanya akan dikenakan biaya jika tuan rumah menerima pemesanan Anda dalam 24 jam."
+    "authorizationNote": "Kartu Anda hanya akan dikenakan biaya jika tuan rumah menerima pemesanan Anda dalam 24 jam.",
+    "continueToPayment": "Lanjutkan ke Pembayaran"
   },
   "availability": {
     "title": "Cek Ketersediaan",

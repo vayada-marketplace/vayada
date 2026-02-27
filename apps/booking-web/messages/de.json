@@ -142,7 +142,21 @@
     "addonsLabel": "Extras:",
     "airportTransfer": "Flughafentransfer",
     "pay": "{amount} bezahlen",
-    "paymentSecure": "Ihre Zahlung ist 100% sicher"
+    "paymentSecure": "Ihre Zahlung ist 100% sicher",
+    "payWithCard": "Mit Karte bezahlen",
+    "cardAuthNote": "Eine Autorisierung wird auf Ihrer Karte durchgeführt",
+    "payAtProperty": "Vor Ort bezahlen",
+    "payAtPropertyNote": "Bezahlen Sie bei Ihrer Ankunft im Hotel",
+    "cardAuthExplanation": "Ihre Karte wird autorisiert, aber erst belastet, wenn der Gastgeber Ihre Buchung annimmt. Die Autorisierung wird freigegeben, wenn die Buchung abgelehnt wird oder abläuft.",
+    "cardNextStep": "Sie geben Ihre Kartendaten im nächsten Schritt ein.",
+    "payAtPropertyExplanation": "Jetzt ist keine Zahlung erforderlich. Sie zahlen direkt in der Unterkunft beim Check-in. Der Gastgeber wird Ihre Buchungsanfrage prüfen.",
+    "submitRequest": "Buchungsanfrage senden",
+    "processing": "Wird verarbeitet...",
+    "confirmPayment": "Zahlung bestätigen",
+    "confirmPaymentDesc": "Schließen Sie Ihre Zahlung ab, um die Buchungsanfrage zu senden. Ihre Karte wird autorisiert, aber erst belastet, wenn der Gastgeber annimmt.",
+    "authorizePayment": "Zahlung autorisieren",
+    "authorizationNote": "Ihre Karte wird nur belastet, wenn der Gastgeber Ihre Buchung innerhalb von 24 Stunden annimmt.",
+    "continueToPayment": "Weiter zur Zahlung"
   },
   "availability": {
     "title": "Verfügbarkeit prüfen",

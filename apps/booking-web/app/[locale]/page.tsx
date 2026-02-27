@@ -70,7 +70,7 @@ export default function HomePage() {
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
-  const { rooms } = useRooms()
+  const { rooms, loading: roomsLoading } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const [checkIn, setCheckIn] = useState(() => {
@@ -95,6 +95,8 @@ export default function HomePage() {
   const [imageIndices, setImageIndices] = useState<Record<string, number>>({})
   const [expandedRates, setExpandedRates] = useState<Record<string, string | null>>({})
   const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null)
+  const [searching, setSearching] = useState(false)
+  const roomsSectionRef = useRef<HTMLDivElement>(null)
 
   const nights = calculateNights(checkIn, checkOut)
 
@@ -238,14 +240,35 @@ export default function HomePage() {
           </div>
 
           {/* Check Availability Button */}
-          <button className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap">
-            {tc('checkAvailability')}
+          <button
+            onClick={() => {
+              setCalendarOpen(false)
+              setGuestsOpen(false)
+              setPromoOpen(false)
+              setSearching(true)
+              roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+              setTimeout(() => setSearching(false), 800)
+            }}
+            disabled={searching}
+            className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap disabled:opacity-80 flex items-center justify-center gap-2"
+          >
+            {searching ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                {tc('loading')}
+              </>
+            ) : (
+              tc('checkAvailability')
+            )}
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div ref={roomsSectionRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
@@ -327,7 +350,27 @@ export default function HomePage() {
 
         {/* Room Cards */}
         <div className="space-y-6">
-          {rooms.map((room, roomIndex) => {
+          {roomsLoading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse">
+                <div className="flex flex-col md:flex-row">
+                  <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
+                  <div className="flex-1 p-5 space-y-4">
+                    <div className="h-6 bg-gray-200 rounded w-48" />
+                    <div className="h-4 bg-gray-200 rounded w-32" />
+                    <div className="flex gap-2">
+                      <div className="h-8 bg-gray-200 rounded-full w-24" />
+                      <div className="h-8 bg-gray-200 rounded-full w-20" />
+                      <div className="h-8 bg-gray-200 rounded-full w-28" />
+                    </div>
+                    <div className="h-px bg-gray-100" />
+                    <div className="h-16 bg-gray-200 rounded-xl" />
+                    <div className="h-16 bg-gray-200 rounded-xl" />
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : rooms.map((room, roomIndex) => {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
             const flexibleTotal = room.baseRate * nights

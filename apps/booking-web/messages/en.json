@@ -133,6 +133,7 @@
     "payAtProperty": "Pay at Property",
     "payAtPropertyNote": "Pay when you arrive at the hotel",
     "cardAuthExplanation": "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires.",
+    "cardNextStep": "You will enter your card details in the next step.",
     "payAtPropertyExplanation": "No payment is required now. You will pay directly at the property upon check-in. The host will review your booking request.",
     "cardholderName": "Cardholder Name",
     "nameOnCard": "Name on card",
@@ -160,7 +161,8 @@
     "confirmPayment": "Confirm Payment",
     "confirmPaymentDesc": "Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.",
     "authorizePayment": "Authorize Payment",
-    "authorizationNote": "Your card will only be charged if the host accepts your booking within 24 hours."
+    "authorizationNote": "Your card will only be charged if the host accepts your booking within 24 hours.",
+    "continueToPayment": "Continue to Payment"
   },
   "availability": {
     "title": "Check Availability",

@@ -149,13 +149,15 @@
     "payAtProperty": "Payer sur place",
     "payAtPropertyNote": "Payez à votre arrivée à l'hôtel",
     "cardAuthExplanation": "Votre carte sera autorisée mais pas débitée tant que l'hôte n'aura pas accepté votre réservation. L'autorisation sera levée si la réservation est refusée ou expire.",
+    "cardNextStep": "Vous saisirez vos coordonnées bancaires à l'étape suivante.",
     "payAtPropertyExplanation": "Aucun paiement n'est requis maintenant. Vous paierez directement à l'établissement lors de l'enregistrement. L'hôte examinera votre demande de réservation.",
     "submitRequest": "Soumettre la demande de réservation",
     "processing": "Traitement en cours...",
     "confirmPayment": "Confirmer le paiement",
     "confirmPaymentDesc": "Finalisez votre paiement pour soumettre la demande de réservation. Votre carte sera autorisée mais pas débitée tant que l'hôte n'aura pas accepté.",
     "authorizePayment": "Autoriser le paiement",
-    "authorizationNote": "Votre carte ne sera débitée que si l'hôte accepte votre réservation dans les 24 heures."
+    "authorizationNote": "Votre carte ne sera débitée que si l'hôte accepte votre réservation dans les 24 heures.",
+    "continueToPayment": "Continuer vers le paiement"
   },
   "availability": {
     "title": "Vérifier la disponibilité",

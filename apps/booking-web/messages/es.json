@@ -149,13 +149,15 @@
     "payAtProperty": "Pagar en el establecimiento",
     "payAtPropertyNote": "Paga cuando llegues al hotel",
     "cardAuthExplanation": "Tu tarjeta será autorizada pero no se cobrará hasta que el anfitrión acepte tu reserva. La retención se liberará si la reserva es rechazada o expira.",
+    "cardNextStep": "Ingresarás los datos de tu tarjeta en el siguiente paso.",
     "payAtPropertyExplanation": "No se requiere ningún pago ahora. Pagarás directamente en el establecimiento al hacer el check-in. El anfitrión revisará tu solicitud de reserva.",
     "submitRequest": "Enviar solicitud de reserva",
     "processing": "Procesando...",
     "confirmPayment": "Confirmar pago",
     "confirmPaymentDesc": "Completa tu pago para enviar la solicitud de reserva. Tu tarjeta será autorizada pero no se cobrará hasta que el anfitrión acepte.",
     "authorizePayment": "Autorizar pago",
-    "authorizationNote": "Tu tarjeta solo se cobrará si el anfitrión acepta tu reserva en un plazo de 24 horas."
+    "authorizationNote": "Tu tarjeta solo se cobrará si el anfitrión acepta tu reserva en un plazo de 24 horas.",
+    "continueToPayment": "Continuar al pago"
   },
   "availability": {
     "title": "Consultar Disponibilidad",
