@@ -69,7 +69,7 @@ export const bookingService = {
     const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/withdraw`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guestEmail }),
+      body: JSON.stringify({ guest_email: guestEmail }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Withdrawal failed' }))
@@ -81,7 +81,7 @@ export const bookingService = {
     const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/cancel-preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guestEmail }),
+      body: JSON.stringify({ guest_email: guestEmail }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Preview failed' }))
@@ -94,7 +94,7 @@ export const bookingService = {
     const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guestEmail }),
+      body: JSON.stringify({ guest_email: guestEmail }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Cancellation failed' }))
