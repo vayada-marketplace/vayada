@@ -133,7 +133,7 @@
     "cvcPlaceholder": "123",
     "sslEncrypted": "Cifrado SSL",
     "securePaymentBadge": "Pago Seguro",
-    "agreeTerms": "Acepto los {terms} y la {cancellation}. Entiendo que se cargará {amount} en mi tarjeta tras la confirmación.",
+    "agreeTerms": "Acepto los <terms>Términos y Condiciones</terms> y la <cancellation>Política de Cancelación</cancellation>. Entiendo que se cargará {amount} en mi tarjeta tras la confirmación.",
     "termsAndConditions": "Términos y Condiciones",
     "cancellationPolicy": "Política de Cancelación",
     "cancellationPolicyTitle": "Política de Cancelación",

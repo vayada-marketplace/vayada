@@ -133,7 +133,7 @@
     "cvcPlaceholder": "123",
     "sslEncrypted": "Terenkripsi SSL",
     "securePaymentBadge": "Pembayaran Aman",
-    "agreeTerms": "Saya menyetujui {terms} dan {cancellation}. Saya memahami bahwa kartu saya akan dikenakan biaya {amount} setelah konfirmasi.",
+    "agreeTerms": "Saya menyetujui <terms>Syarat dan Ketentuan</terms> dan <cancellation>Kebijakan Pembatalan</cancellation>. Saya memahami bahwa kartu saya akan dikenakan biaya {amount} setelah konfirmasi.",
     "termsAndConditions": "Syarat dan Ketentuan",
     "cancellationPolicy": "Kebijakan Pembatalan",
     "cancellationPolicyTitle": "Kebijakan Pembatalan",
