@@ -102,7 +102,7 @@ export default function AffiliatesPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {affiliates.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-50">
+                  <tr key={a.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/affiliates/${a.id}`}>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-900">{a.fullName}</p>
                       {a.socialMedia && (
