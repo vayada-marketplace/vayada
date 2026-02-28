@@ -1,5 +1,10 @@
 import { pmsClient } from '../api/pmsClient'
 
+export interface MonthlyRate {
+  baseRate?: number | null
+  nonRefundableRate?: number | null
+}
+
 export interface RoomType {
   id: string
   hotelId: string
@@ -18,6 +23,7 @@ export interface RoomType {
   totalRooms: number
   isActive: boolean
   sortOrder: number
+  monthlyRates: Record<string, MonthlyRate>
   createdAt: string
   updatedAt: string
 }
@@ -38,6 +44,7 @@ export interface RoomTypeCreate {
   totalRooms?: number
   isActive?: boolean
   sortOrder?: number
+  monthlyRates?: Record<string, MonthlyRate>
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>

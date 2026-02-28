@@ -6,6 +6,7 @@ import { ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
+import MonthlyRatesEditor from '@/components/MonthlyRatesEditor'
 
 export default function EditRoomPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -40,6 +41,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           images: r.images,
           isActive: r.isActive,
           sortOrder: r.sortOrder,
+          monthlyRates: r.monthlyRates || {},
         })
       })
       .catch(console.error)
@@ -337,6 +339,14 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
             label="Room Images"
           />
         </div>
+
+        {/* Monthly Pricing */}
+        <MonthlyRatesEditor
+          monthlyRates={form.monthlyRates || {}}
+          defaultBaseRate={form.baseRate || 0}
+          defaultNonRefundableRate={form.nonRefundableRate}
+          onChange={(rates) => setForm({ ...form, monthlyRates: rates })}
+        />
 
         <div className="flex items-center justify-end gap-3">
           <Link

@@ -6,6 +6,7 @@ import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
+import MonthlyRatesEditor from '@/components/MonthlyRatesEditor'
 
 export default function NewRoomPage() {
   const router = useRouter()
@@ -27,6 +28,7 @@ export default function NewRoomPage() {
     images: [],
     isActive: true,
     sortOrder: 0,
+    monthlyRates: {},
   })
 
   const [amenityInput, setAmenityInput] = useState('')
@@ -284,6 +286,14 @@ export default function NewRoomPage() {
             label="Room Images"
           />
         </div>
+
+        {/* Monthly Pricing */}
+        <MonthlyRatesEditor
+          monthlyRates={form.monthlyRates || {}}
+          defaultBaseRate={form.baseRate || 0}
+          defaultNonRefundableRate={form.nonRefundableRate}
+          onChange={(rates) => setForm({ ...form, monthlyRates: rates })}
+        />
 
         <div className="flex items-center justify-end gap-3">
           <Link
