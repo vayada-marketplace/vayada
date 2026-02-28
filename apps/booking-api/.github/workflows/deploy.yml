@@ -171,23 +171,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-
-      - name: Install migration dependencies
-        run: pip install asyncpg pydantic pydantic-settings
-
-      - name: Run production database migrations
-        run: python scripts/run_migrations.py
-        env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-          AUTH_DATABASE_URL: "unused"
-          JWT_SECRET_KEY: "unused"
-          CORS_ORIGINS: "unused"
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
