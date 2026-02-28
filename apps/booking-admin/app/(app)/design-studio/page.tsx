@@ -71,6 +71,7 @@ export default function DesignStudioPage() {
     if (!file) return
 
     // Show local preview immediately
+    const previousImage = heroImage
     const previewUrl = URL.createObjectURL(file)
     setHeroImage(previewUrl)
 
@@ -94,9 +95,13 @@ export default function DesignStudioPage() {
       if (data.images?.[0]?.url) {
         URL.revokeObjectURL(previewUrl)
         setHeroImage(data.images[0].url)
+      } else {
+        throw new Error('No image URL returned')
       }
     } catch (err) {
       console.error('Image upload failed:', err)
+      URL.revokeObjectURL(previewUrl)
+      setHeroImage(previousImage)
       setFeedback({ type: 'error', message: 'Image upload failed. Please try again.' })
     } finally {
       setUploading(false)
@@ -215,8 +220,8 @@ export default function DesignStudioPage() {
                   <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">1920x1080 recommended</p>
 
                   {heroImage ? (
-                    <div className="relative rounded-lg overflow-hidden">
-                      <img src={heroImage} alt="Hero" className="w-full h-36 object-cover" />
+                    <div className="relative rounded-lg overflow-hidden bg-gray-200">
+                      <img src={heroImage} alt="Hero" className="w-full h-36 object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
                       <button
                         onClick={removeHeroImage}
                         className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
@@ -543,11 +548,9 @@ export default function DesignStudioPage() {
           <div className="flex-1 overflow-y-auto bg-white" style={{ fontFamily: currentFont.bodyFamily }}>
 
             {/* ===== HERO SECTION ===== */}
-            <div className="relative h-[280px] w-full">
-              {heroImage ? (
-                <img src={heroImage} alt="Hero" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-gray-300" />
+            <div className="relative h-[280px] w-full bg-gray-300">
+              {heroImage && (
+                <img src={heroImage} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
               )}
               <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
