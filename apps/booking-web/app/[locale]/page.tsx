@@ -101,12 +101,11 @@ export default function HomePage() {
   const nights = calculateNights(checkIn, checkOut)
 
   const FILTERS = (hotel?.bookingFilters || []).map((key) => {
-    const translated = t(key)
-    // If next-intl returns the key itself (no translation found), check customFilters
-    if (translated === key && hotel?.customFilters?.[key]) {
+    // Use custom filter label if it exists, otherwise use i18n translation
+    if (hotel?.customFilters?.[key]) {
       return hotel.customFilters[key]
     }
-    return translated
+    return t(key)
   })
 
   const filteredRooms = activeFilters.length === 0
