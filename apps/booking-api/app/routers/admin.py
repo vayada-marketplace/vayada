@@ -459,6 +459,7 @@ async def proxy_upload_images(
         # Forward the original token — both services share the same auth DB
         auth_header = request.headers.get("authorization", "")
         pms_url = f"{settings.PMS_API_URL}/upload/images"
+        logger.info(f"Proxying upload to {pms_url} for user {user_id}")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             upload_files = []
@@ -467,6 +468,7 @@ async def proxy_upload_images(
                 upload_files.append(
                     ("files", (f.filename, content, f.content_type or "image/jpeg"))
                 )
+                logger.info(f"Uploading file: {f.filename}, size: {len(content)}, type: {f.content_type}")
 
             resp = await client.post(
                 pms_url,
@@ -475,7 +477,8 @@ async def proxy_upload_images(
             )
 
         if resp.status_code >= 400:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+            logger.error(f"PMS upload failed: status={resp.status_code}, body={resp.text}")
+            raise HTTPException(status_code=resp.status_code, detail=f"PMS upload error: {resp.text}")
 
         return resp.json()
 
@@ -485,7 +488,7 @@ async def proxy_upload_images(
         logger.error(f"Error proxying image upload: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to upload image",
+            detail=f"Failed to upload image: {str(e)}",
         )
 
 
