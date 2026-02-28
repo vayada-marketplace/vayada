@@ -26,6 +26,7 @@ export interface DesignSettings {
   accent_color: string
   font_pairing: string
   booking_filters: string[]
+  custom_filters: Record<string, string>
 }
 
 export type DesignSettingsUpdate = Partial<DesignSettings>

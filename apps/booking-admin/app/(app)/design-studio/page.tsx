@@ -5,6 +5,7 @@ import {
   PhotoIcon,
   XMarkIcon,
   ArrowPathIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService } from '@/services/settings'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
@@ -42,6 +43,8 @@ export default function DesignStudioPage() {
 
   // Filters state
   const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel', 'bestRated', 'mountainView'])
+  const [customFilters, setCustomFilters] = useState<Record<string, string>>({})
+  const [newFilterLabel, setNewFilterLabel] = useState('')
 
   useEffect(() => {
     settingsService.getDesignSettings()
@@ -53,6 +56,7 @@ export default function DesignStudioPage() {
         if (settings.accent_color) setAccentColor(settings.accent_color)
         if (settings.font_pairing) setSelectedFont(settings.font_pairing)
         if (settings.booking_filters) setBookingFilters(settings.booking_filters)
+        if (settings.custom_filters) setCustomFilters(settings.custom_filters)
       })
       .catch(() => {
         // Keep attractive defaults on error
@@ -121,6 +125,7 @@ export default function DesignStudioPage() {
         accent_color: accentColor,
         font_pairing: selectedFont,
         booking_filters: bookingFilters,
+        custom_filters: customFilters,
       })
       setFeedback({ type: 'success', message: 'Design settings saved successfully' })
     } catch {
@@ -388,31 +393,114 @@ export default function DesignStudioPage() {
                 <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which filters guests see on your booking page</p>
 
                 <div className="space-y-2">
-                  {AVAILABLE_FILTERS.map((filter) => {
+                  {[
+                    ...AVAILABLE_FILTERS,
+                    ...Object.entries(customFilters).map(([key, label]) => ({ key, label, isCustom: true })),
+                  ].map((filter) => {
                     const enabled = bookingFilters.includes(filter.key)
+                    const isCustom = 'isCustom' in filter && filter.isCustom
                     return (
-                      <button
+                      <div
                         key={filter.key}
-                        onClick={() => {
-                          setBookingFilters((prev) =>
-                            enabled
-                              ? prev.filter((k) => k !== filter.key)
-                              : [...prev, filter.key]
-                          )
-                        }}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
                           enabled
                             ? 'border-primary-500 bg-primary-50/30'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
-                        <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
-                        <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
+                        <button
+                          className="flex-1 text-left"
+                          onClick={() => {
+                            setBookingFilters((prev) =>
+                              enabled
+                                ? prev.filter((k) => k !== filter.key)
+                                : [...prev, filter.key]
+                            )
+                          }}
+                        >
+                          <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          {isCustom && (
+                            <button
+                              onClick={() => {
+                                setCustomFilters((prev) => {
+                                  const next = { ...prev }
+                                  delete next[filter.key]
+                                  return next
+                                })
+                                setBookingFilters((prev) => prev.filter((k) => k !== filter.key))
+                              }}
+                              className="w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                              title="Remove custom filter"
+                            >
+                              <XMarkIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setBookingFilters((prev) =>
+                                enabled
+                                  ? prev.filter((k) => k !== filter.key)
+                                  : [...prev, filter.key]
+                              )
+                            }}
+                          >
+                            <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
+                            </div>
+                          </button>
                         </div>
-                      </button>
+                      </div>
                     )
                   })}
+                </div>
+
+                {/* Add custom filter */}
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  <p className="text-[12px] font-medium text-gray-700 mb-2">Add Custom Filter</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newFilterLabel}
+                      onChange={(e) => setNewFilterLabel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newFilterLabel.trim()) {
+                          const label = newFilterLabel.trim()
+                          const key = label
+                            .split(/\s+/)
+                            .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+                            .join('')
+                          if (!AVAILABLE_FILTERS.some((f) => f.key === key) && !customFilters[key]) {
+                            setCustomFilters((prev) => ({ ...prev, [key]: label }))
+                            setBookingFilters((prev) => [...prev, key])
+                          }
+                          setNewFilterLabel('')
+                        }
+                      }}
+                      placeholder="e.g. Pool Access"
+                      className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newFilterLabel.trim()) return
+                        const label = newFilterLabel.trim()
+                        const key = label
+                          .split(/\s+/)
+                          .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+                          .join('')
+                        if (!AVAILABLE_FILTERS.some((f) => f.key === key) && !customFilters[key]) {
+                          setCustomFilters((prev) => ({ ...prev, [key]: label }))
+                          setBookingFilters((prev) => [...prev, key])
+                        }
+                        setNewFilterLabel('')
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 transition-colors"
+                    >
+                      <PlusIcon className="w-3.5 h-3.5" />
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
