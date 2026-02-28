@@ -1,7 +1,7 @@
 """
 Admin routes for hotel management in the booking engine
 """
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Request
 from typing import List
 import logging
 import re
@@ -450,12 +450,14 @@ async def update_design_settings(
 
 @router.post("/upload/images", status_code=201)
 async def proxy_upload_images(
+    request: Request,
     files: List[UploadFile] = File(...),
     user_id: str = Depends(require_hotel_admin),
 ):
     """Proxy image uploads to the PMS backend (avoids CORS issues)."""
     try:
-        token_header = f"Bearer {_create_proxy_token(user_id)}"
+        # Forward the original token — both services share the same auth DB
+        auth_header = request.headers.get("authorization", "")
         pms_url = f"{settings.PMS_API_URL}/upload/images"
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -469,7 +471,7 @@ async def proxy_upload_images(
             resp = await client.post(
                 pms_url,
                 files=upload_files,
-                headers={"Authorization": token_header},
+                headers={"Authorization": auth_header},
             )
 
         if resp.status_code >= 400:
@@ -485,19 +487,6 @@ async def proxy_upload_images(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to upload image",
         )
-
-
-def _create_proxy_token(user_id: str) -> str:
-    """Create a JWT for the PMS backend using the shared secret."""
-    import jwt
-    from datetime import datetime, timezone, timedelta
-
-    payload = {
-        "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
-        "type": "access",
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 # ── Addon CRUD ──────────────────────────────────────────────────────
