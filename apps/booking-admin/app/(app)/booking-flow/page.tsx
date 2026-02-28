@@ -7,7 +7,7 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { settingsService, type AddonItem, type AddonSettings, type DesignSettings, type PropertySettings } from '@/services/settings'
+import { settingsService, type AddonItem, type AddonSettings, type DesignSettings } from '@/services/settings'
 
 type Tab = 'rooms' | 'addons' | 'details' | 'payment'
 
@@ -64,11 +64,6 @@ export default function BookingFlowPage() {
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
   const [savingFilters, setSavingFilters] = useState(false)
 
-  // Payment state
-  const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
-  const [freeCancellationDays, setFreeCancellationDays] = useState(7)
-  const [savingPayment, setSavingPayment] = useState(false)
-
   const AVAILABLE_FILTERS = [
     { key: 'includeBreakfast', label: 'Include Breakfast' },
     { key: 'freeCancellation', label: 'Free Cancellation' },
@@ -82,15 +77,10 @@ export default function BookingFlowPage() {
       settingsService.listAddons().catch(() => []),
       settingsService.getAddonSettings().catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
       settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {} } as DesignSettings)),
-      settingsService.getPropertySettings().catch(() => null),
-    ]).then(([addonList, settings, design, propSettings]) => {
+    ]).then(([addonList, settings, design]) => {
       setAddons(addonList)
       setAddonSettings(settings)
       if (design.booking_filters) setBookingFilters(design.booking_filters)
-      if (propSettings) {
-        setPayAtPropertyEnabled(propSettings.pay_at_property_enabled)
-        setFreeCancellationDays(propSettings.free_cancellation_days)
-      }
     }).finally(() => setLoading(false))
   }, [])
 
@@ -519,108 +509,18 @@ export default function BookingFlowPage() {
 
         {/* ═══ PAYMENT TAB ═══ */}
         {activeTab === 'payment' && (
-          <div className="max-w-2xl space-y-4">
-            {/* Payment Methods */}
+          <div className="max-w-2xl">
             <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Payment Methods</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which payment methods guests can use during booking</p>
+              <h2 className="text-[14px] font-semibold text-gray-900">Payment Configuration</h2>
+              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Payment methods and policies are managed in the Property Manager</p>
 
-              <div className="space-y-2">
-                {/* Card payment - always on */}
-                <div className="flex items-center justify-between p-3 rounded-lg border border-primary-500 bg-primary-50/30">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-4 h-4 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="1" y="4" width="22" height="16" rx="2" />
-                        <path d="M1 10h22" />
-                      </svg>
-                    </div>
-                    <div>
-                      <span className="text-[12px] font-medium text-gray-900">Pay with Card</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">Card authorization via Stripe</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-50 text-green-600">Always on</span>
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 text-center">
+                <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
+                  <PaymentIcon className="w-5 h-5 text-gray-400" />
                 </div>
-
-                {/* Pay at Property toggle */}
-                <button
-                  onClick={() => setPayAtPropertyEnabled(!payAtPropertyEnabled)}
-                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                    payAtPropertyEnabled
-                      ? 'border-primary-500 bg-primary-50/30'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${payAtPropertyEnabled ? 'bg-green-100' : 'bg-gray-100'}`}>
-                      <svg className={`w-4 h-4 ${payAtPropertyEnabled ? 'text-green-600' : 'text-gray-400'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                    </div>
-                    <div>
-                      <span className="text-[12px] font-medium text-gray-900">Pay at Property</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay when they arrive at check-in</p>
-                    </div>
-                  </div>
-                  <div className={`w-8 h-5 rounded-full transition-colors relative ${payAtPropertyEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${payAtPropertyEnabled ? 'left-3.5' : 'left-0.5'}`} />
-                  </div>
-                </button>
+                <p className="text-[13px] font-medium text-gray-600">Go to PMS Settings to configure payments</p>
+                <p className="text-[12px] text-gray-400 mt-0.5">Stripe, pay at property, and cancellation policies are configured in the Property Manager</p>
               </div>
-            </div>
-
-            {/* Cancellation Policy */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Cancellation Policy</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Set the free cancellation window for guests</p>
-
-              <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                  Free cancellation days before check-in
-                </label>
-                <select
-                  value={freeCancellationDays}
-                  onChange={(e) => setFreeCancellationDays(parseInt(e.target.value))}
-                  className="w-full max-w-xs px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                >
-                  <option value={1}>1 day</option>
-                  <option value={2}>2 days</option>
-                  <option value={3}>3 days</option>
-                  <option value={5}>5 days</option>
-                  <option value={7}>7 days</option>
-                  <option value={14}>14 days</option>
-                  <option value={30}>30 days</option>
-                </select>
-                <p className="text-[11px] text-gray-400 mt-1">Guests can cancel for free up to this many days before their check-in date</p>
-              </div>
-            </div>
-
-            {/* Save button */}
-            <div className="flex justify-start">
-              <button
-                onClick={async () => {
-                  try {
-                    setSavingPayment(true)
-                    await settingsService.updatePropertySettings({
-                      pay_at_property_enabled: payAtPropertyEnabled,
-                      free_cancellation_days: freeCancellationDays,
-                    })
-                    showFeedback('success', 'Payment settings saved')
-                  } catch {
-                    showFeedback('error', 'Failed to save payment settings')
-                  } finally {
-                    setSavingPayment(false)
-                  }
-                }}
-                disabled={savingPayment}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-              >
-                {savingPayment ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : null}
-                Save Payment Settings
-              </button>
             </div>
           </div>
         )}
