@@ -100,7 +100,14 @@ export default function HomePage() {
 
   const nights = calculateNights(checkIn, checkOut)
 
-  const FILTERS = (hotel?.bookingFilters || []).map((key) => t(key))
+  const FILTERS = (hotel?.bookingFilters || []).map((key) => {
+    const translated = t(key)
+    // If next-intl returns the key itself (no translation found), check customFilters
+    if (translated === key && hotel?.customFilters?.[key]) {
+      return hotel.customFilters[key]
+    }
+    return translated
+  })
 
   const hasAddons = addons.length > 0
   const STEPS = hasAddons

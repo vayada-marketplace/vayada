@@ -37,6 +37,7 @@ export interface Hotel {
   checkOutTime: string
   contact: HotelContact
   bookingFilters: string[]
+  customFilters?: Record<string, string>
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
 }
