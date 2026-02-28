@@ -76,7 +76,7 @@ export default function BookingFlowPage() {
     Promise.all([
       settingsService.listAddons().catch(() => []),
       settingsService.getAddonSettings().catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
-      settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [] } as DesignSettings)),
+      settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {} } as DesignSettings)),
     ]).then(([addonList, settings, design]) => {
       setAddons(addonList)
       setAddonSettings(settings)
