@@ -89,7 +89,11 @@ export default function DesignStudioPage() {
         body: formData,
       })
 
-      if (!res.ok) throw new Error('Upload failed')
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error('Upload response:', res.status, errorText)
+        throw new Error(`Upload failed: ${res.status} ${errorText}`)
+      }
 
       const data = await res.json()
       if (data.images?.[0]?.url) {
