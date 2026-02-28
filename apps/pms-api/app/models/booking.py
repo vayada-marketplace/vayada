@@ -23,6 +23,7 @@ class BookingCreate(BaseModel):
     children: int = 0
     referral_code: Optional[str] = None
     payment_method: str = "card"
+    rate_type: str = "flexible"
 
 
 class BookingResponse(BaseModel):
