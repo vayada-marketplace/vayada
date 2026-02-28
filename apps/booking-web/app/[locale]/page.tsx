@@ -98,6 +98,15 @@ export default function HomePage() {
   const [searching, setSearching] = useState(false)
   const roomsSectionRef = useRef<HTMLDivElement>(null)
 
+  // Default non-refundable rate expanded for all rooms
+  useEffect(() => {
+    if (rooms.length > 0 && Object.keys(expandedRates).length === 0) {
+      const defaults: Record<string, string> = {}
+      rooms.forEach((room) => { defaults[room.id] = 'nonrefundable' })
+      setExpandedRates(defaults)
+    }
+  }, [rooms])
+
   const nights = calculateNights(checkIn, checkOut)
 
   const FILTERS = (hotel?.bookingFilters || []).map((key) => {
