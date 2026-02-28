@@ -208,7 +208,7 @@
     "subtitle": "Ihre Reservierung wurde erfolgreich bestätigt.",
     "requestSubmitted": "Buchungsanfrage eingereicht",
     "pendingSubtitle": "Ihre Buchungsanfrage wurde an den Gastgeber gesendet. Er wird innerhalb von 24 Stunden antworten.",
-    "hostResponseIn": "Gastgeber antwortet in:",
+    "hostResponseIn": "Gastgeber antwortet spätestens:",
     "cancelledTitle": "Buchung storniert",
     "cancelledSubtitle": "Ihre Buchung wurde storniert.",
     "cancelledCardSubtitle": "Ihre Buchung wurde storniert. Die Autorisierung auf Ihrer Karte wurde freigegeben.",

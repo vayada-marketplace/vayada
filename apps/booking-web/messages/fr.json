@@ -209,7 +209,7 @@
     "subtitle": "Votre réservation a été confirmée avec succès.",
     "requestSubmitted": "Demande de réservation envoyée",
     "pendingSubtitle": "Votre demande de réservation a été envoyée à l'hôte. Il répondra dans les 24 heures.",
-    "hostResponseIn": "L'hôte répondra dans :",
+    "hostResponseIn": "L'hôte répondra au plus tard :",
     "cancelledTitle": "Réservation annulée",
     "cancelledSubtitle": "Votre réservation a été annulée.",
     "cancelledCardSubtitle": "Votre réservation a été annulée. L'autorisation de prélèvement sur votre carte a été levée.",

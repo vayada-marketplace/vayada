@@ -209,7 +209,7 @@
     "subtitle": "Reservasi Anda telah berhasil dikonfirmasi.",
     "requestSubmitted": "Permintaan Pemesanan Terkirim",
     "pendingSubtitle": "Permintaan pemesanan Anda telah dikirim ke tuan rumah. Mereka akan merespons dalam 24 jam.",
-    "hostResponseIn": "Tuan rumah akan merespons dalam:",
+    "hostResponseIn": "Tuan rumah akan merespons paling lambat:",
     "cancelledTitle": "Pemesanan Dibatalkan",
     "cancelledSubtitle": "Pemesanan Anda telah dibatalkan.",
     "cancelledCardSubtitle": "Pemesanan Anda telah dibatalkan. Otorisasi pada kartu Anda telah dilepaskan.",

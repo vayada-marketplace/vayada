@@ -209,7 +209,7 @@
     "subtitle": "Tu reserva ha sido confirmada con éxito.",
     "requestSubmitted": "Solicitud de reserva enviada",
     "pendingSubtitle": "Tu solicitud de reserva ha sido enviada al anfitrión. Responderá en un plazo de 24 horas.",
-    "hostResponseIn": "El anfitrión responderá en:",
+    "hostResponseIn": "El anfitrión responderá a más tardar:",
     "cancelledTitle": "Reserva cancelada",
     "cancelledSubtitle": "Tu reserva ha sido cancelada.",
     "cancelledCardSubtitle": "Tu reserva ha sido cancelada. La retención de autorización en tu tarjeta ha sido liberada.",

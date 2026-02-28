@@ -168,7 +168,7 @@ export default function BookingConfirmationPage({
               </p>
               {booking?.hostResponseDeadline && (
                 <div className="mb-6">
-                  <p className="text-sm text-gray-500 mb-1">{t('hostResponseIn') || 'Host will respond in:'}</p>
+                  <p className="text-sm text-gray-500 mb-1">{t('hostResponseIn') || 'Host will respond latest:'}</p>
                   <CountdownTimer deadline={booking.hostResponseDeadline} />
                 </div>
               )}

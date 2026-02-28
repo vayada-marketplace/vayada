@@ -215,7 +215,7 @@
     "subtitle": "Your reservation has been successfully confirmed.",
     "requestSubmitted": "Booking Request Submitted",
     "pendingSubtitle": "Your booking request has been sent to the host. They will respond within 24 hours.",
-    "hostResponseIn": "Host will respond in:",
+    "hostResponseIn": "Host will respond latest:",
     "cancelledTitle": "Booking Cancelled",
     "cancelledSubtitle": "Your booking has been cancelled.",
     "cancelledCardSubtitle": "Your booking has been cancelled. Any authorization hold on your card has been released.",
