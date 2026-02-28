@@ -109,6 +109,18 @@ export default function HomePage() {
     return translated
   })
 
+  const filteredRooms = activeFilters.length === 0
+    ? rooms
+    : rooms.filter((room) =>
+        activeFilters.every((label) => {
+          const lower = label.toLowerCase()
+          return (
+            room.features.some((f) => f.toLowerCase().includes(lower)) ||
+            room.amenities.some((a) => a.toLowerCase().includes(lower))
+          )
+        })
+      )
+
   const hasAddons = addons.length > 0
   const STEPS = hasAddons
     ? [
@@ -377,7 +389,7 @@ export default function HomePage() {
                 </div>
               </div>
             ))
-          ) : rooms.map((room, roomIndex) => {
+          ) : filteredRooms.map((room, roomIndex) => {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
             const flexibleTotal = room.baseRate * nights
@@ -636,14 +648,14 @@ export default function HomePage() {
       {/* Room Detail Modal */}
       {detailModalIndex !== null && (
         <RoomDetailModal
-          room={rooms[detailModalIndex]}
+          room={filteredRooms[detailModalIndex]}
           nights={nights}
           open={true}
           onClose={() => setDetailModalIndex(null)}
           currentIndex={detailModalIndex}
-          totalRooms={rooms.length}
-          onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? rooms.length - 1 : detailModalIndex - 1)}
-          onNext={() => setDetailModalIndex(detailModalIndex === rooms.length - 1 ? 0 : detailModalIndex + 1)}
+          totalRooms={filteredRooms.length}
+          onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1)}
+          onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
         />
       )}
 
