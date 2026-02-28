@@ -346,11 +346,6 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         )}
 
-        {/* Metadata */}
-        <div className="text-xs text-gray-400">
-          <p>Created: {booking.createdAt}</p>
-          <p>Last updated: {booking.updatedAt}</p>
-        </div>
       </div>
     </div>
   )
