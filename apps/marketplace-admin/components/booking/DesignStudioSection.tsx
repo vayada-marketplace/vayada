@@ -71,30 +71,18 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
     const previewUrl = URL.createObjectURL(file)
     setHeroImage(previewUrl)
 
-    // Upload via booking engine backend (proxied to PMS/S3)
+    // Upload to S3 via PMS API
     try {
       setUploading(true)
-      const apiUrl = process.env.NEXT_PUBLIC_BOOKING_API_URL || 'https://booking-api.vayada.com'
+      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
       const token = localStorage.getItem('access_token')
+      const formData = new FormData()
+      formData.append('files', file)
 
-      // Convert file to base64 JSON to avoid WAF/multipart issues
-      const buffer = await file.arrayBuffer()
-      const base64Data = btoa(
-        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      )
-
-      const res = await fetch(`${apiUrl}/admin/upload/images`, {
+      const res = await fetch(`${pmsUrl}/upload/images`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(hotelId ? { 'X-Hotel-Id': hotelId } : {}),
-        },
-        body: JSON.stringify({
-          filename: file.name,
-          content_type: file.type || 'image/jpeg',
-          data: base64Data,
-        }),
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
       })
 
       if (!res.ok) throw new Error('Upload failed')
