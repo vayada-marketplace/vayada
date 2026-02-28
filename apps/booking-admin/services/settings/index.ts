@@ -10,6 +10,10 @@ export interface PropertySettings {
   default_currency: string
   supported_currencies: string[]
   supported_languages: string[]
+  check_in_time: string
+  check_out_time: string
+  pay_at_property_enabled: boolean
+  free_cancellation_days: number
   email_notifications: boolean
   new_booking_alerts: boolean
   payment_alerts: boolean

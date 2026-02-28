@@ -48,6 +48,10 @@ const DEFAULT_SETTINGS: PropertySettings = {
   default_currency: 'EUR',
   supported_currencies: [],
   supported_languages: ['en'],
+  check_in_time: '15:00',
+  check_out_time: '11:00',
+  pay_at_property_enabled: false,
+  free_cancellation_days: 7,
   email_notifications: true,
   new_booking_alerts: true,
   payment_alerts: true,
@@ -259,6 +263,30 @@ export default function SettingsPage() {
                             onChange={(e) => setSettings({ ...settings, address: e.target.value })}
                             className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="Sekotong, Lombok Barat, NTB 83365, Indonesia"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
+                            Check-in Time
+                          </label>
+                          <input
+                            type="time"
+                            value={settings.check_in_time}
+                            onChange={(e) => setSettings({ ...settings, check_in_time: e.target.value })}
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
+                            Check-out Time
+                          </label>
+                          <input
+                            type="time"
+                            value={settings.check_out_time}
+                            onChange={(e) => setSettings({ ...settings, check_out_time: e.target.value })}
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           />
                         </div>
                       </div>
