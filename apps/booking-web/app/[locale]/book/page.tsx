@@ -32,6 +32,7 @@ function BookPageContent() {
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
+  const rateType = searchParams.get('rateType') || 'flexible'
 
   const hasAddons = addons.length > 0
   const STEPS = hasAddons
@@ -50,7 +51,10 @@ function BookPageContent() {
 
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const roomTotal = room ? room.baseRate * nights : 0
+  const nightlyRate = rateType === 'nonrefundable'
+    ? (room?.nonRefundableRate ?? Math.round(room.baseRate * 0.85))
+    : room?.baseRate ?? 0
+  const roomTotal = room ? nightlyRate * nights : 0
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -96,6 +100,7 @@ function BookPageContent() {
         checkOut,
         adults: String(adultsParam),
         children: String(childrenParam),
+        rateType,
       })
       router.push(`/payment?${params.toString()}`)
     } catch (err: any) {
@@ -200,7 +205,7 @@ function BookPageContent() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
-                  <p className="text-xs text-gray-500">{formatPrice(room.baseRate, room.currency)} &times; {nights}</p>
+                  <p className="text-xs text-gray-500">{formatPrice(nightlyRate, room.currency)} &times; {nights}</p>
                 </div>
               </div>
 

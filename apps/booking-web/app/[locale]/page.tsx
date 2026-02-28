@@ -559,7 +559,7 @@ export default function HomePage() {
                               </div>
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
@@ -624,7 +624,7 @@ export default function HomePage() {
                               </div>
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=nonrefundable`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"

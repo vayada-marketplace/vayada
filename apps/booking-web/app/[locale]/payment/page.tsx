@@ -86,9 +86,15 @@ function PaymentPageContent() {
     { number: 4, label: ts('payment') },
   ]
 
+  const rateType = searchParams.get('rateType') || 'flexible'
+  const isNonRefundable = rateType === 'nonrefundable'
+
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const roomTotal = room ? room.baseRate * nights : 0
+  const nightlyRate = isNonRefundable
+    ? (room?.nonRefundableRate ?? Math.round(room.baseRate * 0.85))
+    : room?.baseRate ?? 0
+  const roomTotal = room ? nightlyRate * nights : 0
 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
@@ -136,7 +142,8 @@ function PaymentPageContent() {
         checkOut,
         adults: adultsParam,
         children: childrenParam,
-        paymentMethod,
+        paymentMethod: isNonRefundable ? 'card' : paymentMethod,
+        rateType,
       })
 
       const booking = result.booking
@@ -296,7 +303,7 @@ function PaymentPageContent() {
                   </div>
                   <p className="text-xs text-gray-500">{t('cardAuthNote') || 'An authorization hold will be placed on your card'}</p>
                 </button>
-                {payAtPropertyEnabled && (
+                {payAtPropertyEnabled && !isNonRefundable && (
                   <button
                     onClick={() => setPaymentMethod('pay_at_property')}
                     className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
@@ -426,7 +433,7 @@ function PaymentPageContent() {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-gray-900">{room.name}</p>
-                  <p className="text-xs text-gray-500">{tb('flexibleRate')}</p>
+                  <p className="text-xs text-gray-500">{isNonRefundable ? tb('nonRefundableRate') : tb('flexibleRate')}</p>
                 </div>
               </div>
 

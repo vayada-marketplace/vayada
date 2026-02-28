@@ -41,6 +41,7 @@ export const bookingService = {
     children: number
     referralCode?: string
     paymentMethod?: string
+    rateType?: string
   }): Promise<BookingRequestResponse> {
     const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings`, {
       method: 'POST',
