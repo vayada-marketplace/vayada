@@ -352,10 +352,13 @@ function PaymentPageContent() {
                   )}
                 </button>
                 <span className="text-sm text-gray-700 leading-relaxed">
-                  {t.rich('agreeTerms', {
+                  {paymentMethod === 'card' ? t.rich('agreeTerms', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     amount: formatPrice(roomTotal, room?.currency || 'EUR'),
+                  }) : t.rich('agreeTermsProperty', {
+                    terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
+                    cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                   })}
                 </span>
               </label>

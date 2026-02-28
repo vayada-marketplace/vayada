@@ -146,6 +146,7 @@
     "sslEncrypted": "SSL Encrypted",
     "securePaymentBadge": "Secure Payment",
     "agreeTerms": "I agree to the <terms>Terms and Conditions</terms> and <cancellation>Cancellation Policy</cancellation>. I understand that my card will be charged {amount} upon confirmation.",
+    "agreeTermsProperty": "I agree to the <terms>Terms and Conditions</terms> and <cancellation>Cancellation Policy</cancellation>. I understand that payment will be collected at the property upon check-in.",
     "termsAndConditions": "Terms and Conditions",
     "cancellationPolicy": "Cancellation Policy",
     "cancellationPolicyTitle": "Cancellation Policy",

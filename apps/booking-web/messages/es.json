@@ -134,6 +134,7 @@
     "sslEncrypted": "Cifrado SSL",
     "securePaymentBadge": "Pago Seguro",
     "agreeTerms": "Acepto los <terms>Términos y Condiciones</terms> y la <cancellation>Política de Cancelación</cancellation>. Entiendo que se cargará {amount} en mi tarjeta tras la confirmación.",
+    "agreeTermsProperty": "Acepto los <terms>Términos y Condiciones</terms> y la <cancellation>Política de Cancelación</cancellation>. Entiendo que el pago se realizará en la propiedad al momento del check-in.",
     "termsAndConditions": "Términos y Condiciones",
     "cancellationPolicy": "Política de Cancelación",
     "cancellationPolicyTitle": "Política de Cancelación",

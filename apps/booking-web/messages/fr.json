@@ -134,6 +134,7 @@
     "sslEncrypted": "Chiffrement SSL",
     "securePaymentBadge": "Paiement sécurisé",
     "agreeTerms": "J'accepte les <terms>Conditions Générales</terms> et la <cancellation>Politique d'Annulation</cancellation>. Je comprends que ma carte sera débitée de {amount} lors de la confirmation.",
+    "agreeTermsProperty": "J'accepte les <terms>Conditions Générales</terms> et la <cancellation>Politique d'Annulation</cancellation>. Je comprends que le paiement sera effectué à la propriété lors de l'enregistrement.",
     "termsAndConditions": "Conditions générales",
     "cancellationPolicy": "Politique d'annulation",
     "cancellationPolicyTitle": "Politique d'annulation",

@@ -133,6 +133,7 @@
     "sslEncrypted": "SSL-verschlüsselt",
     "securePaymentBadge": "Sichere Zahlung",
     "agreeTerms": "Ich stimme den <terms>Allgemeinen Geschäftsbedingungen</terms> und der <cancellation>Stornierungsbedingungen</cancellation> zu. Ich verstehe, dass meine Karte nach Bestätigung mit {amount} belastet wird.",
+    "agreeTermsProperty": "Ich stimme den <terms>Allgemeinen Geschäftsbedingungen</terms> und der <cancellation>Stornierungsbedingungen</cancellation> zu. Ich verstehe, dass die Zahlung bei Ankunft in der Unterkunft erfolgt.",
     "termsAndConditions": "Allgemeinen Geschäftsbedingungen",
     "cancellationPolicy": "Stornierungsbedingungen",
     "cancellationPolicyTitle": "Stornierungsbedingungen",
