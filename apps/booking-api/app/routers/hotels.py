@@ -51,6 +51,24 @@ async def get_addons(slug: str):
     return addons
 
 
+@router.get("/{slug}/payment-settings")
+async def get_payment_settings(slug: str):
+    try:
+        from app.repositories.booking_hotel_repo import BookingHotelRepository
+        hotel = await BookingHotelRepository.get_by_slug(slug)
+    except Exception as e:
+        logger.error(f"Error fetching payment settings for {slug}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    if not hotel:
+        raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
+
+    return {
+        "payAtPropertyEnabled": hotel.get("pay_at_property_enabled", False),
+        "freeCancellationDays": hotel.get("free_cancellation_days", 7),
+    }
+
+
 @exchange_router.get("/exchange-rates")
 async def exchange_rates(base: str = Query(default="EUR")):
     try:

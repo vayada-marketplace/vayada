@@ -13,6 +13,10 @@ class PropertySettingsResponse(BaseModel):
     default_currency: str
     supported_currencies: list[str]
     supported_languages: list[str]
+    check_in_time: str
+    check_out_time: str
+    pay_at_property_enabled: bool
+    free_cancellation_days: int
     email_notifications: bool
     new_booking_alerts: bool
     payment_alerts: bool
@@ -29,6 +33,10 @@ class PropertySettingsUpdate(BaseModel):
     default_currency: Optional[str] = None
     supported_currencies: Optional[list[str]] = None
     supported_languages: Optional[list[str]] = None
+    check_in_time: Optional[str] = None
+    check_out_time: Optional[str] = None
+    pay_at_property_enabled: Optional[bool] = None
+    free_cancellation_days: Optional[int] = None
     email_notifications: Optional[bool] = None
     new_booking_alerts: Optional[bool] = None
     payment_alerts: Optional[bool] = None

@@ -192,6 +192,10 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         default_currency=hotel.get('currency') or 'EUR',
         supported_currencies=currencies,
         supported_languages=languages,
+        check_in_time=hotel.get('check_in_time') or '15:00',
+        check_out_time=hotel.get('check_out_time') or '11:00',
+        pay_at_property_enabled=hotel.get('pay_at_property_enabled', False),
+        free_cancellation_days=hotel.get('free_cancellation_days', 7),
         email_notifications=hotel.get('email_notifications', True),
         new_booking_alerts=hotel.get('new_booking_alerts', True),
         payment_alerts=hotel.get('payment_alerts', True),
@@ -218,6 +222,10 @@ async def get_property_settings(
                 default_currency='EUR',
                 supported_currencies=[],
                 supported_languages=['en'],
+                check_in_time='15:00',
+                check_out_time='11:00',
+                pay_at_property_enabled=False,
+                free_cancellation_days=7,
                 email_notifications=True,
                 new_booking_alerts=True,
                 payment_alerts=True,
@@ -274,6 +282,14 @@ async def update_property_settings(
                 updates["supported_currencies"] = data.supported_currencies
             if data.supported_languages is not None:
                 updates["supported_languages"] = data.supported_languages
+            if data.check_in_time is not None:
+                updates["check_in_time"] = data.check_in_time
+            if data.check_out_time is not None:
+                updates["check_out_time"] = data.check_out_time
+            if data.pay_at_property_enabled is not None:
+                updates["pay_at_property_enabled"] = data.pay_at_property_enabled
+            if data.free_cancellation_days is not None:
+                updates["free_cancellation_days"] = data.free_cancellation_days
             if data.email_notifications is not None:
                 updates["email_notifications"] = data.email_notifications
             if data.new_booking_alerts is not None:
