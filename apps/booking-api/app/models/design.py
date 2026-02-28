@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 class DesignSettingsResponse(BaseModel):
@@ -10,6 +10,7 @@ class DesignSettingsResponse(BaseModel):
     accent_color: str
     font_pairing: str
     booking_filters: List[str] = []
+    custom_filters: Dict[str, str] = {}
 
 
 class DesignSettingsUpdate(BaseModel):
@@ -20,3 +21,4 @@ class DesignSettingsUpdate(BaseModel):
     accent_color: Optional[str] = None
     font_pairing: Optional[str] = None
     booking_filters: Optional[List[str]] = None
+    custom_filters: Optional[Dict[str, str]] = None

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 def to_camel(string: str) -> str:
@@ -55,6 +55,7 @@ class HotelResponse(BaseModel):
     contact: HotelContact
     social_links: Optional[HotelSocialLinks] = None
     booking_filters: List[str] = []
+    custom_filters: Dict[str, str] = {}
     branding: Optional[HotelBranding] = None
 
 

@@ -70,6 +70,9 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     raw_filters = row.get("booking_filters")
     booking_filters = json.loads(raw_filters) if isinstance(raw_filters, str) else (raw_filters or [])
 
+    raw_custom_filters = row.get("custom_filters")
+    custom_filters = json.loads(raw_custom_filters) if isinstance(raw_custom_filters, str) else (raw_custom_filters or {})
+
     return HotelResponse(
         id=str(row["id"]),
         name=name,
@@ -81,6 +84,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         currency=row["currency"],
         supported_currencies=supported_currencies,
         booking_filters=booking_filters,
+        custom_filters=custom_filters,
         hero_image=row["hero_image"],
         images=images,
         amenities=amenities,

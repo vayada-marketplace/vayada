@@ -324,7 +324,7 @@ async def update_property_settings(
 
 # ── Design Settings ──────────────────────────────────────────────────
 
-_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing, booking_filters"
+_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing, booking_filters, custom_filters"
 
 _DESIGN_DEFAULTS = DesignSettingsResponse(
     hero_image='',
@@ -334,6 +334,7 @@ _DESIGN_DEFAULTS = DesignSettingsResponse(
     accent_color='',
     font_pairing='',
     booking_filters=[],
+    custom_filters={},
 )
 
 # API field name → DB column name
@@ -345,6 +346,7 @@ _DESIGN_FIELD_MAP = {
     "accent_color": "branding_accent_color",
     "font_pairing": "branding_font_pairing",
     "booking_filters": "booking_filters",
+    "custom_filters": "custom_filters",
 }
 
 
@@ -352,6 +354,9 @@ def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
     filters = hotel.get('booking_filters') or []
     if isinstance(filters, str):
         filters = json.loads(filters)
+    custom_filters = hotel.get('custom_filters') or {}
+    if isinstance(custom_filters, str):
+        custom_filters = json.loads(custom_filters)
     return DesignSettingsResponse(
         hero_image=hotel.get('hero_image') or '',
         hero_heading=hotel.get('name') or '',
@@ -360,6 +365,7 @@ def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
         accent_color=hotel.get('branding_accent_color') or '',
         font_pairing=hotel.get('branding_font_pairing') or '',
         booking_filters=filters,
+        custom_filters=custom_filters,
     )
 
 
