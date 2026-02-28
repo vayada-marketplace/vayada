@@ -48,7 +48,13 @@ async def get_rooms_for_guest(
         else:
             remaining = total
 
-        nr_rate = room.get("non_refundable_rate")
+        if check_in:
+            base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in.month)
+        else:
+            base_rate = float(room["base_rate"])
+            nr = room.get("non_refundable_rate")
+            nr_rate = float(nr) if nr is not None else None
+
         result.append(
             RoomTypeResponse(
                 id=str(room["id"]),
@@ -57,8 +63,8 @@ async def get_rooms_for_guest(
                 short_description=room["short_description"],
                 max_occupancy=room["max_occupancy"],
                 size=room["size"],
-                base_rate=float(room["base_rate"]),
-                non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
+                base_rate=base_rate,
+                non_refundable_rate=nr_rate,
                 currency=room["currency"],
                 amenities=_parse_jsonb(room["amenities"]),
                 images=_parse_jsonb(room["images"]),

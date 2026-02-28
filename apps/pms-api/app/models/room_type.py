@@ -1,10 +1,17 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 def to_camel(string: str) -> str:
     parts = string.split("_")
     return parts[0] + "".join(w.capitalize() for w in parts[1:])
+
+
+class MonthlyRate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    base_rate: Optional[float] = None
+    non_refundable_rate: Optional[float] = None
 
 
 class RoomTypeCreate(BaseModel):
@@ -25,6 +32,7 @@ class RoomTypeCreate(BaseModel):
     total_rooms: int = 1
     is_active: bool = True
     sort_order: int = 0
+    monthly_rates: Optional[Dict[str, MonthlyRate]] = None
 
 
 class RoomTypeUpdate(BaseModel):
@@ -45,6 +53,7 @@ class RoomTypeUpdate(BaseModel):
     total_rooms: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+    monthly_rates: Optional[Dict[str, MonthlyRate]] = None
 
 
 class RoomTypeResponse(BaseModel):
@@ -87,5 +96,6 @@ class RoomTypeAdminResponse(BaseModel):
     total_rooms: int
     is_active: bool
     sort_order: int
+    monthly_rates: Dict[str, MonthlyRate] = {}
     created_at: str
     updated_at: str

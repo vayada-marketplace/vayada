@@ -18,6 +18,7 @@ from app.models.room_type import (
     RoomTypeCreate,
     RoomTypeUpdate,
     RoomTypeAdminResponse,
+    MonthlyRate,
 )
 from app.models.booking import BookingAdminResponse, BookingStatusUpdate, AdminBookingCreate
 from app.models.room import RoomCreate, RoomUpdate, RoomResponse
@@ -65,6 +66,19 @@ async def _get_hotel_id(user_id: str) -> str:
     return str(row["id"])
 
 
+def _parse_monthly_rates(val) -> dict:
+    raw = val if val else {}
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    result = {}
+    for k, v in raw.items():
+        result[k] = MonthlyRate(
+            base_rate=v.get("base_rate"),
+            non_refundable_rate=v.get("non_refundable_rate"),
+        )
+    return result
+
+
 def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
     nr_rate = room.get("non_refundable_rate")
     return RoomTypeAdminResponse(
@@ -85,6 +99,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         total_rooms=room["total_rooms"],
         is_active=room["is_active"],
         sort_order=room["sort_order"],
+        monthly_rates=_parse_monthly_rates(room.get("monthly_rates")),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
     )
@@ -227,7 +242,15 @@ async def create_room_type(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await _get_hotel_id(user_id)
-    room = await RoomTypeRepository.create(hotel_id, data.model_dump())
+    payload = data.model_dump()
+    if payload.get("monthly_rates"):
+        payload["monthly_rates"] = {
+            k: v.model_dump(exclude_none=True) if hasattr(v, "model_dump") else {kk: vv for kk, vv in v.items() if vv is not None}
+            for k, v in payload["monthly_rates"].items()
+        }
+    else:
+        payload["monthly_rates"] = {}
+    room = await RoomTypeRepository.create(hotel_id, payload)
     return _room_to_admin(room)
 
 
@@ -255,6 +278,11 @@ async def update_room_type(
         raise HTTPException(status_code=404, detail="Room type not found")
 
     updates = data.model_dump(exclude_unset=True)
+    if "monthly_rates" in updates and updates["monthly_rates"] is not None:
+        updates["monthly_rates"] = {
+            k: {kk: vv for kk, vv in v.items() if vv is not None}
+            for k, v in updates["monthly_rates"].items()
+        }
     room = await RoomTypeRepository.update(room_type_id, updates)
     return _room_to_admin(room)
 
@@ -400,7 +428,11 @@ async def create_admin_booking(
 
     # Get room type for pricing
     room_type = await RoomTypeRepository.get_by_id(str(room["room_type_id"]))
-    nightly_rate = data.nightly_rate if data.nightly_rate is not None else float(room_type["base_rate"])
+    if data.nightly_rate is not None:
+        nightly_rate = data.nightly_rate
+    else:
+        resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in.month)
+        nightly_rate = resolved_base
     nights = (data.check_out - data.check_in).days
     total_amount = nightly_rate * nights
 

@@ -90,7 +90,8 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
-    nightly_rate = float(room["base_rate"])
+    base_rate, _ = RoomTypeRepository.resolve_rate(room, data.check_in.month)
+    nightly_rate = base_rate
     total_amount = nightly_rate * nights
 
     affiliate_id = None
@@ -163,14 +164,16 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
+    # Resolve monthly rate for check-in month
+    resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, data.check_in.month)
+
     # Rate-type dependent pricing
     if data.rate_type == "nonrefundable":
         if data.payment_method == "pay_at_property":
             raise ValueError("Non-refundable rate requires card payment")
-        nr = room.get("non_refundable_rate")
-        nightly_rate = float(nr) if nr else round(float(room["base_rate"]) * 0.85, 2)
+        nightly_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
     else:
-        nightly_rate = float(room["base_rate"])
+        nightly_rate = resolved_base
     total_amount = nightly_rate * nights
 
     # Resolve affiliate

@@ -1,5 +1,5 @@
 import json
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import date
 from app.database import Database
 
@@ -31,11 +31,11 @@ class RoomTypeRepository:
                 hotel_id, name, description, short_description,
                 max_occupancy, size, base_rate, non_refundable_rate, currency,
                 amenities, images, bed_type, features,
-                total_rooms, is_active, sort_order
+                total_rooms, is_active, sort_order, monthly_rates
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
                 $10::jsonb, $11::jsonb, $12, $13::jsonb,
-                $14, $15, $16
+                $14, $15, $16, $17::jsonb
             ) RETURNING *
             """,
             hotel_id,
@@ -54,6 +54,7 @@ class RoomTypeRepository:
             data.get("total_rooms", 1),
             data.get("is_active", True),
             data.get("sort_order", 0),
+            json.dumps(data.get("monthly_rates", {})),
         )
         return dict(row)
 
@@ -66,7 +67,7 @@ class RoomTypeRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col in ("amenities", "images", "features"):
+            if col in ("amenities", "images", "features", "monthly_rates"):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
@@ -126,3 +127,21 @@ class RoomTypeRepository:
             end_date,
         )
         return count or 0
+
+    @staticmethod
+    def resolve_rate(room: dict, check_in_month: int) -> Tuple[float, Optional[float]]:
+        """Return (base_rate, non_refundable_rate) using monthly override if present."""
+        monthly_rates = room.get("monthly_rates") or {}
+        if isinstance(monthly_rates, str):
+            monthly_rates = json.loads(monthly_rates)
+
+        override = monthly_rates.get(str(check_in_month))
+        if override:
+            base = override.get("base_rate") if override.get("base_rate") is not None else float(room["base_rate"])
+            nr = room.get("non_refundable_rate")
+            nr_default = float(nr) if nr is not None else None
+            nr_resolved = override.get("non_refundable_rate") if override.get("non_refundable_rate") is not None else nr_default
+            return (float(base), float(nr_resolved) if nr_resolved is not None else None)
+
+        nr = room.get("non_refundable_rate")
+        return (float(room["base_rate"]), float(nr) if nr is not None else None)
