@@ -219,11 +219,11 @@ export default function MyBookingPage() {
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t('checkIn')}</span>
-                <span className="font-medium text-gray-900 text-sm">{booking.checkIn}</span>
+                <span className="font-medium text-gray-900 text-sm">{booking.checkIn}, {hotel.checkInTime}</span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t('checkOut')}</span>
-                <span className="font-medium text-gray-900 text-sm">{booking.checkOut}</span>
+                <span className="font-medium text-gray-900 text-sm">{booking.checkOut}, {hotel.checkOutTime}</span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t('guests')}</span>

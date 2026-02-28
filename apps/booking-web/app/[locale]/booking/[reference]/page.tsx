@@ -222,11 +222,15 @@ export default function BookingConfirmationPage({
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('checkIn')}</span>
-              <span className="font-medium text-gray-900">{booking?.checkIn || '—'}</span>
+              <span className="font-medium text-gray-900">
+                {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : '—'}
+              </span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('checkOut')}</span>
-              <span className="font-medium text-gray-900">{booking?.checkOut || '—'}</span>
+              <span className="font-medium text-gray-900">
+                {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : '—'}
+              </span>
             </div>
             <div className="flex justify-between py-3">
               <span className="text-gray-600">{t('duration')}</span>
