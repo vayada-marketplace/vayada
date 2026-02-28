@@ -76,16 +76,25 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
       setUploading(true)
       const apiUrl = process.env.NEXT_PUBLIC_BOOKING_API_URL || 'https://booking-api.vayada.com'
       const token = localStorage.getItem('access_token')
-      const formData = new FormData()
-      formData.append('files', file)
+
+      // Convert file to base64 JSON to avoid WAF/multipart issues
+      const buffer = await file.arrayBuffer()
+      const base64Data = btoa(
+        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      )
 
       const res = await fetch(`${apiUrl}/admin/upload/images`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(hotelId ? { 'X-Hotel-Id': hotelId } : {}),
         },
-        body: formData,
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || 'image/jpeg',
+          data: base64Data,
+        }),
       })
 
       if (!res.ok) throw new Error('Upload failed')
