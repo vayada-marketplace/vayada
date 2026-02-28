@@ -94,7 +94,15 @@ export default function DesignStudioPage() {
       const data = await res.json()
       if (data.images?.[0]?.url) {
         URL.revokeObjectURL(previewUrl)
-        setHeroImage(data.images[0].url)
+        const s3Url = data.images[0].url
+        setHeroImage(s3Url)
+
+        // Auto-save hero image to backend so it persists on reload
+        try {
+          await settingsService.updateDesignSettings({ hero_image: s3Url })
+        } catch {
+          console.error('Failed to auto-save hero image')
+        }
       } else {
         throw new Error('No image URL returned')
       }
@@ -122,8 +130,10 @@ export default function DesignStudioPage() {
     try {
       setSaving(true)
       setFeedback(null)
+      // Never persist blob: URLs — they are temporary local previews
+      const imageToSave = heroImage.startsWith('blob:') ? '' : heroImage
       await settingsService.updateDesignSettings({
-        hero_image: heroImage,
+        hero_image: imageToSave,
         hero_heading: heroHeading,
         hero_subtext: heroSubtext,
         primary_color: primaryColor,
