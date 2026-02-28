@@ -394,11 +394,11 @@ export default function DesignStudioPage() {
 
                 <div className="space-y-2">
                   {[
-                    ...AVAILABLE_FILTERS,
-                    ...Object.entries(customFilters).map(([key, label]) => ({ key, label, isCustom: true })),
+                    ...AVAILABLE_FILTERS.map((f) => ({ ...f, isCustom: false as const })),
+                    ...Object.entries(customFilters).map(([key, label]) => ({ key, label, isCustom: true as const })),
                   ].map((filter) => {
                     const enabled = bookingFilters.includes(filter.key)
-                    const isCustom = 'isCustom' in filter && filter.isCustom
+                    const isCustom = filter.isCustom
                     return (
                       <div
                         key={filter.key}
