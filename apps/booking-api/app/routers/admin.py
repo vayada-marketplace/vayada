@@ -1,12 +1,14 @@
 """
 Admin routes for hotel management in the booking engine
 """
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Request
-from typing import List
+from fastapi import APIRouter, HTTPException, status, Depends, Request
+from typing import List, Optional
 import logging
 import re
 import json
+import base64
 import httpx
+from pydantic import BaseModel
 
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel, require_superadmin
 from app.auth import hash_password
@@ -448,31 +450,29 @@ async def update_design_settings(
 # ── Image Upload Proxy ──────────────────────────────────────────────
 
 
+class ImageUploadRequest(BaseModel):
+    filename: str
+    content_type: Optional[str] = "image/jpeg"
+    data: str  # base64-encoded image
+
+
 @router.post("/upload/images", status_code=201)
 async def proxy_upload_images(
+    body: ImageUploadRequest,
     request: Request,
-    files: List[UploadFile] = File(...),
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Proxy image uploads to the PMS backend (avoids CORS issues)."""
+    """Proxy image upload to PMS backend. Accepts base64 JSON to avoid WAF/CORS issues."""
     try:
-        # Forward the original token — both services share the same auth DB
         auth_header = request.headers.get("authorization", "")
         pms_url = f"{settings.PMS_API_URL}/upload/images"
-        logger.info(f"Proxying upload to {pms_url} for user {user_id}")
+
+        file_content = base64.b64decode(body.data)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            upload_files = []
-            for f in files:
-                content = await f.read()
-                upload_files.append(
-                    ("files", (f.filename, content, f.content_type or "image/jpeg"))
-                )
-                logger.info(f"Uploading file: {f.filename}, size: {len(content)}, type: {f.content_type}")
-
             resp = await client.post(
                 pms_url,
-                files=upload_files,
+                files=[("files", (body.filename, file_content, body.content_type))],
                 headers={"Authorization": auth_header},
             )
 
