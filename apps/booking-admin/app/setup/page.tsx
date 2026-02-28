@@ -117,15 +117,15 @@ export default function SetupPage() {
     const previewUrl = URL.createObjectURL(file)
     setHeroImage(previewUrl)
 
-    // Upload to S3 via PMS API
+    // Upload via booking engine backend (proxied to PMS/S3)
     try {
       setUploading(true)
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'http://localhost:8002'
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
       const token = localStorage.getItem('access_token')
       const formData = new FormData()
       formData.append('files', file)
 
-      const res = await fetch(`${pmsUrl}/upload/images`, {
+      const res = await fetch(`${apiUrl}/admin/upload/images`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
