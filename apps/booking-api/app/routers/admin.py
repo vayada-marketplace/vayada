@@ -1,10 +1,12 @@
 """
 Admin routes for hotel management in the booking engine
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File
+from typing import List
 import logging
 import re
 import json
+import httpx
 
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel, require_superadmin
 from app.auth import hash_password
@@ -441,6 +443,61 @@ async def update_design_settings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update design settings"
         )
+
+
+# ── Image Upload Proxy ──────────────────────────────────────────────
+
+
+@router.post("/upload/images", status_code=201)
+async def proxy_upload_images(
+    files: List[UploadFile] = File(...),
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Proxy image uploads to the PMS backend (avoids CORS issues)."""
+    try:
+        token_header = f"Bearer {_create_proxy_token(user_id)}"
+        pms_url = f"{settings.PMS_API_URL}/upload/images"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            upload_files = []
+            for f in files:
+                content = await f.read()
+                upload_files.append(
+                    ("files", (f.filename, content, f.content_type or "image/jpeg"))
+                )
+
+            resp = await client.post(
+                pms_url,
+                files=upload_files,
+                headers={"Authorization": token_header},
+            )
+
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+        return resp.json()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error proxying image upload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to upload image",
+        )
+
+
+def _create_proxy_token(user_id: str) -> str:
+    """Create a JWT for the PMS backend using the shared secret."""
+    import jwt
+    from datetime import datetime, timezone, timedelta
+
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "type": "access",
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 # ── Addon CRUD ──────────────────────────────────────────────────────

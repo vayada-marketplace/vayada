@@ -145,6 +145,7 @@ jobs:
           MARKETPLACE_DATABASE_URL: ""
           CORS_ORIGINS: "http://localhost:3000,http://localhost:3003"
           JWT_SECRET_KEY: "test-secret-key-for-testing-only"
+          PMS_API_URL: "http://localhost:8002"
           DEBUG: "true"
           ENVIRONMENT: "test"
 
