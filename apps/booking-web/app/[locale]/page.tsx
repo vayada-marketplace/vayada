@@ -508,68 +508,6 @@ export default function HomePage() {
                     <div className="border-t border-gray-100 pt-4">
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t('rateOptions')}</p>
                       <div className="space-y-3">
-                        {/* Flexible Rate */}
-                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
-                          <button
-                            onClick={() =>
-                              setExpandedRates((prev) => ({
-                                ...prev,
-                                [room.id]: prev[room.id] === 'flexible' ? null : 'flexible',
-                              }))
-                            }
-                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                              <div className="text-left">
-                                <p className="text-sm font-bold text-gray-900">{t('flexibleRate')}</p>
-                                <p className="text-xs text-gray-500">{t('flexibleDesc')}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, room.currency)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(room.baseRate, room.currency) })}</p>
-                              </div>
-                              <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'flexible' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </div>
-                          </button>
-                          {expandedRate === 'flexible' && (
-                            <div className="px-4 pb-4">
-                              <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('dailyBreakfast', { count: adults })}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('welcomeDrink')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('freeWifi')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('airportTransfer')}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
-                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
-                                }}
-                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
-                              >
-                                {t('selectThisRate')}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
                         {/* Non-Refundable Rate */}
                         <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200'}`}>
                           <button
@@ -625,6 +563,68 @@ export default function HomePage() {
                               <button
                                 onClick={() => {
                                   const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=nonrefundable`
+                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+                                }}
+                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
+                              >
+                                {t('selectThisRate')}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Flexible Rate */}
+                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
+                          <button
+                            onClick={() =>
+                              setExpandedRates((prev) => ({
+                                ...prev,
+                                [room.id]: prev[room.id] === 'flexible' ? null : 'flexible',
+                              }))
+                            }
+                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              <div className="text-left">
+                                <p className="text-sm font-bold text-gray-900">{t('flexibleRate')}</p>
+                                <p className="text-xs text-gray-500">{t('flexibleDesc')}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, room.currency)}</p>
+                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(room.baseRate, room.currency) })}</p>
+                              </div>
+                              <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'flexible' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </div>
+                          </button>
+                          {expandedRate === 'flexible' && (
+                            <div className="px-4 pb-4">
+                              <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
+                                <p className="flex items-center gap-2 text-sm text-gray-600">
+                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                  {t('dailyBreakfast', { count: adults })}
+                                </p>
+                                <p className="flex items-center gap-2 text-sm text-gray-600">
+                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                  {t('welcomeDrink')}
+                                </p>
+                                <p className="flex items-center gap-2 text-sm text-gray-600">
+                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                  {t('freeWifi')}
+                                </p>
+                                <p className="flex items-center gap-2 text-sm text-gray-600">
+                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                  {t('airportTransfer')}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
