@@ -7,12 +7,24 @@ export interface PropertySettings {
   phone_number: string
   whatsapp_number: string
   address: string
+  city?: string
+  country?: string
+  instagram?: string
+  facebook?: string
   default_currency: string
+  default_language?: string
   supported_currencies: string[]
   supported_languages: string[]
   check_in_time: string
   check_out_time: string
+  minimum_stay?: number
   pay_at_property_enabled: boolean
+  online_card_payment?: boolean
+  bank_transfer?: boolean
+  special_requests_enabled?: boolean
+  arrival_time_enabled?: boolean
+  guest_count_enabled?: boolean
+  refer_a_guest_enabled?: boolean
   free_cancellation_days: number
   email_notifications: boolean
   new_booking_alerts: boolean

@@ -1,9 +1,10 @@
 export const COLOR_PRESETS = [
-  { name: 'Indigo', primary: '#4F46E5', accent: '#F5F5F4' },
-  { name: 'Emerald', primary: '#059669', accent: '#F0FDF4' },
-  { name: 'Amber', primary: '#D97706', accent: '#FFFBEB' },
-  { name: 'Rose', primary: '#E11D48', accent: '#FFF1F2' },
-  { name: 'Slate', primary: '#475569', accent: '#F8FAFC' },
+  { name: 'Ocean Blue', primary: '#0077B6', accent: '#E8F4F8' },
+  { name: 'Tropical Gold', primary: '#D4A017', accent: '#FDF8E8' },
+  { name: 'Forest Green', primary: '#2D6A4F', accent: '#EBF5F0' },
+  { name: 'Sunset Coral', primary: '#E76F51', accent: '#FDF0ED' },
+  { name: 'Royal Purple', primary: '#7B2D8E', accent: '#F5EBF7' },
+  { name: 'Charcoal', primary: '#2D3436', accent: '#F0F0F0' },
 ]
 
 export const FONT_PAIRINGS = [
@@ -26,9 +27,9 @@ export const FONT_PAIRINGS = [
   {
     id: 'grand-classic',
     name: 'Grand Classic',
-    fonts: 'Lora + Source Sans Pro',
+    fonts: 'Cormorant Garamond + Lato',
     preview: 'Stately & Readable',
-    headingFamily: "'Lora', serif",
-    bodyFamily: "'Source Sans Pro', sans-serif",
+    headingFamily: "'Cormorant Garamond', serif",
+    bodyFamily: "'Lato', sans-serif",
   },
 ]
