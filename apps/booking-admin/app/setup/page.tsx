@@ -67,7 +67,7 @@ type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
 const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'details', label: 'Room Details' },
   { key: 'pricing', label: 'Pricing & Rates' },
-  { key: 'media', label: 'Images & Amenities' },
+  { key: 'media', label: 'Images, Features & Amenities' },
   { key: 'benefits', label: 'Book Direct Benefits' },
 ]
 
@@ -189,8 +189,13 @@ export default function SetupPage() {
   const [roomCategory, setRoomCategory] = useState('')
   const [baseRate, setBaseRate] = useState('')
   const [nonRefundableRate, setNonRefundableRate] = useState('')
-  const [freeCancellationDays, setFreeCancellationDays] = useState('7 days before')
-  const [availabilityNote, setAvailabilityNote] = useState('')
+  const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(true)
+  const [nonRefundableEnabled, setNonRefundableEnabled] = useState(false)
+  const [cancellationPolicy, setCancellationPolicy] = useState('Free until 7 days before')
+  const [operatingFrom, setOperatingFrom] = useState('2026-01-01')
+  const [operatingTo, setOperatingTo] = useState('2026-12-31')
+  const [seasons, setSeasons] = useState<{ name: string; from: string; to: string; rate: string }[]>([])
+  const [weekendSurcharge, setWeekendSurcharge] = useState('+0%')
   const [roomCurrency, setRoomCurrency] = useState('')
   const [roomImages, setRoomImages] = useState<string[]>([])
   const [amenities, setAmenities] = useState<string[]>([])
@@ -1517,106 +1522,208 @@ export default function SetupPage() {
 
             {/* Pricing & Rates Tab */}
             {activeRoomTab === 'pricing' && (
-              <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Rate Configuration</h3>
-                  <span className="text-[11px] font-medium text-red-500">Required</span>
-                </div>
+              <div className="space-y-8">
 
-                <div className="bg-blue-50/70 rounded-lg px-4 py-2.5">
-                  <p className="text-[11px] text-blue-700">
-                    <span className="mr-1.5">→</span>
-                    <span className="font-medium">Booking engine:</span> &quot;RATE OPTIONS&quot; section · Flexible Rate card · Non-Refundable Rate card with % OFF badge · Per-night price · Total price
-                  </p>
-                </div>
-
-                {/* Flexible Rate sub-card */}
-                <div className="border border-gray-200 rounded-xl px-5 py-5 space-y-4">
-                  <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Flexible Rate</h4>
-
-                  <div className="grid grid-cols-2 gap-4">
+                {/* Section 1: What can guests book? */}
+                <div>
+                  <div className="flex items-start gap-3 mb-1">
+                    <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
                     <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <label className="text-[12px] font-semibold text-gray-900">
-                          Base Rate (per night) <span className="text-red-500">*</span>
-                        </label>
-                        <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Rate Card</span>
-                      </div>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={baseRate}
-                        onChange={(e) => setBaseRate(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                        placeholder="e.g. 425"
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;Flexible Rate · Free cancellation until X days before · 0 $/per&quot;</p>
+                      <h3 className="text-[13px] font-semibold text-gray-900">What can guests book?</h3>
+                      <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <label className="text-[12px] font-semibold text-gray-900">Free Cancellation Until</label>
-                        <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Rate Card</span>
+                  </div>
+                  <div className="ml-9 space-y-2.5">
+                    {/* Flexible Rate */}
+                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setFlexibleRateEnabled(!flexibleRateEnabled)}
+                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${flexibleRateEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                        >
+                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${flexibleRateEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                        </button>
+                        <svg className="w-4 h-4 text-primary-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                        <span className="text-[12px] font-semibold text-gray-900">Flexible rate</span>
+                        <span className="text-[11px] text-gray-400">(free cancellation)</span>
                       </div>
-                      <select
-                        value={freeCancellationDays}
-                        onChange={(e) => setFreeCancellationDays(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 appearance-none"
-                        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+                      {flexibleRateEnabled && (
+                        <div className="mt-3 ml-[52px] flex items-center gap-3">
+                          <span className="text-[11px] text-gray-500">Cancellation policy:</span>
+                          <select
+                            value={cancellationPolicy}
+                            onChange={(e) => setCancellationPolicy(e.target.value)}
+                            className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                            style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+                          >
+                            <option>Free until 1 day before</option>
+                            <option>Free until 2 days before</option>
+                            <option>Free until 3 days before</option>
+                            <option>Free until 5 days before</option>
+                            <option>Free until 7 days before</option>
+                            <option>Free until 14 days before</option>
+                            <option>Free until 30 days before</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Non-refundable */}
+                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${nonRefundableEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setNonRefundableEnabled(!nonRefundableEnabled)}
+                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                        >
+                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${nonRefundableEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                        </button>
+                        <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                        <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
+                        <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: When are you open? */}
+                <div>
+                  <div className="flex items-start gap-3 mb-1">
+                    <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                    <div>
+                      <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
+                      <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
+                    </div>
+                  </div>
+                  <div className="ml-9">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
+                      {/* Month bar */}
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m) => (
+                            <span key={m} className="text-[9px] text-gray-400 w-[calc(100%/12)] text-center">{m}</span>
+                          ))}
+                        </div>
+                        <div className="h-5 rounded-full bg-gradient-to-r from-primary-400 to-primary-500 relative">
+                          <span className="absolute inset-0 flex items-center justify-center text-[9px] font-semibold text-white">Year Round</span>
+                        </div>
+                      </div>
+                      {/* Date inputs */}
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="date"
+                          value={operatingFrom}
+                          onChange={(e) => setOperatingFrom(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        <span className="text-[11px] text-gray-400">to</span>
+                        <input
+                          type="date"
+                          value={operatingTo}
+                          onChange={(e) => setOperatingTo(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                      </div>
+                      <button className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
+                        <PlusIcon className="w-3.5 h-3.5" /> Add period
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Seasonal pricing */}
+                <div>
+                  <div className="flex items-start justify-between mb-1">
+                    <div className="flex items-start gap-3">
+                      <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                      <div>
+                        <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
+                        <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (seasons.length === 0) {
+                          setSeasons([
+                            { name: 'Low Season', from: '2026-01-01', to: '2026-03-31', rate: '' },
+                            { name: 'Mid Season', from: '2026-04-01', to: '2026-06-30', rate: '' },
+                            { name: 'High Season', from: '2026-07-01', to: '2026-09-30', rate: '' },
+                            { name: 'Peak Season', from: '2026-10-01', to: '2026-12-31', rate: '' },
+                          ])
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5.5 8.5l3-3 3 3M15.5 15.5l3 3 3-3M3 12h18" /></svg>
+                      Auto-create
+                    </button>
+                  </div>
+                  <div className="ml-9">
+                    {seasons.length === 0 ? (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
+                        <p className="text-[11px] text-gray-400">No seasons yet. Click &quot;Auto-create&quot; or add manually below.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {seasons.map((season, idx) => (
+                          <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3">
+                            <input
+                              type="text"
+                              value={season.name}
+                              onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
+                              className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                            <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <span className="text-[10px] text-gray-400">to</span>
+                            <input type="date" value={season.to} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <input
+                              type="number"
+                              placeholder="Rate"
+                              value={season.rate}
+                              onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
+                              className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                            <button onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 transition-colors">
+                              <XMarkIcon className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setSeasons([...seasons, { name: '', from: '', to: '', rate: '' }])}
+                      className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      <PlusIcon className="w-3.5 h-3.5" /> Add season
+                    </button>
+                  </div>
+                </div>
+
+                {/* Section 4: Weekend surcharge */}
+                <div>
+                  <div className="flex items-start gap-3 mb-2">
+                    <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
+                    <div>
+                      <h3 className="text-[13px] font-semibold text-gray-900">Do weekends cost more?</h3>
+                      <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
+                    </div>
+                  </div>
+                  <div className="ml-9 flex flex-wrap gap-2">
+                    {['+0%', '+10%', '+15%', '+20%', 'Custom'].map((opt) => (
+                      <button
+                        key={opt}
+                        onClick={() => setWeekendSurcharge(opt)}
+                        className={`px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                          weekendSurcharge === opt
+                            ? 'bg-primary-500 text-white border-primary-500'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        }`}
                       >
-                        <option value="1 day before">1 day before</option>
-                        <option value="2 days before">2 days before</option>
-                        <option value="3 days before">3 days before</option>
-                        <option value="5 days before">5 days before</option>
-                        <option value="7 days before">7 days before</option>
-                        <option value="14 days before">14 days before</option>
-                        <option value="30 days before">30 days before</option>
-                      </select>
-                    </div>
+                        {opt}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Non-Refundable Rate sub-card */}
-                <div className="border border-gray-200 rounded-xl px-5 py-5 space-y-4">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Non-Refundable Rate</h4>
-                    <span className="text-[10px] text-gray-400">— generates &quot;-X% OFF&quot; badge automatically</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <label className="text-[12px] font-semibold text-gray-900">Non-Refundable Rate</label>
-                        <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded uppercase tracking-wide">Rate Card + Badge</span>
-                      </div>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={nonRefundableRate}
-                        onChange={(e) => setNonRefundableRate(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                        placeholder="e.g. 354"
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;Non-Refundable Rate · -X% OFF · 0 $/per&quot; — discount % is auto-calculated</p>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <label className="text-[12px] font-semibold text-gray-900">Availability Note</label>
-                        <span className="text-[10px] text-gray-400">(optional)</span>
-                        <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded uppercase tracking-wide">Below Rates</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={availabilityNote}
-                        onChange={(e) => setAvailabilityNote(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                        placeholder="e.g. Only 1 left at this rate"
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;· Only 1 left at this rate&quot; below rate options</p>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
