@@ -74,7 +74,7 @@ class BookingRepository:
         row = await Database.fetchrow(
             """
             SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
-                   rm.room_number
+                   h.slug AS hotel_slug, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             JOIN hotels h ON h.id = b.hotel_id
@@ -90,7 +90,7 @@ class BookingRepository:
         row = await Database.fetchrow(
             """
             SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
-                   rm.room_number
+                   h.slug AS hotel_slug, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             JOIN hotels h ON h.id = b.hotel_id

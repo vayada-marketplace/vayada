@@ -24,6 +24,23 @@ STYLE = """
 """
 
 
+def _my_booking_url(booking: dict) -> str | None:
+    slug = booking.get("hotel_slug")
+    if not slug:
+        return None
+    return f"https://{slug}.vayada.com/my-booking"
+
+
+def _my_booking_button_html(booking: dict) -> str:
+    url = _my_booking_url(booking)
+    if not url:
+        return ""
+    return f"""
+    <hr class="divider">
+    <a href="{url}" class="btn">View My Booking</a>
+    """
+
+
 def _wrap_html(content: str) -> str:
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">{STYLE}</head>
@@ -101,6 +118,7 @@ async def send_guest_confirmation(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">You can look up your booking anytime using your reference number and email address.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -114,6 +132,7 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">If you have any questions, please contact the hotel directly.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -158,6 +177,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">You will receive an email once the host responds. You can also check your booking status using your reference number.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -176,6 +196,7 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -194,6 +215,7 @@ async def send_guest_booking_rejected(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We encourage you to search for alternative dates or properties.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -212,6 +234,7 @@ async def send_guest_booking_expired(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We apologize for the inconvenience. Please try booking again or explore other properties.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -271,5 +294,87 @@ async def send_guest_cancellation_refund(
     <hr class="divider">
     <p class="detail">{refund_text}</p>
     <p class="detail">If you have any questions, please contact the hotel directly.</p>
+    {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
+
+
+# ── New notification emails ────────────────────────────────────────
+
+
+async def send_guest_booking_withdrawn(guest_email: str, booking: dict):
+    """Confirm to guest that they withdrew their booking request."""
+    payment_method = booking.get("payment_method", "card")
+    release_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+
+    subject = f"Booking Withdrawn — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Withdrawn</h2>
+    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has been withdrawn.</p>
+    {"<p class='detail'>" + release_note + "</p>" if release_note else ""}
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">If you change your mind, you're welcome to submit a new booking request anytime.</p>
+    {_my_booking_button_html(booking)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_host_booking_accepted(hotel_email: str, booking: dict):
+    """Confirm to host that they accepted the booking."""
+    if not hotel_email:
+        return
+
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+    payment_method = booking.get("payment_method", "card")
+    payment_note = "Payment has been captured." if payment_method == "card" else "Guest will pay at the property."
+
+    subject = f"Booking Accepted: {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Accepted</h2>
+    <p class="detail">You have accepted the booking from <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong>.</p>
+    <p class="detail">{payment_note}</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
+async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
+    """Notify guest that an admin has created and confirmed their booking."""
+    subject = f"Booking Confirmed — {booking['booking_reference']}"
+    content = f"""
+    <h2>Your Booking is Confirmed!</h2>
+    <p class="detail">Your booking at <strong>{booking['hotel_name']}</strong> has been confirmed.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">We look forward to welcoming you!</p>
+    {_my_booking_button_html(booking)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_host_guest_cancelled(hotel_email: str, booking: dict):
+    """Notify host that a guest cancelled their confirmed booking."""
+    if not hotel_email:
+        return
+
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+
+    subject = f"Booking Cancelled by Guest: {booking['booking_reference']}"
+    content = f"""
+    <h2>Guest Cancelled Booking</h2>
+    <p class="detail">The guest <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has cancelled their confirmed booking.</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">The room is now available for new bookings.</p>
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))

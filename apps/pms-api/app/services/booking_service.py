@@ -23,6 +23,9 @@ from app.services.email_service import (
     send_guest_booking_expired,
     send_host_booking_withdrawn,
     send_guest_cancellation_refund,
+    send_guest_booking_withdrawn,
+    send_host_booking_accepted,
+    send_host_guest_cancelled,
 )
 
 logger = logging.getLogger(__name__)
@@ -375,11 +378,18 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
             check_out=booking["check_out"],
         )
 
-    # Send guest confirmation
+    # Send guest confirmation and host confirmation
     updated = await BookingRepository.get_by_id(booking_id)
     asyncio.create_task(
         send_guest_booking_accepted(updated["guest_email"], updated)
     )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_accepted(hotel["contact_email"], updated)
+        )
 
     return updated
 
@@ -446,7 +456,7 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
         "UPDATE bookings SET guest_withdrawn = true WHERE id = $1", booking_id
     )
 
-    # Notify host
+    # Notify host and guest
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
@@ -455,6 +465,9 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
         asyncio.create_task(
             send_host_booking_withdrawn(hotel["contact_email"], updated)
         )
+    asyncio.create_task(
+        send_guest_booking_withdrawn(updated["guest_email"], updated)
+    )
 
     return updated
 
@@ -559,6 +572,13 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
             updated["guest_email"], updated, refund_amount, refund_pct
         )
     )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_guest_cancelled(hotel["contact_email"], updated)
+        )
 
     return updated
 

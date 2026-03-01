@@ -29,7 +29,7 @@ from app.models.affiliate import (
     AffiliateCommissionUpdate,
 )
 from app.models.room_block import RoomBlockCreate, RoomBlockResponse
-from app.services.email_service import send_guest_confirmation, send_guest_cancellation
+from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
@@ -460,6 +460,13 @@ async def create_admin_booking(
 
     # Re-fetch with JOINs for full response
     full_booking = await BookingRepository.get_by_id(str(booking["id"]))
+
+    # Notify guest of their confirmed booking
+    if full_booking.get("guest_email"):
+        asyncio.create_task(
+            send_guest_admin_booking_confirmed(full_booking["guest_email"], full_booking)
+        )
+
     return _booking_to_admin(full_booking)
 
 
