@@ -71,6 +71,68 @@ const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'benefits', label: 'Book Direct Benefits' },
 ]
 
+interface RoomType {
+  name: string
+  beds: { type: string; count: number }[]
+  maxOccupancy: number
+  roomSize: string
+  totalRooms: number
+  description: string
+  category: string
+  baseRate: string
+  nonRefundableRate: string
+  flexibleRateEnabled: boolean
+  nonRefundableEnabled: boolean
+  cancellationPolicy: string
+  operatingFrom: string
+  operatingTo: string
+  seasons: { name: string; from: string; to: string; rate: string }[]
+  weekendSurcharge: string
+  currency: string
+  images: string[]
+  amenities: string[]
+  features: string[]
+  bookDirectBenefits: string[]
+}
+
+const createEmptyRoom = (): RoomType => ({
+  name: '',
+  beds: [{ type: 'King Bed', count: 1 }],
+  maxOccupancy: 2,
+  roomSize: '',
+  totalRooms: 1,
+  description: '',
+  category: '',
+  baseRate: '',
+  nonRefundableRate: '',
+  flexibleRateEnabled: true,
+  nonRefundableEnabled: false,
+  cancellationPolicy: 'Free until 7 days before',
+  operatingFrom: '2026-01-01',
+  operatingTo: '2026-12-31',
+  seasons: [],
+  weekendSurcharge: '+0%',
+  currency: '',
+  images: [],
+  amenities: [],
+  features: [],
+  bookDirectBenefits: [],
+})
+
+const getRoomCompleteness = (room: RoomType): { done: number; total: number } => {
+  let done = 0
+  const total = 4
+  // Tab 1: details — name + occupancy + totalRooms
+  if (room.name.trim() && room.maxOccupancy >= 1 && room.totalRooms >= 1) done++
+  // Tab 2: pricing — has at least one rate plan enabled
+  if (room.flexibleRateEnabled || room.nonRefundableEnabled) done++
+  // Tab 3: images — at least 1 image
+  if (room.images.length > 0) done++
+  // Tab 4: benefits — optional, count as done if any selected
+  if (room.bookDirectBenefits.length > 0) done++
+  return { done, total }
+}
+
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Beds', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
 const ROOM_CATEGORIES = ['Standard', 'Deluxe', 'Superior', 'Suite', 'Villa', 'Bungalow', 'Studio', 'Penthouse']
@@ -179,34 +241,21 @@ export default function SetupPage() {
   const [selectedPms, setSelectedPms] = useState('vayada')
 
   // Step 4: Rooms & Rates
+  const [rooms, setRooms] = useState<RoomType[]>([createEmptyRoom()])
+  const [activeRoomIndex, setActiveRoomIndex] = useState(0)
   const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>('details')
-  const [roomName, setRoomName] = useState('')
-  const [beds, setBeds] = useState<{ type: string; count: number }[]>([{ type: 'King Bed', count: 1 }])
-  const [maxOccupancy, setMaxOccupancy] = useState(2)
-  const [roomSize, setRoomSize] = useState('')
-  const [totalRooms, setTotalRooms] = useState(1)
-  const [roomDescription, setRoomDescription] = useState('')
-  const [roomCategory, setRoomCategory] = useState('')
-  const [baseRate, setBaseRate] = useState('')
-  const [nonRefundableRate, setNonRefundableRate] = useState('')
-  const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(true)
-  const [nonRefundableEnabled, setNonRefundableEnabled] = useState(false)
-  const [cancellationPolicy, setCancellationPolicy] = useState('Free until 7 days before')
-  const [operatingFrom, setOperatingFrom] = useState('2026-01-01')
-  const [operatingTo, setOperatingTo] = useState('2026-12-31')
-  const [seasons, setSeasons] = useState<{ name: string; from: string; to: string; rate: string }[]>([])
-  const [weekendSurcharge, setWeekendSurcharge] = useState('+0%')
-  const [roomCurrency, setRoomCurrency] = useState('')
-  const [roomImages, setRoomImages] = useState<string[]>([])
-  const [amenities, setAmenities] = useState<string[]>([])
-  const [features, setFeatures] = useState<string[]>([])
-  const [bookDirectBenefits, setBookDirectBenefits] = useState<string[]>([])
   const [filterInput, setFilterInput] = useState('')
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
   const [benefitInput, setBenefitInput] = useState('')
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
+
+  // Convenience accessors for current room
+  const room = rooms[activeRoomIndex]
+  const updateRoom = (updates: Partial<RoomType>) => {
+    setRooms(prev => prev.map((r, i) => i === activeRoomIndex ? { ...r, ...updates } : r))
+  }
 
   // Step 5: Policies & Operations
   const [checkInTime, setCheckInTime] = useState('14:00')
@@ -248,8 +297,8 @@ export default function SetupPage() {
 
   // Default room currency to property currency
   useEffect(() => {
-    if (!roomCurrency) setRoomCurrency(currency)
-  }, [currency, roomCurrency])
+    setRooms(prev => prev.map(r => r.currency ? r : { ...r, currency }))
+  }, [currency])
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -297,7 +346,7 @@ export default function SetupPage() {
       if (!res.ok) throw new Error('Upload failed')
       const data = await res.json()
       const urls = (data.images || []).map((img: { url: string }) => img.url)
-      setRoomImages((prev) => [...prev, ...urls])
+      updateRoom({ images: [...room.images, ...urls] })
     } catch (err) {
       console.error('Room image upload failed:', err)
     } finally {
@@ -317,7 +366,7 @@ export default function SetupPage() {
       return !!selectedPms
     }
     if (step === 4) {
-      return !!(roomName.trim() && maxOccupancy >= 1 && totalRooms >= 1 && Number(baseRate) > 0)
+      return rooms.every(r => !!(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1))
     }
     if (step === 5) {
       return true
@@ -380,25 +429,27 @@ export default function SetupPage() {
         }
         localStorage.setItem('pmsProvider', 'vayada')
 
-        // 4. Create first room type
-        try {
-          const bedSummary = beds.map((b) => `${b.count} ${b.type}`).join(', ')
-          await pmsClient.post('/admin/room-types', {
-            name: roomName,
-            bedType: bedSummary,
-            maxOccupancy,
-            size: roomSize ? Number(roomSize) : 0,
-            totalRooms,
-            description: roomDescription,
-            baseRate: Number(baseRate),
-            nonRefundableRate: nonRefundableRate ? Number(nonRefundableRate) : undefined,
-            currency: roomCurrency || currency,
-            images: roomImages,
-            amenities,
-            features,
-          })
-        } catch {
-          // Non-fatal: room creation may fail but setup can continue
+        // 4. Create room types
+        for (const r of rooms) {
+          try {
+            const bedSummary = r.beds.map((b) => `${b.count} ${b.type}`).join(', ')
+            await pmsClient.post('/admin/room-types', {
+              name: r.name,
+              bedType: bedSummary,
+              maxOccupancy: r.maxOccupancy,
+              size: r.roomSize ? Number(r.roomSize) : 0,
+              totalRooms: r.totalRooms,
+              description: r.description,
+              baseRate: Number(r.baseRate),
+              nonRefundableRate: r.nonRefundableRate ? Number(r.nonRefundableRate) : undefined,
+              currency: r.currency || currency,
+              images: r.images,
+              amenities: r.amenities,
+              features: r.features,
+            })
+          } catch {
+            // Non-fatal: room creation may fail but setup can continue
+          }
         }
 
         // 5. Save payment settings
@@ -1306,13 +1357,79 @@ export default function SetupPage() {
       {/* ===== STEP 4: Rooms & Rates ===== */}
       {step === 4 && (
         <div className="flex-1 overflow-auto">
-          <div className="max-w-3xl mx-auto px-6 py-6">
+          <div className="max-w-4xl mx-auto px-6 py-6">
             {stepIndicators}
             <div className="mb-5">
               <h2 className="text-[18px] font-bold text-gray-900" style={{ fontFamily: "'Playfair Display', serif" }}>Rooms & Rates</h2>
-              <p className="text-[12px] text-gray-500 mt-1">Set up your first room type. Everything here maps directly to the room card guests see on the booking page.</p>
+              <p className="text-[12px] text-gray-500 mt-1">Configure your room types. Each room maps directly to a card guests see on the booking page.</p>
             </div>
 
+            <div className="flex gap-6">
+            {/* Room Sidebar */}
+            <div className="w-48 shrink-0">
+              <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest mb-3">Your Rooms</h3>
+              <div className="space-y-2 mb-3">
+                {rooms.map((r, idx) => {
+                  const { done, total } = getRoomCompleteness(r)
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => { setActiveRoomIndex(idx); setActiveRoomTab('details') }}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors cursor-pointer group ${
+                        activeRoomIndex === idx
+                          ? 'border-primary-500 bg-primary-50/30'
+                          : 'border-gray-200 bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px]">🏨</span>
+                        <span className="text-[12px] font-medium text-gray-900 truncate flex-1">
+                          {r.name || `Room ${idx + 1}`}
+                        </span>
+                        {rooms.length > 1 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const newRooms = rooms.filter((_, i) => i !== idx)
+                              setRooms(newRooms)
+                              if (activeRoomIndex >= newRooms.length) setActiveRoomIndex(newRooms.length - 1)
+                              else if (activeRoomIndex > idx) setActiveRoomIndex(activeRoomIndex - 1)
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-500 transition-all"
+                          >
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 mt-1.5 ml-6">
+                        {Array.from({ length: total }).map((_, di) => (
+                          <div
+                            key={di}
+                            className={`w-1.5 h-1.5 rounded-full ${di < done ? 'bg-primary-500' : 'bg-gray-300'}`}
+                          />
+                        ))}
+                        <span className="text-[10px] text-gray-400 ml-1">{done}/{total}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <button
+                onClick={() => {
+                  const newRoom = createEmptyRoom()
+                  newRoom.currency = currency
+                  setRooms(prev => [...prev, newRoom])
+                  setActiveRoomIndex(rooms.length)
+                  setActiveRoomTab('details')
+                }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed border-gray-300 rounded-lg text-[12px] text-gray-500 font-medium hover:border-gray-400 hover:bg-gray-50 transition-colors"
+              >
+                <PlusIcon className="w-3.5 h-3.5" /> Add Room Type
+              </button>
+            </div>
+
+            {/* Room Content */}
+            <div className="flex-1 min-w-0">
             {/* Room Tabs */}
             <div className="flex gap-6 mb-6 border-b border-gray-200">
               {ROOM_TABS.map((tab) => (
@@ -1358,8 +1475,8 @@ export default function SetupPage() {
                   </div>
                   <input
                     type="text"
-                    value={roomName}
-                    onChange={(e) => setRoomName(e.target.value)}
+                    value={room.name}
+                    onChange={(e) => updateRoom({ name: e.target.value })}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                     placeholder="e.g. Two-Bedroom Villa"
                   />
@@ -1374,14 +1491,14 @@ export default function SetupPage() {
                   </div>
                   <p className="text-[10px] text-gray-400 mb-2">Add all bed types available in this room</p>
                   <div className="space-y-2">
-                    {beds.map((bed, idx) => (
+                    {room.beds.map((bed, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <select
                           value={bed.type}
                           onChange={(e) => {
-                            const updated = [...beds]
+                            const updated = [...room.beds]
                             updated[idx] = { ...updated[idx], type: e.target.value }
-                            setBeds(updated)
+                            updateRoom({ beds: updated })
                           }}
                           className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 appearance-none"
                           style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
@@ -1395,15 +1512,15 @@ export default function SetupPage() {
                           min={1}
                           value={bed.count}
                           onChange={(e) => {
-                            const updated = [...beds]
+                            const updated = [...room.beds]
                             updated[idx] = { ...updated[idx], count: Math.max(1, Number(e.target.value)) }
-                            setBeds(updated)
+                            updateRoom({ beds: updated })
                           }}
                           className="w-16 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                         />
-                        {beds.length > 1 && (
+                        {room.beds.length > 1 && (
                           <button
-                            onClick={() => setBeds(beds.filter((_, i) => i !== idx))}
+                            onClick={() => updateRoom({ beds: room.beds.filter((_, i) => i !== idx) })}
                             className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
                           >
                             <XMarkIcon className="w-3.5 h-3.5" />
@@ -1413,7 +1530,7 @@ export default function SetupPage() {
                     ))}
                   </div>
                   <button
-                    onClick={() => setBeds([...beds, { type: 'King Bed', count: 1 }])}
+                    onClick={() => updateRoom({ beds: [...room.beds, { type: 'King Bed', count: 1 }] })}
                     className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-gray-700 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
                     <PlusIcon className="w-3.5 h-3.5" /> Add Bed
@@ -1431,8 +1548,8 @@ export default function SetupPage() {
                   <input
                     type="number"
                     min={1}
-                    value={maxOccupancy}
-                    onChange={(e) => setMaxOccupancy(Math.max(1, Number(e.target.value)))}
+                    value={room.maxOccupancy}
+                    onChange={(e) => updateRoom({ maxOccupancy: Math.max(1, Number(e.target.value)) })}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                   />
                   <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;Up to X guests&quot; on room card</p>
@@ -1451,8 +1568,8 @@ export default function SetupPage() {
                     <input
                       type="number"
                       min={0}
-                      value={roomSize}
-                      onChange={(e) => setRoomSize(e.target.value)}
+                      value={room.roomSize}
+                      onChange={(e) => updateRoom({ roomSize: e.target.value })}
                       className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                       placeholder="e.g. 150"
                     />
@@ -1468,8 +1585,8 @@ export default function SetupPage() {
                     <input
                       type="number"
                       min={1}
-                      value={totalRooms}
-                      onChange={(e) => setTotalRooms(Math.max(1, Number(e.target.value)))}
+                      value={room.totalRooms}
+                      onChange={(e) => updateRoom({ totalRooms: Math.max(1, Number(e.target.value)) })}
                       className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                     />
                     <p className="text-[10px] text-gray-400 mt-1">Determines availability in PMS calendar</p>
@@ -1483,8 +1600,8 @@ export default function SetupPage() {
                     <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded uppercase tracking-wide">Modal</span>
                   </div>
                   <textarea
-                    value={roomDescription}
-                    onChange={(e) => setRoomDescription(e.target.value)}
+                    value={room.description}
+                    onChange={(e) => updateRoom({ description: e.target.value })}
                     rows={3}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 resize-vertical"
                     placeholder="The private pool is the standout feature of this villa. The air-conditioned villa has 2 bedrooms and 2 bathrooms..."
@@ -1499,8 +1616,8 @@ export default function SetupPage() {
                     <span className="text-[10px] text-gray-400">(shows in PMS room list)</span>
                   </div>
                   <select
-                    value={roomCategory}
-                    onChange={(e) => setRoomCategory(e.target.value)}
+                    value={room.category}
+                    onChange={(e) => updateRoom({ category: e.target.value })}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 appearance-none"
                     style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
                   >
@@ -1528,24 +1645,24 @@ export default function SetupPage() {
                   </div>
                   <div className="ml-9 space-y-2.5">
                     {/* Flexible Rate */}
-                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${room.flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
                       <div className="flex items-center gap-3">
                         <button
-                          onClick={() => setFlexibleRateEnabled(!flexibleRateEnabled)}
-                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${flexibleRateEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                          onClick={() => updateRoom({ flexibleRateEnabled: !room.flexibleRateEnabled })}
+                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${room.flexibleRateEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
                         >
-                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${flexibleRateEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${room.flexibleRateEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
                         </button>
                         <svg className="w-4 h-4 text-primary-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
                         <span className="text-[12px] font-semibold text-gray-900">Flexible rate</span>
                         <span className="text-[11px] text-gray-400">(free cancellation)</span>
                       </div>
-                      {flexibleRateEnabled && (
+                      {room.flexibleRateEnabled && (
                         <div className="mt-3 ml-[52px] flex items-center gap-3">
                           <span className="text-[11px] text-gray-500">Cancellation policy:</span>
                           <select
-                            value={cancellationPolicy}
-                            onChange={(e) => setCancellationPolicy(e.target.value)}
+                            value={room.cancellationPolicy}
+                            onChange={(e) => updateRoom({ cancellationPolicy: e.target.value })}
                             className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
                             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
                           >
@@ -1562,13 +1679,13 @@ export default function SetupPage() {
                     </div>
 
                     {/* Non-refundable */}
-                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${nonRefundableEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className={`rounded-xl border px-4 py-3.5 transition-colors ${room.nonRefundableEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
                       <div className="flex items-center gap-3">
                         <button
-                          onClick={() => setNonRefundableEnabled(!nonRefundableEnabled)}
-                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                          onClick={() => updateRoom({ nonRefundableEnabled: !room.nonRefundableEnabled })}
+                          className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${room.nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
                         >
-                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${nonRefundableEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                          <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${room.nonRefundableEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
                         </button>
                         <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
                         <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
@@ -1604,15 +1721,15 @@ export default function SetupPage() {
                       <div className="flex items-center gap-3">
                         <input
                           type="date"
-                          value={operatingFrom}
-                          onChange={(e) => setOperatingFrom(e.target.value)}
+                          value={room.operatingFrom}
+                          onChange={(e) => updateRoom({ operatingFrom: e.target.value })}
                           className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
                         <span className="text-[11px] text-gray-400">to</span>
                         <input
                           type="date"
-                          value={operatingTo}
-                          onChange={(e) => setOperatingTo(e.target.value)}
+                          value={room.operatingTo}
+                          onChange={(e) => updateRoom({ operatingTo: e.target.value })}
                           className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
                       </div>
@@ -1635,13 +1752,13 @@ export default function SetupPage() {
                     </div>
                     <button
                       onClick={() => {
-                        if (seasons.length === 0) {
-                          setSeasons([
+                        if (room.seasons.length === 0) {
+                          updateRoom({ seasons: [
                             { name: 'Low Season', from: '2026-01-01', to: '2026-03-31', rate: '' },
                             { name: 'Mid Season', from: '2026-04-01', to: '2026-06-30', rate: '' },
                             { name: 'High Season', from: '2026-07-01', to: '2026-09-30', rate: '' },
                             { name: 'Peak Season', from: '2026-10-01', to: '2026-12-31', rate: '' },
-                          ])
+                          ] })
                         }
                       }}
                       className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
@@ -1651,31 +1768,31 @@ export default function SetupPage() {
                     </button>
                   </div>
                   <div className="ml-9">
-                    {seasons.length === 0 ? (
+                    {room.seasons.length === 0 ? (
                       <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
                         <p className="text-[11px] text-gray-400">No seasons yet. Click &quot;Auto-create&quot; or add manually below.</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {seasons.map((season, idx) => (
+                        {room.seasons.map((season, idx) => (
                           <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3">
                             <input
                               type="text"
                               value={season.name}
-                              onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
+                              onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], name: e.target.value }; updateRoom({ seasons: u }) }}
                               className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                             />
-                            <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <input type="date" value={season.from} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], from: e.target.value }; updateRoom({ seasons: u }) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
                             <span className="text-[10px] text-gray-400">to</span>
-                            <input type="date" value={season.to} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <input type="date" value={season.to} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], to: e.target.value }; updateRoom({ seasons: u }) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
                             <input
                               type="number"
                               placeholder="Rate"
                               value={season.rate}
-                              onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
+                              onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], rate: e.target.value }; updateRoom({ seasons: u }) }}
                               className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                             />
-                            <button onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 transition-colors">
+                            <button onClick={() => updateRoom({ seasons: room.seasons.filter((_, i) => i !== idx) })} className="text-gray-400 hover:text-red-500 transition-colors">
                               <XMarkIcon className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -1683,7 +1800,7 @@ export default function SetupPage() {
                       </div>
                     )}
                     <button
-                      onClick={() => setSeasons([...seasons, { name: '', from: '', to: '', rate: '' }])}
+                      onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', from: '', to: '', rate: '' }] })}
                       className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                     >
                       <PlusIcon className="w-3.5 h-3.5" /> Add season
@@ -1704,9 +1821,9 @@ export default function SetupPage() {
                     {['+0%', '+10%', '+15%', '+20%', 'Custom'].map((opt) => (
                       <button
                         key={opt}
-                        onClick={() => setWeekendSurcharge(opt)}
+                        onClick={() => updateRoom({ weekendSurcharge: opt })}
                         className={`px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
-                          weekendSurcharge === opt
+                          room.weekendSurcharge === opt
                             ? 'bg-primary-500 text-white border-primary-500'
                             : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                         }`}
@@ -1738,13 +1855,13 @@ export default function SetupPage() {
                   </div>
 
                   {/* Uploaded images preview */}
-                  {roomImages.length > 0 && (
+                  {room.images.length > 0 && (
                     <div className="flex flex-wrap gap-2">
-                      {roomImages.map((url, idx) => (
+                      {room.images.map((url, idx) => (
                         <div key={idx} className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200">
                           <img src={url} alt={`Room ${idx + 1}`} className="w-full h-full object-cover" />
                           <button
-                            onClick={() => setRoomImages(roomImages.filter((_, i) => i !== idx))}
+                            onClick={() => updateRoom({ images: room.images.filter((_, i) => i !== idx) })}
                             className="absolute top-1 right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
                           >
                             <XMarkIcon className="w-3 h-3" />
@@ -1810,15 +1927,15 @@ export default function SetupPage() {
 
                     <div className="flex flex-wrap gap-2">
                       {QUICK_AMENITIES.map((item) => {
-                        const isSelected = amenities.includes(item.label)
+                        const isSelected = room.amenities.includes(item.label)
                         return (
                           <button
                             key={item.label}
                             onClick={() => {
                               if (isSelected) {
-                                setAmenities(amenities.filter((a) => a !== item.label))
+                                updateRoom({ amenities: room.amenities.filter((a) => a !== item.label) })
                               } else {
-                                setAmenities([...amenities, item.label])
+                                updateRoom({ amenities: [...room.amenities, item.label] })
                               }
                             }}
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
@@ -1858,15 +1975,15 @@ export default function SetupPage() {
                 {/* Predefined benefit options */}
                 <div className="space-y-2">
                   {BENEFIT_OPTIONS.map((benefit) => {
-                    const isSelected = bookDirectBenefits.includes(benefit)
+                    const isSelected = room.bookDirectBenefits.includes(benefit)
                     return (
                       <button
                         key={benefit}
                         onClick={() => {
                           if (isSelected) {
-                            setBookDirectBenefits(bookDirectBenefits.filter((b) => b !== benefit))
+                            updateRoom({ bookDirectBenefits: room.bookDirectBenefits.filter((b) => b !== benefit) })
                           } else {
-                            setBookDirectBenefits([...bookDirectBenefits, benefit])
+                            updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, benefit] })
                           }
                         }}
                         className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg border text-left transition-colors ${
@@ -1897,13 +2014,26 @@ export default function SetupPage() {
                       value={benefitInput}
                       onChange={(e) => setBenefitInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); addChip(benefitInput, bookDirectBenefits, setBookDirectBenefits, setBenefitInput) }
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          const trimmed = benefitInput.trim()
+                          if (trimmed && !room.bookDirectBenefits.includes(trimmed)) {
+                            updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, trimmed] })
+                          }
+                          setBenefitInput('')
+                        }
                       }}
                       className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                       placeholder="e.g. Complimentary sunset cocktail"
                     />
                     <button
-                      onClick={() => addChip(benefitInput, bookDirectBenefits, setBookDirectBenefits, setBenefitInput)}
+                      onClick={() => {
+                        const trimmed = benefitInput.trim()
+                        if (trimmed && !room.bookDirectBenefits.includes(trimmed)) {
+                          updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, trimmed] })
+                        }
+                        setBenefitInput('')
+                      }}
                       className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
                     >
                       <PlusIcon className="w-3.5 h-3.5" />
@@ -1919,20 +2049,31 @@ export default function SetupPage() {
               </div>
             )}
 
-            <div className="mt-6 flex justify-between">
+            </div>{/* close Room Content */}
+            </div>{/* close flex sidebar+content */}
+
+            <div className="mt-6 flex items-center justify-between">
               <button
                 onClick={() => setStep(3)}
                 className="px-4 py-2 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
-              <button
-                onClick={() => { setError(''); setStep(5) }}
-                disabled={!canProceed()}
-                className="px-6 py-2 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Continue
-              </button>
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const incomplete = rooms.filter(r => !(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1)).length
+                  return incomplete > 0 ? (
+                    <span className="text-[11px] text-amber-600 font-medium">{incomplete} room{incomplete > 1 ? 's' : ''} incomplete</span>
+                  ) : null
+                })()}
+                <button
+                  onClick={() => { setError(''); setStep(5) }}
+                  disabled={!canProceed()}
+                  className="px-6 py-2 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Continue
+                </button>
+              </div>
             </div>
           </div>
         </div>
