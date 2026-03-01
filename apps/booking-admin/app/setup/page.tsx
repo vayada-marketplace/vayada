@@ -1458,12 +1458,6 @@ export default function SetupPage() {
                   <span className="text-[11px] font-medium text-red-500">Required</span>
                 </div>
 
-                <div className="bg-blue-50/70 rounded-lg px-4 py-2.5">
-                  <p className="text-[11px] text-blue-700">
-                    <span className="mr-1.5">→</span>
-                    <span className="font-medium">Booking engine:</span> Room card title · &quot;View Details&quot; modal header · Booking summary · PMS Rooms & Rates list
-                  </p>
-                </div>
 
                 {/* Room Type Name */}
                 <div>
@@ -1471,7 +1465,6 @@ export default function SetupPage() {
                     <label className="text-[12px] font-semibold text-gray-900">
                       Room Type Name <span className="text-red-500">*</span>
                     </label>
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Card Title</span>
                   </div>
                   <input
                     type="text"
@@ -1487,7 +1480,6 @@ export default function SetupPage() {
                 <div>
                   <div className="flex items-center gap-2 mb-0.5">
                     <label className="text-[12px] font-semibold text-gray-900">Beds</label>
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded uppercase tracking-wide">Modal</span>
                   </div>
                   <p className="text-[10px] text-gray-400 mb-2">Add all bed types available in this room</p>
                   <div className="space-y-2">
@@ -1543,7 +1535,6 @@ export default function SetupPage() {
                     <label className="text-[12px] font-semibold text-gray-900">
                       Max Occupancy <span className="text-red-500">*</span>
                     </label>
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Card</span>
                   </div>
                   <input
                     type="number"
@@ -1562,9 +1553,7 @@ export default function SetupPage() {
                       <label className="text-[12px] font-semibold text-gray-900">
                         Room Size (m&sup2;)
                       </label>
-                      <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Card</span>
-                      <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded uppercase tracking-wide">Modal</span>
-                    </div>
+                        </div>
                     <input
                       type="number"
                       min={0}
@@ -1580,7 +1569,6 @@ export default function SetupPage() {
                       <label className="text-[12px] font-semibold text-gray-900">
                         Total Rooms of this Type <span className="text-red-500">*</span>
                       </label>
-                      <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded uppercase tracking-wide">PMS</span>
                     </div>
                     <input
                       type="number"
@@ -1597,7 +1585,6 @@ export default function SetupPage() {
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
                     <label className="text-[12px] font-semibold text-gray-900">Room Description</label>
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded uppercase tracking-wide">Modal</span>
                   </div>
                   <textarea
                     value={room.description}
@@ -1847,12 +1834,6 @@ export default function SetupPage() {
                     <span className="text-[11px] font-medium text-amber-600">Strongly recommended</span>
                   </div>
 
-                  <div className="bg-blue-50/70 rounded-lg px-4 py-2.5">
-                    <p className="text-[11px] text-blue-700">
-                      <span className="mr-1.5">→</span>
-                      <span className="font-medium">Booking engine:</span> Room card left-side image slider · &quot;View Details&quot; modal gallery with thumbnail strip · Photo count badge
-                    </p>
-                  </div>
 
                   {/* Uploaded images preview */}
                   {room.images.length > 0 && (
@@ -1911,17 +1892,11 @@ export default function SetupPage() {
                     <span className="text-[11px] font-medium text-gray-400">Optional</span>
                   </div>
 
-                  <div className="bg-blue-50/70 rounded-lg px-4 py-2.5">
-                    <p className="text-[11px] text-blue-700">
-                      <span className="mr-1.5">→</span>
-                      <span className="font-medium">Booking engine:</span> Amenity tags row below room name ({'✓ Entire villa · ✓ Free WiFi · ✓ Air conditioning...'}) · &quot;+X more&quot; badge · &quot;View Full Amenities (X)&quot; in modal
-                    </p>
-                  </div>
+
 
                   <div>
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-[12px] font-semibold text-gray-900">Quick-add amenities</span>
-                      <span className="text-[8px] font-semibold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded uppercase tracking-wide">Room Card Tags</span>
                     </div>
                     <p className="text-[10px] text-gray-400 mb-3">First 4–5 shown on room card; all shown in &quot;View Full Amenities&quot; in modal</p>
 
@@ -1963,12 +1938,7 @@ export default function SetupPage() {
                   <span className="text-[11px] font-medium text-gray-400">Optional</span>
                 </div>
 
-                <div className="bg-blue-50/70 rounded-lg px-4 py-2.5">
-                  <p className="text-[11px] text-blue-700">
-                    <span className="mr-1.5">→</span>
-                    <span className="font-medium">Booking engine:</span> &quot;Book Direct Benefits&quot; card with ✓ list in &quot;View Details&quot; modal · Differentiates your direct channel from OTAs
-                  </p>
-                </div>
+
 
                 <p className="text-[11px] text-gray-500">These appear in the room detail modal under a &quot;Book Direct Benefits&quot; section, encouraging guests to book via your website instead of OTAs.</p>
 
