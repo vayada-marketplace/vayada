@@ -1221,25 +1221,18 @@ export default function SetupPage() {
                 >
                   <div className="flex items-start gap-3.5">
                     {/* PMS Icon */}
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-                      pms.id === 'vayada' ? 'bg-blue-600' :
-                      pms.id === 'cloudbeds' ? 'bg-slate-700' :
-                      pms.id === 'ezee' ? 'bg-orange-500' :
-                      'bg-blue-500'
-                    }`}>
+                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
                       {pms.id === 'vayada' && (
-                        <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
+                        <img src="/vayada-logo.png" alt="Vayada" className="w-7 h-7 object-contain m-auto" />
                       )}
                       {pms.id === 'cloudbeds' && (
-                        <span className="text-white text-[13px] font-bold">C</span>
+                        <img src="/pms-cloudbeds.png" alt="Cloudbeds" className="w-full h-full object-cover" />
                       )}
                       {pms.id === 'ezee' && (
-                        <span className="text-white text-[10px] font-bold leading-none">eZee</span>
+                        <img src="/pms-ezee.png" alt="eZee" className="w-full h-full object-cover" />
                       )}
                       {pms.id === 'siteminder' && (
-                        <span className="text-white text-[13px] font-bold">S</span>
+                        <img src="/pms-siteminder.png" alt="SiteMinder" className="w-full h-full object-cover" />
                       )}
                     </div>
 
