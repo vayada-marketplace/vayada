@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   PlusIcon,
   PencilSquareIcon,
   TrashIcon,
   XMarkIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type AddonItem, type AddonSettings, type DesignSettings } from '@/services/settings'
 
@@ -59,6 +60,8 @@ export default function BookingFlowPage() {
   const [formData, setFormData] = useState(emptyAddon)
   const [savingAddon, setSavingAddon] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const addonFileInputRef = useRef<HTMLInputElement>(null)
 
   // Rooms state (read-only, from design settings for filters)
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
@@ -112,6 +115,43 @@ export default function BookingFlowPage() {
     setShowModal(true)
   }
 
+  const handleAddonImageUpload = async (file: File) => {
+    const previousImage = formData.image
+    const previewUrl = URL.createObjectURL(file)
+    setFormData((prev) => ({ ...prev, image: previewUrl }))
+
+    try {
+      setUploadingImage(true)
+      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
+      const token = localStorage.getItem('access_token')
+      const fd = new FormData()
+      fd.append('files', file)
+
+      const res = await fetch(`${pmsUrl}/upload/images`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      })
+
+      if (!res.ok) throw new Error('Upload failed')
+
+      const data = await res.json()
+      if (data.images?.[0]?.url) {
+        URL.revokeObjectURL(previewUrl)
+        setFormData((prev) => ({ ...prev, image: data.images[0].url }))
+      } else {
+        throw new Error('No image URL returned')
+      }
+    } catch (err) {
+      console.error('Image upload failed:', err)
+      URL.revokeObjectURL(previewUrl)
+      setFormData((prev) => ({ ...prev, image: previousImage }))
+      showFeedback('error', 'Image upload failed. Please try again.')
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
   const handleSaveAddon = async () => {
     if (!formData.name.trim()) return
     try {
@@ -122,7 +162,7 @@ export default function BookingFlowPage() {
         price: formData.price,
         currency: formData.currency,
         category: formData.category,
-        image: formData.image,
+        image: formData.image.startsWith('blob:') ? '' : formData.image,
         duration: formData.duration || undefined,
         perPerson: formData.perPerson,
       }
@@ -607,16 +647,73 @@ export default function BookingFlowPage() {
                 </select>
               </div>
 
-              {/* Image URL */}
+              {/* Image */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Image URL</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Image</label>
+                {formData.image ? (
+                  <div className="relative rounded-lg overflow-hidden bg-gray-200">
+                    <img
+                      src={formData.image}
+                      alt="Add-on"
+                      className="w-full h-36 object-cover"
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, image: '' })}
+                      className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
+                    >
+                      <XMarkIcon className="w-3.5 h-3.5" />
+                    </button>
+                    {uploadingImage && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => addonFileInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const file = e.dataTransfer.files?.[0]
+                      if (file && file.type.startsWith('image/')) handleAddonImageUpload(file)
+                    }}
+                    className="w-full h-36 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-gray-400 hover:text-gray-500 transition-colors"
+                  >
+                    {uploadingImage ? (
+                      <div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <PhotoIcon className="w-6 h-6" />
+                        <span className="text-[12px]">Click or drag to upload</span>
+                      </>
+                    )}
+                  </button>
+                )}
                 <input
-                  type="text"
-                  value={formData.image}
-                  onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="https://..."
+                  ref={addonFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleAddonImageUpload(file)
+                    e.target.value = ''
+                  }}
+                  className="hidden"
                 />
+                {formData.image && !uploadingImage && (
+                  <button
+                    type="button"
+                    onClick={() => addonFileInputRef.current?.click()}
+                    className="mt-2 w-full py-1.5 text-[12px] text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Replace Image
+                  </button>
+                )}
               </div>
 
               {/* Duration */}
