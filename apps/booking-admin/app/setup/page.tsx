@@ -1360,7 +1360,7 @@ export default function SetupPage() {
           <div className="max-w-4xl mx-auto px-6 py-6">
             {stepIndicators}
             <div className="mb-5">
-              <h2 className="text-[18px] font-bold text-gray-900" style={{ fontFamily: "'Playfair Display', serif" }}>Rooms & Rates</h2>
+              <h2 className="text-[18px] font-bold text-gray-900">Rooms & Rates</h2>
               <p className="text-[12px] text-gray-500 mt-1">Configure your room types. Each room maps directly to a card guests see on the booking page.</p>
             </div>
 
