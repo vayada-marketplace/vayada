@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     S3_USE_PUBLIC_URLS: bool = True
 
     # Image Processing
-    MAX_IMAGE_SIZE_MB: int = 5
+    MAX_IMAGE_SIZE_MB: int = 20
     ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif"]
     MAX_IMAGE_WIDTH: int = 4000
     MAX_IMAGE_HEIGHT: int = 4000
@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     # Xendit
     XENDIT_SECRET_KEY: str = ""
     XENDIT_WEBHOOK_SECRET: str = ""
+
+    # Beds24
+    BEDS24_API_BASE_URL: str = "https://api.beds24.com/v2"
+    BEDS24_WEBHOOK_SECRET: str = ""
+    BEDS24_POLL_INTERVAL_MINUTES: int = 5
+    BEDS24_FULL_SYNC_HOUR: int = 3
+    BEDS24_API_DELAY_SECONDS: float = 2.0
 
     # Environment
     ENVIRONMENT: str = "development"
