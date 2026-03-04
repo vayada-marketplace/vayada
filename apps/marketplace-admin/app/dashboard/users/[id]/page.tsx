@@ -265,8 +265,8 @@ export default function UserDetailPage() {
       return
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setSaveError('Image size must be less than 5MB')
+    if (file.size > 20 * 1024 * 1024) {
+      setSaveError('Image size must be less than 20MB')
       return
     }
 
@@ -1580,7 +1580,7 @@ export default function UserDetailPage() {
                                     <p className="mb-2 text-sm text-gray-500">
                                       <span className="font-semibold">Click to upload</span> or drag and drop
                                     </p>
-                                    <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB</p>
+                                    <p className="text-xs text-gray-500">PNG, JPG, GIF up to 20MB</p>
                                   </div>
                                   <input
                                     id="profile-picture-upload"
@@ -2302,7 +2302,7 @@ export default function UserDetailPage() {
                             <p className="mb-2 text-sm text-gray-500">
                               <span className="font-semibold">Click to upload</span> or drag and drop
                             </p>
-                            <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB each</p>
+                            <p className="text-xs text-gray-500">PNG, JPG, GIF up to 20MB each</p>
                           </div>
                           <input
                             id="listing-images-edit"

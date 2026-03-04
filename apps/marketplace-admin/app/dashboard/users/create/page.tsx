@@ -459,9 +459,9 @@ export default function CreateUserPage() {
       return
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError('Image size must be less than 5MB')
+    // Validate file size (max 20MB)
+    if (file.size > 20 * 1024 * 1024) {
+      setUploadError('Image size must be less than 20MB')
       return
     }
 
@@ -921,7 +921,7 @@ export default function CreateUserPage() {
                                 <p className="mb-2 text-sm text-gray-500">
                                   <span className="font-semibold">Click to upload</span> or drag and drop
                                 </p>
-                                <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB</p>
+                                <p className="text-xs text-gray-500">PNG, JPG, GIF up to 20MB</p>
                               </div>
                               <input
                                 id="profilePicture"
@@ -1351,7 +1351,7 @@ export default function CreateUserPage() {
                                       <p className="mb-2 text-sm text-gray-500">
                                         <span className="font-semibold">Click to upload</span> or drag and drop
                                       </p>
-                                      <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB each</p>
+                                      <p className="text-xs text-gray-500">PNG, JPG, GIF up to 20MB each</p>
                                     </div>
                                     <input
                                       id={`listing-images-${listingIndex}`}
