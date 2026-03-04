@@ -498,15 +498,15 @@ class TestUploadChatImage:
     async def test_upload_chat_image_too_large(
         self, client: AsyncClient, test_creator
     ):
-        """Test uploading chat image larger than 5MB."""
-        # Create a large image (slightly over 5MB)
+        """Test uploading chat image larger than 20MB."""
+        # Create a large image (slightly over 20MB)
         large_image = create_test_image(width=3000, height=3000)
 
         # If the test image isn't large enough, pad it
-        if len(large_image) < 5 * 1024 * 1024:
-            # Create a BytesIO with the image and append data to exceed 5MB
+        if len(large_image) < 20 * 1024 * 1024:
+            # Create a BytesIO with the image and append data to exceed 20MB
             # For testing purposes, we'll create raw data that exceeds the limit
-            large_data = large_image + b"\x00" * (5 * 1024 * 1024 - len(large_image) + 1000)
+            large_data = large_image + b"\x00" * (20 * 1024 * 1024 - len(large_image) + 1000)
         else:
             large_data = large_image
 
@@ -517,7 +517,7 @@ class TestUploadChatImage:
         )
 
         assert response.status_code == 400
-        assert "5MB" in response.json()["detail"]
+        assert "20MB" in response.json()["detail"]
 
     async def test_upload_chat_image_hotel_user(
         self, client: AsyncClient, test_hotel

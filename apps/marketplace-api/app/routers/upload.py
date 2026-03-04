@@ -361,7 +361,7 @@ async def upload_chat_image(
     Upload an image for chat messages
 
     - **file**: Image file (JPEG, PNG, WEBP, or GIF)
-    - Max file size: 5MB
+    - Max file size: 20MB
 
     Returns the S3 URL of the uploaded image.
     """
@@ -382,12 +382,12 @@ async def upload_chat_image(
                 detail="Empty file"
             )
 
-        # Check file size (5MB max for chat images)
-        max_size = 5 * 1024 * 1024  # 5MB
+        # Check file size (20MB max for chat images)
+        max_size = 20 * 1024 * 1024  # 20MB
         if len(file_content) > max_size:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Image must be smaller than 5MB"
+                detail="Image must be smaller than 20MB"
             )
 
         # Validate content type (allow GIF for chat)
