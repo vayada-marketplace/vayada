@@ -3,14 +3,15 @@ from typing import Optional
 from app.config import settings
 
 
-class Database:
+class BaseDatabase:
     _pool: Optional[asyncpg.Pool] = None
+    _url: str = ""
 
     @classmethod
     async def get_pool(cls) -> asyncpg.Pool:
         if cls._pool is None:
             cls._pool = await asyncpg.create_pool(
-                settings.DATABASE_URL,
+                cls._url,
                 min_size=settings.DATABASE_POOL_MIN_SIZE,
                 max_size=settings.DATABASE_POOL_MAX_SIZE,
                 command_timeout=settings.DATABASE_COMMAND_TIMEOUT,
@@ -48,82 +49,19 @@ class Database:
             return await conn.fetchval(query, *args)
 
 
-class AuthDatabase:
+class Database(BaseDatabase):
     _pool: Optional[asyncpg.Pool] = None
-
-    @classmethod
-    async def get_pool(cls) -> asyncpg.Pool:
-        if cls._pool is None:
-            cls._pool = await asyncpg.create_pool(
-                settings.AUTH_DATABASE_URL,
-                min_size=settings.DATABASE_POOL_MIN_SIZE,
-                max_size=settings.DATABASE_POOL_MAX_SIZE,
-                command_timeout=settings.DATABASE_COMMAND_TIMEOUT,
-            )
-        return cls._pool
-
-    @classmethod
-    async def close_pool(cls):
-        if cls._pool:
-            await cls._pool.close()
-            cls._pool = None
-
-    @classmethod
-    async def execute(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.execute(query, *args)
-
-    @classmethod
-    async def fetch(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetch(query, *args)
-
-    @classmethod
-    async def fetchrow(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchrow(query, *args)
-
-    @classmethod
-    async def fetchval(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchval(query, *args)
+    _url = settings.DATABASE_URL
 
 
-class MarketplaceDatabase:
+class AuthDatabase(BaseDatabase):
     _pool: Optional[asyncpg.Pool] = None
+    _url = settings.AUTH_DATABASE_URL
 
-    @classmethod
-    async def get_pool(cls) -> asyncpg.Pool:
-        if cls._pool is None:
-            cls._pool = await asyncpg.create_pool(
-                settings.MARKETPLACE_DATABASE_URL,
-                min_size=settings.DATABASE_POOL_MIN_SIZE,
-                max_size=settings.DATABASE_POOL_MAX_SIZE,
-                command_timeout=settings.DATABASE_COMMAND_TIMEOUT,
-            )
-        return cls._pool
 
-    @classmethod
-    async def close_pool(cls):
-        if cls._pool:
-            await cls._pool.close()
-            cls._pool = None
-
-    @classmethod
-    async def fetch(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetch(query, *args)
-
-    @classmethod
-    async def fetchrow(cls, query: str, *args):
-        pool = await cls.get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchrow(query, *args)
+class MarketplaceDatabase(BaseDatabase):
+    _pool: Optional[asyncpg.Pool] = None
+    _url = settings.MARKETPLACE_DATABASE_URL
 
 
 async def check_database_connection() -> dict:

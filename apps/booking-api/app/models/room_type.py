@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 
-from app.models.hotel import to_camel
+from app.models.utils import to_camel
 
 
 class RoomTypeCreate(BaseModel):
