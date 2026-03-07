@@ -179,8 +179,8 @@ class TestAddonSettings:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["show_addons_step"] is True
-        assert body["group_addons_by_category"] is True
+        assert body["showAddonsStep"] is True
+        assert body["groupAddonsByCategory"] is True
 
     async def test_update_settings(self, client, hotel_with_property):
         user = hotel_with_property["user"]
@@ -188,13 +188,13 @@ class TestAddonSettings:
 
         resp = await client.patch(
             "/admin/settings/addons",
-            json={"show_addons_step": False},
+            json={"showAddonsStep": False},
             headers=headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["show_addons_step"] is False
-        assert body["group_addons_by_category"] is True
+        assert body["showAddonsStep"] is False
+        assert body["groupAddonsByCategory"] is True
 
     async def test_update_both_settings(self, client, hotel_with_property):
         user = hotel_with_property["user"]
@@ -202,14 +202,14 @@ class TestAddonSettings:
 
         resp = await client.patch(
             "/admin/settings/addons",
-            json={"show_addons_step": False, "group_addons_by_category": False},
+            json={"showAddonsStep": False, "groupAddonsByCategory": False},
             headers=headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["show_addons_step"] is False
-        assert body["group_addons_by_category"] is False
+        assert body["showAddonsStep"] is False
+        assert body["groupAddonsByCategory"] is False
 
         # Verify persistence
         get_resp = await client.get("/admin/settings/addons", headers=headers)
-        assert get_resp.json()["show_addons_step"] is False
+        assert get_resp.json()["showAddonsStep"] is False
