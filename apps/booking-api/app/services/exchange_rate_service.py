@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 
 import httpx
@@ -13,7 +13,7 @@ _CACHE_TTL = timedelta(hours=6)
 async def get_rates(base: str) -> dict:
     base = base.upper()
     cached = _cache.get(base)
-    if cached and datetime.utcnow() - cached["fetched_at"] < _CACHE_TTL:
+    if cached and datetime.now(timezone.utc) - cached["fetched_at"] < _CACHE_TTL:
         return cached["rates"]
 
     try:
@@ -26,7 +26,7 @@ async def get_rates(base: str) -> dict:
             rates = data.get("rates", {})
             _cache[base] = {
                 "rates": rates,
-                "fetched_at": datetime.utcnow(),
+                "fetched_at": datetime.now(timezone.utc),
             }
             return rates
     except Exception as e:

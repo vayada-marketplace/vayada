@@ -1,9 +1,8 @@
-import json
-
 from fastapi import APIRouter, Depends
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
+from app.models.utils import parse_json
 
 router = APIRouter()
 
@@ -27,14 +26,6 @@ _DESIGN_DEFAULTS = DesignSettingsResponse(
 )
 
 
-def _parse_json(val, default=None):
-    if default is None:
-        default = []
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val is not None else default
-
-
 def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
     return DesignSettingsResponse(
         hero_image=hotel.get('hero_image') or '',
@@ -43,8 +34,8 @@ def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
         primary_color=hotel.get('branding_primary_color') or '',
         accent_color=hotel.get('branding_accent_color') or '',
         font_pairing=hotel.get('branding_font_pairing') or '',
-        booking_filters=_parse_json(hotel.get('booking_filters')),
-        custom_filters=_parse_json(hotel.get('custom_filters'), default={}),
+        booking_filters=parse_json(hotel.get('booking_filters')),
+        custom_filters=parse_json(hotel.get('custom_filters'), default={}),
     )
 
 

@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Optional, List
 from app.repositories.booking_hotel_repo import BookingHotelRepository
@@ -11,16 +10,9 @@ from app.models.hotel import (
     RoomTypeResponse,
     AddonResponse,
 )
+from app.models.utils import parse_json
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_json(val, default=None):
-    if default is None:
-        default = []
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val is not None else default
 
 
 async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResponse]:
@@ -75,12 +67,12 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         country=country,
         star_rating=row["star_rating"],
         currency=row["currency"],
-        supported_currencies=_parse_json(row.get("supported_currencies")),
-        booking_filters=_parse_json(row.get("booking_filters")),
-        custom_filters=_parse_json(row.get("custom_filters"), default={}),
+        supported_currencies=parse_json(row.get("supported_currencies")),
+        booking_filters=parse_json(row.get("booking_filters")),
+        custom_filters=parse_json(row.get("custom_filters"), default={}),
         hero_image=row["hero_image"],
-        images=_parse_json(row["images"]),
-        amenities=_parse_json(raw_amenities),
+        images=parse_json(row["images"]),
+        amenities=parse_json(raw_amenities),
         check_in_time=row["check_in_time"],
         check_out_time=row["check_out_time"],
         contact=contact,

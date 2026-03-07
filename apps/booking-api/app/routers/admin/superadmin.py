@@ -1,23 +1,28 @@
-import re
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends, status
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
+
 from app.dependencies import require_superadmin
 from app.auth import hash_password
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.models.utils import slugify
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def _slugify(text: str) -> str:
-    text = text.lower().strip()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_]+', '-', text)
-    text = re.sub(r'-+', '-', text)
-    return text or 'my-hotel'
+class SuperadminCreateHotelRequest(BaseModel):
+    user_id: str
+    name: Optional[str] = ""
+
+
+class SuperadminSetPasswordRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8)
 
 
 @router.get("/superadmin/check")
@@ -49,28 +54,24 @@ async def superadmin_list_hotels(user_id: str = Depends(require_superadmin)):
 
 @router.post("/superadmin/hotels", status_code=status.HTTP_201_CREATED)
 async def superadmin_create_hotel(
-    data: dict,
+    data: SuperadminCreateHotelRequest,
     user_id: str = Depends(require_superadmin),
 ):
-    target_user_id = data.get("user_id")
-    hotel_name = data.get("name", "")
-    if not target_user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
-
-    existing = await BookingHotelRepository.get_by_user_id(target_user_id, columns="id")
+    existing = await BookingHotelRepository.get_by_user_id(data.user_id, columns="id")
     if existing:
         return {"id": str(existing["id"]), "message": "Hotel already exists for this user"}
 
+    hotel_name = data.name
     if not hotel_name:
-        owner = await UserRepository.get_by_id(target_user_id, columns="id, name")
-        hotel_name = owner["name"] if owner else f"Hotel {target_user_id[:8]}"
+        owner = await UserRepository.get_by_id(data.user_id, columns="id, name")
+        hotel_name = owner["name"] if owner else f"Hotel {data.user_id[:8]}"
 
-    slug = _slugify(hotel_name)
+    slug = slugify(hotel_name)
     existing_slug = await BookingHotelRepository.get_by_slug(slug)
     if existing_slug:
-        slug = f"{slug}-{target_user_id[:8]}"
+        slug = f"{slug}-{data.user_id[:8]}"
 
-    result = await BookingHotelRepository.create(
+    await BookingHotelRepository.create(
         name=hotel_name,
         slug=slug,
         contact_email="",
@@ -78,10 +79,10 @@ async def superadmin_create_hotel(
         timezone="UTC",
         currency="EUR",
         supported_languages=["en"],
-        user_id=target_user_id,
+        user_id=data.user_id,
     )
 
-    created = await BookingHotelRepository.get_by_user_id(target_user_id, columns="id, name, slug")
+    created = await BookingHotelRepository.get_by_user_id(data.user_id, columns="id, name, slug")
     return {
         "id": str(created["id"]),
         "name": created["name"],
@@ -91,17 +92,12 @@ async def superadmin_create_hotel(
 
 @router.post("/superadmin/set-password")
 async def superadmin_set_password(
-    data: dict,
+    data: SuperadminSetPasswordRequest,
     user_id: str = Depends(require_superadmin),
 ):
-    email = data.get("email")
-    new_password = data.get("password")
-    if not email or not new_password:
-        raise HTTPException(status_code=400, detail="email and password are required")
-
-    user = await UserRepository.get_by_email(email, columns="id")
+    user = await UserRepository.get_by_email(data.email, columns="id")
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    await UserRepository.update_password(str(user["id"]), hash_password(new_password))
-    return {"message": f"Password updated for {email}"}
+    await UserRepository.update_password(str(user["id"]), hash_password(data.password))
+    return {"message": f"Password updated for {data.email}"}

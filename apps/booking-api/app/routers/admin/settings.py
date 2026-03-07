@@ -1,5 +1,3 @@
-import re
-import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -7,6 +5,7 @@ from app.dependencies import require_hotel_admin, get_current_hotel, require_cur
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
 from app.models.setup import SetupStatusResponse, SetupPrefillData
+from app.models.utils import parse_json, slugify
 from app.database import MarketplaceDatabase
 from app.config import settings
 
@@ -100,14 +99,6 @@ _PROPERTY_FIELD_MAP = {
 }
 
 
-def _parse_json(val, default=None):
-    if default is None:
-        default = []
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val is not None else default
-
-
 def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
     return PropertySettingsResponse(
         slug=hotel.get('slug') or '',
@@ -118,8 +109,8 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         address=hotel.get('contact_address') or '',
         timezone=hotel.get('timezone') or 'UTC',
         default_currency=hotel.get('currency') or 'EUR',
-        supported_currencies=_parse_json(hotel.get('supported_currencies')),
-        supported_languages=_parse_json(hotel.get('supported_languages'), default=['en']),
+        supported_currencies=parse_json(hotel.get('supported_currencies')),
+        supported_languages=parse_json(hotel.get('supported_languages'), default=['en']),
         check_in_time=hotel.get('check_in_time') or '15:00',
         check_out_time=hotel.get('check_out_time') or '11:00',
         pay_at_property_enabled=hotel.get('pay_at_property_enabled', False),
@@ -153,14 +144,6 @@ async def get_property_settings(
     return _hotel_to_property_settings(full_hotel)
 
 
-def _slugify(text: str) -> str:
-    text = text.lower().strip()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_]+', '-', text)
-    text = re.sub(r'-+', '-', text)
-    return text or 'my-hotel'
-
-
 @router.patch("/settings/property", response_model=PropertySettingsResponse)
 async def update_property_settings(
     data: PropertySettingsUpdate,
@@ -180,7 +163,7 @@ async def update_property_settings(
             result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     else:
         name = data.property_name or ''
-        slug = _slugify(name) if name else f"hotel-{user_id[:8]}"
+        slug = slugify(name) if name else f"hotel-{user_id[:8]}"
 
         result = await BookingHotelRepository.create(
             name=name,
