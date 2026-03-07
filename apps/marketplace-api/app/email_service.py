@@ -388,6 +388,357 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
     return html
 
 
+def _collaboration_email_wrapper(title: str, content: str) -> str:
+    """Shared wrapper for all collaboration emails."""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h1 style="color: #2c3e50; margin-top: 0;">{title}</h1>
+        </div>
+
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
+            {content}
+        </div>
+
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
+            <p>&copy; {settings.EMAIL_FROM_NAME}. All rights reserved.</p>
+            <p>This is an automated message, please do not reply to this email.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+
+def _collaboration_details_html(
+    collaboration_type: str,
+    listing_name: str,
+    listing_location: Optional[str] = None,
+) -> str:
+    """Render a small collaboration summary block."""
+    location_line = f"<br><strong>Location:</strong> {listing_location}" if listing_location else ""
+    return f"""
+    <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <strong>Type:</strong> {collaboration_type}<br>
+        <strong>Listing:</strong> {listing_name}{location_line}
+    </div>
+    """
+
+
+def _view_button_html(url: str, label: str = "View Collaboration") -> str:
+    return f"""
+    <div style="text-align: center; margin: 30px 0;">
+        <a href="{url}"
+           style="background-color: #007bff; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+            {label}
+        </a>
+    </div>
+    """
+
+
+def create_collaboration_request_email_html(
+    recipient_name: str,
+    initiator_name: str,
+    initiator_type: str,
+    collaboration_type: str,
+    listing_name: str,
+    listing_location: Optional[str] = None,
+    why_great_fit: Optional[str] = None,
+) -> str:
+    """Email sent to the recipient when a new collaboration request is created."""
+    if initiator_type == "creator":
+        title = "New Collaboration Application"
+        intro = f"<strong>{initiator_name}</strong> has applied to collaborate with your property."
+    else:
+        title = "New Collaboration Invitation"
+        intro = f"<strong>{initiator_name}</strong> has invited you to collaborate."
+
+    fit_section = ""
+    if why_great_fit:
+        fit_section = f"""
+        <p style="margin-top: 15px;"><strong>Why they think it's a great fit:</strong></p>
+        <p style="color: #555; font-style: italic;">"{why_great_fit}"</p>
+        """
+
+    collab_url = f"{settings.FRONTEND_URL}/collaborations"
+    content = f"""
+        <p>Hi {recipient_name},</p>
+        <p>{intro}</p>
+        {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+        {fit_section}
+        <p>Log in to review the details and respond.</p>
+        {_view_button_html(collab_url, "View Request")}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
+def create_collaboration_response_email_html(
+    recipient_name: str,
+    responder_name: str,
+    accepted: bool,
+    collaboration_type: str,
+    listing_name: str,
+    listing_location: Optional[str] = None,
+    response_message: Optional[str] = None,
+) -> str:
+    """Email sent to the initiator when their request is accepted or declined."""
+    if accepted:
+        title = "Collaboration Request Accepted"
+        status_html = '<div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;"><p style="margin: 0; color: #2e7d32; font-weight: bold;">Your collaboration request has been accepted!</p></div>'
+        next_step = "The collaboration is now in the negotiation phase. You can discuss and finalize the terms via chat."
+    else:
+        title = "Collaboration Request Declined"
+        status_html = '<div style="background-color: #fbe9e7; padding: 15px; border-radius: 5px; margin: 20px 0;"><p style="margin: 0; color: #c62828; font-weight: bold;">Your collaboration request has been declined.</p></div>'
+        next_step = "Don't be discouraged — there are many other opportunities on Vayada!"
+
+    message_section = ""
+    if response_message:
+        message_section = f'<p style="color: #555; font-style: italic;">Message from {responder_name}: "{response_message}"</p>'
+
+    collab_url = f"{settings.FRONTEND_URL}/collaborations"
+    content = f"""
+        <p>Hi {recipient_name},</p>
+        <p><strong>{responder_name}</strong> has responded to your collaboration request.</p>
+        {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+        {status_html}
+        {message_section}
+        <p>{next_step}</p>
+        {_view_button_html(collab_url)}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
+def create_collaboration_counter_offer_email_html(
+    recipient_name: str,
+    sender_name: str,
+    sender_role: str,
+    collaboration_type: str,
+    listing_name: str,
+    changes_summary: str,
+    listing_location: Optional[str] = None,
+) -> str:
+    """Email sent when the other party suggests new terms."""
+    title = "New Counter-Offer on Your Collaboration"
+    collab_url = f"{settings.FRONTEND_URL}/collaborations"
+    content = f"""
+        <p>Hi {recipient_name},</p>
+        <p><strong>{sender_name}</strong> ({sender_role}) has suggested updated terms for your collaboration.</p>
+        {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+        <div style="background-color: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 0 0 5px 0; font-weight: bold;">Proposed changes:</p>
+            <p style="margin: 0; color: #555;">{changes_summary}</p>
+        </div>
+        <p>Log in to review the updated terms, discuss in the chat, or make your own counter-offer.</p>
+        {_view_button_html(collab_url, "Review Terms")}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
+def create_collaboration_approved_email_html(
+    recipient_name: str,
+    other_party_name: str,
+    collaboration_type: str,
+    listing_name: str,
+    listing_location: Optional[str] = None,
+    both_approved: bool = False,
+) -> str:
+    """Email sent when a party approves the terms (and when both have approved)."""
+    if both_approved:
+        title = "Collaboration Confirmed!"
+        content = f"""
+            <p>Hi {recipient_name},</p>
+            <p>Great news! Both parties have approved the terms. Your collaboration is now confirmed.</p>
+            {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p style="margin: 0; color: #2e7d32; font-weight: bold;">The collaboration is now active!</p>
+            </div>
+            {_view_button_html(f"{settings.FRONTEND_URL}/collaborations")}
+        """
+    else:
+        title = "Terms Approved — Waiting for Confirmation"
+        content = f"""
+            <p>Hi {recipient_name},</p>
+            <p><strong>{other_party_name}</strong> has approved the current terms.</p>
+            {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+            <p>Please review and approve the terms to confirm the collaboration.</p>
+            {_view_button_html(f"{settings.FRONTEND_URL}/collaborations", "Review & Approve")}
+        """
+    return _collaboration_email_wrapper(title, content)
+
+
+def create_collaboration_cancelled_email_html(
+    recipient_name: str,
+    canceller_name: str,
+    canceller_role: str,
+    collaboration_type: str,
+    listing_name: str,
+    listing_location: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> str:
+    """Email sent when the other party cancels the collaboration."""
+    title = "Collaboration Cancelled"
+    reason_section = ""
+    if reason:
+        reason_section = f'<p style="color: #555;"><strong>Reason:</strong> {reason}</p>'
+    content = f"""
+        <p>Hi {recipient_name},</p>
+        <p><strong>{canceller_name}</strong> ({canceller_role}) has cancelled the collaboration.</p>
+        {_collaboration_details_html(collaboration_type, listing_name, listing_location)}
+        <div style="background-color: #fbe9e7; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 0; color: #c62828; font-weight: bold;">This collaboration has been cancelled.</p>
+        </div>
+        {reason_section}
+        <p>You can explore other collaboration opportunities on Vayada.</p>
+        {_view_button_html(f"{settings.FRONTEND_URL}/collaborations", "Browse Collaborations")}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
+def _newsletter_item_html(
+    name: str,
+    location: str,
+    description: str,
+    image_url: Optional[str] = None,
+    badge: Optional[str] = None,
+) -> str:
+    """Render a single recommendation card inside a newsletter."""
+    badge_html = ""
+    if badge:
+        badge_html = f'<span style="display: inline-block; background-color: #e3f2fd; color: #1565c0; font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 12px; margin-bottom: 8px;">{badge}</span><br>'
+
+    img_html = ""
+    if image_url:
+        img_html = f'<img src="{image_url}" alt="{name}" style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; margin-right: 15px; flex-shrink: 0;" />'
+
+    return f"""
+    <div style="display: flex; align-items: flex-start; padding: 15px 0; border-bottom: 1px solid #eee;">
+        {img_html}
+        <div>
+            {badge_html}
+            <strong style="font-size: 15px;">{name}</strong><br>
+            <span style="color: #888; font-size: 13px;">{location}</span>
+            <p style="margin: 6px 0 0; color: #555; font-size: 13px;">{description}</p>
+        </div>
+    </div>
+    """
+
+
+def create_newsletter_for_creator_html(
+    creator_name: str,
+    recommendations: list,
+    new_hotels: list,
+    frontend_url: str,
+) -> str:
+    """
+    Weekly newsletter for creators — recommends hotels.
+
+    recommendations: list of dicts with keys name, location, description, image_url, accommodation_type
+    new_hotels:      list of dicts (same shape) for newly joined hotels
+    """
+    recs_html = ""
+    for r in recommendations:
+        recs_html += _newsletter_item_html(
+            name=r["name"],
+            location=r["location"],
+            description=r.get("description", ""),
+            image_url=r.get("image_url"),
+        )
+
+    new_section = ""
+    if new_hotels:
+        items = ""
+        for h in new_hotels:
+            items += _newsletter_item_html(
+                name=h["name"],
+                location=h["location"],
+                description=h.get("description", ""),
+                image_url=h.get("image_url"),
+                badge="New on Vayada",
+            )
+        new_section = f"""
+        <h2 style="font-size: 18px; color: #2c3e50; margin-top: 30px;">New Hotels This Week</h2>
+        {items}
+        """
+
+    content = f"""
+        <p>Hi {creator_name},</p>
+        <p>Here are this week's top hotel recommendations for you:</p>
+        {recs_html}
+        {new_section}
+        {_view_button_html(f"{frontend_url}/marketplace", "Explore the Marketplace")}
+        <p style="color: #999; font-size: 12px; margin-top: 20px;">
+            You can update your newsletter preferences in
+            <a href="{frontend_url}/settings/newsletter" style="color: #007bff;">Settings</a>.
+        </p>
+    """
+    return _collaboration_email_wrapper("Your Weekly Hotel Picks", content)
+
+
+def create_newsletter_for_hotel_html(
+    hotel_name: str,
+    recommendations: list,
+    new_creators: list,
+    frontend_url: str,
+) -> str:
+    """
+    Weekly newsletter for hotels — recommends creators.
+
+    recommendations: list of dicts with keys name, location, description, image_url, followers, platform
+    new_creators:     list of dicts (same shape) for newly joined creators
+    """
+    recs_html = ""
+    for r in recommendations:
+        extra = ""
+        if r.get("followers"):
+            extra = f" | {r['followers']:,} followers"
+        if r.get("platform"):
+            extra += f" on {r['platform']}"
+        recs_html += _newsletter_item_html(
+            name=r["name"],
+            location=r["location"],
+            description=(r.get("description", "") + extra),
+            image_url=r.get("image_url"),
+        )
+
+    new_section = ""
+    if new_creators:
+        items = ""
+        for c in new_creators:
+            extra = ""
+            if c.get("followers"):
+                extra = f" | {c['followers']:,} followers"
+            items += _newsletter_item_html(
+                name=c["name"],
+                location=c["location"],
+                description=(c.get("description", "") + extra),
+                image_url=c.get("image_url"),
+                badge="New on Vayada",
+            )
+        new_section = f"""
+        <h2 style="font-size: 18px; color: #2c3e50; margin-top: 30px;">New Creators This Week</h2>
+        {items}
+        """
+
+    content = f"""
+        <p>Hi {hotel_name},</p>
+        <p>Here are this week's top creator recommendations for your property:</p>
+        {recs_html}
+        {new_section}
+        {_view_button_html(f"{frontend_url}/marketplace", "Explore the Marketplace")}
+        <p style="color: #999; font-size: 12px; margin-top: 20px;">
+            You can update your newsletter preferences in
+            <a href="{frontend_url}/settings/newsletter" style="color: #007bff;">Settings</a>.
+        </p>
+    """
+    return _collaboration_email_wrapper("Your Weekly Creator Picks", content)
+
+
 def create_password_reset_email_html(reset_link: str, user_name: Optional[str] = None) -> str:
     """
     Create HTML email template for password reset

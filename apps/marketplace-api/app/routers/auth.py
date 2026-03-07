@@ -203,6 +203,10 @@ async def register(request: RegisterRequest):
             elif request.type == "hotel":
                 await HotelRepository.create_profile(user['id'], user['name'])
 
+            # Create newsletter preferences (enabled by default)
+            from app.repositories.newsletter_repo import NewsletterRepository
+            await NewsletterRepository.upsert(str(user['id']), enabled=True)
+
             # Create consent history records for GDPR audit trail
             await ConsentRepository.record(user['id'], 'terms', True, version=terms_version)
             await ConsentRepository.record(user['id'], 'privacy', True, version=privacy_version)

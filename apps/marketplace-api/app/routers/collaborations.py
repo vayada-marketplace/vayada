@@ -13,7 +13,16 @@ from app.repositories.collaboration_repo import CollaborationRepository
 import logging
 import json
 import uuid
+import asyncio
 from .chat import create_system_message
+from app.email_service import (
+    send_email,
+    create_collaboration_request_email_html,
+    create_collaboration_response_email_html,
+    create_collaboration_counter_offer_email_html,
+    create_collaboration_approved_email_html,
+    create_collaboration_cancelled_email_html,
+)
 from app.models.collaborations import (
     PlatformDeliverable,
     PlatformDeliverablesItem,
@@ -34,6 +43,45 @@ router = APIRouter(prefix="/collaborations", tags=["collaborations"])
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
+
+async def _get_party_email_and_name(
+    party: str,
+    creator_id: Optional[str] = None,
+    hotel_id: Optional[str] = None,
+) -> tuple:
+    """
+    Resolve (email, name) for a collaboration party.
+    party: "creator" or "hotel"
+    """
+    try:
+        if party == "creator" and creator_id:
+            creator = await CreatorRepository.get_by_id(creator_id, columns="user_id")
+            if creator:
+                user = await UserRepository.get_by_id(creator['user_id'], columns="email, name")
+                if user:
+                    return user['email'], user['name']
+        elif party == "hotel" and hotel_id:
+            hotel = await HotelRepository.get_profile_by_id(hotel_id, columns="user_id, name")
+            if hotel:
+                user = await UserRepository.get_by_id(hotel['user_id'], columns="email, name")
+                if user:
+                    return user['email'], hotel['name']
+    except Exception as e:
+        logger.error(f"Failed to resolve {party} email: {e}")
+    return None, None
+
+
+def _send_email_background(to_email: str, subject: str, html_body: str):
+    """Fire-and-forget email sending — never blocks the response."""
+    asyncio.ensure_future(_send_email_safe(to_email, subject, html_body))
+
+
+async def _send_email_safe(to_email: str, subject: str, html_body: str):
+    try:
+        await send_email(to_email, subject, html_body)
+    except Exception as e:
+        logger.error(f"Background email to {to_email} failed: {e}")
+
 
 async def get_collaboration_deliverables(collaboration_id: str) -> List[PlatformDeliverablesItem]:
     """
@@ -190,6 +238,26 @@ async def create_collaboration(
         # Fetch deliverables from the new table for the response
         platform_deliverables_response = await get_collaboration_deliverables(str(collaboration['id']))
         
+        # Send email notification to the recipient
+        if request.initiator_type == "creator":
+            initiator_name = creator_user_info['name'] if creator_user_info else 'A creator'
+            recipient_email, recipient_name = await _get_party_email_and_name("hotel", hotel_id=hotel_id)
+        else:
+            initiator_name = listing['hotel_name']
+            recipient_email, recipient_name = await _get_party_email_and_name("creator", creator_id=creator_id)
+
+        if recipient_email:
+            html = create_collaboration_request_email_html(
+                recipient_name=recipient_name or "there",
+                initiator_name=initiator_name,
+                initiator_type=request.initiator_type,
+                collaboration_type=request.collaboration_type,
+                listing_name=listing['name'],
+                listing_location=listing.get('location'),
+                why_great_fit=request.why_great_fit,
+            )
+            _send_email_background(recipient_email, "New Collaboration Request on Vayada", html)
+
         return CollaborationResponse(
             id=str(collaboration['id']),
             initiator_type=collaboration['initiator_type'],
@@ -221,7 +289,7 @@ async def create_collaboration(
             cancelled_at=collaboration['cancelled_at'],
             completed_at=collaboration['completed_at']
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -330,6 +398,30 @@ async def respond_to_collaboration_request(
         # Fetch creator name
         creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
+
+        # Send email to the initiator about the response
+        if collab['initiator_type'] == "creator":
+            initiator_email, initiator_name = await _get_party_email_and_name(
+                "creator", creator_id=str(collab['creator_id']))
+            responder_name = updated['hotel_name']
+        else:
+            initiator_email, initiator_name = await _get_party_email_and_name(
+                "hotel", hotel_id=str(collab['hotel_id']))
+            responder_name = creator_name
+
+        if initiator_email:
+            accepted = request.status == "accepted"
+            html = create_collaboration_response_email_html(
+                recipient_name=initiator_name or "there",
+                responder_name=responder_name,
+                accepted=accepted,
+                collaboration_type=collab['collaboration_type'],
+                listing_name=updated['listing_name'],
+                listing_location=updated.get('listing_location'),
+                response_message=request.response_message,
+            )
+            subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
+            _send_email_background(initiator_email, subject, html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
@@ -557,6 +649,29 @@ async def update_collaboration_terms(
         creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
+        # Send email to the other party about the counter-offer
+        if is_creator:
+            other_email, other_name = await _get_party_email_and_name(
+                "hotel", hotel_id=str(current_collab['hotel_id']))
+            sender_display = creator_name
+        else:
+            other_email, other_name = await _get_party_email_and_name(
+                "creator", creator_id=str(current_collab['creator_id']))
+            sender_display = updated['hotel_name']
+
+        if other_email and diff_summary:
+            collab_type = request.collaboration_type or current_collab['collaboration_type']
+            html = create_collaboration_counter_offer_email_html(
+                recipient_name=other_name or "there",
+                sender_name=sender_display,
+                sender_role=sender_name,
+                collaboration_type=collab_type,
+                listing_name=updated['listing_name'],
+                changes_summary=" | ".join(diff_summary),
+                listing_location=updated.get('listing_location'),
+            )
+            _send_email_background(other_email, "New Counter-Offer on Your Collaboration", html)
+
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
         return CollaborationResponse(
@@ -662,6 +777,45 @@ async def approve_collaboration_terms(
         creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
+        # Send email notifications for approval
+        creator_email, creator_email_name = await _get_party_email_and_name(
+            "creator", creator_id=str(collab['creator_id']))
+        hotel_email, hotel_email_name = await _get_party_email_and_name(
+            "hotel", hotel_id=str(collab['hotel_id']))
+
+        if new_status == 'accepted':
+            # Both approved — notify both parties
+            for email, name in [(creator_email, creator_email_name), (hotel_email, hotel_email_name)]:
+                if email:
+                    html = create_collaboration_approved_email_html(
+                        recipient_name=name or "there",
+                        other_party_name=sender_name,
+                        collaboration_type=collab['collaboration_type'],
+                        listing_name=updated['listing_name'],
+                        listing_location=updated.get('listing_location'),
+                        both_approved=True,
+                    )
+                    _send_email_background(email, "Collaboration Confirmed!", html)
+        else:
+            # Only one side approved — notify the other party to approve
+            if is_creator:
+                other_email, other_name = hotel_email, hotel_email_name
+                approver_name = creator_name
+            else:
+                other_email, other_name = creator_email, creator_email_name
+                approver_name = updated['hotel_name']
+
+            if other_email:
+                html = create_collaboration_approved_email_html(
+                    recipient_name=other_name or "there",
+                    other_party_name=approver_name,
+                    collaboration_type=collab['collaboration_type'],
+                    listing_name=updated['listing_name'],
+                    listing_location=updated.get('listing_location'),
+                    both_approved=False,
+                )
+                _send_email_background(other_email, "Terms Approved — Your Confirmation Needed", html)
+
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
         return CollaborationResponse(
@@ -759,6 +913,28 @@ async def cancel_collaboration(
         # Fetch creator name
         creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
         creator_name = creator_user['name'] if creator_user else 'Unknown'
+
+        # Send email to the other party about the cancellation
+        if is_creator:
+            other_email, other_name = await _get_party_email_and_name(
+                "hotel", hotel_id=str(collab['hotel_id']))
+            canceller_display = creator_name
+        else:
+            other_email, other_name = await _get_party_email_and_name(
+                "creator", creator_id=str(collab['creator_id']))
+            canceller_display = updated['hotel_name']
+
+        if other_email:
+            html = create_collaboration_cancelled_email_html(
+                recipient_name=other_name or "there",
+                canceller_name=canceller_display,
+                canceller_role=sender_name,
+                collaboration_type=collab['collaboration_type'],
+                listing_name=updated['listing_name'],
+                listing_location=updated.get('listing_location'),
+                reason=request.reason,
+            )
+            _send_email_background(other_email, "Collaboration Cancelled", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
