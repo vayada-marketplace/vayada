@@ -115,7 +115,7 @@ class TestSuperadminCreateHotel:
             json={"user_id": str(target["id"])},
             headers=get_auth_headers(admin["token"]),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         assert "already exists" in resp.json()["message"]
 
     async def test_create_hotel_non_superadmin(self, client, hotel_user):

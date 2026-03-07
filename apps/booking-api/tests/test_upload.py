@@ -86,4 +86,5 @@ class TestUploadImages:
             },
             headers=get_auth_headers(user["token"]),
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 400
+        assert "base64" in resp.json()["detail"].lower()

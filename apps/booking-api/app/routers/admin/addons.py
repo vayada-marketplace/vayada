@@ -92,9 +92,10 @@ async def delete_addon(
 
 @router.get("/settings/addons", response_model=AddonSettingsResponse)
 async def get_addon_settings(hotel: dict = Depends(require_current_hotel)):
+    full = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     return AddonSettingsResponse(
-        show_addons_step=hotel.get("show_addons_step", True),
-        group_addons_by_category=hotel.get("group_addons_by_category", True),
+        show_addons_step=full.get("show_addons_step", True),
+        group_addons_by_category=full.get("group_addons_by_category", True),
     )
 
 

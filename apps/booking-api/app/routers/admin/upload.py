@@ -28,7 +28,10 @@ async def proxy_upload_images(
 ):
     auth_header = request.headers.get("authorization", "")
     pms_url = f"{settings.PMS_API_URL}/upload/images"
-    file_content = base64.b64decode(body.data)
+    try:
+        file_content = base64.b64decode(body.data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 data")
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
