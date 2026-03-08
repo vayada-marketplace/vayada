@@ -232,6 +232,8 @@ export default function SetupPage() {
               name: r.name,
               bedType: bedSummary,
               maxOccupancy: r.maxOccupancy,
+              bedrooms: r.bedrooms,
+              bathrooms: r.bathrooms,
               size: r.roomSize ? Number(r.roomSize) : 0,
               totalRooms: r.totalRooms,
               description: r.description,
