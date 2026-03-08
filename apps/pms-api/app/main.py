@@ -9,6 +9,11 @@ from app.database import Database, AuthDatabase
 from app.routers.rooms import router as rooms_router
 from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
+from app.routers.admin_rooms import router as admin_rooms_router
+from app.routers.admin_bookings import router as admin_bookings_router
+from app.routers.admin_payments import router as admin_payments_router
+from app.routers.admin_affiliates import router as admin_affiliates_router
+from app.routers.admin_beds24 import router as admin_beds24_router
 from app.routers.upload import router as upload_router
 from app.routers.affiliates import router as affiliates_router
 from app.routers.webhooks import router as webhooks_router
@@ -52,6 +57,11 @@ app.add_middleware(
 app.include_router(rooms_router)
 app.include_router(bookings_router)
 app.include_router(admin_router)
+app.include_router(admin_rooms_router)
+app.include_router(admin_bookings_router)
+app.include_router(admin_payments_router)
+app.include_router(admin_affiliates_router)
+app.include_router(admin_beds24_router)
 app.include_router(upload_router)
 app.include_router(affiliates_router)
 app.include_router(webhooks_router)

@@ -14,6 +14,16 @@ def parse_jsonb(val):
     return val if val else []
 
 
+async def get_hotel_id(user_id: str) -> str:
+    """Look up hotel ID from user_id, raising 404 if not found."""
+    row = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE user_id = $1", user_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No hotel found for this account")
+    return str(row["id"])
+
+
 async def get_hotel_id_by_slug(slug: str) -> str:
     """Look up hotel ID from slug, raising 404 if not found."""
     row = await Database.fetchrow("SELECT id FROM hotels WHERE slug = $1", slug)
