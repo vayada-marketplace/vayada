@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.database import Database
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.utils import get_hotel_id_by_slug
 from app.models.affiliate import AffiliateRegister, AffiliateResponse
 
 logger = logging.getLogger(__name__)
@@ -31,13 +32,7 @@ def _affiliate_to_response(a: dict) -> AffiliateResponse:
 @router.post("/{slug}/affiliates", response_model=AffiliateResponse, status_code=201)
 async def register_affiliate(slug: str, data: AffiliateRegister):
     # Resolve hotel
-    hotel = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE slug = $1", slug
-    )
-    if not hotel:
-        raise HTTPException(status_code=404, detail="Hotel not found")
-
-    hotel_id = str(hotel["id"])
+    hotel_id = await get_hotel_id_by_slug(slug)
 
     # Check if email already registered for this hotel
     existing = await Database.fetchrow(
@@ -61,13 +56,7 @@ async def register_affiliate(slug: str, data: AffiliateRegister):
 
 @router.post("/{slug}/affiliates/{referral_code}/click", status_code=204)
 async def record_affiliate_click(slug: str, referral_code: str, request: Request):
-    hotel = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE slug = $1", slug
-    )
-    if not hotel:
-        raise HTTPException(status_code=404, detail="Hotel not found")
-
-    hotel_id = str(hotel["id"])
+    hotel_id = await get_hotel_id_by_slug(slug)
 
     affiliate = await AffiliateRepository.get_by_code(hotel_id, referral_code)
     if not affiliate or affiliate["status"] != "approved":

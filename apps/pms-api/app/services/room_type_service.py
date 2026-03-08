@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Optional, List
 from datetime import date
@@ -6,14 +5,9 @@ from datetime import date
 from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.models.room_type import RoomTypeResponse
+from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_jsonb(val):
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val else []
 
 
 async def get_hotel_id_by_slug(slug: str) -> Optional[str]:
@@ -66,11 +60,11 @@ async def get_rooms_for_guest(
                 base_rate=base_rate,
                 non_refundable_rate=nr_rate,
                 currency=room["currency"],
-                amenities=_parse_jsonb(room["amenities"]),
-                images=_parse_jsonb(room["images"]),
+                amenities=parse_jsonb(room["amenities"]),
+                images=parse_jsonb(room["images"]),
                 bed_type=room["bed_type"],
                 remaining_rooms=remaining,
-                features=_parse_jsonb(room["features"]),
+                features=parse_jsonb(room["features"]),
             )
         )
 

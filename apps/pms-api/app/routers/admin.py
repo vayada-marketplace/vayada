@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Optional, List
 
+from app.utils import parse_jsonb
+
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -64,12 +66,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _parse_jsonb(val):
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val else []
-
-
 async def _get_hotel_id(user_id: str) -> str:
     row = await Database.fetchrow(
         "SELECT id FROM hotels WHERE user_id = $1", user_id
@@ -105,10 +101,10 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         base_rate=float(room["base_rate"]),
         non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
         currency=room["currency"],
-        amenities=_parse_jsonb(room["amenities"]),
-        images=_parse_jsonb(room["images"]),
+        amenities=parse_jsonb(room["amenities"]),
+        images=parse_jsonb(room["images"]),
         bed_type=room["bed_type"],
-        features=_parse_jsonb(room["features"]),
+        features=parse_jsonb(room["features"]),
         total_rooms=room["total_rooms"],
         is_active=room["is_active"],
         sort_order=room["sort_order"],

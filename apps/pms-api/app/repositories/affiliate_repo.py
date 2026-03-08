@@ -2,9 +2,10 @@ import secrets
 import string
 from typing import Optional, List
 from app.database import Database
+from app.utils import generate_unique_code
 
 
-def generate_referral_code() -> str:
+def _make_referral_code() -> str:
     chars = string.ascii_lowercase + string.digits
     return "".join(secrets.choice(chars) for _ in range(8))
 
@@ -14,17 +15,14 @@ class AffiliateRepository:
     @staticmethod
     async def create(hotel_id: str, data: dict) -> dict:
         # Generate unique referral code
-        for _ in range(10):
-            code = generate_referral_code()
-            existing = await Database.fetchval(
+        async def code_exists(code: str) -> bool:
+            return bool(await Database.fetchval(
                 "SELECT 1 FROM affiliates WHERE hotel_id = $1 AND referral_code = $2",
                 hotel_id,
                 code,
-            )
-            if not existing:
-                break
-        else:
-            raise RuntimeError("Could not generate unique referral code")
+            ))
+
+        code = await generate_unique_code(_make_referral_code, code_exists, entity_name="referral code")
 
         row = await Database.fetchrow(
             """

@@ -1,5 +1,6 @@
 from typing import Optional
 from app.database import Database
+from app.utils import upsert_by_hotel_id
 
 
 class CancellationPolicyRepository:
@@ -14,38 +15,4 @@ class CancellationPolicyRepository:
 
     @staticmethod
     async def upsert(hotel_id: str, data: dict) -> dict:
-        existing = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
-
-        if existing:
-            sets = ["updated_at = now()"]
-            args = [str(existing["id"])]
-            idx = 2
-            for key, value in data.items():
-                sets.append(f"{key} = ${idx}")
-                args.append(value)
-                idx += 1
-
-            row = await Database.fetchrow(
-                f"UPDATE cancellation_policies SET {', '.join(sets)} WHERE id = $1 RETURNING *",
-                *args,
-            )
-        else:
-            columns = ["hotel_id"]
-            values = [hotel_id]
-            placeholders = ["$1"]
-            idx = 2
-            for key, value in data.items():
-                columns.append(key)
-                values.append(value)
-                placeholders.append(f"${idx}")
-                idx += 1
-
-            row = await Database.fetchrow(
-                f"""
-                INSERT INTO cancellation_policies ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
-                RETURNING *
-                """,
-                *values,
-            )
-        return dict(row)
+        return await upsert_by_hotel_id("cancellation_policies", hotel_id, data)

@@ -2,9 +2,10 @@ import secrets
 import string
 from typing import Optional, List
 from app.database import Database
+from app.utils import generate_unique_code
 
 
-def generate_booking_reference() -> str:
+def _make_booking_ref() -> str:
     chars = string.ascii_uppercase + string.digits
     suffix = "".join(secrets.choice(chars) for _ in range(6))
     return f"VAY-{suffix}"
@@ -15,15 +16,12 @@ class BookingRepository:
     @staticmethod
     async def create(data: dict) -> dict:
         # Generate unique reference
-        for _ in range(10):
-            ref = generate_booking_reference()
-            existing = await Database.fetchval(
+        async def ref_exists(ref: str) -> bool:
+            return bool(await Database.fetchval(
                 "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
-            )
-            if not existing:
-                break
-        else:
-            raise RuntimeError("Could not generate unique booking reference")
+            ))
+
+        ref = await generate_unique_code(_make_booking_ref, ref_exists, entity_name="booking reference")
 
         row = await Database.fetchrow(
             """
