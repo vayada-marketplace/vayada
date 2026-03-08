@@ -577,35 +577,17 @@ export default function RoomsStep({
 
             {/* Section 3: Seasonal pricing */}
             <div>
-              <div className="flex items-start justify-between mb-1">
-                <div className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
-                  <div>
-                    <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
-                    <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
-                  </div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
+                  <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
                 </div>
-                <button
-                  onClick={() => {
-                    if (room.seasons.length === 0) {
-                      updateRoom({ seasons: [
-                        { name: 'Low Season', from: '2026-01-01', to: '2026-03-31', rate: '' },
-                        { name: 'Mid Season', from: '2026-04-01', to: '2026-06-30', rate: '' },
-                        { name: 'High Season', from: '2026-07-01', to: '2026-09-30', rate: '' },
-                        { name: 'Peak Season', from: '2026-10-01', to: '2026-12-31', rate: '' },
-                      ] })
-                    }
-                  }}
-                  className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5.5 8.5l3-3 3 3M15.5 15.5l3 3 3-3M3 12h18" /></svg>
-                  Auto-create
-                </button>
               </div>
               <div className="ml-9">
                 {room.seasons.length === 0 ? (
                   <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
-                    <p className="text-[11px] text-gray-400">No seasons yet. Click &quot;Auto-create&quot; or add manually below.</p>
+                    <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
