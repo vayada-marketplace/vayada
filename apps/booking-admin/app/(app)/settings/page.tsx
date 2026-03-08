@@ -365,7 +365,7 @@ export default function SettingsPage() {
                           className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                         >
                           {CURRENCY_OPTIONS.map((c) => (
-                            <option key={c.code} value={c.code}>{c.label}</option>
+                            <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
                           ))}
                         </select>
                       </div>
@@ -381,7 +381,7 @@ export default function SettingsPage() {
                                 key={code}
                                 className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[13px] rounded-full"
                               >
-                                {cur?.label || code}
+                                {cur ? `${cur.flag} ${cur.code}` : code}
                                 <button
                                   onClick={() => removeCurrency(code)}
                                   className="ml-0.5 text-primary-400 hover:text-primary-600"
@@ -408,7 +408,7 @@ export default function SettingsPage() {
                                     onClick={() => addCurrency(cur.code)}
                                     className="block w-full text-left px-2.5 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50"
                                   >
-                                    {cur.label}
+                                    {cur.flag} {cur.name}
                                   </button>
                                 ))}
                               </div>
