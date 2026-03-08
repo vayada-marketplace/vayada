@@ -1,4 +1,5 @@
 import { pmsClient } from '../api/pmsClient'
+import { buildQueryString } from '@/lib/utils/queryString'
 
 export interface Booking {
   id: string
@@ -84,12 +85,8 @@ export interface PayoutListResponse {
 
 export const bookingsService = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const query = new URLSearchParams()
-    if (params?.status) query.set('status', params.status)
-    if (params?.limit) query.set('limit', String(params.limit))
-    if (params?.offset) query.set('offset', String(params.offset))
-    const qs = query.toString()
-    return pmsClient.get<BookingListResponse>(`/admin/bookings${qs ? `?${qs}` : ''}`)
+    const qs = buildQueryString(params)
+    return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`)
   },
 
   get: (id: string) =>
@@ -120,11 +117,7 @@ export const bookingsService = {
     pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link'),
 
   getPayouts: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const query = new URLSearchParams()
-    if (params?.status) query.set('status', params.status)
-    if (params?.limit) query.set('limit', String(params.limit))
-    if (params?.offset) query.set('offset', String(params.offset))
-    const qs = query.toString()
-    return pmsClient.get<PayoutListResponse>(`/admin/payouts${qs ? `?${qs}` : ''}`)
+    const qs = buildQueryString(params)
+    return pmsClient.get<PayoutListResponse>(`/admin/payouts${qs}`)
   },
 }

@@ -4,24 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { bookingsService, Booking } from '@/services/bookings'
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700',
-  confirmed: 'bg-green-100 text-green-700',
-  cancelled: 'bg-red-100 text-red-600',
-  expired: 'bg-gray-100 text-gray-600',
-}
-
-const PAYMENT_STATUS_STYLES: Record<string, string> = {
-  unpaid: 'bg-gray-100 text-gray-600',
-  authorized: 'bg-blue-100 text-blue-700',
-  captured: 'bg-green-100 text-green-700',
-  cancelled: 'bg-red-100 text-red-600',
-  refunded: 'bg-purple-100 text-purple-700',
-  partially_refunded: 'bg-purple-100 text-purple-700',
-  failed: 'bg-red-100 text-red-600',
-  pay_at_property: 'bg-amber-100 text-amber-700',
-}
+import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from '@/lib/constants/statusStyles'
 
 function CountdownTimer({ deadline }: { deadline: string }) {
   const [timeLeft, setTimeLeft] = useState('')
@@ -145,7 +128,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         <h1 className="text-xl font-bold text-gray-900">
           Booking {booking.bookingReference}
         </h1>
-        <span className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[booking.status] || ''}`}>
+        <span className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || ''}`}>
           {booking.status}
         </span>
       </div>

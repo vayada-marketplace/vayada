@@ -1,4 +1,5 @@
 import { pmsClient } from '../api/pmsClient'
+import { buildQueryString } from '@/lib/utils/queryString'
 
 export interface Affiliate {
   id: string
@@ -36,12 +37,8 @@ export interface AffiliateListResponse {
 
 export const affiliatesService = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const query = new URLSearchParams()
-    if (params?.status) query.set('status', params.status)
-    if (params?.limit) query.set('limit', String(params.limit))
-    if (params?.offset) query.set('offset', String(params.offset))
-    const qs = query.toString()
-    return pmsClient.get<AffiliateListResponse>(`/admin/affiliates${qs ? `?${qs}` : ''}`)
+    const qs = buildQueryString(params)
+    return pmsClient.get<AffiliateListResponse>(`/admin/affiliates${qs}`)
   },
 
   get: (id: string) =>

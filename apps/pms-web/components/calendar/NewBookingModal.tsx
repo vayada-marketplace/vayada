@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CalendarRoomType, CalendarRoom, CreateAdminBookingPayload } from '@/services/calendar'
+import Modal from '@/components/Modal'
 
 interface NewBookingModalProps {
   roomTypes: CalendarRoomType[]
@@ -101,9 +102,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <Modal onClose={onClose} maxWidth="lg">
         <h2 className="text-lg font-bold text-gray-900 mb-4">New Booking</h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -294,7 +293,6 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   )
 }

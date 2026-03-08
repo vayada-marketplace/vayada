@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CalendarRoomType } from '@/services/calendar'
+import Modal from '@/components/Modal'
 
 interface BlockModalProps {
   roomTypes: CalendarRoomType[]
@@ -51,9 +52,7 @@ export default function BlockModal({ roomTypes, onSubmit, onClose }: BlockModalP
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+    <Modal onClose={onClose}>
         <h2 className="text-lg font-bold text-gray-900 mb-4">Block Rooms</h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -158,7 +157,6 @@ export default function BlockModal({ roomTypes, onSubmit, onClose }: BlockModalP
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   )
 }

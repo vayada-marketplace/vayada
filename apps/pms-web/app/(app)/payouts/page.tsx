@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { bookingsService, Payout, PayoutListResponse } from '@/services/bookings'
+import { PAYOUT_STATUS_STYLES } from '@/lib/constants/statusStyles'
+import FilterTabs from '@/components/FilterTabs'
+import Pagination from '@/components/Pagination'
 
 const STATUS_TABS = [
   { label: 'All', value: '' },
@@ -10,13 +13,6 @@ const STATUS_TABS = [
   { label: 'Completed', value: 'completed' },
   { label: 'Failed', value: 'failed' },
 ]
-
-const STATUS_STYLES: Record<string, string> = {
-  scheduled: 'bg-blue-100 text-blue-700',
-  processing: 'bg-yellow-100 text-yellow-700',
-  completed: 'bg-green-100 text-green-700',
-  failed: 'bg-red-100 text-red-600',
-}
 
 export default function PayoutsPage() {
   const [payouts, setPayouts] = useState<Payout[]>([])
@@ -50,22 +46,7 @@ export default function PayoutsPage() {
     <div className="p-6">
       <h1 className="text-xl font-bold text-gray-900 mb-6">Payouts</h1>
 
-      {/* Status Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
-        {STATUS_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusFilter(tab.value)}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              statusFilter === tab.value
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <FilterTabs tabs={STATUS_TABS} activeValue={statusFilter} onChange={setStatusFilter} />
 
       {loading ? (
         <div className="animate-pulse">
@@ -108,7 +89,7 @@ export default function PayoutsPage() {
                       {p.currency} {p.amount.toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[p.status] || ''}`}>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYOUT_STATUS_STYLES[p.status] || ''}`}>
                         {p.status}
                       </span>
                     </td>
@@ -124,30 +105,7 @@ export default function PayoutsPage() {
             </table>
           </div>
 
-          {/* Pagination */}
-          {total > limit && (
-            <div className="flex items-center justify-between mt-4">
-              <p className="text-sm text-gray-500">
-                Showing {offset + 1}–{Math.min(offset + limit, total)} of {total}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setOffset(Math.max(0, offset - limit))}
-                  disabled={offset === 0}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => setOffset(offset + limit)}
-                  disabled={offset + limit >= total}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <Pagination total={total} limit={limit} offset={offset} onOffsetChange={setOffset} />
         </>
       )}
     </div>

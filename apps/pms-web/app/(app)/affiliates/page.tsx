@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { affiliatesService, Affiliate, AffiliateListResponse } from '@/services/affiliates'
+import { AFFILIATE_STATUS_STYLES } from '@/lib/constants/statusStyles'
+import FilterTabs from '@/components/FilterTabs'
+import Pagination from '@/components/Pagination'
 
 const STATUS_TABS = [
   { label: 'All', value: '' },
@@ -11,13 +14,6 @@ const STATUS_TABS = [
   { label: 'Rejected', value: 'rejected' },
   { label: 'Suspended', value: 'suspended' },
 ]
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-600',
-  suspended: 'bg-gray-100 text-gray-600',
-}
 
 const USER_TYPE_STYLES: Record<string, string> = {
   guest: 'bg-blue-50 text-blue-700',
@@ -56,22 +52,7 @@ export default function AffiliatesPage() {
     <div className="p-6">
       <h1 className="text-xl font-bold text-gray-900 mb-6">Affiliates</h1>
 
-      {/* Status Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
-        {STATUS_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusFilter(tab.value)}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              statusFilter === tab.value
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <FilterTabs tabs={STATUS_TABS} activeValue={statusFilter} onChange={setStatusFilter} />
 
       {loading ? (
         <div className="animate-pulse">
@@ -131,7 +112,7 @@ export default function AffiliatesPage() {
                       <span className="text-xs text-gray-500 ml-1">({a.commissionPct}%)</span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[a.status] || ''}`}>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${AFFILIATE_STATUS_STYLES[a.status] || ''}`}>
                         {a.status}
                       </span>
                     </td>
@@ -149,30 +130,7 @@ export default function AffiliatesPage() {
             </table>
           </div>
 
-          {/* Pagination */}
-          {total > limit && (
-            <div className="flex items-center justify-between mt-4">
-              <p className="text-sm text-gray-500">
-                Showing {offset + 1}&ndash;{Math.min(offset + limit, total)} of {total}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setOffset(Math.max(0, offset - limit))}
-                  disabled={offset === 0}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => setOffset(offset + limit)}
-                  disabled={offset + limit >= total}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-gray-50"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <Pagination total={total} limit={limit} offset={offset} onOffsetChange={setOffset} />
         </>
       )}
     </div>
