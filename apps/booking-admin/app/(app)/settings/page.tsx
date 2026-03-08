@@ -11,11 +11,10 @@ import {
   EnvelopeIcon,
   MapPinIcon,
   LockClosedIcon,
-  EyeIcon,
-  EyeSlashIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type PropertySettings } from '@/services/settings'
 import { CURRENCY_OPTIONS } from '@/lib/constants/options'
+import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
 
 type Tab = 'property' | 'notifications' | 'security' | 'billing'
 
@@ -71,15 +70,11 @@ export default function SettingsPage() {
   const [emailForm, setEmailForm] = useState({ new_email: '', password: '' })
   const [changingEmail, setChangingEmail] = useState(false)
   const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [showEmailPassword, setShowEmailPassword] = useState(false)
 
   // Password form state
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
-  const [showNewPassword, setShowNewPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const handleChangeEmail = async () => {
     try {
@@ -182,6 +177,10 @@ export default function SettingsPage() {
     })
   }
 
+  const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
+    setSettings({ ...settings, [key]: value })
+  }
+
   const tabs = [
     { id: 'property' as const, label: 'Property', icon: PropertyIcon },
     { id: 'notifications' as const, label: 'Notifications', icon: NotificationsIcon },
@@ -214,15 +213,7 @@ export default function SettingsPage() {
 
           {/* Feedback banner */}
           {feedback && (
-            <div
-              className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] ${
-                feedback.type === 'success'
-                  ? 'bg-green-50 text-green-800 border border-green-200'
-                  : 'bg-red-50 text-red-800 border border-red-200'
-              }`}
-            >
-              {feedback.message}
-            </div>
+            <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3" />
           )}
 
           {/* Property tab */}
@@ -246,7 +237,7 @@ export default function SettingsPage() {
                         <input
                           type="text"
                           value={settings.property_name}
-                          onChange={(e) => setSettings({ ...settings, property_name: e.target.value })}
+                          onChange={(e) => updateSetting('property_name', e.target.value)}
                           className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           placeholder="Enter property name"
                         />
@@ -260,7 +251,7 @@ export default function SettingsPage() {
                           <input
                             type="text"
                             value={settings.address}
-                            onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                            onChange={(e) => updateSetting('address', e.target.value)}
                             className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="Sekotong, Lombok Barat, NTB 83365, Indonesia"
                           />
@@ -274,7 +265,7 @@ export default function SettingsPage() {
                           <input
                             type="time"
                             value={settings.check_in_time}
-                            onChange={(e) => setSettings({ ...settings, check_in_time: e.target.value })}
+                            onChange={(e) => updateSetting('check_in_time', e.target.value)}
                             className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           />
                         </div>
@@ -285,7 +276,7 @@ export default function SettingsPage() {
                           <input
                             type="time"
                             value={settings.check_out_time}
-                            onChange={(e) => setSettings({ ...settings, check_out_time: e.target.value })}
+                            onChange={(e) => updateSetting('check_out_time', e.target.value)}
                             className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           />
                         </div>
@@ -310,7 +301,7 @@ export default function SettingsPage() {
                           <input
                             type="tel"
                             value={settings.phone_number}
-                            onChange={(e) => setSettings({ ...settings, phone_number: e.target.value })}
+                            onChange={(e) => updateSetting('phone_number', e.target.value)}
                             className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="+62 370 123 4567"
                           />
@@ -325,7 +316,7 @@ export default function SettingsPage() {
                           <input
                             type="tel"
                             value={settings.whatsapp_number}
-                            onChange={(e) => setSettings({ ...settings, whatsapp_number: e.target.value })}
+                            onChange={(e) => updateSetting('whatsapp_number', e.target.value)}
                             className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="+62 812 3456 7890"
                           />
@@ -340,7 +331,7 @@ export default function SettingsPage() {
                           <input
                             type="email"
                             value={settings.reservation_email}
-                            onChange={(e) => setSettings({ ...settings, reservation_email: e.target.value })}
+                            onChange={(e) => updateSetting('reservation_email', e.target.value)}
                             className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="reservations@hotel.com"
                           />
@@ -477,20 +468,7 @@ export default function SettingsPage() {
 
                   {/* Save button */}
                   <div className="flex justify-end">
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-                    >
-                      {saving ? (
-                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                        </svg>
-                      )}
-                      Save Changes
-                    </button>
+                    <SaveButton onClick={handleSave} saving={saving} />
                   </div>
                 </>
               )}
@@ -507,97 +485,40 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-[13px] text-gray-500 mb-4">Configure when and how you receive updates</p>
 
-                {/* Email Notifications toggle */}
-                <div className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="text-[13px] font-semibold text-gray-900">Email Notifications</p>
-                    <p className="text-[13px] text-gray-500">Receive notifications via email</p>
-                  </div>
-                  <button
-                    onClick={() => setSettings({ ...settings, email_notifications: !settings.email_notifications })}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                      settings.email_notifications ? 'bg-primary-500' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                      settings.email_notifications ? 'translate-x-[18px]' : ''
-                    }`} />
-                  </button>
-                </div>
+                <ToggleSwitch
+                  enabled={settings.email_notifications}
+                  onChange={() => updateSetting('email_notifications', !settings.email_notifications)}
+                  label="Email Notifications"
+                  description="Receive notifications via email"
+                />
 
                 <div className="border-t border-gray-200 my-2" />
 
-                {/* New Booking Alerts */}
-                <div className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="text-[13px] font-semibold text-gray-900">New Booking Alerts</p>
-                    <p className="text-[13px] text-gray-500">Get notified when a new booking is made</p>
-                  </div>
-                  <button
-                    onClick={() => setSettings({ ...settings, new_booking_alerts: !settings.new_booking_alerts })}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                      settings.new_booking_alerts ? 'bg-primary-500' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                      settings.new_booking_alerts ? 'translate-x-[18px]' : ''
-                    }`} />
-                  </button>
-                </div>
+                <ToggleSwitch
+                  enabled={settings.new_booking_alerts}
+                  onChange={() => updateSetting('new_booking_alerts', !settings.new_booking_alerts)}
+                  label="New Booking Alerts"
+                  description="Get notified when a new booking is made"
+                />
 
-                {/* Payment Alerts */}
-                <div className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="text-[13px] font-semibold text-gray-900">Payment Alerts</p>
-                    <p className="text-[13px] text-gray-500">Get notified about payment events</p>
-                  </div>
-                  <button
-                    onClick={() => setSettings({ ...settings, payment_alerts: !settings.payment_alerts })}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                      settings.payment_alerts ? 'bg-primary-500' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                      settings.payment_alerts ? 'translate-x-[18px]' : ''
-                    }`} />
-                  </button>
-                </div>
+                <ToggleSwitch
+                  enabled={settings.payment_alerts}
+                  onChange={() => updateSetting('payment_alerts', !settings.payment_alerts)}
+                  label="Payment Alerts"
+                  description="Get notified about payment events"
+                />
 
-                {/* Weekly Reports */}
-                <div className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="text-[13px] font-semibold text-gray-900">Weekly Reports</p>
-                    <p className="text-[13px] text-gray-500">Receive weekly performance summaries</p>
-                  </div>
-                  <button
-                    onClick={() => setSettings({ ...settings, weekly_reports: !settings.weekly_reports })}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                      settings.weekly_reports ? 'bg-primary-500' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                      settings.weekly_reports ? 'translate-x-[18px]' : ''
-                    }`} />
-                  </button>
-                </div>
+                <ToggleSwitch
+                  enabled={settings.weekly_reports}
+                  onChange={() => updateSetting('weekly_reports', !settings.weekly_reports)}
+                  label="Weekly Reports"
+                  description="Receive weekly performance summaries"
+                />
               </div>
 
               {/* Save button */}
               <div className="flex justify-end">
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-                >
-                  {saving ? (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                    </svg>
-                  )}
-                  Save Changes
-                </button>
+                <SaveButton onClick={handleSave} saving={saving} />
               </div>
             </div>
           )}
@@ -629,54 +550,27 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Current Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showEmailPassword ? 'text' : 'password'}
-                        value={emailForm.password}
-                        onChange={(e) => setEmailForm({ ...emailForm, password: e.target.value })}
-                        className="w-full px-2.5 py-1.5 pr-9 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Confirm with your password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowEmailPassword(!showEmailPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showEmailPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <PasswordField
+                    label="Current Password"
+                    value={emailForm.password}
+                    onChange={(value) => setEmailForm({ ...emailForm, password: value })}
+                    placeholder="Confirm with your password"
+                  />
                 </div>
 
                 {emailFeedback && (
-                  <div
-                    className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] max-w-sm ${
-                      emailFeedback.type === 'success'
-                        ? 'bg-green-50 text-green-800 border border-green-200'
-                        : 'bg-red-50 text-red-800 border border-red-200'
-                    }`}
-                  >
-                    {emailFeedback.message}
-                  </div>
+                  <FeedbackAlert type={emailFeedback.type} message={emailFeedback.message} className="mt-3 max-w-sm" />
                 )}
 
                 <div className="flex justify-end mt-4">
-                  <button
+                  <SaveButton
                     onClick={handleChangeEmail}
-                    disabled={changingEmail || !emailForm.new_email || !emailForm.password}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                    saving={changingEmail}
+                    disabled={!emailForm.new_email || !emailForm.password}
+                    icon={<EnvelopeIcon className="w-3.5 h-3.5" />}
                   >
-                    {changingEmail ? (
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <EnvelopeIcon className="w-3.5 h-3.5" />
-                    )}
                     Update Email
-                  </button>
+                  </SaveButton>
                 </div>
               </div>
 
@@ -689,96 +583,39 @@ export default function SettingsPage() {
                 <p className="text-[13px] text-gray-500 mb-4">Update your account password</p>
 
                 <div className="space-y-3 max-w-sm">
-                  <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Current Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showCurrentPassword ? 'text' : 'password'}
-                        value={passwordForm.current_password}
-                        onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
-                        className="w-full px-2.5 py-1.5 pr-9 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Enter current password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showCurrentPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      New Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showNewPassword ? 'text' : 'password'}
-                        value={passwordForm.new_password}
-                        onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
-                        className="w-full px-2.5 py-1.5 pr-9 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Enter new password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showNewPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Confirm New Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        value={passwordForm.confirm_password}
-                        onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
-                        className="w-full px-2.5 py-1.5 pr-9 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Confirm new password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showConfirmPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <PasswordField
+                    label="Current Password"
+                    value={passwordForm.current_password}
+                    onChange={(value) => setPasswordForm({ ...passwordForm, current_password: value })}
+                    placeholder="Enter current password"
+                  />
+                  <PasswordField
+                    label="New Password"
+                    value={passwordForm.new_password}
+                    onChange={(value) => setPasswordForm({ ...passwordForm, new_password: value })}
+                    placeholder="Enter new password"
+                  />
+                  <PasswordField
+                    label="Confirm New Password"
+                    value={passwordForm.confirm_password}
+                    onChange={(value) => setPasswordForm({ ...passwordForm, confirm_password: value })}
+                    placeholder="Confirm new password"
+                  />
                 </div>
 
                 {passwordFeedback && (
-                  <div
-                    className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] max-w-sm ${
-                      passwordFeedback.type === 'success'
-                        ? 'bg-green-50 text-green-800 border border-green-200'
-                        : 'bg-red-50 text-red-800 border border-red-200'
-                    }`}
-                  >
-                    {passwordFeedback.message}
-                  </div>
+                  <FeedbackAlert type={passwordFeedback.type} message={passwordFeedback.message} className="mt-3 max-w-sm" />
                 )}
 
                 <div className="flex justify-end mt-4">
-                  <button
+                  <SaveButton
                     onClick={handleChangePassword}
-                    disabled={changingPassword || !passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                    saving={changingPassword}
+                    disabled={!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
+                    icon={<LockClosedIcon className="w-3.5 h-3.5" />}
                   >
-                    {changingPassword ? (
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <LockClosedIcon className="w-3.5 h-3.5" />
-                    )}
                     Update Password
-                  </button>
+                  </SaveButton>
                 </div>
               </div>
             </div>

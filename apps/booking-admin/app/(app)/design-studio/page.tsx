@@ -9,16 +9,11 @@ import {
 } from '@heroicons/react/24/outline'
 import { settingsService } from '@/services/settings'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
+import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
+import { FeedbackAlert, SaveButton } from '@/components/ui'
+import { uploadSingleImage } from '@/lib/utils/uploadImage'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
-
-const AVAILABLE_FILTERS = [
-  { key: 'includeBreakfast', label: 'Include Breakfast' },
-  { key: 'freeCancellation', label: 'Free Cancellation' },
-  { key: 'payAtHotel', label: 'Pay at Hotel' },
-  { key: 'bestRated', label: 'Best Rated' },
-  { key: 'mountainView', label: 'Mountain View' },
-]
 
 type Tab = 'media' | 'colors' | 'fonts' | 'filters'
 
@@ -70,41 +65,20 @@ export default function DesignStudioPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Show local preview immediately
     const previousImage = heroImage
     const previewUrl = URL.createObjectURL(file)
     setHeroImage(previewUrl)
 
-    // Upload to S3 via PMS API
     try {
       setUploading(true)
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
-      const token = localStorage.getItem('access_token')
-      const formData = new FormData()
-      formData.append('files', file)
+      const s3Url = await uploadSingleImage(file)
+      URL.revokeObjectURL(previewUrl)
+      setHeroImage(s3Url)
 
-      const res = await fetch(`${pmsUrl}/upload/images`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      })
-
-      if (!res.ok) throw new Error('Upload failed')
-
-      const data = await res.json()
-      if (data.images?.[0]?.url) {
-        URL.revokeObjectURL(previewUrl)
-        const s3Url = data.images[0].url
-        setHeroImage(s3Url)
-
-        // Auto-save hero image to backend so it persists on reload
-        try {
-          await settingsService.updateDesignSettings({ hero_image: s3Url })
-        } catch {
-          console.error('Failed to auto-save hero image')
-        }
-      } else {
-        throw new Error('No image URL returned')
+      try {
+        await settingsService.updateDesignSettings({ hero_image: s3Url })
+      } catch {
+        console.error('Failed to auto-save hero image')
       }
     } catch (err) {
       console.error('Image upload failed:', err)
@@ -184,15 +158,7 @@ export default function DesignStudioPage() {
 
       {/* Feedback banner */}
       {feedback && (
-        <div
-          className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] shrink-0 ${
-            feedback.type === 'success'
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
-          }`}
-        >
-          {feedback.message}
-        </div>
+        <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3 shrink-0" />
       )}
 
       {/* Main split layout */}
@@ -523,20 +489,7 @@ export default function DesignStudioPage() {
 
           {/* Save button — always visible at bottom */}
           <div className="pt-3 shrink-0 border-t border-gray-100">
-            <button
-              onClick={handleSave}
-              disabled={saving || uploading}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-            >
-              {saving ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                </svg>
-              )}
-              Save Changes
-            </button>
+            <SaveButton onClick={handleSave} saving={saving} disabled={uploading} />
           </div>
         </div>
 

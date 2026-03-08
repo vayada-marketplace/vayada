@@ -9,6 +9,9 @@ import {
   PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type AddonItem, type AddonSettings, type DesignSettings } from '@/services/settings'
+import { ToggleSwitch, FeedbackAlert } from '@/components/ui'
+import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
+import { uploadSingleImage } from '@/lib/utils/uploadImage'
 
 type Tab = 'rooms' | 'addons' | 'details' | 'payment'
 
@@ -67,14 +70,6 @@ export default function BookingFlowPage() {
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
   const [savingFilters, setSavingFilters] = useState(false)
 
-  const AVAILABLE_FILTERS = [
-    { key: 'includeBreakfast', label: 'Include Breakfast' },
-    { key: 'freeCancellation', label: 'Free Cancellation' },
-    { key: 'payAtHotel', label: 'Pay at Hotel' },
-    { key: 'bestRated', label: 'Best Rated' },
-    { key: 'mountainView', label: 'Mountain View' },
-  ]
-
   useEffect(() => {
     Promise.all([
       settingsService.listAddons().catch(() => []),
@@ -122,26 +117,9 @@ export default function BookingFlowPage() {
 
     try {
       setUploadingImage(true)
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
-      const token = localStorage.getItem('access_token')
-      const fd = new FormData()
-      fd.append('files', file)
-
-      const res = await fetch(`${pmsUrl}/upload/images`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      })
-
-      if (!res.ok) throw new Error('Upload failed')
-
-      const data = await res.json()
-      if (data.images?.[0]?.url) {
-        URL.revokeObjectURL(previewUrl)
-        setFormData((prev) => ({ ...prev, image: data.images[0].url }))
-      } else {
-        throw new Error('No image URL returned')
-      }
+      const s3Url = await uploadSingleImage(file)
+      URL.revokeObjectURL(previewUrl)
+      setFormData((prev) => ({ ...prev, image: s3Url }))
     } catch (err) {
       console.error('Image upload failed:', err)
       URL.revokeObjectURL(previewUrl)
@@ -253,15 +231,7 @@ export default function BookingFlowPage() {
 
       {/* Feedback banner */}
       {feedback && (
-        <div
-          className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] shrink-0 ${
-            feedback.type === 'success'
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
-          }`}
-        >
-          {feedback.message}
-        </div>
+        <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3 shrink-0" />
       )}
 
       {/* Tab bar */}
@@ -285,7 +255,7 @@ export default function BookingFlowPage() {
       {/* Tab content */}
       <div className="mt-4 flex-1 overflow-y-auto pb-4">
 
-        {/* ═══ ROOMS TAB ═══ */}
+        {/* ROOMS TAB */}
         {activeTab === 'rooms' && (
           <div className="max-w-2xl space-y-4">
             {/* Room Visual Merchandising */}
@@ -308,25 +278,15 @@ export default function BookingFlowPage() {
               <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which filters guests can use to narrow room results</p>
 
               <div className="grid grid-cols-2 gap-2">
-                {AVAILABLE_FILTERS.map((filter) => {
-                  const enabled = bookingFilters.includes(filter.key)
-                  return (
-                    <button
-                      key={filter.key}
-                      onClick={() => handleToggleFilter(filter.key)}
-                      className={`flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                        enabled
-                          ? 'border-primary-500 bg-primary-50/30'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
-                      <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
-                      </div>
-                    </button>
-                  )
-                })}
+                {AVAILABLE_FILTERS.map((filter) => (
+                  <ToggleSwitch
+                    key={filter.key}
+                    size="sm"
+                    enabled={bookingFilters.includes(filter.key)}
+                    onChange={() => handleToggleFilter(filter.key)}
+                    label={filter.label}
+                  />
+                ))}
               </div>
 
               <button
@@ -343,7 +303,7 @@ export default function BookingFlowPage() {
           </div>
         )}
 
-        {/* ═══ ADD-ONS TAB ═══ */}
+        {/* ADD-ONS TAB */}
         {activeTab === 'addons' && (
           <div className="max-w-2xl space-y-4">
             {/* Guest Experiences */}
@@ -446,45 +406,26 @@ export default function BookingFlowPage() {
               <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Control how add-ons appear in the booking flow</p>
 
               <div className="space-y-2">
-                <button
-                  onClick={() => handleToggleAddonSetting('showAddonsStep')}
-                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                    addonSettings.showAddonsStep
-                      ? 'border-primary-500 bg-primary-50/30'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[12px] font-medium text-gray-900">Show Add-ons Step</span>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Display the add-ons step in the booking flow</p>
-                  </div>
-                  <div className={`w-8 h-5 rounded-full transition-colors relative ${addonSettings.showAddonsStep ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${addonSettings.showAddonsStep ? 'left-3.5' : 'left-0.5'}`} />
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleToggleAddonSetting('groupAddonsByCategory')}
-                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                    addonSettings.groupAddonsByCategory
-                      ? 'border-primary-500 bg-primary-50/30'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[12px] font-medium text-gray-900">Group by Category</span>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Organize add-ons by category (Transport, Wellness, etc.)</p>
-                  </div>
-                  <div className={`w-8 h-5 rounded-full transition-colors relative ${addonSettings.groupAddonsByCategory ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${addonSettings.groupAddonsByCategory ? 'left-3.5' : 'left-0.5'}`} />
-                  </div>
-                </button>
+                <ToggleSwitch
+                  size="sm"
+                  enabled={addonSettings.showAddonsStep}
+                  onChange={() => handleToggleAddonSetting('showAddonsStep')}
+                  label="Show Add-ons Step"
+                  description="Display the add-ons step in the booking flow"
+                />
+                <ToggleSwitch
+                  size="sm"
+                  enabled={addonSettings.groupAddonsByCategory}
+                  onChange={() => handleToggleAddonSetting('groupAddonsByCategory')}
+                  label="Group by Category"
+                  description="Organize add-ons by category (Transport, Wellness, etc.)"
+                />
               </div>
             </div>
           </div>
         )}
 
-        {/* ═══ DETAILS TAB ═══ */}
+        {/* DETAILS TAB */}
         {activeTab === 'details' && (
           <div className="max-w-2xl space-y-4">
             {/* Guest Information Fields */}
@@ -547,7 +488,7 @@ export default function BookingFlowPage() {
           </div>
         )}
 
-        {/* ═══ PAYMENT TAB ═══ */}
+        {/* PAYMENT TAB */}
         {activeTab === 'payment' && (
           <div className="max-w-2xl">
             <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -566,7 +507,7 @@ export default function BookingFlowPage() {
         )}
       </div>
 
-      {/* ═══ ADD/EDIT ADDON MODAL ═══ */}
+      {/* ADD/EDIT ADDON MODAL */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
@@ -729,23 +670,13 @@ export default function BookingFlowPage() {
               </div>
 
               {/* Per Person toggle */}
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, perPerson: !formData.perPerson })}
-                className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                  formData.perPerson
-                    ? 'border-primary-500 bg-primary-50/30'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div>
-                  <span className="text-[12px] font-medium text-gray-900">Per Person Pricing</span>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Price is multiplied by number of guests</p>
-                </div>
-                <div className={`w-8 h-5 rounded-full transition-colors relative ${formData.perPerson ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${formData.perPerson ? 'left-3.5' : 'left-0.5'}`} />
-                </div>
-              </button>
+              <ToggleSwitch
+                size="sm"
+                enabled={formData.perPerson}
+                onChange={() => setFormData({ ...formData, perPerson: !formData.perPerson })}
+                label="Per Person Pricing"
+                description="Price is multiplied by number of guests"
+              />
             </div>
 
             <div className="p-4 border-t border-gray-200 flex gap-2">
@@ -773,7 +704,7 @@ export default function BookingFlowPage() {
   )
 }
 
-/* ── Tab Icon Components ── */
+/* Tab Icon Components */
 
 function RoomsIcon({ className }: { className?: string }) {
   return (

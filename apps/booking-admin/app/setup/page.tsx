@@ -8,15 +8,9 @@ import { pmsClient } from '@/services/api/pmsClient'
 import { checkSetupStatus, isSetupComplete } from '@/lib/utils/setupStatus'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
 import { CURRENCY_OPTIONS } from '@/lib/constants/options'
+import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
 import { PhotoIcon, XMarkIcon, CheckIcon, PlusIcon } from '@heroicons/react/24/outline'
-
-const AVAILABLE_FILTERS = [
-  { key: 'includeBreakfast', label: 'Include Breakfast' },
-  { key: 'freeCancellation', label: 'Free Cancellation' },
-  { key: 'payAtHotel', label: 'Pay at Hotel' },
-  { key: 'bestRated', label: 'Best Rated' },
-  { key: 'mountainView', label: 'Mountain View' },
-]
+import { uploadSingleImage, uploadImages } from '@/lib/utils/uploadImage'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -307,21 +301,9 @@ export default function SetupPage() {
     setHeroImage(previewUrl)
     try {
       setUploading(true)
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
-      const token = localStorage.getItem('access_token')
-      const formData = new FormData()
-      formData.append('files', file)
-      const res = await fetch(`${pmsUrl}/upload/images`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      })
-      if (!res.ok) throw new Error('Upload failed')
-      const data = await res.json()
-      if (data.images?.[0]?.url) {
-        URL.revokeObjectURL(previewUrl)
-        setHeroImage(data.images[0].url)
-      }
+      const s3Url = await uploadSingleImage(file)
+      URL.revokeObjectURL(previewUrl)
+      setHeroImage(s3Url)
     } catch (err) {
       console.error('Image upload failed:', err)
     } finally {
@@ -334,18 +316,7 @@ export default function SetupPage() {
     if (!files || files.length === 0) return
     try {
       setUploadingRoomImages(true)
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || 'https://pms-api.vayada.com'
-      const token = localStorage.getItem('access_token')
-      const formData = new FormData()
-      Array.from(files).forEach((file) => formData.append('files', file))
-      const res = await fetch(`${pmsUrl}/upload/images`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      })
-      if (!res.ok) throw new Error('Upload failed')
-      const data = await res.json()
-      const urls = (data.images || []).map((img: { url: string }) => img.url)
+      const urls = await uploadImages(Array.from(files))
       updateRoom({ images: [...room.images, ...urls] })
     } catch (err) {
       console.error('Room image upload failed:', err)
