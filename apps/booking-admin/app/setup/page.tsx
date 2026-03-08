@@ -7,7 +7,6 @@ import { settingsService } from '@/services/settings'
 import { pmsClient } from '@/services/api/pmsClient'
 import { checkSetupStatus, isSetupComplete } from '@/lib/utils/setupStatus'
 import { FONT_PAIRINGS } from '@/lib/constants/branding'
-import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
 import { CheckIcon } from '@heroicons/react/24/outline'
 import { uploadSingleImage, uploadImages } from '@/lib/utils/uploadImage'
 
@@ -69,7 +68,6 @@ export default function SetupPage() {
   const [rooms, setRooms] = useState<RoomType[]>([createEmptyRoom()])
   const [activeRoomIndex, setActiveRoomIndex] = useState(0)
   const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>('details')
-  const [filterInput, setFilterInput] = useState('')
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
   const [benefitInput, setBenefitInput] = useState('')
@@ -281,14 +279,6 @@ export default function SetupPage() {
     }
   }
 
-  const addChip = (value: string, list: string[], setList: (v: string[]) => void, setInput: (v: string) => void) => {
-    const trimmed = value.trim()
-    if (trimmed && !list.includes(trimmed)) {
-      setList([...list, trimmed])
-    }
-    setInput('')
-  }
-
   const stepIndicators = (
     <div className="flex items-center justify-center mb-8">
       {STEPS.map((s, idx) => (
@@ -388,12 +378,9 @@ export default function SetupPage() {
           accentColor={accentColor} setAccentColor={setAccentColor}
           selectedFont={selectedFont} setSelectedFont={setSelectedFont}
           propertyDescription={propertyDescription} setPropertyDescription={setPropertyDescription}
-          bookingFilters={bookingFilters} setBookingFilters={setBookingFilters}
-          filterInput={filterInput} setFilterInput={setFilterInput}
           uploading={uploading}
           fileInputRef={fileInputRef}
           handleImageUpload={handleImageUpload}
-          addChip={addChip}
           propertyName={propertyName}
           currency={currency}
           defaultLanguage={defaultLanguage}

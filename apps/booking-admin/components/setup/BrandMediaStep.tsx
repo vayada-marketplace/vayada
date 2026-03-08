@@ -3,7 +3,6 @@
 import { RefObject } from 'react'
 import { PhotoIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
-import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
 
 interface BrandMediaStepProps {
   heroImage: string; setHeroImage: (v: string) => void
@@ -11,12 +10,9 @@ interface BrandMediaStepProps {
   accentColor: string; setAccentColor: (v: string) => void
   selectedFont: string; setSelectedFont: (v: string) => void
   propertyDescription: string; setPropertyDescription: (v: string) => void
-  bookingFilters: string[]; setBookingFilters: (v: string[]) => void
-  filterInput: string; setFilterInput: (v: string) => void
   uploading: boolean
   fileInputRef: RefObject<HTMLInputElement>
   handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
-  addChip: (value: string, list: string[], setList: (v: string[]) => void, setInput: (v: string) => void) => void
   propertyName: string
   currency: string
   defaultLanguage: string
@@ -33,12 +29,9 @@ export default function BrandMediaStep({
   accentColor, setAccentColor,
   selectedFont, setSelectedFont,
   propertyDescription, setPropertyDescription,
-  bookingFilters, setBookingFilters,
-  filterInput, setFilterInput,
   uploading,
   fileInputRef,
   handleImageUpload,
-  addChip,
   propertyName,
   currency,
   defaultLanguage,
@@ -215,56 +208,6 @@ export default function BrandMediaStep({
               <p className="text-[11px] text-gray-400 mt-1 text-right">{propertyDescription.length}/1000 characters</p>
             </div>
 
-            {/* Booking Filters */}
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h2 className="text-[13px] font-semibold text-gray-900">Booking Filters</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Add filters that guests can use on your booking page</p>
-
-              <div className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  value={filterInput}
-                  onChange={(e) => setFilterInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); addChip(filterInput, bookingFilters, setBookingFilters, setFilterInput) }
-                  }}
-                  className="flex-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
-                  placeholder="e.g. Pool View, Pet Friendly"
-                />
-                <button
-                  onClick={() => addChip(filterInput, bookingFilters, setBookingFilters, setFilterInput)}
-                  className="px-3 py-1.5 bg-gray-100 text-gray-700 text-[12px] font-medium rounded-lg hover:bg-gray-200 transition-colors"
-                >
-                  Add
-                </button>
-              </div>
-
-              {bookingFilters.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {bookingFilters.map((f) => (
-                    <span key={f} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full">
-                      {AVAILABLE_FILTERS.find((af) => af.key === f)?.label || f}
-                      <button onClick={() => setBookingFilters(bookingFilters.filter((x) => x !== f))} className="ml-0.5 text-primary-400 hover:text-primary-600">&times;</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div>
-                <p className="text-[11px] text-gray-400 font-medium mb-1.5">Suggestions</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {AVAILABLE_FILTERS.filter((f) => !bookingFilters.includes(f.key)).map((filter) => (
-                    <button
-                      key={filter.key}
-                      onClick={() => setBookingFilters([...bookingFilters, filter.key])}
-                      className="text-[11px] px-2 py-0.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:bg-gray-50 transition-colors"
-                    >
-                      + {filter.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Bottom buttons */}
