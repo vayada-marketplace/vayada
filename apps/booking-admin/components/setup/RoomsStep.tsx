@@ -19,8 +19,7 @@ export interface RoomType {
   flexibleRateEnabled: boolean
   nonRefundableEnabled: boolean
   cancellationPolicy: string
-  operatingFrom: string
-  operatingTo: string
+  operatingPeriods: { from: string; to: string }[]
   seasons: { name: string; from: string; to: string; rate: string }[]
   weekendSurcharge: string
   currency: string
@@ -46,8 +45,7 @@ export const createEmptyRoom = (): RoomType => ({
   flexibleRateEnabled: true,
   nonRefundableEnabled: false,
   cancellationPolicy: 'Free until 7 days before',
-  operatingFrom: '2026-01-01',
-  operatingTo: '2026-12-31',
+  operatingPeriods: [{ from: '2026-01-01', to: '2026-12-31' }],
   seasons: [],
   weekendSurcharge: '+0%',
   currency: '',
@@ -543,32 +541,43 @@ export default function RoomsStep({
               </div>
               <div className="ml-9">
                 <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m) => (
-                        <span key={m} className="text-[9px] text-gray-400 w-[calc(100%/12)] text-center">{m}</span>
-                      ))}
+                  {room.operatingPeriods.map((period, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <input
+                        type="date"
+                        value={period.from}
+                        onChange={(e) => {
+                          const updated = [...room.operatingPeriods]
+                          updated[idx] = { ...updated[idx], from: e.target.value }
+                          updateRoom({ operatingPeriods: updated })
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <span className="text-[11px] text-gray-400">to</span>
+                      <input
+                        type="date"
+                        value={period.to}
+                        onChange={(e) => {
+                          const updated = [...room.operatingPeriods]
+                          updated[idx] = { ...updated[idx], to: e.target.value }
+                          updateRoom({ operatingPeriods: updated })
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      {room.operatingPeriods.length > 1 && (
+                        <button
+                          onClick={() => updateRoom({ operatingPeriods: room.operatingPeriods.filter((_, i) => i !== idx) })}
+                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <XMarkIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
-                    <div className="h-5 rounded-full bg-gradient-to-r from-primary-400 to-primary-500 relative">
-                      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-semibold text-white">Year Round</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="date"
-                      value={room.operatingFrom}
-                      onChange={(e) => updateRoom({ operatingFrom: e.target.value })}
-                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                    <span className="text-[11px] text-gray-400">to</span>
-                    <input
-                      type="date"
-                      value={room.operatingTo}
-                      onChange={(e) => updateRoom({ operatingTo: e.target.value })}
-                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  </div>
-                  <button className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
+                  ))}
+                  <button
+                    onClick={() => updateRoom({ operatingPeriods: [...room.operatingPeriods, { from: '', to: '' }] })}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
                     <PlusIcon className="w-3.5 h-3.5" /> Add period
                   </button>
                 </div>
