@@ -1,0 +1,367 @@
+'use client'
+
+import { CURRENCY_OPTIONS } from '@/lib/constants/options'
+
+export const COUNTRY_OPTIONS = [
+  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia',
+  'Austria', 'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium',
+  'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei',
+  'Bulgaria', 'Burkina Faso', 'Burundi', 'Cambodia', 'Cameroon', 'Canada', 'Cape Verde',
+  'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Congo',
+  'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic', 'Denmark', 'Djibouti', 'Dominica',
+  'Dominican Republic', 'East Timor', 'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea',
+  'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'France', 'Gabon', 'Gambia',
+  'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau',
+  'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran', 'Iraq',
+  'Ireland', 'Israel', 'Italy', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati',
+  'Kosovo', 'Kuwait', 'Kyrgyzstan', 'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya',
+  'Liechtenstein', 'Lithuania', 'Luxembourg', 'Madagascar', 'Malawi', 'Malaysia', 'Maldives',
+  'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia',
+  'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia',
+  'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea',
+  'North Macedonia', 'Norway', 'Oman', 'Pakistan', 'Palau', 'Palestine', 'Panama',
+  'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar', 'Romania',
+  'Russia', 'Rwanda', 'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines',
+  'Samoa', 'San Marino', 'Saudi Arabia', 'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone',
+  'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea',
+  'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria',
+  'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Togo', 'Tonga', 'Trinidad and Tobago',
+  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates',
+  'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City',
+  'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
+]
+
+export const LANGUAGE_OPTIONS = [
+  { code: 'en', label: 'English' },
+  { code: 'de', label: 'German' },
+  { code: 'fr', label: 'French' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'id', label: 'Indonesian' },
+]
+
+interface PropertyStepProps {
+  propertyName: string; setPropertyName: (v: string) => void
+  city: string; setCity: (v: string) => void
+  country: string; setCountry: (v: string) => void
+  address: string; setAddress: (v: string) => void
+  reservationEmail: string; setReservationEmail: (v: string) => void
+  phoneNumber: string; setPhoneNumber: (v: string) => void
+  whatsapp: string; setWhatsapp: (v: string) => void
+  instagram: string; setInstagram: (v: string) => void
+  facebook: string; setFacebook: (v: string) => void
+  currency: string; setCurrency: (v: string) => void
+  defaultLanguage: string; setDefaultLanguage: (v: string) => void
+  supportedCurrencies: string[]; setSupportedCurrencies: (v: string[]) => void
+  supportedLanguages: string[]; setSupportedLanguages: (v: string[]) => void
+  prefilled: boolean
+  error: string
+  canProceed: boolean
+  onContinue: () => void
+  stepIndicators: React.ReactNode
+}
+
+export default function PropertyStep({
+  propertyName, setPropertyName,
+  city, setCity,
+  country, setCountry,
+  address, setAddress,
+  reservationEmail, setReservationEmail,
+  phoneNumber, setPhoneNumber,
+  whatsapp, setWhatsapp,
+  instagram, setInstagram,
+  facebook, setFacebook,
+  currency, setCurrency,
+  defaultLanguage, setDefaultLanguage,
+  supportedCurrencies, setSupportedCurrencies,
+  supportedLanguages, setSupportedLanguages,
+  prefilled,
+  error,
+  canProceed,
+  onContinue,
+  stepIndicators,
+}: PropertyStepProps) {
+  return (
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-2xl mx-auto px-6 py-6">
+        {stepIndicators}
+        {prefilled && (
+          <div className="mb-4 px-3 py-2.5 rounded-lg text-[13px] bg-blue-50 text-blue-800 border border-blue-200">
+            Some fields were pre-filled from your marketplace profile. Review and adjust as needed.
+          </div>
+        )}
+
+        <div className="text-center mb-6">
+          <h2 className="text-base font-bold text-gray-900">Your Property</h2>
+          <p className="text-[12px] text-gray-500 mt-1">Tell us about your property so we can set up everything for you.</p>
+        </div>
+
+        {/* Basic Information */}
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-5 space-y-4 mb-5">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-primary-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+              <path d="M10 6h4" /><path d="M10 10h4" /><path d="M10 14h4" /><path d="M10 18h4" />
+            </svg>
+            <h3 className="text-[13px] font-bold text-gray-900">Basic Information</h3>
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+              Property Name <span className="text-gray-800">*</span>
+            </label>
+            <input
+              type="text"
+              value={propertyName}
+              onChange={(e) => setPropertyName(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+              placeholder="e.g. Sundancer Villas & Suites"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+                City <span className="text-gray-800">*</span>
+              </label>
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="e.g. Seminyak"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+                Country <span className="text-gray-800">*</span>
+              </label>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+              >
+                <option value="">Select country</option>
+                {COUNTRY_OPTIONS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+              Full Address <span className="text-gray-800">*</span>
+            </label>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+              placeholder="Street address, area"
+            />
+          </div>
+        </div>
+
+        {/* Contact Details */}
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-5 space-y-4 mb-5">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+            </svg>
+            <h3 className="text-[13px] font-bold text-gray-900">Contact Details</h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+                Email <span className="text-gray-800">*</span>
+              </label>
+              <input
+                type="email"
+                value={reservationEmail}
+                onChange={(e) => setReservationEmail(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="reservations@yourproperty.com"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">
+                Phone Number <span className="text-gray-800">*</span>
+              </label>
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="+62 812 3456 7890"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="flex items-center gap-1 text-[12px] text-gray-800 mb-1">
+                <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                </svg>
+                <span className="font-semibold">WhatsApp</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+              </label>
+              <input
+                type="tel"
+                value={whatsapp}
+                onChange={(e) => setWhatsapp(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="+62 812 ..."
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-gray-800 mb-1">
+                <span className="font-semibold">Instagram</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={instagram}
+                onChange={(e) => setInstagram(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="@yourproperty"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-gray-800 mb-1">
+                <span className="font-semibold">Facebook</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={facebook}
+                onChange={(e) => setFacebook(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="facebook.com/yourproperty"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Currency & Languages */}
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-5 space-y-4">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+            </svg>
+            <h3 className="text-[13px] font-bold text-gray-900">Currency & Languages</h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">Default Currency <span className="text-gray-800">*</span></label>
+              <select
+                value={currency}
+                onChange={(e) => {
+                  const newPrimary = e.target.value
+                  setCurrency(newPrimary)
+                  setSupportedCurrencies(supportedCurrencies.filter((c) => c !== newPrimary))
+                }}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+              >
+                {CURRENCY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-800 mb-1">Default Language <span className="text-gray-800">*</span></label>
+              <select
+                value={defaultLanguage}
+                onChange={(e) => setDefaultLanguage(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+              >
+                {LANGUAGE_OPTIONS.map((l) => (
+                  <option key={l.code} value={l.code}>{l.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[12px] text-gray-800 mb-1">
+              <span className="font-semibold">Additional Currencies</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {['EUR', 'GBP', 'IDR', 'AUD', 'THB', 'JPY'].filter((code) => code !== currency).map((code) => {
+                const selected = supportedCurrencies.includes(code)
+                return (
+                  <button
+                    key={code}
+                    onClick={() => {
+                      setSupportedCurrencies(
+                        selected ? supportedCurrencies.filter((x) => x !== code) : [...supportedCurrencies, code]
+                      )
+                    }}
+                    className={`px-2.5 py-0.5 text-[11px] font-medium rounded-full transition-colors ${
+                      selected
+                        ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                        : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {code}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[12px] text-gray-800 mb-1">
+              <span className="font-semibold">Additional Languages</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {LANGUAGE_OPTIONS.filter((l) => l.code !== defaultLanguage).map((l) => {
+                const selected = supportedLanguages.includes(l.code)
+                const displayNames: Record<string, string> = { de: 'Deutsch', fr: 'Fran\u00e7ais', es: 'Espa\u00f1ol', id: 'Bahasa Indonesia', en: 'English' }
+                return (
+                  <button
+                    key={l.code}
+                    onClick={() => {
+                      setSupportedLanguages(
+                        selected ? supportedLanguages.filter((x) => x !== l.code) : [...supportedLanguages, l.code]
+                      )
+                    }}
+                    className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors ${
+                      selected
+                        ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                        : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {displayNames[l.code] || l.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+            <p className="text-[12px] text-red-700 font-medium">{error}</p>
+          </div>
+        )}
+
+        <div className="mt-8 flex items-center justify-between">
+          <button
+            className="text-[13px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Back
+          </button>
+          <button
+            onClick={onContinue}
+            disabled={!canProceed}
+            className="px-6 py-2.5 bg-primary-500 text-white text-[13px] font-semibold rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

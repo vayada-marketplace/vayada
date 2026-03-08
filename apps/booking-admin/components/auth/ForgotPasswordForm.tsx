@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { validateEmail } from '@/lib/utils/validation'
 
 interface ForgotPasswordFormProps {
   onSubmit: (email: string) => Promise<void>
@@ -16,10 +17,6 @@ export default function ForgotPasswordForm({
   const [email, setEmail] = useState('')
   const [emailError, setEmailError] = useState('')
   const [isSuccess, setIsSuccess] = useState(false)
-
-  const validateEmail = (value: string): boolean => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

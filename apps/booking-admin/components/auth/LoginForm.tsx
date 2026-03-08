@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { validateEmail } from '@/lib/utils/validation'
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void>
@@ -32,10 +33,6 @@ export default function LoginForm({
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [emailError, setEmailError] = useState('')
-
-  const validateEmail = (value: string): boolean => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

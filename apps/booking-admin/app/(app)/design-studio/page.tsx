@@ -1,17 +1,15 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import {
-  PhotoIcon,
-  XMarkIcon,
-  ArrowPathIcon,
-  PlusIcon,
-} from '@heroicons/react/24/outline'
 import { settingsService } from '@/services/settings'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
-import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
 import { FeedbackAlert, SaveButton } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
+
+import MediaTab from '@/components/design-studio/MediaTab'
+import ColorsTab from '@/components/design-studio/ColorsTab'
+import FontsTab from '@/components/design-studio/FontsTab'
+import FiltersTab from '@/components/design-studio/FiltersTab'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
@@ -104,7 +102,6 @@ export default function DesignStudioPage() {
     try {
       setSaving(true)
       setFeedback(null)
-      // Never persist blob: URLs — they are temporary local previews
       const imageToSave = heroImage.startsWith('blob:') ? '' : heroImage
       await settingsService.updateDesignSettings({
         hero_image: imageToSave,
@@ -133,7 +130,7 @@ export default function DesignStudioPage() {
     { id: 'media' as const, label: 'Media & Content', icon: MediaIcon },
     { id: 'colors' as const, label: 'Colors', icon: ColorsIcon },
     { id: 'fonts' as const, label: 'Fonts', icon: FontsIcon },
-    { id: 'filters' as const, label: 'Filters', icon: FiltersIcon },
+    { id: 'filters' as const, label: 'Filters', icon: FiltersIcon2 },
   ]
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
@@ -184,310 +181,45 @@ export default function DesignStudioPage() {
             ))}
           </div>
 
-          {/* Tab content — scrollable */}
+          {/* Tab content */}
           <div className="mt-3 flex-1 overflow-y-auto space-y-3 pb-3">
-
-            {/* Media & Content tab */}
             {activeTab === 'media' && (
-              <>
-                {/* Hero Image */}
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <h2 className="text-[13px] font-semibold text-gray-900">Hero Image</h2>
-                  <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">1920x1080 recommended</p>
-
-                  {heroImage ? (
-                    <div className="relative rounded-lg overflow-hidden bg-gray-200">
-                      <img src={heroImage} alt="Hero" className="w-full h-36 object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                      <button
-                        onClick={removeHeroImage}
-                        className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
-                      >
-                        <XMarkIcon className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full h-36 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-gray-400 hover:text-gray-500 transition-colors"
-                    >
-                      <PhotoIcon className="w-6 h-6" />
-                      <span className="text-[12px]">Click to upload</span>
-                    </button>
-                  )}
-
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-
-                  {heroImage && (
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="mt-2 w-full py-1.5 text-[12px] text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Replace Image
-                    </button>
-                  )}
-                </div>
-
-                {/* Text Overrides */}
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <h2 className="text-[13px] font-semibold text-gray-900">Hero Text</h2>
-                  <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">Customize heading and subtext</p>
-
-                  <div className="space-y-2.5">
-                    <div>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Heading</label>
-                      <input
-                        type="text"
-                        value={heroHeading}
-                        onChange={(e) => setHeroHeading(e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Enter hero heading"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Subtext</label>
-                      <textarea
-                        value={heroSubtext}
-                        onChange={(e) => { if (e.target.value.length <= 200) setHeroSubtext(e.target.value) }}
-                        rows={3}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
-                        placeholder="Enter hero subtext"
-                      />
-                      <p className="text-[11px] text-gray-400 mt-0.5">{heroSubtext.length}/200 characters</p>
-                    </div>
-                    <button
-                      onClick={resetContent}
-                      className="w-full py-1.5 text-[12px] text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-1"
-                    >
-                      <ArrowPathIcon className="w-3 h-3" />
-                      Reset to Default
-                    </button>
-                  </div>
-                </div>
-              </>
+              <MediaTab
+                heroImage={heroImage} setHeroImage={setHeroImage}
+                heroHeading={heroHeading} setHeroHeading={setHeroHeading}
+                heroSubtext={heroSubtext} setHeroSubtext={setHeroSubtext}
+                fileInputRef={fileInputRef}
+                handleImageUpload={handleImageUpload}
+                removeHeroImage={removeHeroImage}
+                resetContent={resetContent}
+              />
             )}
 
-            {/* Colors tab */}
             {activeTab === 'colors' && (
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <h2 className="text-[13px] font-semibold text-gray-900">Color Profile</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Define your brand colors</p>
-
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-[12px] font-semibold text-gray-900">Primary Brand Color</h3>
-                    <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Buttons, links, and accents</p>
-                    <div className="flex items-center gap-2">
-                      <label
-                        className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
-                        style={{ backgroundColor: primaryColor }}
-                      >
-                        <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="opacity-0 w-0 h-0" />
-                      </label>
-                      <input
-                        type="text"
-                        value={primaryColor}
-                        onChange={(e) => setPrimaryColor(e.target.value)}
-                        className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
-                    <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Card and section backgrounds</p>
-                    <div className="flex items-center gap-2">
-                      <label
-                        className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
-                        style={{ backgroundColor: accentColor }}
-                      >
-                        <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="opacity-0 w-0 h-0" />
-                      </label>
-                      <input
-                        type="text"
-                        value={accentColor}
-                        onChange={(e) => setAccentColor(e.target.value)}
-                        className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-[12px] font-semibold text-gray-900 mb-1.5">Quick Presets</h3>
-                    <div className="flex flex-wrap gap-1.5">
-                      {COLOR_PRESETS.map((preset) => (
-                        <button
-                          key={preset.name}
-                          onClick={() => applyPreset(preset)}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 border border-gray-200 rounded-full text-[12px] text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: preset.primary }} />
-                          {preset.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ColorsTab
+                primaryColor={primaryColor} setPrimaryColor={setPrimaryColor}
+                accentColor={accentColor} setAccentColor={setAccentColor}
+                applyPreset={applyPreset}
+              />
             )}
 
-            {/* Fonts tab */}
             {activeTab === 'fonts' && (
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <h2 className="text-[13px] font-semibold text-gray-900">Typography</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Select a font pairing</p>
-
-                <div className="space-y-1.5">
-                  {FONT_PAIRINGS.map((pairing) => (
-                    <button
-                      key={pairing.id}
-                      onClick={() => setSelectedFont(pairing.id)}
-                      className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                        selectedFont === pairing.id
-                          ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[12px] font-semibold text-gray-900">{pairing.name}</span>
-                          {selectedFont === pairing.id && (
-                            <svg className="w-3.5 h-3.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-gray-500">{pairing.fonts}</span>
-                      </div>
-                      <span className="text-sm text-gray-600" style={{ fontFamily: pairing.headingFamily }}>
-                        {pairing.preview}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <FontsTab
+                selectedFont={selectedFont}
+                setSelectedFont={setSelectedFont}
+              />
             )}
 
-            {/* Filters tab */}
             {activeTab === 'filters' && (
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <h2 className="text-[13px] font-semibold text-gray-900">Booking Filters</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which filters guests see on your booking page</p>
-
-                <div className="space-y-2">
-                  {[
-                    ...AVAILABLE_FILTERS.map((f) => ({ ...f, isCustom: false as const })),
-                    ...Object.entries(customFilters).map(([key, label]) => ({ key, label, isCustom: true as const })),
-                  ].map((filter) => {
-                    const enabled = bookingFilters.includes(filter.key)
-                    const isCustom = filter.isCustom
-                    return (
-                      <div
-                        key={filter.key}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
-                          enabled
-                            ? 'border-primary-500 bg-primary-50/30'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <button
-                          className="flex-1 text-left"
-                          onClick={() => {
-                            setBookingFilters((prev) =>
-                              enabled
-                                ? prev.filter((k) => k !== filter.key)
-                                : [...prev, filter.key]
-                            )
-                          }}
-                        >
-                          <span className="text-[12px] font-medium text-gray-900">{filter.label}</span>
-                        </button>
-                        <div className="flex items-center gap-2">
-                          {isCustom && (
-                            <button
-                              onClick={() => {
-                                setCustomFilters((prev) => {
-                                  const next = { ...prev }
-                                  delete next[filter.key]
-                                  return next
-                                })
-                                setBookingFilters((prev) => prev.filter((k) => k !== filter.key))
-                              }}
-                              className="w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                              title="Remove custom filter"
-                            >
-                              <XMarkIcon className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setBookingFilters((prev) =>
-                                enabled
-                                  ? prev.filter((k) => k !== filter.key)
-                                  : [...prev, filter.key]
-                              )
-                            }}
-                          >
-                            <div className={`w-8 h-5 rounded-full transition-colors relative ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'left-3.5' : 'left-0.5'}`} />
-                            </div>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {/* Add custom filter */}
-                <div className="mt-4 pt-3 border-t border-gray-100">
-                  <p className="text-[12px] font-medium text-gray-700 mb-2">Add Custom Filter</p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newFilterLabel}
-                      onChange={(e) => setNewFilterLabel(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newFilterLabel.trim()) {
-                          const label = newFilterLabel.trim()
-                          const key = label
-                            .split(/\s+/)
-                            .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-                            .join('')
-                          if (!AVAILABLE_FILTERS.some((f) => f.key === key) && !customFilters[key]) {
-                            setCustomFilters((prev) => ({ ...prev, [key]: label }))
-                            setBookingFilters((prev) => [...prev, key])
-                          }
-                          setNewFilterLabel('')
-                        }
-                      }}
-                      placeholder="e.g. Pool Access"
-                      className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!newFilterLabel.trim()) return
-                        const label = newFilterLabel.trim()
-                        const key = label
-                          .split(/\s+/)
-                          .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-                          .join('')
-                        if (!AVAILABLE_FILTERS.some((f) => f.key === key) && !customFilters[key]) {
-                          setCustomFilters((prev) => ({ ...prev, [key]: label }))
-                          setBookingFilters((prev) => [...prev, key])
-                        }
-                        setNewFilterLabel('')
-                      }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 transition-colors"
-                    >
-                      <PlusIcon className="w-3.5 h-3.5" />
-                      Add
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <FiltersTab
+                bookingFilters={bookingFilters} setBookingFilters={setBookingFilters}
+                customFilters={customFilters} setCustomFilters={setCustomFilters}
+                newFilterLabel={newFilterLabel} setNewFilterLabel={setNewFilterLabel}
+              />
             )}
           </div>
 
-          {/* Save button — always visible at bottom */}
+          {/* Save button */}
           <div className="pt-3 shrink-0 border-t border-gray-100">
             <SaveButton onClick={handleSave} saving={saving} disabled={uploading} />
           </div>
@@ -507,17 +239,17 @@ export default function DesignStudioPage() {
             </div>
           </div>
 
-          {/* Preview content — scrollable */}
+          {/* Preview content */}
           <div className="flex-1 overflow-y-auto bg-white" style={{ fontFamily: currentFont.bodyFamily }}>
 
-            {/* ===== HERO SECTION ===== */}
+            {/* HERO SECTION */}
             <div className="relative h-[280px] w-full bg-gray-300">
               {heroImage && (
                 <img src={heroImage} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
               )}
               <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
-              {/* Navigation — absolute over hero */}
+              {/* Navigation */}
               <div className="absolute top-0 left-0 right-0 z-10">
                 <div className="flex items-center justify-between px-4 h-10">
                   <span className="text-[11px] font-semibold text-white" style={{ fontFamily: currentFont.bodyFamily }}>
@@ -543,7 +275,7 @@ export default function DesignStudioPage() {
                 </div>
               </div>
 
-              {/* Hero Content — centered */}
+              {/* Hero Content */}
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
                 <h2
                   className="text-2xl italic text-white mb-1.5"
@@ -560,10 +292,9 @@ export default function DesignStudioPage() {
               </div>
             </div>
 
-            {/* ===== SEARCH BAR — overlaps hero ===== */}
+            {/* SEARCH BAR */}
             <div className="relative z-20 max-w-[92%] mx-auto -mt-6">
               <div className="bg-white rounded-xl shadow-lg border border-gray-100 px-3 py-2.5 flex items-center gap-2">
-                {/* Dates */}
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
                     <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -579,7 +310,6 @@ export default function DesignStudioPage() {
 
                 <div className="w-px h-8 bg-gray-200" />
 
-                {/* Guests */}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
                     <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -595,7 +325,6 @@ export default function DesignStudioPage() {
 
                 <div className="w-px h-8 bg-gray-200" />
 
-                {/* Promo */}
                 <div className="flex items-center gap-1 text-gray-400 flex-shrink-0">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
@@ -603,7 +332,6 @@ export default function DesignStudioPage() {
                   <span className="text-[9px] font-medium" style={{ fontFamily: currentFont.bodyFamily }}>Promo</span>
                 </div>
 
-                {/* Check Availability */}
                 <button
                   className="px-3 py-1.5 rounded-full text-[9px] font-semibold text-white shrink-0"
                   style={{ backgroundColor: primaryColor }}
@@ -613,9 +341,8 @@ export default function DesignStudioPage() {
               </div>
             </div>
 
-            {/* ===== MAIN CONTENT ===== */}
+            {/* MAIN CONTENT */}
             <div className="px-4 py-5">
-              {/* Section header + Step indicator */}
               <div className="flex items-center justify-between mb-4">
                 <h3
                   className="text-sm text-gray-900"
@@ -624,7 +351,6 @@ export default function DesignStudioPage() {
                   Available Accommodations
                 </h3>
 
-                {/* Step Indicator */}
                 <div className="flex items-center gap-1">
                   {[
                     { n: 1, label: 'Rooms' },
@@ -685,17 +411,15 @@ export default function DesignStudioPage() {
                 </div>
               </div>
 
-              {/* ===== ROOM CARD (horizontal layout like actual frontend) ===== */}
+              {/* ROOM CARD */}
               <div className="border border-gray-200 rounded-xl overflow-hidden">
                 <div className="flex">
-                  {/* Room Image */}
                   <div className="relative w-[160px] flex-shrink-0">
                     <img
                       src="https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400&q=80"
                       alt="Deluxe Room"
                       className="w-full h-full object-cover"
                     />
-                    {/* Thumbnail dots */}
                     <div className="absolute bottom-1.5 left-1.5 right-1.5 flex gap-0.5">
                       {[0, 1, 2].map((i) => (
                         <div
@@ -707,9 +431,7 @@ export default function DesignStudioPage() {
                     </div>
                   </div>
 
-                  {/* Room Details + Rates */}
                   <div className="flex-1 p-3">
-                    {/* Header */}
                     <div className="flex items-start justify-between mb-1.5">
                       <div>
                         <h4 className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.headingFamily }}>
@@ -725,7 +447,6 @@ export default function DesignStudioPage() {
                       </span>
                     </div>
 
-                    {/* Feature pills */}
                     <div className="flex flex-wrap gap-1 mb-2">
                       {['Mountain View', 'Balcony', 'Mini Bar', 'Safe'].map((feat) => (
                         <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
@@ -737,11 +458,9 @@ export default function DesignStudioPage() {
                       ))}
                     </div>
 
-                    {/* Rate Options */}
                     <div className="border-t border-gray-100 pt-2">
                       <p className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Rate Options</p>
 
-                      {/* Flexible Rate */}
                       <div className="rounded-lg border-2 mb-1.5" style={{ borderColor: primaryColor }}>
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
@@ -760,7 +479,6 @@ export default function DesignStudioPage() {
                         </div>
                       </div>
 
-                      {/* Non-Refundable Rate */}
                       <div className="rounded-lg border border-gray-200">
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
@@ -856,10 +574,9 @@ export default function DesignStudioPage() {
               </div>
             </div>
 
-            {/* ===== FOOTER ===== */}
+            {/* FOOTER */}
             <div className="px-4 py-4 text-white" style={{ backgroundColor: primaryColor }}>
               <div className="flex gap-6 mb-3">
-                {/* Hotel info */}
                 <div className="flex-1">
                   <p className="text-[11px] font-bold mb-1" style={{ fontFamily: currentFont.headingFamily }}>
                     {heroHeading || 'Your Hotel'}
@@ -868,7 +585,6 @@ export default function DesignStudioPage() {
                     {heroSubtext ? heroSubtext.slice(0, 80) + (heroSubtext.length > 80 ? '...' : '') : 'Your hotel description.'}
                   </p>
                 </div>
-                {/* Contact */}
                 <div>
                   <p className="text-[8px] font-bold uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Contact</p>
                   <div className="space-y-0.5 text-[8px] text-white/80" style={{ fontFamily: currentFont.bodyFamily }}>
@@ -921,7 +637,7 @@ function FontsIcon({ className }: { className?: string }) {
   )
 }
 
-function FiltersIcon({ className }: { className?: string }) {
+function FiltersIcon2({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />

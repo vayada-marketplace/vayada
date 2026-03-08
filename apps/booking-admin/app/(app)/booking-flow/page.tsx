@@ -3,15 +3,17 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   PlusIcon,
-  PencilSquareIcon,
-  TrashIcon,
   XMarkIcon,
   PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type AddonItem, type AddonSettings, type DesignSettings } from '@/services/settings'
 import { ToggleSwitch, FeedbackAlert } from '@/components/ui'
-import { AVAILABLE_FILTERS } from '@/lib/constants/filters'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
+
+import RoomsTab from '@/components/booking-flow/RoomsTab'
+import AddonsTab from '@/components/booking-flow/AddonsTab'
+import DetailsTab from '@/components/booking-flow/DetailsTab'
+import PaymentTab from '@/components/booking-flow/PaymentTab'
 
 type Tab = 'rooms' | 'addons' | 'details' | 'payment'
 
@@ -20,23 +22,6 @@ const CATEGORIES = [
   { value: 'wellness', label: 'Wellness' },
   { value: 'dining', label: 'Dining' },
   { value: 'experience', label: 'Experience' },
-]
-
-const CATEGORY_COLORS: Record<string, string> = {
-  transport: 'bg-blue-100 text-blue-700',
-  wellness: 'bg-purple-100 text-purple-700',
-  dining: 'bg-orange-100 text-orange-700',
-  experience: 'bg-green-100 text-green-700',
-}
-
-const GUEST_INFO_FIELDS = [
-  { name: 'First Name', type: 'Text', required: true },
-  { name: 'Last Name', type: 'Text', required: true },
-  { name: 'Email', type: 'Email', required: true },
-  { name: 'Phone Number', type: 'Phone', required: true },
-  { name: 'Country', type: 'Select', required: true },
-  { name: 'Arrival Time', type: 'Time', required: false },
-  { name: 'Special Requests', type: 'Textarea', required: false },
 ]
 
 const emptyAddon = {
@@ -254,257 +239,30 @@ export default function BookingFlowPage() {
 
       {/* Tab content */}
       <div className="mt-4 flex-1 overflow-y-auto pb-4">
-
-        {/* ROOMS TAB */}
         {activeTab === 'rooms' && (
-          <div className="max-w-2xl space-y-4">
-            {/* Room Visual Merchandising */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Room Visual Merchandising</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Rooms are synced from your PMS. Manage room types, images, and pricing in the Property Manager.</p>
-
-              <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 text-center">
-                <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-                  <RoomsIcon className="w-5 h-5 text-gray-400" />
-                </div>
-                <p className="text-[13px] font-medium text-gray-600">Rooms are managed in your PMS</p>
-                <p className="text-[12px] text-gray-400 mt-0.5">Room types, images, and pricing sync automatically</p>
-              </div>
-            </div>
-
-            {/* Popular Filters */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Popular Filters</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which filters guests can use to narrow room results</p>
-
-              <div className="grid grid-cols-2 gap-2">
-                {AVAILABLE_FILTERS.map((filter) => (
-                  <ToggleSwitch
-                    key={filter.key}
-                    size="sm"
-                    enabled={bookingFilters.includes(filter.key)}
-                    onChange={() => handleToggleFilter(filter.key)}
-                    label={filter.label}
-                  />
-                ))}
-              </div>
-
-              <button
-                onClick={handleSaveFilters}
-                disabled={savingFilters}
-                className="mt-4 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-              >
-                {savingFilters ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : null}
-                Save Filters
-              </button>
-            </div>
-          </div>
+          <RoomsTab
+            bookingFilters={bookingFilters}
+            handleToggleFilter={handleToggleFilter}
+            handleSaveFilters={handleSaveFilters}
+            savingFilters={savingFilters}
+          />
         )}
 
-        {/* ADD-ONS TAB */}
         {activeTab === 'addons' && (
-          <div className="max-w-2xl space-y-4">
-            {/* Guest Experiences */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-[14px] font-semibold text-gray-900">Guest Experiences</h2>
-                  <p className="text-[12px] text-gray-500 mt-0.5">Upsells and add-ons shown during the booking flow</p>
-                </div>
-                <button
-                  onClick={openCreateModal}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 transition-colors"
-                >
-                  <PlusIcon className="w-3.5 h-3.5" />
-                  Add Experience
-                </button>
-              </div>
-
-              {addons.length === 0 ? (
-                <div className="bg-gray-50 rounded-lg border border-dashed border-gray-300 p-6 text-center">
-                  <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-                    <AddonsIcon className="w-5 h-5 text-gray-400" />
-                  </div>
-                  <p className="text-[13px] font-medium text-gray-600">No add-ons yet</p>
-                  <p className="text-[12px] text-gray-400 mt-0.5">Create your first guest experience to show during booking</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {addons.map((addon) => (
-                    <div
-                      key={addon.id}
-                      className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
-                    >
-                      {/* Drag handle icon */}
-                      <div className="text-gray-300 shrink-0">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                          <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
-                          <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
-                          <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
-                        </svg>
-                      </div>
-
-                      {/* Image thumbnail */}
-                      {addon.image ? (
-                        <img src={addon.image} alt={addon.name} className="w-10 h-10 rounded-md object-cover shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-md bg-gray-100 flex items-center justify-center shrink-0">
-                          <AddonsIcon className="w-4 h-4 text-gray-400" />
-                        </div>
-                      )}
-
-                      {/* Name and category */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-medium text-gray-900 truncate">{addon.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[addon.category] || 'bg-gray-100 text-gray-600'}`}>
-                            {addon.category.charAt(0).toUpperCase() + addon.category.slice(1)}
-                          </span>
-                          {addon.duration && (
-                            <span className="text-[11px] text-gray-400">{addon.duration}</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Price */}
-                      <div className="text-right shrink-0">
-                        <p className="text-[13px] font-semibold text-gray-900">
-                          {addon.currency === 'EUR' ? '\u20AC' : addon.currency === 'USD' ? '$' : addon.currency}{addon.price.toFixed(2)}
-                        </p>
-                        {addon.perPerson && (
-                          <p className="text-[10px] text-gray-400">per person</p>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => openEditModal(addon)}
-                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-                        >
-                          <PencilSquareIcon className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteAddon(addon.id)}
-                          disabled={deletingId === addon.id}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Display Settings */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Display Settings</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Control how add-ons appear in the booking flow</p>
-
-              <div className="space-y-2">
-                <ToggleSwitch
-                  size="sm"
-                  enabled={addonSettings.showAddonsStep}
-                  onChange={() => handleToggleAddonSetting('showAddonsStep')}
-                  label="Show Add-ons Step"
-                  description="Display the add-ons step in the booking flow"
-                />
-                <ToggleSwitch
-                  size="sm"
-                  enabled={addonSettings.groupAddonsByCategory}
-                  onChange={() => handleToggleAddonSetting('groupAddonsByCategory')}
-                  label="Group by Category"
-                  description="Organize add-ons by category (Transport, Wellness, etc.)"
-                />
-              </div>
-            </div>
-          </div>
+          <AddonsTab
+            addons={addons}
+            addonSettings={addonSettings}
+            deletingId={deletingId}
+            openCreateModal={openCreateModal}
+            openEditModal={openEditModal}
+            handleDeleteAddon={handleDeleteAddon}
+            handleToggleAddonSetting={handleToggleAddonSetting}
+          />
         )}
 
-        {/* DETAILS TAB */}
-        {activeTab === 'details' && (
-          <div className="max-w-2xl space-y-4">
-            {/* Guest Information Fields */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Guest Information Fields</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Fields collected during the booking details step</p>
+        {activeTab === 'details' && <DetailsTab />}
 
-              <div className="space-y-1">
-                {GUEST_INFO_FIELDS.map((field) => (
-                  <div
-                    key={field.name}
-                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-[13px] font-medium text-gray-900">{field.name}</span>
-                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                        {field.type}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {field.required && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-50 text-red-600">
-                          Required
-                        </span>
-                      )}
-                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-50 text-green-600">
-                        Enabled
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Additional Options */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Additional Options</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Optional features on the details page</p>
-
-              <div className="space-y-2">
-                {[
-                  { label: 'Newsletter Signup', description: 'Show newsletter opt-in checkbox' },
-                  { label: 'Terms & Conditions', description: 'Require agreement to terms before booking' },
-                ].map((opt) => (
-                  <div
-                    key={opt.label}
-                    className="flex items-center justify-between p-3 rounded-lg border border-primary-500 bg-primary-50/30"
-                  >
-                    <div>
-                      <span className="text-[12px] font-medium text-gray-900">{opt.label}</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{opt.description}</p>
-                    </div>
-                    <div className="w-8 h-5 rounded-full bg-primary-500 relative">
-                      <div className="absolute top-0.5 left-3.5 w-4 h-4 rounded-full bg-white shadow-sm" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PAYMENT TAB */}
-        {activeTab === 'payment' && (
-          <div className="max-w-2xl">
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Payment Configuration</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Payment methods and policies are managed in the Property Manager</p>
-
-              <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 text-center">
-                <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-                  <PaymentIcon className="w-5 h-5 text-gray-400" />
-                </div>
-                <p className="text-[13px] font-medium text-gray-600">Go to PMS Settings to configure payments</p>
-                <p className="text-[12px] text-gray-400 mt-0.5">Stripe, pay at property, and cancellation policies are configured in the Property Manager</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'payment' && <PaymentTab />}
       </div>
 
       {/* ADD/EDIT ADDON MODAL */}
