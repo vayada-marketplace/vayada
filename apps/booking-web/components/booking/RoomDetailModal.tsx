@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { RoomType } from '@/lib/types'
 import { useCurrency } from '@/contexts/CurrencyContext'
+import { getNonRefundableRate } from '@/lib/constants/booking'
 
 interface RoomDetailModalProps {
   room: RoomType
@@ -34,7 +35,7 @@ export default function RoomDetailModal({
   if (!open) return null
 
   const flexibleTotal = room.baseRate * nights
-  const nonRefundableNightly = room.nonRefundableRate ?? Math.round(room.baseRate * 0.85)
+  const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
   const nonRefundableTotal = nonRefundableNightly * nights
   const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 

@@ -12,6 +12,7 @@ import RoomDetailModal from '@/components/booking/RoomDetailModal'
 import { useHotel, useRooms, useAddons } from '@/contexts/HotelContext'
 import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
+import { getNonRefundableRate } from '@/lib/constants/booking'
 
 function PromoPopover({
   open,
@@ -401,7 +402,7 @@ export default function HomePage() {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
             const flexibleTotal = room.baseRate * nights
-            const nonRefundableNightly = room.nonRefundableRate ?? Math.round(room.baseRate * 0.85)
+            const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
             const nonRefundableTotal = nonRefundableNightly * nights
             const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 

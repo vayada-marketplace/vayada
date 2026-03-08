@@ -6,13 +6,15 @@ import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
 import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js'
-import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
+import HeroSection from '@/components/booking/HeroSection'
+import StepIndicator from '@/components/booking/StepIndicator'
 import StripeProvider from '@/components/StripeProvider'
 import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
+import { getNonRefundableRate } from '@/lib/constants/booking'
 
 interface GuestDetails {
   roomTypeId: string
@@ -92,7 +94,7 @@ function PaymentPageContent() {
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
   const nightlyRate = isNonRefundable
-    ? (room?.nonRefundableRate ?? Math.round(room.baseRate * 0.85))
+    ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
     : room?.baseRate ?? 0
   const roomTotal = room ? nightlyRate * nights : 0
 
@@ -195,62 +197,13 @@ function PaymentPageContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Hero */}
-      <div className="relative h-[420px] w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
-        <BookingNavigation />
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-heading italic text-white mb-4">
-            {hotel.name}
-          </h1>
-          <p className="text-white/90 text-lg md:text-xl max-w-2xl leading-relaxed">
-            {hotel.description}
-          </p>
-        </div>
-      </div>
+      <HeroSection heroImage={hotel.heroImage} hotelName={hotel.name} description={hotel.description} />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
           <h2 className="text-3xl font-heading text-gray-900">{t('securePayment')}</h2>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {STEPS.map((step, index) => (
-              <div key={step.number} className="flex items-center">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      step.number === currentStep
-                        ? 'bg-primary-600 text-white'
-                        : step.number < currentStep
-                        ? 'bg-primary-600 text-white'
-                        : 'bg-gray-200 text-gray-500'
-                    }`}
-                  >
-                    {step.number < currentStep ? (
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      step.number
-                    )}
-                  </div>
-                  <span className={`text-sm font-medium ${step.number <= currentStep ? 'text-gray-900' : 'text-gray-400'}`}>
-                    {step.label}
-                  </span>
-                </div>
-                {index < STEPS.length - 1 && (
-                  <div className={`w-8 md:w-12 h-px mx-2 ${step.number < currentStep ? 'bg-primary-600' : 'bg-gray-300'}`} />
-                )}
-              </div>
-            ))}
-          </div>
+          <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
 
         {/* Guest confirmation banner */}
@@ -558,11 +511,7 @@ function StripePaymentPage({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="relative h-32 w-full">
-        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
-        <BookingNavigation />
-      </div>
+      <HeroSection heroImage={hotel.heroImage} hotelName={hotel.name} compact />
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="bg-white rounded-2xl border border-gray-200 p-8">
