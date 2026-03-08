@@ -6,6 +6,7 @@ import { authService } from '@/services/auth'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
 import { checkPmsSetupStatus } from '@/lib/utils/setupStatus'
 import ImageUpload from '@/components/ImageUpload'
+import { addToList, removeFromList } from '@/lib/utils/listHelpers'
 
 const STEPS = [
   { number: 1, label: 'Your First Room' },
@@ -65,27 +66,6 @@ export default function PmsSetupPage() {
       return !!(roomName.trim() && baseRate > 0 && totalRooms >= 1)
     }
     return true
-  }
-
-  const addToList = (
-    list: string[],
-    setList: (v: string[]) => void,
-    value: string,
-    setter: (v: string) => void
-  ) => {
-    if (!value.trim()) return
-    setList([...list, value.trim()])
-    setter('')
-  }
-
-  const removeFromList = (
-    list: string[],
-    setList: (v: string[]) => void,
-    index: number
-  ) => {
-    const newList = [...list]
-    newList.splice(index, 1)
-    setList(newList)
   }
 
   const handleComplete = async () => {

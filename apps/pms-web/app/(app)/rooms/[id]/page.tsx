@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import MonthlyRatesEditor from '@/components/MonthlyRatesEditor'
+import { addToList, removeFromList } from '@/lib/utils/listHelpers'
 
 export default function EditRoomPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -75,16 +76,12 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const addToList = (field: 'amenities' | 'features' | 'images', value: string, setter: (v: string) => void) => {
-    if (!value.trim()) return
-    setForm({ ...form, [field]: [...(form[field] || []), value.trim()] })
-    setter('')
+  const addToField = (field: 'amenities' | 'features' | 'images', value: string, setter: (v: string) => void) => {
+    addToList(form[field] || [], (v) => setForm({ ...form, [field]: v }), value, setter)
   }
 
-  const removeFromList = (field: 'amenities' | 'features' | 'images', index: number) => {
-    const list = [...(form[field] || [])]
-    list.splice(index, 1)
-    setForm({ ...form, [field]: list })
+  const removeFromField = (field: 'amenities' | 'features' | 'images', index: number) => {
+    removeFromList(form[field] || [], (v) => setForm({ ...form, [field]: v }), index)
   }
 
   if (loading) {
@@ -278,13 +275,13 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
               type="text"
               value={amenityInput}
               onChange={(e) => setAmenityInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToList('amenities', amenityInput, setAmenityInput))}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToField('amenities', amenityInput, setAmenityInput))}
               placeholder="e.g. Free WiFi"
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
             <button
               type="button"
-              onClick={() => addToList('amenities', amenityInput, setAmenityInput)}
+              onClick={() => addToField('amenities', amenityInput, setAmenityInput)}
               className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
             >
               Add
@@ -294,7 +291,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
             {(form.amenities || []).map((a, i) => (
               <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
                 {a}
-                <button type="button" onClick={() => removeFromList('amenities', i)} className="text-gray-400 hover:text-gray-600">&times;</button>
+                <button type="button" onClick={() => removeFromField('amenities', i)} className="text-gray-400 hover:text-gray-600">&times;</button>
               </span>
             ))}
           </div>
@@ -308,13 +305,13 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
               type="text"
               value={featureInput}
               onChange={(e) => setFeatureInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToList('features', featureInput, setFeatureInput))}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addToField('features', featureInput, setFeatureInput))}
               placeholder="e.g. Mountain View"
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
             <button
               type="button"
-              onClick={() => addToList('features', featureInput, setFeatureInput)}
+              onClick={() => addToField('features', featureInput, setFeatureInput)}
               className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
             >
               Add
@@ -324,7 +321,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
             {(form.features || []).map((f, i) => (
               <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
                 {f}
-                <button type="button" onClick={() => removeFromList('features', i)} className="text-gray-400 hover:text-gray-600">&times;</button>
+                <button type="button" onClick={() => removeFromField('features', i)} className="text-gray-400 hover:text-gray-600">&times;</button>
               </span>
             ))}
           </div>
