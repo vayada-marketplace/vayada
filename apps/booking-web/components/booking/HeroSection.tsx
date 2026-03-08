@@ -12,7 +12,7 @@ export default function HeroSection({ heroImage, hotelName, description, compact
   if (compact) {
     return (
       <div className="relative h-32 w-full">
-        <Image src={heroImage} alt={hotelName} fill className="object-cover" priority />
+        <Image src={heroImage} alt={hotelName} fill className="object-cover" priority quality={90} sizes="100vw" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>
@@ -27,6 +27,8 @@ export default function HeroSection({ heroImage, hotelName, description, compact
         fill
         className="object-cover"
         priority
+        quality={90}
+        sizes="100vw"
       />
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
       <BookingNavigation />
