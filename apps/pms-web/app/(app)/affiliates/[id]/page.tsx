@@ -4,13 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon, NoSymbolIcon } from '@heroicons/react/24/outline'
 import { affiliatesService, Affiliate } from '@/services/affiliates'
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-600',
-  suspended: 'bg-gray-100 text-gray-600',
-}
+import { AFFILIATE_STATUS_STYLES } from '@/lib/constants/statusStyles'
 
 export default function AffiliateDetailPage({ params }: { params: { id: string } }) {
   const [affiliate, setAffiliate] = useState<Affiliate | null>(null)
@@ -155,7 +149,7 @@ export default function AffiliateDetailPage({ params }: { params: { id: string }
           <ArrowLeftIcon className="w-5 h-5" />
         </Link>
         <h1 className="text-xl font-bold text-gray-900">{affiliate.fullName}</h1>
-        <span className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[affiliate.status] || ''}`}>
+        <span className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${AFFILIATE_STATUS_STYLES[affiliate.status] || ''}`}>
           {affiliate.status}
         </span>
       </div>
