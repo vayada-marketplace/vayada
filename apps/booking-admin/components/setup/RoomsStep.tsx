@@ -15,6 +15,7 @@ export interface RoomType {
   category: string
   baseRate: string
   nonRefundableRate: string
+  nonRefundableDiscount: number
   flexibleRateEnabled: boolean
   nonRefundableEnabled: boolean
   cancellationPolicy: string
@@ -41,6 +42,7 @@ export const createEmptyRoom = (): RoomType => ({
   category: '',
   baseRate: '',
   nonRefundableRate: '',
+  nonRefundableDiscount: 10,
   flexibleRateEnabled: true,
   nonRefundableEnabled: false,
   cancellationPolicy: 'Free until 7 days before',
@@ -486,7 +488,7 @@ export default function RoomsStep({
                 </div>
 
                 {/* Non-refundable */}
-                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${room.nonRefundableEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${room.nonRefundableEnabled ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200 bg-gray-50'}`}>
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => updateRoom({ nonRefundableEnabled: !room.nonRefundableEnabled })}
@@ -498,6 +500,34 @@ export default function RoomsStep({
                     <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
                     <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
                   </div>
+                  {room.nonRefundableEnabled && room.flexibleRateEnabled && (
+                    <div className="mt-3 ml-[52px] flex items-center gap-3">
+                      <span className="text-[11px] text-gray-500">Discount:</span>
+                      <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => updateRoom({ nonRefundableDiscount: Math.max(1, room.nonRefundableDiscount - 5) })}
+                          className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                        >
+                          &minus;
+                        </button>
+                        <span className="px-3 py-1.5 text-[12px] font-semibold text-gray-900 bg-white min-w-[48px] text-center">
+                          {room.nonRefundableDiscount}%
+                        </span>
+                        <button
+                          onClick={() => updateRoom({ nonRefundableDiscount: Math.min(50, room.nonRefundableDiscount + 5) })}
+                          className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span className="text-[11px] text-gray-500">off flexible rate</span>
+                    </div>
+                  )}
+                  {room.nonRefundableEnabled && !room.flexibleRateEnabled && (
+                    <p className="mt-3 ml-[52px] text-[11px] text-gray-500">
+                      Set your base rate in the seasons table below &mdash; this will be used as the non-refundable price.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

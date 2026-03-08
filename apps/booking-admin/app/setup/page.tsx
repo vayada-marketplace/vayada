@@ -239,6 +239,7 @@ export default function SetupPage() {
               description: r.description,
               baseRate: Number(r.baseRate),
               nonRefundableRate: r.nonRefundableRate ? Number(r.nonRefundableRate) : undefined,
+              nonRefundableDiscount: r.nonRefundableEnabled && r.flexibleRateEnabled ? r.nonRefundableDiscount : undefined,
               currency: r.currency || currency,
               images: r.images,
               amenities: r.amenities,
