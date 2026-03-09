@@ -12,6 +12,19 @@ import { cn } from '@/lib/utils'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
+function buildHandoffUrl(baseUrl: string): string {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+  const expiresAt = typeof window !== 'undefined' ? localStorage.getItem('token_expires_at') : null
+  const user = typeof window !== 'undefined' ? localStorage.getItem('user') : null
+  if (!token || !expiresAt) return baseUrl
+  const params = new URLSearchParams({
+    token,
+    expires_at: expiresAt,
+    ...(user ? { user: encodeURIComponent(user) } : {}),
+  })
+  return `${baseUrl}/handoff#${params.toString()}`
+}
+
 const navItems = [
   {
     label: 'Dashboard',
@@ -110,7 +123,8 @@ export default function Sidebar() {
               Switch App
             </p>
             <a
-              href={BOOKING_ADMIN_URL}
+              href="#"
+              onClick={(e) => { e.preventDefault(); window.location.href = buildHandoffUrl(BOOKING_ADMIN_URL) }}
               className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors"
             >
               <div className="w-7 h-7 bg-primary-500 rounded-md flex items-center justify-center shrink-0">
