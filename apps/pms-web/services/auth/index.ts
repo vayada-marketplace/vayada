@@ -8,6 +8,22 @@ import { apiClient } from '../api/client'
 const TOKEN_KEY = 'access_token'
 const EXPIRES_AT_KEY = 'token_expires_at'
 
+export interface RegisterRequest {
+  name: string
+  email: string
+  password: string
+}
+
+export interface RegisterResponse {
+  message: string
+  id: string
+  email: string
+  name: string
+  access_token: string
+  token_type: string
+  expires_in: number
+}
+
 export interface LoginRequest {
   email: string
   password: string
@@ -83,6 +99,25 @@ function getToken(): string | null {
 }
 
 export const authService = {
+  register: async (data: RegisterRequest): Promise<RegisterResponse> => {
+    const response = await apiClient.post<RegisterResponse>('/auth/register', {
+      ...data,
+      terms_accepted: true,
+      privacy_accepted: true,
+    })
+
+    storeToken(response.access_token, response.expires_in)
+    storeUserData({
+      id: response.id,
+      email: response.email,
+      name: response.name,
+      type: 'hotel',
+      status: 'active',
+    })
+
+    return response
+  },
+
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     const response = await apiClient.post<LoginResponse>('/auth/login', data)
 
