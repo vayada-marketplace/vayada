@@ -18,16 +18,6 @@ export default function AppLayout({
     if (!authService.isLoggedIn() || (!authService.isHotelAdmin() && !authService.isSuperAdmin())) {
       router.replace('/login')
     } else {
-      // Super admins skip setup check — they don't own hotels
-      if (authService.isSuperAdmin()) {
-        setIsAuthorized(true)
-        return
-      }
-      const setupOk = localStorage.getItem('setupComplete')
-      if (setupOk === 'false') {
-        router.replace('/setup')
-        return
-      }
       setIsAuthorized(true)
     }
   }, [router])
