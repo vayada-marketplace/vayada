@@ -47,11 +47,7 @@ export default function PmsSetupPage() {
         return
       }
       const status = await checkPmsSetupStatus()
-      if (!status || !status.registered) {
-        router.replace('/login')
-        return
-      }
-      if (status.setupComplete) {
+      if (status?.setupComplete) {
         localStorage.setItem('pmsSetupComplete', 'true')
         router.replace('/dashboard')
         return
