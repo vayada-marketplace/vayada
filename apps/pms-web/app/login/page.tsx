@@ -90,16 +90,14 @@ export default function LoginPage() {
           showRegister={false}
         />
 
-        {/* Booking Engine link */}
+        {/* Sign up link */}
         <p className="text-center text-[13px] text-gray-500 mt-5">
-          Need to set up your booking engine?{' '}
+          Don&apos;t have an account?{' '}
           <a
-            href={process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'}
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/register"
             className="text-primary-600 hover:text-primary-700 font-medium"
           >
-            Go to Booking Engine
+            Sign up
           </a>
         </p>
       </div>
