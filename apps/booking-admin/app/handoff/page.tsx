@@ -26,7 +26,25 @@ export default function HandoffPage() {
           localStorage.setItem('user', JSON.stringify(user))
         } catch { /* ignore */ }
       }
-      window.location.href = '/dashboard'
+
+      // Check setup status before redirecting
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://booking-api.vayada.com'
+      fetch(`${apiUrl}/admin/settings/setup-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.setup_complete) {
+            localStorage.setItem('setupComplete', 'true')
+          } else {
+            localStorage.setItem('setupComplete', 'false')
+          }
+          window.location.href = '/dashboard'
+        })
+        .catch(() => {
+          localStorage.setItem('setupComplete', 'true')
+          window.location.href = '/dashboard'
+        })
     } else {
       window.location.href = '/login'
     }
