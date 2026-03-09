@@ -25,13 +25,7 @@ export default function LoginPage() {
       // Check PMS setup status
       const status = await checkPmsSetupStatus()
 
-      if (!status || !status.registered) {
-        setSubmitError('Please complete the booking engine setup first. Visit the Booking Engine Admin to register your hotel.')
-        setIsSubmitting(false)
-        return
-      }
-
-      if (!status.setupComplete) {
+      if (!status || !status.registered || !status.setupComplete) {
         localStorage.setItem('pmsSetupComplete', 'false')
         router.push('/setup')
       } else {
