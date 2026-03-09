@@ -35,6 +35,11 @@ const baseNavItems = [
     icon: DashboardIcon,
   },
   {
+    label: 'Affiliates',
+    href: '/affiliates',
+    icon: AffiliatesIcon,
+  },
+  {
     label: 'Design Studio',
     href: '/design-studio',
     icon: DesignStudioIcon,
@@ -247,6 +252,15 @@ function BookingFlowIcon({ className }: { className?: string }) {
       <path d="M5 11h14" />
       <path d="M12 11v5" />
       <rect x="9" y="16" width="6" height="4" rx="1" />
+    </svg>
+  )
+}
+
+function AffiliatesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   )
 }
