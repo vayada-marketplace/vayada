@@ -64,6 +64,11 @@ class MarketplaceDatabase(BaseDatabase):
     _url = settings.MARKETPLACE_DATABASE_URL
 
 
+class PmsDatabase(BaseDatabase):
+    _pool: Optional[asyncpg.Pool] = None
+    _url = settings.PMS_DATABASE_URL
+
+
 async def check_database_connection() -> dict:
     try:
         version = await Database.fetchval("SELECT version()")

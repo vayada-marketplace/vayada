@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"
 
-    # PMS Backend URL (for proxying uploads)
+    # PMS Configuration
     PMS_API_URL: str = Field("https://pms-api.vayada.com", description="PMS backend URL for proxying image uploads")
+    PMS_DATABASE_URL: str = Field(default="", description="PMS PostgreSQL connection string (for dashboard stats)")
 
     # Frontend URL (for reset password links)
     FRONTEND_URL: str = Field("http://localhost:3003", description="Frontend URL for reset password links")
