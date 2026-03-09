@@ -15,6 +15,19 @@ import { authService } from '@/services/auth'
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
 
+function buildHandoffUrl(baseUrl: string): string {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+  const expiresAt = typeof window !== 'undefined' ? localStorage.getItem('token_expires_at') : null
+  const user = typeof window !== 'undefined' ? localStorage.getItem('user') : null
+  if (!token || !expiresAt) return baseUrl
+  const params = new URLSearchParams({
+    token,
+    expires_at: expiresAt,
+    ...(user ? { user: encodeURIComponent(user) } : {}),
+  })
+  return `${baseUrl}/handoff#${params.toString()}`
+}
+
 const baseNavItems = [
   {
     label: 'Dashboard',
@@ -124,7 +137,8 @@ export default function Sidebar() {
               <CheckIcon className="w-4 h-4 text-primary-500 shrink-0" />
             </button>
             <a
-              href={PMS_FRONTEND_URL}
+              href="#"
+              onClick={(e) => { e.preventDefault(); window.location.href = buildHandoffUrl(PMS_FRONTEND_URL) }}
               className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors"
             >
               <div className="w-7 h-7 bg-emerald-600 rounded-md flex items-center justify-center shrink-0">
