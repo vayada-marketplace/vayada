@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { settingsService } from '@/services/settings'
 import { pmsClient } from '@/services/api/pmsClient'
-import { checkSetupStatus, isSetupComplete } from '@/lib/utils/setupStatus'
+import { checkSetupStatus } from '@/lib/utils/setupStatus'
 import { FONT_PAIRINGS } from '@/lib/constants/branding'
 import { CheckIcon } from '@heroicons/react/24/outline'
 import { uploadSingleImage, uploadImages } from '@/lib/utils/uploadImage'
@@ -88,6 +88,36 @@ export default function SetupPage() {
 
   useEffect(() => {
     async function checkAuth() {
+      // Accept auth token passed via URL hash (cross-domain handoff from PMS)
+      if (typeof window !== 'undefined' && window.location.hash) {
+        const params = new URLSearchParams(window.location.hash.slice(1))
+        const token = params.get('token')
+        const expiresAt = params.get('expires_at')
+        const userData = params.get('user')
+        const fromPms = params.get('from') === 'pms'
+        if (fromPms) {
+          localStorage.setItem('setup_from', 'pms')
+        }
+        if (token && expiresAt) {
+          localStorage.setItem('access_token', token)
+          localStorage.setItem('token_expires_at', expiresAt)
+          if (userData) {
+            try {
+              const user = JSON.parse(decodeURIComponent(userData))
+              localStorage.setItem('isLoggedIn', 'true')
+              localStorage.setItem('userId', user.id)
+              localStorage.setItem('userEmail', user.email)
+              localStorage.setItem('userName', user.name)
+              localStorage.setItem('userType', user.type)
+              localStorage.setItem('userStatus', user.status)
+              localStorage.setItem('user', JSON.stringify(user))
+            } catch { /* ignore */ }
+          }
+          // Clean the hash from the URL
+          window.history.replaceState(null, '', window.location.pathname)
+        }
+      }
+
       if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
         router.replace('/login')
         return
@@ -267,15 +297,18 @@ export default function SetupPage() {
         localStorage.setItem('selectedHotelId', newHotel.id)
       }
 
-      const complete = await isSetupComplete()
-      if (complete) {
-        localStorage.setItem('setupComplete', 'true')
-        router.push('/dashboard')
-      } else {
-        // Force redirect anyway — the backend may not have updated yet
-        localStorage.setItem('setupComplete', 'true')
-        router.push('/dashboard')
+      localStorage.setItem('setupComplete', 'true')
+
+      // If the user came from PMS, redirect back there
+      const fromPms = localStorage.getItem('setup_from') === 'pms'
+      if (fromPms) {
+        localStorage.removeItem('setup_from')
+        const pmsUrl = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
+        window.location.href = `${pmsUrl}/dashboard`
+        return
       }
+
+      router.push('/dashboard')
     } catch {
       setError('Failed to save settings. Please try again.')
       setSaving(false)
