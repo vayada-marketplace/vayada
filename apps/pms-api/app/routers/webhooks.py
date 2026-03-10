@@ -104,6 +104,59 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
+@router.post("/webhooks/beds24")
+async def beds24_webhook(request: Request):
+    """Handle Beds24 webhook events for booking notifications."""
+    import asyncio
+    import json
+
+    payload = await request.body()
+    token = request.headers.get("x-beds24-token")
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing x-beds24-token header")
+
+    if not hmac.compare_digest(token, settings.BEDS24_WEBHOOK_SECRET):
+        logger.warning("Beds24 webhook token verification failed")
+        raise HTTPException(status_code=400, detail="Invalid webhook token")
+
+    data = json.loads(payload)
+
+    # Normalize to list (Beds24 may send single booking or array)
+    bookings = data if isinstance(data, list) else [data]
+
+    for b24_booking in bookings:
+        property_id = str(b24_booking.get("propertyId", ""))
+        if not property_id:
+            continue
+
+        from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
+        conn = await Beds24ConnectionRepository.get_by_property_id(property_id)
+        if not conn:
+            logger.warning("No Beds24 connection for property %s", property_id)
+            continue
+
+        hotel_id = str(conn["hotel_id"])
+
+        from app.services.beds24_sync_service import (
+            process_inbound_booking,
+            push_availability_for_booking,
+        )
+        await process_inbound_booking(b24_booking, hotel_id)
+
+        # If a booking was created, push updated availability
+        from app.repositories.beds24_mapping_repo import Beds24BookingMappingRepository
+        mapping = await Beds24BookingMappingRepository.get_by_beds24_id(
+            str(b24_booking.get("id", ""))
+        )
+        if mapping:
+            asyncio.create_task(
+                push_availability_for_booking(str(mapping["booking_id"]))
+            )
+
+    return {"status": "ok"}
+
+
 @router.post("/webhooks/xendit")
 async def xendit_webhook(request: Request):
     """Handle Xendit webhook events for payout status updates."""

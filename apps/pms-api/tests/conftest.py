@@ -84,6 +84,10 @@ async def cleanup_database(init_database):
         test_booking_ids = [row["id"] for row in test_bookings]
         if test_booking_ids:
             await Database.execute(
+                "DELETE FROM beds24_booking_mappings WHERE booking_id = ANY($1::uuid[])",
+                test_booking_ids,
+            )
+            await Database.execute(
                 "DELETE FROM payouts WHERE booking_id = ANY($1::uuid[])",
                 test_booking_ids,
             )
@@ -91,6 +95,14 @@ async def cleanup_database(init_database):
                 "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
                 test_booking_ids,
             )
+        await Database.execute(
+            "DELETE FROM beds24_room_mappings WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
+        await Database.execute(
+            "DELETE FROM beds24_connections WHERE hotel_id = ANY($1::uuid[])",
+            test_hotel_ids,
+        )
         await Database.execute(
             "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
             test_hotel_ids,
@@ -146,6 +158,10 @@ async def cleanup_database(init_database):
             user_booking_ids = [row["id"] for row in user_bookings]
             if user_booking_ids:
                 await Database.execute(
+                    "DELETE FROM beds24_booking_mappings WHERE booking_id = ANY($1::uuid[])",
+                    user_booking_ids,
+                )
+                await Database.execute(
                     "DELETE FROM payouts WHERE booking_id = ANY($1::uuid[])",
                     user_booking_ids,
                 )
@@ -153,6 +169,14 @@ async def cleanup_database(init_database):
                     "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
                     user_booking_ids,
                 )
+            await Database.execute(
+                "DELETE FROM beds24_room_mappings WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
+            await Database.execute(
+                "DELETE FROM beds24_connections WHERE hotel_id = ANY($1::uuid[])",
+                user_hotel_ids,
+            )
             await Database.execute(
                 "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
                 user_hotel_ids,

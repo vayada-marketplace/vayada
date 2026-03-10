@@ -181,8 +181,38 @@ async def process_affiliate_payouts():
             await PayoutRepository.update_status(payout_id, "failed")
 
 
+async def poll_beds24_bookings():
+    """Poll all active Beds24 connections for new/modified bookings."""
+    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
+    from app.services.beds24_sync_service import poll_bookings_for_hotel
+
+    connections = await Beds24ConnectionRepository.list_active()
+    for conn in connections:
+        hotel_id = str(conn["hotel_id"])
+        try:
+            await poll_bookings_for_hotel(hotel_id)
+        except Exception as e:
+            logger.error("Failed to poll Beds24 bookings for hotel %s: %s", hotel_id, e)
+
+
+async def full_beds24_availability_sync():
+    """Daily full availability push to Beds24 for all active connections."""
+    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
+    from app.services.beds24_sync_service import push_availability_for_hotel
+
+    connections = await Beds24ConnectionRepository.list_active()
+    for conn in connections:
+        hotel_id = str(conn["hotel_id"])
+        try:
+            await push_availability_for_hotel(hotel_id)
+        except Exception as e:
+            logger.error("Failed to sync Beds24 availability for hotel %s: %s", hotel_id, e)
+
+
 def setup_scheduler():
     """Configure and return the scheduler with all jobs."""
+    from app.config import settings as app_settings
+
     scheduler.add_job(
         expire_pending_bookings,
         trigger=IntervalTrigger(minutes=1),
@@ -201,6 +231,20 @@ def setup_scheduler():
         process_affiliate_payouts,
         trigger=CronTrigger(day=1, hour=2, minute=0),
         id="process_affiliate_payouts",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        poll_beds24_bookings,
+        trigger=IntervalTrigger(minutes=app_settings.BEDS24_POLL_INTERVAL_MINUTES),
+        id="poll_beds24_bookings",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        full_beds24_availability_sync,
+        trigger=CronTrigger(hour=app_settings.BEDS24_FULL_SYNC_HOUR, minute=0),
+        id="full_beds24_availability_sync",
         replace_existing=True,
     )
 
