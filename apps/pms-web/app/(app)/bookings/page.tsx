@@ -189,18 +189,18 @@ export default function ReservationsPage() {
           <p className="text-gray-400 text-sm">No reservations found.</p>
         </div>
       ) : (
-        <div>
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left pb-3 text-xs font-medium text-gray-400 w-[200px]">Guest</th>
-                <th className="text-left pb-3 text-xs font-medium text-gray-400 w-[110px]">Status</th>
-                <th className="text-left pb-3 text-xs font-medium text-gray-400">Room</th>
-                <th className="text-left pb-3 text-xs font-medium text-gray-400">Stay Period</th>
-                <th className="text-right pb-3 text-xs font-medium text-gray-400 w-[90px]">Total</th>
-                <th className="text-center pb-3 text-xs font-medium text-gray-400 w-[80px]">Balance</th>
-                <th className="text-center pb-3 text-xs font-medium text-gray-400 w-[70px]">Source</th>
-                <th className="w-10"></th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[200px]">Guest</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[110px]">Status</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">Room</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">Stay Period</th>
+                <th className="text-right px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[90px]">Total</th>
+                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[80px]">Balance</th>
+                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[70px]">Source</th>
+                <th className="w-10 pt-4"></th>
               </tr>
             </thead>
             <tbody>
@@ -210,9 +210,9 @@ export default function ReservationsPage() {
                 const balance = getBalanceStatus(b)
                 const source = SOURCE_ICONS[b.channel] || SOURCE_ICONS['direct']
                 return (
-                  <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors group">
+                  <tr key={b.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/50 transition-colors group">
                     {/* Guest */}
-                    <td className="py-4">
+                    <td className="px-4 py-4">
                       <Link href={`/bookings/${b.id}`} className="block">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[13px] font-medium text-gray-900 group-hover:text-primary-600 transition-colors">
@@ -227,14 +227,14 @@ export default function ReservationsPage() {
                     </td>
 
                     {/* Status */}
-                    <td className="py-4">
+                    <td className="px-4 py-4">
                       <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold ${STATUS_STYLES[b.status] || STATUS_STYLES['pending']}`}>
                         {STATUS_LABELS[b.status] || b.status}
                       </span>
                     </td>
 
                     {/* Room */}
-                    <td className="py-4 text-[13px] text-gray-600">
+                    <td className="px-4 py-4 text-[13px] text-gray-600">
                       {b.roomNumber ? (
                         <>
                           <span className="font-medium text-gray-800">#{b.roomNumber}</span>
@@ -247,7 +247,7 @@ export default function ReservationsPage() {
                     </td>
 
                     {/* Stay Period */}
-                    <td className="py-4">
+                    <td className="px-4 py-4">
                       <div className="flex items-center gap-1.5 text-[13px] text-gray-600">
                         <span>{formatDate(b.checkIn)}</span>
                         <span className="text-gray-300">&rarr;</span>
@@ -264,19 +264,19 @@ export default function ReservationsPage() {
                     </td>
 
                     {/* Total */}
-                    <td className="py-4 text-right text-[13px] font-semibold text-gray-900">
+                    <td className="px-4 py-4 text-right text-[13px] font-semibold text-gray-900">
                       ${b.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                     </td>
 
                     {/* Balance */}
-                    <td className="py-4 text-center">
+                    <td className="px-4 py-4 text-center">
                       <span className={`text-[11px] font-semibold capitalize ${BALANCE_STYLES[balance] || BALANCE_STYLES['due']}`}>
                         {balance === 'paid' ? 'Paid' : balance === 'partial' ? 'Partial' : balance === 'refunded' ? 'Refunded' : 'Due'}
                       </span>
                     </td>
 
                     {/* Source */}
-                    <td className="py-4 text-center">
+                    <td className="px-4 py-4 text-center">
                       <span
                         className={`inline-flex w-6 h-6 items-center justify-center rounded-md ${source.bg}`}
                         title={b.channel || 'Direct'}
@@ -290,7 +290,7 @@ export default function ReservationsPage() {
                     </td>
 
                     {/* Actions */}
-                    <td className="py-4 text-right">
+                    <td className="px-4 py-4 text-right">
                       <Link
                         href={`/bookings/${b.id}`}
                         className="p-1 rounded-md hover:bg-gray-100 transition-colors inline-flex"
@@ -306,7 +306,7 @@ export default function ReservationsPage() {
 
           {/* Pagination */}
           {total > limit && (
-            <div className="flex items-center justify-between py-4 border-t border-gray-200 mt-1">
+            <div className="flex items-center justify-between px-4 py-4 border-t border-gray-200">
               <p className="text-sm text-gray-400">
                 Showing {offset + 1}-{Math.min(offset + limit, total)} of {total}
               </p>
