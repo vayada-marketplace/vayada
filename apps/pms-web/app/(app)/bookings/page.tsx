@@ -252,11 +252,9 @@ export default function ReservationsPage() {
                         <span>{formatDate(b.checkIn)}</span>
                         <span className="text-gray-300">&rarr;</span>
                         <span>{formatDate(b.checkOut)}</span>
-                        <span className="flex items-center gap-0.5 text-[11px] text-gray-400 ml-2">
+                        <span className="flex items-center gap-0.5 text-[12px] text-gray-400 ml-2">
                           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="23 4 23 10 17 10" />
-                            <polyline points="1 20 1 14 7 14" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
                           </svg>
                           {nights}
                         </span>
