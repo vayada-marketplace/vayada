@@ -37,7 +37,7 @@ const navItems = [
     icon: RoomsIcon,
   },
   {
-    label: 'Bookings',
+    label: 'Reservations',
     href: '/bookings',
     icon: BookingsIcon,
   },
