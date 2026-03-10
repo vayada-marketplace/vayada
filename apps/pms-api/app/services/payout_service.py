@@ -18,21 +18,29 @@ def calculate_split(
     has_affiliate: bool,
     affiliate_commission_pct: float = 0.0,
 ) -> dict:
-    """Calculate platform fee, affiliate commission, and property payout."""
-    if has_affiliate:
-        if fee_type == "flat":
-            platform_fee = fee_with_affiliate
-        else:
-            platform_fee = round(total_amount * fee_with_affiliate / 100, 2)
-        affiliate_commission = round(total_amount * affiliate_commission_pct / 100, 2)
-    else:
-        if fee_type == "flat":
-            platform_fee = fee_value
-        else:
-            platform_fee = round(total_amount * fee_value / 100, 2)
-        affiliate_commission = 0.0
+    """Calculate platform fee, affiliate commission, and property payout.
 
-    property_payout = round(total_amount - platform_fee - affiliate_commission, 2)
+    Total fee is always fee_value (8%) of the booking.
+    Without affiliate: platform keeps the full 8%.
+    With affiliate: affiliate gets their commission (max 5%) out of the 8%,
+    platform keeps the remainder.
+    Hotel always pays exactly fee_value (8%).
+    """
+    if fee_type == "flat":
+        total_fee = fee_value
+    else:
+        total_fee = round(total_amount * fee_value / 100, 2)
+
+    if has_affiliate:
+        affiliate_commission = round(total_amount * affiliate_commission_pct / 100, 2)
+        # Affiliate commission comes out of the total fee, not on top of it
+        affiliate_commission = min(affiliate_commission, total_fee)
+        platform_fee = round(total_fee - affiliate_commission, 2)
+    else:
+        affiliate_commission = 0.0
+        platform_fee = total_fee
+
+    property_payout = round(total_amount - total_fee, 2)
 
     return {
         "platform_fee": platform_fee,

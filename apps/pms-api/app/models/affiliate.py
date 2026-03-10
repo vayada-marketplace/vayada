@@ -14,7 +14,7 @@ class AffiliateRegister(BaseModel):
     email: EmailStr
     social_media: str = ""
     user_type: str = "guest"  # 'guest' or 'creator'
-    payment_method: str = "paypal"  # 'paypal' or 'bank'
+    payment_method: str = "stripe"  # 'stripe', 'paypal', or 'bank'
     paypal_email: str = ""
     bank_iban: str = ""
 
