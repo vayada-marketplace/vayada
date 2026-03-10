@@ -54,7 +54,7 @@ class TestAffiliateRegistration:
         assert resp.status_code == 201
         body = resp.json()
         assert body["userType"] == "guest"
-        assert body["paymentMethod"] == "paypal"
+        assert body["paymentMethod"] == "stripe"
 
     async def test_register_affiliate_duplicate_email(self, client, cleanup_database):
         """Same email for same hotel → 409."""

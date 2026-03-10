@@ -73,6 +73,7 @@ class TestRegisterHotel:
 
 class TestSetupStatus:
     async def test_setup_status_no_hotel(self, client, cleanup_database):
+        """Setup-status auto-registers a hotel from auth profile."""
         user = await create_test_user()
         resp = await client.get(
             "/admin/setup-status",
@@ -80,7 +81,8 @@ class TestSetupStatus:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["registered"] is False
+        # Auto-register creates hotel from auth profile, so registered is True
+        assert body["registered"] is True
         assert body["setupComplete"] is False
         assert body["roomCount"] == 0
 

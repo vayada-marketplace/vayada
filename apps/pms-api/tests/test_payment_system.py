@@ -649,9 +649,10 @@ class TestPayoutService:
             has_affiliate=True,
             affiliate_commission_pct=5.0,
         )
-        assert result["platform_fee"] == 20.0  # 2% of 1000 (reduced fee)
-        assert result["affiliate_commission"] == 50.0  # 5% of 1000
-        assert result["property_payout"] == 930.0  # 1000 - 20 - 50
+        # Total fee always 8% = 80. Affiliate gets 5% = 50, platform gets 80 - 50 = 30
+        assert result["platform_fee"] == 30.0
+        assert result["affiliate_commission"] == 50.0
+        assert result["property_payout"] == 920.0  # 1000 - 80
 
     async def test_split_flat_fee(self, init_database):
         from app.services.payout_service import calculate_split
@@ -668,7 +669,7 @@ class TestPayoutService:
         assert result["property_payout"] == 475.0  # 500 - 25
 
     async def test_split_10pct_affiliate_commission(self, init_database):
-        """Example: €1000 booking, 10% creator commission, 2% platform fee."""
+        """Example: €1000 booking, 10% creator commission capped to 8% total fee."""
         from app.services.payout_service import calculate_split
 
         result = calculate_split(
@@ -679,10 +680,12 @@ class TestPayoutService:
             has_affiliate=True,
             affiliate_commission_pct=10.0,
         )
-        assert result["platform_fee"] == 20.0       # 2% of 1000
-        assert result["affiliate_commission"] == 100.0  # 10% of 1000
-        assert result["property_payout"] == 880.0    # 1000 - 20 - 100
-        # Total: 20 + 100 + 880 = 1000 ✓
+        # Total fee is 8% = 80. Affiliate wants 10% = 100, but capped to 80 (total fee).
+        # Platform gets 80 - 80 = 0, hotel still pays only 8%.
+        assert result["platform_fee"] == 0.0
+        assert result["affiliate_commission"] == 80.0  # capped to total fee
+        assert result["property_payout"] == 920.0     # 1000 - 80
+        # Total: 0 + 80 + 920 = 1000 ✓
 
 
 # ── Expire Booking (Scheduler) ──────────────────────────────────
