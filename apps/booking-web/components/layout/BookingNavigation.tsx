@@ -121,17 +121,18 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
   const [email, setEmail] = useState('')
   const [social, setSocial] = useState('')
   const [userType, setUserType] = useState<'guest' | 'creator'>('guest')
-  const [paymentMethod, setPaymentMethod] = useState<'paypal' | 'bank'>('paypal')
-  const [paypalEmail, setPaypalEmail] = useState('')
-  const [bankIban, setBankIban] = useState('')
   const [copied, setCopied] = useState(false)
   const [referralCode, setReferralCode] = useState('')
+  const [affiliateId, setAffiliateId] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [stripeLoading, setStripeLoading] = useState(false)
+  const [stripeConnected, setStripeConnected] = useState(false)
   const [apiError, setApiError] = useState('')
 
   const referralDomain = `${hotelSlug}.booking.vayada.com`
 
   const handleGenerateLink = async () => {
+    if (!fullName || !email) return
     setSubmitting(true)
     setApiError('')
     try {
@@ -143,9 +144,9 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
           email,
           socialMedia: social,
           userType,
-          paymentMethod,
-          paypalEmail,
-          bankIban,
+          paymentMethod: 'stripe',
+          paypalEmail: '',
+          bankIban: '',
         }),
       })
       if (!res.ok) {
@@ -154,11 +155,36 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
       }
       const data = await res.json()
       setReferralCode(data.referralCode)
-      setStep(3)
+      setAffiliateId(data.id)
+      setStep(2)
     } catch (err: any) {
       setApiError(err.message || 'Failed to register')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleStripeConnect = async () => {
+    setStripeLoading(true)
+    setApiError('')
+    try {
+      const res = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates/${affiliateId}/stripe/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed to connect Stripe' }))
+        throw new Error(err.detail || 'Failed to connect Stripe')
+      }
+      const data = await res.json()
+      setStripeConnected(true)
+      // Open Stripe onboarding in new tab
+      window.open(data.onboardingUrl, '_blank')
+    } catch (err: any) {
+      setApiError(err.message || 'Failed to connect Stripe')
+    } finally {
+      setStripeLoading(false)
     }
   }
 
@@ -174,11 +200,10 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
     setEmail('')
     setSocial('')
     setUserType('guest')
-    setPaymentMethod('paypal')
-    setPaypalEmail('')
-    setBankIban('')
     setCopied(false)
     setReferralCode('')
+    setAffiliateId('')
+    setStripeConnected(false)
     setApiError('')
   }
 
@@ -206,13 +231,12 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
         {/* Subtitle */}
         <p className="px-6 text-sm text-gray-500 mb-4">
           {step === 1 && t('step1Desc')}
-          {step === 2 && t('step2Desc')}
-          {step === 3 && t('step3Desc')}
+          {step === 2 && t('step3Desc')}
         </p>
 
         {/* Step Indicator */}
         <div className="flex items-center justify-center gap-0 px-6 mb-6">
-          {[1, 2, 3].map((s, i) => (
+          {[1, 2].map((s, i) => (
             <div key={s} className="flex items-center">
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 ${
@@ -231,7 +255,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   s
                 )}
               </div>
-              {i < 2 && (
+              {i < 1 && (
                 <div className={`w-10 h-0.5 ${s < step ? 'bg-primary-600' : 'bg-gray-300'}`} />
               )}
             </div>
@@ -315,108 +339,26 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 </div>
               </div>
 
-              <button
-                onClick={() => setStep(2)}
-                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2"
-              >
-                {tc('continue')}
-              </button>
-            </div>
-          )}
-
-          {/* Step 2: Payment */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-bold text-gray-900 mb-2">{t('paymentMethod')}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setPaymentMethod('paypal')}
-                    className={`py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
-                      paymentMethod === 'paypal'
-                        ? 'border-primary-500 bg-primary-50 text-primary-700'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                    }`}
-                  >
-                    {t('paypal')}
-                  </button>
-                  <button
-                    onClick={() => setPaymentMethod('bank')}
-                    className={`py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
-                      paymentMethod === 'bank'
-                        ? 'border-primary-500 bg-primary-50 text-primary-700'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                    }`}
-                  >
-                    {t('bankTransfer')}
-                  </button>
-                </div>
-              </div>
-
-              {paymentMethod === 'paypal' && (
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1.5">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    {t('paypalEmail')}
-                  </label>
-                  <input
-                    type="email"
-                    value={paypalEmail}
-                    onChange={(e) => setPaypalEmail(e.target.value)}
-                    placeholder="paypal@example.com"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                  />
-                </div>
-              )}
-
-              {paymentMethod === 'bank' && (
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1.5">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                    </svg>
-                    {t('iban')}
-                  </label>
-                  <input
-                    type="text"
-                    value={bankIban}
-                    onChange={(e) => setBankIban(e.target.value)}
-                    placeholder="AT89 3704 0044 0532 0130 00"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                  />
-                </div>
-              )}
-
               {apiError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                   {apiError}
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setStep(1)}
-                  disabled={submitting}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                  {tc('back')}
-                </button>
-                <button
-                  onClick={handleGenerateLink}
-                  disabled={submitting}
-                  className="flex-1 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50"
-                >
-                  {submitting ? '...' : t('generateLink')}
-                </button>
-              </div>
+              <button
+                onClick={handleGenerateLink}
+                disabled={submitting || !fullName || !email}
+                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2 disabled:opacity-50"
+              >
+                {submitting ? '...' : t('generateLink')}
+              </button>
             </div>
           )}
 
-          {/* Step 3: Link */}
-          {step === 3 && (
+          {/* Step 2: Link + Stripe Connect */}
+          {step === 2 && (
             <div className="space-y-4">
+              {/* Referral Link */}
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                 <p className="flex items-center gap-2 text-sm font-medium text-primary-700 mb-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -450,6 +392,44 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
               </div>
 
               <p className="text-sm text-gray-600 text-center" dangerouslySetInnerHTML={{ __html: t.raw('commissionInfo') }} />
+
+              {/* Stripe Connect */}
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <p className="text-sm font-semibold text-gray-900 mb-1">Set up payouts</p>
+                <p className="text-xs text-gray-500 mb-3">Connect your Stripe account to receive commission payouts automatically.</p>
+
+                {apiError && (
+                  <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 mb-3">
+                    {apiError}
+                  </div>
+                )}
+
+                {stripeConnected ? (
+                  <div className="flex items-center gap-2 text-sm text-success-700 font-medium">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Stripe onboarding opened — complete it in the new tab
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleStripeConnect}
+                    disabled={stripeLoading}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-[#635bff] text-white font-semibold rounded-xl hover:bg-[#5851db] transition-colors disabled:opacity-50"
+                  >
+                    {stripeLoading ? (
+                      '...'
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z" />
+                        </svg>
+                        Connect with Stripe
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
 
               <p className="text-sm text-gray-500 text-center" dangerouslySetInnerHTML={{ __html: (t.raw('pendingReview') as string).replace('{email}', email || 'your email') }} />
 
