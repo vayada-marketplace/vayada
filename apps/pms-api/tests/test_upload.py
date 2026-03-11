@@ -80,7 +80,7 @@ class TestImageUpload:
         assert resp.status_code == 403
 
     async def test_upload_non_hotel_user_forbidden(self, client, cleanup_database):
-        user = await create_test_user(user_type="admin")
+        user = await create_test_user(user_type="creator")
         image_data = make_test_image()
         resp = await client.post(
             "/upload/images",

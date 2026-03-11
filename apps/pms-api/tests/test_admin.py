@@ -60,7 +60,7 @@ class TestRegisterHotel:
         assert resp.status_code == 403
 
     async def test_register_hotel_non_hotel_user(self, client, cleanup_database):
-        user = await create_test_user(user_type="admin")
+        user = await create_test_user(user_type="creator")
         resp = await client.post(
             "/admin/register-hotel",
             json={"name": "X", "slug": "x", "contactEmail": "x@x.com"},
