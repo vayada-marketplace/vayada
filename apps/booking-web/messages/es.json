@@ -115,6 +115,7 @@
     "roomLabel": "Habitación",
     "rate": "Tarifa",
     "flexibleRate": "Tarifa Flexible",
+    "nonRefundableRate": "Tarifa No Reembolsable",
     "checkIn": "Entrada",
     "checkOut": "Salida",
     "duration": "Duración"

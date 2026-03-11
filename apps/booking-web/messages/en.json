@@ -120,6 +120,7 @@
     "roomLabel": "Room",
     "rate": "Rate",
     "flexibleRate": "Flexible Rate",
+    "nonRefundableRate": "Non-Refundable Rate",
     "checkIn": "Check-in",
     "checkOut": "Check-out",
     "duration": "Duration"

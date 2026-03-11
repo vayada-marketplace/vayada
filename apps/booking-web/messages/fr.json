@@ -115,6 +115,7 @@
     "roomLabel": "Chambre",
     "rate": "Tarif",
     "flexibleRate": "Tarif flexible",
+    "nonRefundableRate": "Tarif non remboursable",
     "checkIn": "Arrivée",
     "checkOut": "Départ",
     "duration": "Durée"

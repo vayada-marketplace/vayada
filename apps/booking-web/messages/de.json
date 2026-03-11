@@ -114,6 +114,7 @@
     "roomLabel": "Zimmer",
     "rate": "Tarif",
     "flexibleRate": "Flexibler Tarif",
+    "nonRefundableRate": "Nicht erstattbarer Tarif",
     "checkIn": "Check-in",
     "checkOut": "Check-out",
     "duration": "Dauer"

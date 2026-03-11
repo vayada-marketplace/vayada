@@ -115,6 +115,7 @@
     "roomLabel": "Kamar",
     "rate": "Tarif",
     "flexibleRate": "Tarif Fleksibel",
+    "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "checkIn": "Check-in",
     "checkOut": "Check-out",
     "duration": "Durasi"
