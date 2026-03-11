@@ -61,7 +61,7 @@ async def require_hotel_admin(
     user = await AuthDatabase.fetchrow(
         "SELECT type FROM users WHERE id = $1", user_id
     )
-    if user["type"] != "hotel":
+    if user["type"] not in ("hotel", "admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hotel admin access required",
