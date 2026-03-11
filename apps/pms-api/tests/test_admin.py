@@ -41,15 +41,16 @@ class TestRegisterHotel:
         assert resp1.status_code == 201
         hotel_id = resp1.json()["id"]
 
-        # Second call returns same hotel
+        # Second call updates slug/name to keep in sync with booking engine
         resp2 = await client.post(
             "/admin/register-hotel",
-            json={"name": "Ignored Name", "slug": "ignored-slug", "contactEmail": "ignored@b.com"},
+            json={"name": "Updated Name", "slug": "updated-slug", "contactEmail": "updated@b.com"},
             headers=headers,
         )
         assert resp2.status_code == 201
         assert resp2.json()["id"] == hotel_id
-        assert resp2.json()["name"] == "Hotel One"  # original name
+        assert resp2.json()["name"] == "Updated Name"
+        assert resp2.json()["slug"] == "updated-slug"
 
     async def test_register_hotel_requires_auth(self, client):
         resp = await client.post(
