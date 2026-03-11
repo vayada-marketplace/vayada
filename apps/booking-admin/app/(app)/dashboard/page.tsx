@@ -145,15 +145,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-        <a
-          href={bookingUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-[13px] font-medium rounded-lg hover:bg-primary-700 transition-colors"
-        >
-          View Live Page
-          <span className="text-sm">&nearr;</span>
-        </a>
       </div>
 
       {/* Time Range Tabs */}
