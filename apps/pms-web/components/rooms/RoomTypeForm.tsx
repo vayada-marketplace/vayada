@@ -257,7 +257,7 @@ export default function RoomTypeForm({
           </div>
 
           {/* Bedrooms, Bathrooms, Room Size, Total Rooms */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-4 gap-4 items-end">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Bedrooms</label>
