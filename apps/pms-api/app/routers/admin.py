@@ -71,8 +71,7 @@ async def update_hotel(
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
     row = await Database.fetchrow(
-        """UPDATE hotels SET slug = $1, name = $2, contact_email = $3, updated_at = now()
-           WHERE id = $4
+        """UPDATE hotels SET slug = $1, name = $2, contact_email = $3           WHERE id = $4
            RETURNING id, slug, name, contact_email, user_id, created_at""",
         data.slug,
         data.name,
