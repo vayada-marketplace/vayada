@@ -159,18 +159,12 @@ export default function RoomTypeForm({
             <span className="text-[11px] font-medium text-red-500">Required</span>
           </div>
 
-          <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-            <span className="text-blue-500 mt-0.5">&rarr;</span>
-            <p className="text-[11px] text-blue-700">Booking engine: Room card title &middot; &quot;View Details&quot; modal header &middot; Booking summary &middot; PMS Rooms &amp; Rates list</p>
-          </div>
-
           {/* Room Type Name */}
           <div>
             <div className="flex items-center gap-2 mb-1.5">
               <label className="text-[12px] font-semibold text-gray-900">
                 Room Type Name <span className="text-red-500">*</span>
               </label>
-              <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card Title</span>
             </div>
             <input
               type="text"
@@ -186,7 +180,6 @@ export default function RoomTypeForm({
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <label className="text-[12px] font-semibold text-gray-900">Beds</label>
-              <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Modal</span>
             </div>
             <p className="text-[10px] text-gray-400 mb-2">Add all bed types available in this room</p>
             <div className="space-y-2">
@@ -244,7 +237,6 @@ export default function RoomTypeForm({
               <label className="text-[12px] font-semibold text-gray-900">
                 Max Occupancy <span className="text-red-500">*</span>
               </label>
-              <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
             </div>
             <input
               type="number"
@@ -261,7 +253,6 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Bedrooms</label>
-                <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
               </div>
               <input
                 type="number"
@@ -274,7 +265,6 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Bathrooms</label>
-                <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
               </div>
               <input
                 type="number"
@@ -287,7 +277,6 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;)</label>
-                <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
               </div>
               <input
                 type="number"
@@ -301,7 +290,6 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Total Rooms <span className="text-red-500">*</span></label>
-                <span className="text-[9px] font-medium text-blue-500 uppercase tracking-wider bg-blue-50 px-1.5 py-0.5 rounded">PMS</span>
               </div>
               <input
                 type="number"
@@ -317,7 +305,6 @@ export default function RoomTypeForm({
           <div>
             <div className="flex items-center gap-2 mb-1.5">
               <label className="text-[12px] font-semibold text-gray-900">Room Description</label>
-              <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Modal</span>
             </div>
             <textarea
               value={form.description || ''}
@@ -353,7 +340,6 @@ export default function RoomTypeForm({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Sort Order</label>
-                <span className="text-[9px] font-medium text-blue-500 uppercase tracking-wider bg-blue-50 px-1.5 py-0.5 rounded">PMS</span>
               </div>
               <input
                 type="number"
