@@ -19,17 +19,23 @@ async def register_hotel(
     data: HotelRegister,
     user_id: str = Depends(require_hotel_admin),
 ):
-    # Idempotent: return existing hotel if already registered
+    # Idempotent: update slug/name if hotel already registered
     existing = await Database.fetchrow(
         "SELECT id, slug, name, contact_email, user_id, created_at FROM hotels WHERE user_id = $1",
         user_id,
     )
     if existing:
+        # Keep slug in sync with booking engine
+        if existing["slug"] != data.slug or existing["name"] != data.name:
+            await Database.execute(
+                "UPDATE hotels SET slug = $1, name = $2, contact_email = $3, updated_at = now() WHERE id = $4",
+                data.slug, data.name, data.contact_email, str(existing["id"]),
+            )
         return HotelResponse(
             id=str(existing["id"]),
-            slug=existing["slug"],
-            name=existing["name"],
-            contact_email=existing["contact_email"],
+            slug=data.slug,
+            name=data.name,
+            contact_email=data.contact_email,
             user_id=str(existing["user_id"]),
             created_at=existing["created_at"].isoformat(),
         )
@@ -42,6 +48,36 @@ async def register_hotel(
         data.name,
         data.contact_email,
         user_id,
+    )
+    return HotelResponse(
+        id=str(row["id"]),
+        slug=row["slug"],
+        name=row["name"],
+        contact_email=row["contact_email"],
+        user_id=str(row["user_id"]),
+        created_at=row["created_at"].isoformat(),
+    )
+
+
+@router.patch("/hotel")
+async def update_hotel(
+    data: HotelRegister,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Update hotel details (slug, name, email) for the current user's hotel."""
+    hotel = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE user_id = $1", user_id
+    )
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    row = await Database.fetchrow(
+        """UPDATE hotels SET slug = $1, name = $2, contact_email = $3, updated_at = now()
+           WHERE id = $4
+           RETURNING id, slug, name, contact_email, user_id, created_at""",
+        data.slug,
+        data.name,
+        data.contact_email,
+        str(hotel["id"]),
     )
     return HotelResponse(
         id=str(row["id"]),
