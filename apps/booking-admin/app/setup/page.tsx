@@ -203,8 +203,8 @@ export default function SetupPage() {
     setError('')
     setSaving(true)
     try {
-      // 1. Save property settings
-      await settingsService.updatePropertySettings({
+      // 1. Save property settings (returns hotel data including slug)
+      const savedSettings = await settingsService.updatePropertySettings({
         property_name: propertyName,
         reservation_email: reservationEmail,
         phone_number: phoneNumber,
@@ -240,13 +240,13 @@ export default function SetupPage() {
         booking_filters: bookingFilters,
       })
 
-      // 3. Register hotel in PMS
+      // 3. Register hotel in PMS (use the same slug as the booking engine)
       if (selectedPms === 'vayada') {
-        const slug = propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        const pmsSlug = savedSettings?.slug || propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
         try {
           await pmsClient.post('/admin/register-hotel', {
             name: propertyName,
-            slug,
+            slug: pmsSlug,
             contactEmail: reservationEmail,
           })
         } catch {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { pmsClient } from '@/services/api/pmsClient'
 import {
   BellIcon,
   ShieldCheckIcon,
@@ -135,6 +136,16 @@ export default function SettingsPage() {
       setFeedback(null)
       const data = await settingsService.updatePropertySettings(settings)
       setSettings(data)
+      // Sync slug and name to PMS
+      try {
+        await pmsClient.patch('/admin/hotel', {
+          slug: data.slug,
+          name: data.property_name,
+          contactEmail: data.reservation_email,
+        })
+      } catch {
+        // Non-fatal: PMS sync may fail if not using Vayada PMS
+      }
       setFeedback({ type: 'success', message: 'Settings saved successfully' })
     } catch {
       setFeedback({ type: 'error', message: 'Failed to save settings' })
