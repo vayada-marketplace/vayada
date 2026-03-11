@@ -131,7 +131,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
   const referralDomain = `${hotelSlug}.booking.vayada.com`
 
-  const handleGenerateLink = async () => {
+  const handleSubmitInfo = async () => {
     if (!fullName || !email) return
     setSubmitting(true)
     setApiError('')
@@ -179,7 +179,6 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
       }
       const data = await res.json()
       setStripeConnected(true)
-      // Open Stripe onboarding in new tab
       window.open(data.onboardingUrl, '_blank')
     } catch (err: any) {
       setApiError(err.message || 'Failed to connect Stripe')
@@ -231,18 +230,17 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
         {/* Subtitle */}
         <p className="px-6 text-sm text-gray-500 mb-4">
           {step === 1 && t('step1Desc')}
-          {step === 2 && t('step3Desc')}
+          {step === 2 && t('step2Desc')}
+          {step === 3 && t('step3Desc')}
         </p>
 
         {/* Step Indicator */}
         <div className="flex items-center justify-center gap-0 px-6 mb-6">
-          {[1, 2].map((s, i) => (
+          {[1, 2, 3].map((s, i) => (
             <div key={s} className="flex items-center">
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 ${
-                  s < step
-                    ? 'bg-primary-600 border-primary-600 text-white'
-                    : s === step
+                  s <= step
                     ? 'bg-primary-600 border-primary-600 text-white'
                     : 'bg-white border-gray-300 text-gray-400'
                 }`}
@@ -255,7 +253,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                   s
                 )}
               </div>
-              {i < 1 && (
+              {i < 2 && (
                 <div className={`w-10 h-0.5 ${s < step ? 'bg-primary-600' : 'bg-gray-300'}`} />
               )}
             </div>
@@ -263,7 +261,7 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
         </div>
 
         <div className="px-6 pb-6">
-          {/* Step 1: Info */}
+          {/* Step 1: Personal Info */}
           {step === 1 && (
             <div className="space-y-4">
               <div>
@@ -346,54 +344,18 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
               )}
 
               <button
-                onClick={handleGenerateLink}
+                onClick={handleSubmitInfo}
                 disabled={submitting || !fullName || !email}
                 className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2 disabled:opacity-50"
               >
-                {submitting ? '...' : t('generateLink')}
+                {submitting ? '...' : tc('continue')}
               </button>
             </div>
           )}
 
-          {/* Step 2: Link + Stripe Connect */}
+          {/* Step 2: Payout Setup */}
           {step === 2 && (
             <div className="space-y-4">
-              {/* Referral Link */}
-              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <p className="flex items-center gap-2 text-sm font-medium text-primary-700 mb-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                  </svg>
-                  {t('yourReferralLink')}
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${referralDomain}?ref=${referralCode}`}
-                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm text-gray-700 font-mono"
-                  />
-                  <button
-                    onClick={handleCopy}
-                    className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors"
-                    title="Copy link"
-                  >
-                    {copied ? (
-                      <svg className="w-5 h-5 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <p className="text-sm text-gray-600 text-center" dangerouslySetInnerHTML={{ __html: t.raw('commissionInfo') }} />
-
-              {/* Stripe Connect */}
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                 <p className="text-sm font-semibold text-gray-900 mb-1">Set up payouts</p>
                 <p className="text-xs text-gray-500 mb-3">Connect your Stripe account to receive commission payouts automatically.</p>
@@ -431,7 +393,55 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 )}
               </div>
 
+              <p className="text-sm text-gray-600 text-center" dangerouslySetInnerHTML={{ __html: t.raw('commissionInfo') }} />
+
               <p className="text-sm text-gray-500 text-center" dangerouslySetInnerHTML={{ __html: (t.raw('pendingReview') as string).replace('{email}', email || 'your email') }} />
+
+              <button
+                onClick={() => setStep(3)}
+                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors"
+              >
+                {tc('continue')}
+              </button>
+            </div>
+          )}
+
+          {/* Step 3: Your Referral Link */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <p className="flex items-center gap-2 text-sm font-medium text-primary-700 mb-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  {t('yourReferralLink')}
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${referralDomain}?ref=${referralCode}`}
+                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm text-gray-700 font-mono"
+                  />
+                  <button
+                    onClick={handleCopy}
+                    className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors"
+                    title="Copy link"
+                  >
+                    {copied ? (
+                      <svg className="w-5 h-5 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-600 text-center" dangerouslySetInnerHTML={{ __html: t.raw('commissionInfo') }} />
 
               <button
                 onClick={() => { onClose(); reset() }}
