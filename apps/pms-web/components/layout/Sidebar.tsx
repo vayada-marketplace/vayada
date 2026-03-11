@@ -32,7 +32,7 @@ const navItems = [
     icon: DashboardIcon,
   },
   {
-    label: 'Room Types',
+    label: 'Rooms & Rates',
     href: '/rooms',
     icon: RoomsIcon,
   },
