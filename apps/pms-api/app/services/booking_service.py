@@ -235,12 +235,17 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
         # Create Stripe PaymentIntent (manual capture = authorization hold)
         amount_cents = int(math.ceil(total_amount * 100))
-        pi = await stripe_service.create_payment_intent(
-            amount=amount_cents,
-            currency=room["currency"],
-            metadata={"booking_id": booking_id, "hotel_id": hotel_id},
-            stripe_account=stripe_account,
-        )
+        try:
+            pi = await stripe_service.create_payment_intent(
+                amount=amount_cents,
+                currency=room["currency"],
+                metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+                stripe_account=stripe_account,
+            )
+        except Exception:
+            # Clean up the booking if Stripe fails
+            await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+            raise
         client_secret = pi["client_secret"]
 
         # Create payment record
