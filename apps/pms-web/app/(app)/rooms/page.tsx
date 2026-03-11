@@ -204,26 +204,6 @@ export default function RoomsPage() {
             className="w-72 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
           />
         </div>
-        <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
-          <button
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-green-500 text-white shadow-sm rounded-md transition-colors"
-          >
-            <Cog6ToothIcon className="w-3.5 h-3.5" />
-            Config
-          </button>
-          <Link
-            href="/calendar"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-gray-500 hover:text-gray-700 rounded-md transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" />
-              <path d="M16 2v4" />
-              <path d="M8 2v4" />
-              <path d="M3 10h18" />
-            </svg>
-            Calendar
-          </Link>
-        </div>
       </div>
 
       {/* Room Type List */}
