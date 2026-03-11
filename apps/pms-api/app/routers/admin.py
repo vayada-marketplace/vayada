@@ -28,7 +28,7 @@ async def register_hotel(
         # Keep slug in sync with booking engine
         if existing["slug"] != data.slug or existing["name"] != data.name:
             await Database.execute(
-                "UPDATE hotels SET slug = $1, name = $2, contact_email = $3, updated_at = now() WHERE id = $4",
+                "UPDATE hotels SET slug = $1, name = $2, contact_email = $3 WHERE id = $4",
                 data.slug, data.name, data.contact_email, str(existing["id"]),
             )
         return HotelResponse(
