@@ -407,11 +407,12 @@ export default function HomePage() {
             const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
             const nonRefundableTotal = nonRefundableNightly * nights
             const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
+            const soldOut = room.remainingRooms <= 0
 
             return (
               <div
                 key={room.id}
-                className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-lg transition-shadow"
+                className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-shadow ${soldOut ? 'opacity-60' : 'hover:shadow-lg'}`}
               >
                 <div className="flex flex-col md:flex-row">
                   {/* Image Carousel — fills full card height */}
@@ -422,6 +423,11 @@ export default function HomePage() {
                       fill
                       className="object-cover"
                     />
+                    {soldOut && (
+                      <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
+                        <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">{t('soldOut')}</span>
+                      </div>
+                    )}
                     {/* Prev/Next Arrows */}
                     {room.images.length > 1 && (
                       <>
@@ -577,9 +583,10 @@ export default function HomePage() {
                                   const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=nonrefundable`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
-                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
+                                disabled={soldOut}
+                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                {t('selectThisRate')}
+                                {soldOut ? t('soldOut') : t('selectThisRate')}
                               </button>
                             </div>
                           )}
@@ -639,9 +646,10 @@ export default function HomePage() {
                                   const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
-                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm"
+                                disabled={soldOut}
+                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                {t('selectThisRate')}
+                                {soldOut ? t('soldOut') : t('selectThisRate')}
                               </button>
                             </div>
                           )}

@@ -70,7 +70,8 @@
     "welcomeDrink": "Minuman selamat datang",
     "freeWifi": "WiFi gratis",
     "airportTransfer": "Transfer bandara",
-    "selectThisRate": "Pilih Tarif Ini"
+    "selectThisRate": "Pilih Tarif Ini",
+    "soldOut": "Habis Terjual"
   },
   "rooms": {
     "title": "Kamar Kami",

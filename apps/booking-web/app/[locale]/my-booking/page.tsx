@@ -107,7 +107,7 @@ export default function MyBookingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-screen bg-surface flex flex-col">
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
         <Image
@@ -124,7 +124,7 @@ export default function MyBookingPage() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-12 flex-1">
         {/* Lookup Form */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
           <h2 className="text-xl font-bold text-gray-900 mb-2">{t('lookUp')}</h2>

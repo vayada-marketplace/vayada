@@ -70,7 +70,8 @@
     "welcomeDrink": "Willkommensgetränk",
     "freeWifi": "Kostenloses WLAN",
     "airportTransfer": "Flughafentransfer",
-    "selectThisRate": "Diesen Tarif wählen"
+    "selectThisRate": "Diesen Tarif wählen",
+    "soldOut": "Ausgebucht"
   },
   "rooms": {
     "title": "Unsere Zimmer",

@@ -71,7 +71,8 @@
     "welcomeDrink": "Welcome drink",
     "freeWifi": "Free WiFi",
     "airportTransfer": "Airport transfer",
-    "selectThisRate": "Select This Rate"
+    "selectThisRate": "Select This Rate",
+    "soldOut": "Sold Out"
   },
   "rooms": {
     "title": "Our Rooms",
