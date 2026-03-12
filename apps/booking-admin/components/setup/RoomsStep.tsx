@@ -325,7 +325,6 @@ export default function RoomsStep({
                 <label className="text-[12px] font-semibold text-gray-900">
                   Max Occupancy <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
               </div>
               <input
                 type="number"
@@ -342,7 +341,6 @@ export default function RoomsStep({
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="text-[12px] font-semibold text-gray-900">Bedrooms</label>
-                  <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
                 </div>
                 <input
                   type="number"
@@ -355,7 +353,6 @@ export default function RoomsStep({
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="text-[12px] font-semibold text-gray-900">Bathrooms</label>
-                  <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
                 </div>
                 <input
                   type="number"
@@ -368,7 +365,6 @@ export default function RoomsStep({
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;)</label>
-                  <span className="text-[9px] font-medium text-gray-400 uppercase tracking-wider bg-gray-100 px-1.5 py-0.5 rounded">Card</span>
                 </div>
                 <input
                   type="number"
@@ -382,7 +378,6 @@ export default function RoomsStep({
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="text-[12px] font-semibold text-gray-900">Total Rooms <span className="text-red-500">*</span></label>
-                  <span className="text-[9px] font-medium text-blue-500 uppercase tracking-wider bg-blue-50 px-1.5 py-0.5 rounded">PMS</span>
                 </div>
                 <input
                   type="number"
@@ -413,7 +408,6 @@ export default function RoomsStep({
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Room Category Tag</label>
-                <span className="text-[10px] text-gray-400">(shows in PMS room list)</span>
               </div>
               <select
                 value={room.category}
@@ -668,8 +662,29 @@ export default function RoomsStep({
               {room.images.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {room.images.map((url, idx) => (
-                    <div key={idx} className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200">
-                      <img src={url} alt={`Room ${idx + 1}`} className="w-full h-full object-cover" />
+                    <div
+                      key={idx}
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData('text/plain', String(idx)); (e.currentTarget as HTMLElement).style.opacity = '0.5' }}
+                      onDragEnd={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                      onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.borderColor = '#6366f1' }}
+                      onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '' }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).style.borderColor = ''
+                        const fromIdx = parseInt(e.dataTransfer.getData('text/plain'))
+                        if (fromIdx === idx || isNaN(fromIdx)) return
+                        const reordered = [...room.images]
+                        const [moved] = reordered.splice(fromIdx, 1)
+                        reordered.splice(idx, 0, moved)
+                        updateRoom({ images: reordered })
+                      }}
+                      className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200 cursor-grab active:cursor-grabbing"
+                    >
+                      <img src={url} alt={`Room ${idx + 1}`} className="w-full h-full object-cover pointer-events-none" />
+                      {idx === 0 && (
+                        <span className="absolute bottom-1 left-1 text-[8px] font-bold text-white bg-black/50 px-1.5 py-0.5 rounded">Cover</span>
+                      )}
                       <button
                         onClick={() => updateRoom({ images: room.images.filter((_, i) => i !== idx) })}
                         className="absolute top-1 right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
