@@ -344,6 +344,7 @@ export default function BookingFlowPage() {
                     <option value="USD">USD</option>
                     <option value="GBP">GBP</option>
                     <option value="CHF">CHF</option>
+                    <option value="IDR">IDR</option>
                   </select>
                 </div>
               </div>
