@@ -20,6 +20,7 @@ export interface RoomType {
   images: string[]
   bedType: string
   features: string[]
+  benefits: string[]
   totalRooms: number
   isActive: boolean
   sortOrder: number
@@ -41,6 +42,7 @@ export interface RoomTypeCreate {
   images?: string[]
   bedType?: string
   features?: string[]
+  benefits?: string[]
   totalRooms?: number
   isActive?: boolean
   sortOrder?: number

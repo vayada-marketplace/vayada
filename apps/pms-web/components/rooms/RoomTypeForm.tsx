@@ -98,7 +98,7 @@ export default function RoomTypeForm({
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(true)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState((form.nonRefundableRate ?? null) !== null)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(10)
-  const [bookDirectBenefits, setBookDirectBenefits] = useState<string[]>([])
+  const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState('')
   const [bedrooms, setBedrooms] = useState(1)
   const [bathrooms, setBathrooms] = useState(1)
@@ -445,7 +445,11 @@ export default function RoomTypeForm({
                     onClick={() => {
                       const next = !nonRefundableEnabled
                       setNonRefundableEnabled(next)
-                      if (!next) updateForm({ nonRefundableRate: null })
+                      if (next) {
+                        updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - nonRefundableDiscount / 100) * 100) / 100 })
+                      } else {
+                        updateForm({ nonRefundableRate: null })
+                      }
                     }}
                     className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
                   >
@@ -803,16 +807,16 @@ export default function RoomTypeForm({
           {/* Predefined benefit options */}
           <div className="space-y-2">
             {BENEFIT_OPTIONS.map((benefit) => {
-              const isSelected = bookDirectBenefits.includes(benefit)
+              const isSelected = benefits.includes(benefit)
               return (
                 <button
                   key={benefit}
                   type="button"
                   onClick={() => {
                     if (isSelected) {
-                      setBookDirectBenefits(bookDirectBenefits.filter((b) => b !== benefit))
+                      updateForm({ benefits: benefits.filter((b) => b !== benefit) })
                     } else {
-                      setBookDirectBenefits([...bookDirectBenefits, benefit])
+                      updateForm({ benefits: [...benefits, benefit] })
                     }
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg border text-left transition-colors ${
@@ -846,8 +850,8 @@ export default function RoomTypeForm({
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     const trimmed = benefitInput.trim()
-                    if (trimmed && !bookDirectBenefits.includes(trimmed)) {
-                      setBookDirectBenefits([...bookDirectBenefits, trimmed])
+                    if (trimmed && !benefits.includes(trimmed)) {
+                      updateForm({ benefits: [...benefits, trimmed] })
                     }
                     setBenefitInput('')
                   }
@@ -859,8 +863,8 @@ export default function RoomTypeForm({
                 type="button"
                 onClick={() => {
                   const trimmed = benefitInput.trim()
-                  if (trimmed && !bookDirectBenefits.includes(trimmed)) {
-                    setBookDirectBenefits([...bookDirectBenefits, trimmed])
+                  if (trimmed && !benefits.includes(trimmed)) {
+                    updateForm({ benefits: [...benefits, trimmed] })
                   }
                   setBenefitInput('')
                 }}
@@ -872,14 +876,14 @@ export default function RoomTypeForm({
           </div>
 
           {/* Selected custom benefits */}
-          {bookDirectBenefits.filter(b => !BENEFIT_OPTIONS.includes(b)).length > 0 && (
+          {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).length > 0 && (
             <div className="space-y-1">
               <span className="text-[10px] text-gray-400 uppercase tracking-wider">Custom benefits</span>
               <div className="flex flex-wrap gap-2">
-                {bookDirectBenefits.filter(b => !BENEFIT_OPTIONS.includes(b)).map((b, i) => (
+                {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).map((b, i) => (
                   <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
                     {b}
-                    <button type="button" onClick={() => setBookDirectBenefits(bookDirectBenefits.filter(x => x !== b))} className="text-primary-400 hover:text-primary-600">
+                    <button type="button" onClick={() => updateForm({ benefits: benefits.filter(x => x !== b) })} className="text-primary-400 hover:text-primary-600">
                       <XMarkIcon className="w-3 h-3" />
                     </button>
                   </span>
