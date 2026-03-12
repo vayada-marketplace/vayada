@@ -230,8 +230,7 @@ export default function AffiliatesPage() {
           <p className="text-[11px] text-gray-500 mt-1">
             {stats.active} active · {stats.pending} pending · {stats.paused} paused
           </p>
-          {/* TODO: compute real trend from historical data */}
-          <p className="text-[11px] text-emerald-600 font-medium mt-2">+12% vs last month</p>
+          <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
@@ -239,8 +238,7 @@ export default function AffiliatesPage() {
           </p>
           <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats.totalRevenue)}</p>
           <p className="text-[11px] text-gray-500 mt-1">Last 30 days</p>
-          {/* TODO: compute real trend */}
-          <p className="text-[11px] text-emerald-600 font-medium mt-2">+8% vs last month</p>
+          <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
@@ -250,8 +248,7 @@ export default function AffiliatesPage() {
           <p className="text-[11px] text-gray-500 mt-1">
             {formatCurrency(stats.avgPerBooking)} avg per booking
           </p>
-          {/* TODO: compute real trend */}
-          <p className="text-[11px] text-emerald-600 font-medium mt-2">+15% vs last month</p>
+          <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
@@ -263,8 +260,7 @@ export default function AffiliatesPage() {
           <p className="text-[11px] text-gray-500 mt-1">
             {stats.avgCommission.toFixed(1)}% avg rate
           </p>
-          {/* TODO: compute real trend */}
-          <p className="text-[11px] text-emerald-600 font-medium mt-2">+5% vs last month</p>
+          <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
       </div>
 
