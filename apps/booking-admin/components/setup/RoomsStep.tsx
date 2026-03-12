@@ -629,8 +629,8 @@ export default function RoomsStep({
                   <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
                 </div>
               </div>
-              <div className="ml-9 flex flex-wrap gap-2">
-                {['+0%', '+10%', '+15%', '+20%', 'Custom'].map((opt) => (
+              <div className="ml-9 flex flex-wrap items-center gap-2">
+                {['+0%', '+10%', '+15%', '+20%'].map((opt) => (
                   <button
                     key={opt}
                     onClick={() => updateRoom({ weekendSurcharge: opt })}
@@ -643,6 +643,28 @@ export default function RoomsStep({
                     {opt}
                   </button>
                 ))}
+                {!['+0%', '+10%', '+15%', '+20%'].includes(room.weekendSurcharge) ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-gray-500">+</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={room.weekendSurcharge.replace(/[^0-9]/g, '')}
+                      onChange={(e) => updateRoom({ weekendSurcharge: `+${e.target.value}%` })}
+                      className="w-14 px-2 py-1.5 bg-white border border-primary-500 rounded-full text-[11px] text-center font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      autoFocus
+                    />
+                    <span className="text-[11px] text-gray-500">%</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => updateRoom({ weekendSurcharge: '+%' })}
+                    className="px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                  >
+                    Custom
+                  </button>
+                )}
               </div>
             </div>
 
