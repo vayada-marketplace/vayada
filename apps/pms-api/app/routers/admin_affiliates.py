@@ -13,6 +13,8 @@ from app.models.affiliate import (
 )
 from app.models.payment import StripeConnectAccountRequest, XenditBankDetailsRequest
 from app.services import stripe_service
+from app.services.email_service import send_affiliate_approved
+from app.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,17 @@ async def update_affiliate_status(
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
     await AffiliateRepository.update_status(affiliate_id, data.status)
+
+    if data.status == "approved":
+        hotel = await Database.fetchrow("SELECT name FROM hotels WHERE id = $1", hotel_id)
+        hotel_name = hotel["name"] if hotel else "the hotel"
+        await send_affiliate_approved(
+            affiliate["email"],
+            affiliate["full_name"],
+            hotel_name,
+            affiliate["referral_code"],
+        )
+
     # Re-fetch with stats
     affiliates = await AffiliateRepository.list_by_hotel_id(hotel_id, limit=1000)
     matched = next((a for a in affiliates if str(a["id"]) == affiliate_id), None)

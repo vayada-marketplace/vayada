@@ -359,6 +359,21 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
+async def send_affiliate_approved(affiliate_email: str, affiliate_name: str, hotel_name: str, referral_code: str):
+    """Notify affiliate that they have been approved by the hotel."""
+    subject = f"You're Approved — Start Referring Guests to {hotel_name}"
+    content = f"""
+    <h2>Congratulations, {affiliate_name}!</h2>
+    <p class="detail">Great news — <strong>{hotel_name}</strong> has approved your referral application.</p>
+    <p class="detail">You can now start sharing your unique referral link and earn commissions on every booking.</p>
+    <hr class="divider">
+    <p class="detail"><strong>Your Referral Code:</strong> {referral_code}</p>
+    <hr class="divider">
+    <p class="detail">Make sure to set up your payout method so you can receive your commissions.</p>
+    """
+    await _send_email(affiliate_email, subject, _wrap_html(content))
+
+
 async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
     if not hotel_email:
