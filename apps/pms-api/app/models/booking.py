@@ -110,6 +110,12 @@ class BookingStatusUpdate(BaseModel):
     status: str  # 'confirmed' or 'cancelled'
 
 
+class BookingRoomAssign(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    room_id: str
+
+
 class BookingLookup(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 

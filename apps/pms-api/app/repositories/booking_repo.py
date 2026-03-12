@@ -245,6 +245,19 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def assign_room(booking_id: str, room_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings SET room_id = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            room_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def list_expired_pending(before_date) -> List[dict]:
         """Find bookings where host response deadline has passed."""
         rows = await Database.fetch(

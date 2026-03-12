@@ -10,7 +10,7 @@ from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.payout_repo import PayoutRepository
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate, AdminBookingCreate
+from app.models.booking import BookingAdminResponse, BookingStatusUpdate, AdminBookingCreate, BookingRoomAssign
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
@@ -198,6 +198,45 @@ async def update_booking_status(
             send_guest_cancellation(updated["guest_email"], updated)
         )
 
+    return _booking_to_admin(updated)
+
+
+# ── Room Assignment ───────────────────────────────────────────────
+
+
+@router.patch("/bookings/{booking_id}/assign-room", response_model=BookingAdminResponse)
+async def assign_room_to_booking(
+    booking_id: str,
+    data: BookingRoomAssign,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    # Validate room belongs to hotel and matches room type
+    room = await RoomRepository.get_by_id(data.room_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if str(room["room_type_id"]) != str(booking["room_type_id"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Room does not belong to the same room type as the booking",
+        )
+
+    # Check room availability for the booking dates
+    available = await BookingRepository.is_room_available(
+        data.room_id, booking["check_in"], booking["check_out"]
+    )
+    if not available:
+        raise HTTPException(
+            status_code=409,
+            detail="Room is not available for the booking dates",
+        )
+
+    await BookingRepository.assign_room(booking_id, data.room_id)
+    updated = await BookingRepository.get_by_id(booking_id)
     return _booking_to_admin(updated)
 
 
