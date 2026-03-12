@@ -274,6 +274,7 @@ export default function SetupPage() {
               images: r.images,
               amenities: r.amenities,
               features: r.features,
+              benefits: r.bookDirectBenefits || [],
             })
           } catch {
             // Non-fatal: room creation may fail but setup can continue
@@ -309,8 +310,10 @@ export default function SetupPage() {
       }
 
       router.push('/dashboard')
-    } catch {
-      setError('Failed to save settings. Please try again.')
+    } catch (err) {
+      console.error('Setup failed:', err)
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      setError(`Failed to save settings: ${message}`)
       setSaving(false)
     }
   }
