@@ -5,20 +5,33 @@ import { bookingsService, Booking } from '@/services/bookings'
 import { CHANNEL_COLORS, getChannelLabel } from '@/lib/constants/statusStyles'
 import Modal from '@/components/Modal'
 
+interface CalendarRoom {
+  id: string
+  roomTypeId: string
+  roomTypeName: string
+  roomNumber: string
+  floor: string
+  status: string
+}
+
 interface BookingDetailModalProps {
   bookingId: string
   onClose: () => void
   onStatusChange: () => void
+  rooms?: CalendarRoom[]
 }
 
 export default function BookingDetailModal({
   bookingId,
   onClose,
   onStatusChange,
+  rooms = [],
 }: BookingDetailModalProps) {
   const [booking, setBooking] = useState<Booking | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [assigningRoom, setAssigningRoom] = useState(false)
+  const [selectedRoomId, setSelectedRoomId] = useState<string>('')
 
   useEffect(() => {
     bookingsService
@@ -40,6 +53,25 @@ export default function BookingDetailModal({
       setActionLoading(false)
     }
   }
+
+  const handleAssignRoom = async () => {
+    if (!selectedRoomId) return
+    setAssigningRoom(true)
+    try {
+      await bookingsService.assignRoom(bookingId, selectedRoomId)
+      onStatusChange()
+      onClose()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setAssigningRoom(false)
+    }
+  }
+
+  // Filter rooms matching the booking's room type
+  const availableRooms = booking
+    ? rooms.filter((r) => r.roomTypeId === booking.roomTypeId && r.status === 'available')
+    : []
 
   const channelStyle = CHANNEL_COLORS[booking?.channel || 'direct'] || CHANNEL_COLORS.other
 
@@ -110,9 +142,13 @@ export default function BookingDetailModal({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-900">{booking.roomName}</p>
-                  {booking.roomNumber && (
+                  {booking.roomNumber ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 mt-1">
                       #{booking.roomNumber}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 mt-1">
+                      Unassigned
                     </span>
                   )}
                 </div>
@@ -124,6 +160,36 @@ export default function BookingDetailModal({
                   </p>
                 </div>
               </div>
+
+              {/* Room Assignment */}
+              {!booking.roomId && availableRooms.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                    Assign to Room
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedRoomId}
+                      onChange={(e) => setSelectedRoomId(e.target.value)}
+                      className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="">Select a room...</option>
+                      {availableRooms.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          #{r.roomNumber}{r.floor ? ` (Floor ${r.floor})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleAssignRoom}
+                      disabled={!selectedRoomId || assigningRoom}
+                      className="px-3 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {assigningRoom ? 'Assigning...' : 'Assign'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Guest Information */}
