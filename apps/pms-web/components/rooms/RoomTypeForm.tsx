@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
-import MonthlyRatesEditor from '@/components/MonthlyRatesEditor'
 
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Beds', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
@@ -393,7 +392,7 @@ export default function RoomTypeForm({
                   <span className="text-[11px] text-gray-400">(free cancellation)</span>
                 </div>
                 {flexibleRateEnabled && (
-                  <div className="mt-3 ml-[52px] space-y-3">
+                  <div className="mt-3 ml-[52px]">
                     <div className="flex items-center gap-3">
                       <span className="text-[11px] text-gray-500">Cancellation policy:</span>
                       <select
@@ -410,16 +409,6 @@ export default function RoomTypeForm({
                         <option>Free until 14 days before</option>
                         <option>Free until 30 days before</option>
                       </select>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] text-gray-500">Base rate ({form.currency || 'EUR'}):</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={form.baseRate ?? 0}
-                        onChange={(e) => updateForm({ baseRate: parseFloat(e.target.value) || 0 })}
-                        className="w-28 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                      />
                     </div>
                   </div>
                 )}
@@ -474,21 +463,6 @@ export default function RoomTypeForm({
                       </button>
                     </div>
                     <span className="text-[11px] text-gray-500">off flexible rate</span>
-                  </div>
-                )}
-                {nonRefundableEnabled && !flexibleRateEnabled && (
-                  <div className="mt-3 ml-[52px] space-y-3">
-                    <p className="text-[11px] text-gray-500">
-                      Set your non-refundable rate directly:
-                    </p>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={form.nonRefundableRate ?? ''}
-                      onChange={(e) => updateForm({ nonRefundableRate: e.target.value ? parseFloat(e.target.value) : null })}
-                      placeholder="Non-refundable rate"
-                      className="w-28 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                    />
                   </div>
                 )}
               </div>
@@ -629,15 +603,6 @@ export default function RoomTypeForm({
             </div>
           </div>
 
-          {/* Monthly Rates Editor */}
-          <div>
-            <MonthlyRatesEditor
-              monthlyRates={form.monthlyRates || {}}
-              defaultBaseRate={form.baseRate || 0}
-              defaultNonRefundableRate={form.nonRefundableRate}
-              onChange={(rates) => updateForm({ monthlyRates: rates })}
-            />
-          </div>
         </div>
       )}
 
