@@ -29,6 +29,7 @@ class RoomTypeCreate(BaseModel):
     images: List[str] = []
     bed_type: str = ""
     features: List[str] = []
+    benefits: List[str] = []
     total_rooms: int = 1
     is_active: bool = True
     sort_order: int = 0
@@ -50,6 +51,7 @@ class RoomTypeUpdate(BaseModel):
     images: Optional[List[str]] = None
     bed_type: Optional[str] = None
     features: Optional[List[str]] = None
+    benefits: Optional[List[str]] = None
     total_rooms: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
@@ -74,6 +76,7 @@ class RoomTypeResponse(BaseModel):
     bed_type: str
     remaining_rooms: int
     features: List[str]
+    benefits: List[str] = []
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -93,6 +96,7 @@ class RoomTypeAdminResponse(BaseModel):
     images: List[str]
     bed_type: str
     features: List[str]
+    benefits: List[str] = []
     total_rooms: int
     is_active: bool
     sort_order: int
