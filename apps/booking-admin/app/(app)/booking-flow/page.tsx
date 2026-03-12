@@ -22,6 +22,7 @@ const CATEGORIES = [
   { value: 'wellness', label: 'Wellness' },
   { value: 'dining', label: 'Dining' },
   { value: 'experience', label: 'Experience' },
+  { value: 'other', label: 'Other' },
 ]
 
 const emptyAddon = {
