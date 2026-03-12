@@ -15,6 +15,7 @@ interface RoomDetailModalProps {
   totalRooms: number
   onPrev: () => void
   onNext: () => void
+  onSelectRate: (rateType: 'flexible' | 'nonrefundable') => void
 }
 
 export default function RoomDetailModal({
@@ -26,6 +27,7 @@ export default function RoomDetailModal({
   totalRooms,
   onPrev,
   onNext,
+  onSelectRate,
 }: RoomDetailModalProps) {
   const [imgIndex, setImgIndex] = useState(0)
   const [showAllAmenities, setShowAllAmenities] = useState(false)
@@ -56,17 +58,17 @@ export default function RoomDetailModal({
           </button>
         </div>
 
-        <div className="flex flex-col md:flex-row overflow-y-auto flex-1">
+        <div className="flex flex-col md:flex-row overflow-hidden flex-1 min-h-0">
           {/* Left — Images */}
-          <div className="md:w-1/2 flex-shrink-0">
-            <div className="relative aspect-[4/3]">
+          <div className="md:w-1/2 flex-shrink-0 flex flex-col min-h-0">
+            <div className="relative flex-1 min-h-[300px]">
               <Image src={room.images[imgIndex]} alt={room.name} fill className="object-cover" />
               <div className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
                 {room.name}
               </div>
             </div>
             {room.images.length > 1 && (
-              <div className="flex gap-1.5 p-3">
+              <div className="flex gap-1.5 p-3 flex-shrink-0 bg-white">
                 {room.images.map((img, i) => (
                   <button
                     key={i}
@@ -192,6 +194,13 @@ export default function RoomDetailModal({
                 </div>
               </button>
             </div>
+
+            <button
+              onClick={() => onSelectRate(selectedRate)}
+              className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm"
+            >
+              Select This Rate
+            </button>
 
             {room.remainingRooms <= 3 && (
               <p className="text-sm text-gray-500 mt-3 flex items-center gap-1.5">

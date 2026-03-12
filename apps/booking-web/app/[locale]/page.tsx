@@ -667,6 +667,11 @@ export default function HomePage() {
           totalRooms={filteredRooms.length}
           onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1)}
           onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
+          onSelectRate={(rateType) => {
+            const room = filteredRooms[detailModalIndex]
+            const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=${rateType}`
+            router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+          }}
         />
       )}
 
