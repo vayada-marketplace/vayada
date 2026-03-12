@@ -35,6 +35,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           totalRooms: r.totalRooms,
           amenities: r.amenities,
           features: r.features,
+          benefits: r.benefits,
           images: r.images,
           isActive: r.isActive,
           sortOrder: r.sortOrder,
