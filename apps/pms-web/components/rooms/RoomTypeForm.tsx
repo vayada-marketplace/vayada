@@ -367,10 +367,33 @@ export default function RoomTypeForm({
       {/* Tab 2: Pricing & Rates */}
       {activeTab === 'pricing' && (
         <div className="space-y-8">
-          {/* Section 1: What can guests book? */}
+          {/* Base Rate */}
           <div>
             <div className="flex items-start gap-3 mb-1">
               <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+              <div>
+                <h3 className="text-[13px] font-semibold text-gray-900">Nightly rate</h3>
+                <p className="text-[11px] text-gray-400">The default price per night for this room</p>
+              </div>
+            </div>
+            <div className="ml-9">
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-gray-500">Base rate ({form.currency || 'EUR'}):</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.baseRate ?? 0}
+                  onChange={(e) => updateForm({ baseRate: parseFloat(e.target.value) || 0 })}
+                  className="w-32 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[13px] font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: What can guests book? */}
+          <div>
+            <div className="flex items-start gap-3 mb-1">
+              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
               <div>
                 <h3 className="text-[13px] font-semibold text-gray-900">What can guests book?</h3>
                 <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
@@ -472,7 +495,7 @@ export default function RoomTypeForm({
           {/* Section 2: When are you open? */}
           <div>
             <div className="flex items-start gap-3 mb-1">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
               <div>
                 <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
                 <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
@@ -528,7 +551,7 @@ export default function RoomTypeForm({
           {/* Section 3: Seasonal pricing */}
           <div>
             <div className="flex items-start gap-3 mb-1">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
               <div>
                 <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
                 <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
@@ -579,7 +602,7 @@ export default function RoomTypeForm({
           {/* Section 4: Weekend surcharge */}
           <div>
             <div className="flex items-start gap-3 mb-2">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
+              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>
               <div>
                 <h3 className="text-[13px] font-semibold text-gray-900">Do weekends cost more?</h3>
                 <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
