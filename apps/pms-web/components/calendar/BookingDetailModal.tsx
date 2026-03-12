@@ -32,6 +32,7 @@ export default function BookingDetailModal({
   const [actionLoading, setActionLoading] = useState(false)
   const [assigningRoom, setAssigningRoom] = useState(false)
   const [selectedRoomId, setSelectedRoomId] = useState<string>('')
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 
   useEffect(() => {
     bookingsService
@@ -251,34 +252,65 @@ export default function BookingDetailModal({
             )}
 
             {/* Actions */}
-            {booking.status === 'pending' && (
-              <div className="flex gap-2 pt-2 border-t border-gray-200">
-                <button
-                  onClick={() => handleStatusUpdate('confirmed')}
-                  disabled={actionLoading}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  Confirm
-                </button>
-                <button
-                  onClick={() => handleStatusUpdate('cancelled')}
-                  disabled={actionLoading}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-            {booking.status === 'confirmed' && (
+            {showCancelConfirm ? (
               <div className="pt-2 border-t border-gray-200">
-                <button
-                  onClick={() => handleStatusUpdate('cancelled')}
-                  disabled={actionLoading}
-                  className="w-full px-4 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  Cancel Booking
-                </button>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-3">
+                  <p className="text-sm font-medium text-red-800">
+                    Are you sure you want to cancel this booking?
+                  </p>
+                  <p className="text-xs text-red-600 mt-1">
+                    {booking.guestFirstName} {booking.guestLastName} &middot; {booking.checkIn} &rarr; {booking.checkOut} &middot; {booking.currency} {booking.totalAmount.toFixed(2)}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowCancelConfirm(false)}
+                    disabled={actionLoading}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    onClick={() => handleStatusUpdate('cancelled')}
+                    disabled={actionLoading}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {actionLoading ? 'Cancelling...' : 'Yes, Cancel'}
+                  </button>
+                </div>
               </div>
+            ) : (
+              <>
+                {booking.status === 'pending' && (
+                  <div className="flex gap-2 pt-2 border-t border-gray-200">
+                    <button
+                      onClick={() => handleStatusUpdate('confirmed')}
+                      disabled={actionLoading}
+                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setShowCancelConfirm(true)}
+                      disabled={actionLoading}
+                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                {booking.status === 'confirmed' && (
+                  <div className="pt-2 border-t border-gray-200">
+                    <button
+                      onClick={() => setShowCancelConfirm(true)}
+                      disabled={actionLoading}
+                      className="w-full px-4 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      Cancel Booking
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
