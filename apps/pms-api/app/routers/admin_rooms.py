@@ -55,6 +55,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         images=parse_jsonb(room["images"]),
         bed_type=room["bed_type"],
         features=parse_jsonb(room["features"]),
+        benefits=parse_jsonb(room.get("benefits", [])),
         total_rooms=room["total_rooms"],
         is_active=room["is_active"],
         sort_order=room["sort_order"],
