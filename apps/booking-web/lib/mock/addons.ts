@@ -6,6 +6,7 @@ export const ADDON_CATEGORIES = [
   { key: 'wellness', label: 'Wellness' },
   { key: 'experiences', label: 'Experiences' },
   { key: 'dining', label: 'Dining' },
+  { key: 'other', label: 'Other' },
 ] as const
 
 export const MOCK_ADDONS: Addon[] = [
