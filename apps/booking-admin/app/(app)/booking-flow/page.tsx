@@ -51,8 +51,9 @@ export default function BookingFlowPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const addonFileInputRef = useRef<HTMLInputElement>(null)
 
-  // Rooms state (read-only, from design settings for filters)
+  // Rooms state (filters)
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
+  const [filtersEnabled, setFiltersEnabled] = useState(false)
   const [savingFilters, setSavingFilters] = useState(false)
 
   useEffect(() => {
@@ -63,7 +64,10 @@ export default function BookingFlowPage() {
     ]).then(([addonList, settings, design]) => {
       setAddons(addonList)
       setAddonSettings(settings)
-      if (design.booking_filters) setBookingFilters(design.booking_filters)
+      if (design.booking_filters) {
+        setBookingFilters(design.booking_filters)
+        setFiltersEnabled(design.booking_filters.length > 0)
+      }
     }).finally(() => setLoading(false))
   }, [])
 
@@ -174,16 +178,25 @@ export default function BookingFlowPage() {
 
   // ── Filter handlers (Rooms tab) ──
 
-  const handleToggleFilter = (key: string) => {
-    setBookingFilters((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    )
+  const handleToggleFiltersEnabled = () => {
+    setFiltersEnabled((prev) => !prev)
+  }
+
+  const handleAddFilter = (label: string) => {
+    if (!bookingFilters.includes(label)) {
+      setBookingFilters((prev) => [...prev, label])
+    }
+  }
+
+  const handleRemoveFilter = (key: string) => {
+    setBookingFilters((prev) => prev.filter((k) => k !== key))
   }
 
   const handleSaveFilters = async () => {
     try {
       setSavingFilters(true)
-      await settingsService.updateDesignSettings({ booking_filters: bookingFilters })
+      const filters = filtersEnabled ? bookingFilters : []
+      await settingsService.updateDesignSettings({ booking_filters: filters })
       showFeedback('success', 'Filters saved successfully')
     } catch {
       showFeedback('error', 'Failed to save filters')
@@ -242,7 +255,10 @@ export default function BookingFlowPage() {
         {activeTab === 'rooms' && (
           <RoomsTab
             bookingFilters={bookingFilters}
-            handleToggleFilter={handleToggleFilter}
+            filtersEnabled={filtersEnabled}
+            onToggleFiltersEnabled={handleToggleFiltersEnabled}
+            onAddFilter={handleAddFilter}
+            onRemoveFilter={handleRemoveFilter}
             handleSaveFilters={handleSaveFilters}
             savingFilters={savingFilters}
           />
