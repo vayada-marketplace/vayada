@@ -1,7 +1,7 @@
 'use client'
 
-import { RefObject } from 'react'
-import { XMarkIcon, PlusIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { RefObject, useState } from 'react'
+import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 
 export interface RoomType {
   name: string
@@ -69,19 +69,82 @@ export const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Beds', 'S
 
 export const ROOM_CATEGORIES = ['Standard', 'Deluxe', 'Superior', 'Suite', 'Villa', 'Bungalow', 'Studio', 'Penthouse']
 
-export const QUICK_AMENITIES = [
-  { label: 'Private Pool', emoji: '\uD83C\uDFCA' },
-  { label: 'Entire villa', emoji: '\uD83C\uDFE1' },
-  { label: 'Free WiFi', emoji: '\uD83D\uDCF6' },
-  { label: 'Air conditioning', emoji: '\u2744\uFE0F' },
-  { label: 'Pool view', emoji: '\uD83C\uDFCA' },
-  { label: 'Ocean view', emoji: '\uD83C\uDFD6\uFE0F' },
-  { label: 'Mountain view', emoji: '\u26F0\uFE0F' },
-  { label: 'Kitchen', emoji: '\uD83C\uDF73' },
-  { label: 'Flat-screen TV', emoji: '\uD83D\uDCFA' },
-  { label: 'Garden', emoji: '\uD83C\uDF3F' },
-  { label: 'Spa bath', emoji: '\uD83D\uDEC1' },
-  { label: 'Parking', emoji: '\uD83C\uDD7F\uFE0F' },
+export const FEATURE_CATEGORIES = [
+  {
+    name: 'VIEWS & LOCATION',
+    items: [
+      { label: 'Sea view', emoji: '\uD83C\uDF0A' },
+      { label: 'Ocean view', emoji: '\uD83C\uDF05' },
+      { label: 'Mountain view', emoji: '\u26F0\uFE0F' },
+      { label: 'Garden view', emoji: '\uD83C\uDF3F' },
+      { label: 'Pool view', emoji: '\uD83C\uDFCA' },
+      { label: 'Beachfront', emoji: '\uD83C\uDFD6\uFE0F' },
+      { label: 'Forest view', emoji: '\uD83C\uDF32' },
+      { label: 'City view', emoji: '\uD83C\uDFD9\uFE0F' },
+      { label: 'Lake view', emoji: '\uD83C\uDFDE\uFE0F' },
+      { label: 'River view', emoji: '\uD83C\uDFDE\uFE0F' },
+    ],
+  },
+  {
+    name: 'OUTDOOR & RECREATION',
+    items: [
+      { label: 'Private Pool', emoji: '\uD83C\uDFCA' },
+      { label: 'Shared Pool', emoji: '\uD83C\uDFCA' },
+      { label: 'Hot tub', emoji: '\uD83D\uDEC1' },
+      { label: 'BBQ', emoji: '\uD83D\uDD25' },
+      { label: 'Outdoor dining area', emoji: '\uD83C\uDF7D\uFE0F' },
+      { label: 'Private terrace', emoji: '\uD83C\uDF05' },
+      { label: 'Balcony', emoji: '\uD83C\uDFE0' },
+      { label: 'Garden', emoji: '\uD83C\uDF3F' },
+      { label: 'Rooftop access', emoji: '\uD83C\uDFD9\uFE0F' },
+    ],
+  },
+  {
+    name: 'SPACE & TYPE',
+    items: [
+      { label: 'Entire villa', emoji: '\uD83C\uDFE1' },
+      { label: 'Entire apartment', emoji: '\uD83C\uDFE2' },
+      { label: 'Private entrance', emoji: '\uD83D\uDEAA' },
+      { label: 'Penthouse', emoji: '\uD83C\uDFD9\uFE0F' },
+      { label: 'Duplex', emoji: '\uD83C\uDFE0' },
+      { label: 'Studio', emoji: '\uD83D\uDECB\uFE0F' },
+    ],
+  },
+]
+
+export const AMENITY_CATEGORIES = [
+  {
+    name: 'Internet & Tech',
+    items: ['Free WiFi', 'Flat-screen TV', 'Smart TV', 'Netflix / Streaming', 'Work desk', 'Laptop-friendly workspace'],
+  },
+  {
+    name: 'Kitchen',
+    items: ['Mini Bar', 'Refrigerator', 'Microwave', 'Kitchenware', 'Electric kettle', 'Stovetop', 'Dining table'],
+  },
+  {
+    name: 'Bathroom',
+    items: ['Bath', 'Shower', 'Free toiletries', 'Hairdryer', 'Toilet', 'Toilet paper', 'Hot Tub', 'Towels', 'Slippers', 'Bathrobe'],
+  },
+  {
+    name: 'Climate & Comfort',
+    items: ['Air conditioning', 'Heating', 'Fan', 'Fireplace'],
+  },
+  {
+    name: 'Bedroom',
+    items: ['Extra pillows', 'Blackout curtains', 'Wardrobe', 'Bed linen'],
+  },
+  {
+    name: 'Laundry',
+    items: ['Washing machine', 'Dryer', 'Iron/Ironing board', 'Clothes rack'],
+  },
+  {
+    name: 'Safety & Access',
+    items: ['Safe', '24hr Security', 'Smoke detector', 'First aid kit', 'Fire extinguisher'],
+  },
+  {
+    name: 'Services',
+    items: ['Room service', 'Daily housekeeping', 'Concierge', 'Parking', 'Non-smoking', 'Adults-Only', 'Outdoor furniture'],
+  },
 ]
 
 export const BENEFIT_OPTIONS = [
@@ -145,6 +208,8 @@ export default function RoomsStep({
   const updateRoom = (updates: Partial<RoomType>) => {
     setRooms((prev: RoomType[]) => prev.map((r: RoomType, i: number) => i === activeRoomIndex ? { ...r, ...updates } : r))
   }
+  const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
+  const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
 
   return (
     <div className="flex-1 overflow-auto">
@@ -750,45 +815,188 @@ export default function RoomsStep({
               <p className="text-[10px] text-gray-400">Shown in: room listing card (left side) · &quot;View Details&quot; modal with prev/next navigation · thumbnail strip at bottom of modal</p>
             </div>
 
-            {/* Amenities & Features Section */}
+            {/* Features Section */}
             <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Amenities & Features</h3>
-                <span className="text-[11px] font-medium text-gray-400">Optional</span>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Features</h3>
+                  <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Room card tags</span>
+                  <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal highlights</span>
+                </div>
+                <span className="text-[11px] font-medium text-primary-600">{room.features.length} selected</span>
+              </div>
+              <p className="text-[10px] text-gray-400">What makes this room special — guests see these tags directly on the room listing. Choose the 3–6 most compelling highlights.</p>
+
+              {/* Live Preview */}
+              <div className="bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Live Preview — Room Card</p>
+                <p className="text-[12px] font-semibold text-gray-900">{room.name || 'Room name'} <span className="text-[11px] font-normal text-gray-400">&middot; Up to {room.maxOccupancy} guests</span></p>
+                {room.features.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {room.features.slice(0, 5).map((f) => (
+                      <span key={f} className="text-[10px] text-gray-600 border border-gray-200 bg-white rounded-full px-2 py-0.5">{f}</span>
+                    ))}
+                    {room.features.length > 5 && (
+                      <span className="text-[10px] text-gray-400 border border-gray-200 bg-white rounded-full px-2 py-0.5">+{room.features.length - 5} more</span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-400 mt-1 italic">Select features below to preview card tags...</p>
+                )}
               </div>
 
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-[12px] font-semibold text-gray-900">Quick-add amenities</span>
+              {/* Feature Categories */}
+              {FEATURE_CATEGORIES.map((cat) => (
+                <div key={cat.name}>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">{cat.name}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {cat.items.map((item) => {
+                      const isSelected = room.features.includes(item.label)
+                      return (
+                        <button
+                          key={item.label}
+                          onClick={() => {
+                            if (isSelected) {
+                              updateRoom({ features: room.features.filter((f) => f !== item.label) })
+                            } else {
+                              updateRoom({ features: [...room.features, item.label] })
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                            isSelected
+                              ? 'border-primary-300 bg-primary-50 text-primary-700'
+                              : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="text-[13px]">{item.emoji}</span>
+                          {item.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-                <p className="text-[10px] text-gray-400 mb-3">First 4–5 shown on room card; all shown in &quot;View Full Amenities&quot; in modal</p>
+              ))}
 
-                <div className="flex flex-wrap gap-2">
-                  {QUICK_AMENITIES.map((item) => {
-                    const isSelected = room.amenities.includes(item.label)
-                    return (
+              <p className="text-[10px] text-gray-400">{room.features.length} features selected &middot; First 5 shown on card</p>
+            </div>
+
+            {/* Amenities Section */}
+            <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Amenities</h3>
+                  <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal full list</span>
+                </div>
+                <span className="text-[11px] font-medium text-primary-600">{room.amenities.length} selected</span>
+              </div>
+              <p className="text-[10px] text-gray-400">What&apos;s included — guests see these after clicking &quot;View Details&quot;. Group by category for easy scanning.</p>
+
+              <div className="space-y-1">
+                {AMENITY_CATEGORIES.map((cat) => {
+                  const selectedCount = cat.items.filter((item) => room.amenities.includes(item)).length
+                  const isExpanded = expandedAmenityCategories.includes(cat.name)
+                  const allSelected = selectedCount === cat.items.length
+
+                  return (
+                    <div key={cat.name} className="border border-gray-200 rounded-lg overflow-hidden">
                       <button
-                        key={item.label}
                         onClick={() => {
-                          if (isSelected) {
-                            updateRoom({ amenities: room.amenities.filter((a) => a !== item.label) })
+                          if (isExpanded) {
+                            setExpandedAmenityCategories(prev => prev.filter(c => c !== cat.name))
                           } else {
-                            updateRoom({ amenities: [...room.amenities, item.label] })
+                            setExpandedAmenityCategories(prev => [...prev, cat.name])
                           }
                         }}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                          isSelected
-                            ? 'border-primary-300 bg-primary-50 text-primary-700'
-                            : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                        }`}
+                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
                       >
-                        <span className="text-[13px]">{item.emoji}</span>
-                        {item.label}
+                        <div className="flex items-center gap-2">
+                          <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                          <span className="text-[12px] font-semibold text-gray-900">{cat.name}</span>
+                        </div>
+                        <span className="text-[11px] text-gray-400">{selectedCount} selected</span>
                       </button>
-                    )
-                  })}
-                </div>
+
+                      {isExpanded && (
+                        <div className="px-4 pb-4 space-y-2">
+                          <button
+                            onClick={() => {
+                              if (allSelected) {
+                                updateRoom({ amenities: room.amenities.filter(a => !cat.items.includes(a)) })
+                              } else {
+                                updateRoom({ amenities: [...new Set([...room.amenities, ...cat.items])] })
+                              }
+                            }}
+                            className="text-[11px] text-primary-600 font-medium hover:text-primary-700"
+                          >
+                            {allSelected ? 'Deselect all' : 'Select all'}
+                          </button>
+
+                          <div className="space-y-1.5">
+                            {cat.items.map((item) => {
+                              const isSelected = room.amenities.includes(item)
+                              return (
+                                <button
+                                  key={item}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      updateRoom({ amenities: room.amenities.filter(a => a !== item) })
+                                    } else {
+                                      updateRoom({ amenities: [...room.amenities, item] })
+                                    }
+                                  }}
+                                  className="flex items-center gap-3 w-full text-left"
+                                >
+                                  <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
+                                    isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300'
+                                  }`}>
+                                    {isSelected && <CheckIcon className="w-2.5 h-2.5 text-white" />}
+                                  </div>
+                                  <span className="text-[12px] text-gray-700">{item}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+
+                          {/* Custom amenity input */}
+                          <div className="flex gap-2 mt-2">
+                            <input
+                              type="text"
+                              value={customAmenityInputs[cat.name] || ''}
+                              onChange={(e) => setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: e.target.value }))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const trimmed = (customAmenityInputs[cat.name] || '').trim()
+                                  if (trimmed && !room.amenities.includes(trimmed)) {
+                                    updateRoom({ amenities: [...room.amenities, trimmed] })
+                                  }
+                                  setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
+                                }
+                              }}
+                              className="flex-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                              placeholder="+ Add custom amenity..."
+                            />
+                            <button
+                              onClick={() => {
+                                const trimmed = (customAmenityInputs[cat.name] || '').trim()
+                                if (trimmed && !room.amenities.includes(trimmed)) {
+                                  updateRoom({ amenities: [...room.amenities, trimmed] })
+                                }
+                                setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
+                              }}
+                              className="px-2 py-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                              <PlusIcon className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
+
+              <p className="text-[10px] text-gray-400">{room.amenities.length} amenities selected &middot; Shown as &quot;View Full Amenities ({room.amenities.length})&quot; in the room detail modal</p>
             </div>
           </div>
         )}

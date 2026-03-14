@@ -44,32 +44,6 @@ export default function DetailsTab() {
           ))}
         </div>
       </div>
-
-      {/* Additional Options */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="text-[14px] font-semibold text-gray-900">Additional Options</h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Optional features on the details page</p>
-
-        <div className="space-y-2">
-          {[
-            { label: 'Newsletter Signup', description: 'Show newsletter opt-in checkbox' },
-            { label: 'Terms & Conditions', description: 'Require agreement to terms before booking' },
-          ].map((opt) => (
-            <div
-              key={opt.label}
-              className="flex items-center justify-between p-3 rounded-lg border border-primary-500 bg-primary-50/30"
-            >
-              <div>
-                <span className="text-[12px] font-medium text-gray-900">{opt.label}</span>
-                <p className="text-[11px] text-gray-500 mt-0.5">{opt.description}</p>
-              </div>
-              <div className="w-8 h-5 rounded-full bg-primary-500 relative">
-                <div className="absolute top-0.5 left-3.5 w-4 h-4 rounded-full bg-white shadow-sm" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
