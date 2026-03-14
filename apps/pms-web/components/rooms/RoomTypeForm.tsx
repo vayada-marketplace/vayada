@@ -824,7 +824,7 @@ export default function RoomTypeForm({
                             if (allSelected) {
                               updateForm({ amenities: amenities.filter(a => !cat.items.includes(a)) })
                             } else {
-                              updateForm({ amenities: [...new Set([...amenities, ...cat.items])] })
+                              updateForm({ amenities: Array.from(new Set([...amenities, ...cat.items])) })
                             }
                           }}
                           className="text-[11px] text-primary-600 font-medium hover:text-primary-700"
