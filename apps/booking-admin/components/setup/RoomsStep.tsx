@@ -923,7 +923,7 @@ export default function RoomsStep({
                               if (allSelected) {
                                 updateRoom({ amenities: room.amenities.filter(a => !cat.items.includes(a)) })
                               } else {
-                                updateRoom({ amenities: [...new Set([...room.amenities, ...cat.items])] })
+                                updateRoom({ amenities: Array.from(new Set([...room.amenities, ...cat.items])) })
                               }
                             }}
                             className="text-[11px] text-primary-600 font-medium hover:text-primary-700"
