@@ -57,6 +57,7 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: 'INR', name: 'Indian Rupee', flag: '\u{1F1EE}\u{1F1F3}' },
   { code: 'BRL', name: 'Brazilian Real', flag: '\u{1F1E7}\u{1F1F7}' },
   { code: 'MXN', name: 'Mexican Peso', flag: '\u{1F1F2}\u{1F1FD}' },
+  { code: 'HKD', name: 'Hong Kong Dollar', flag: '\u{1F1ED}\u{1F1F0}' },
 ]
 
 export const POPULAR_CURRENCY_CODES = ['EUR', 'GBP', 'AUD', 'SGD', 'CHF', 'CAD', 'THB', 'JPY']
