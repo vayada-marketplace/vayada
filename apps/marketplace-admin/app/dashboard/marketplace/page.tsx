@@ -482,7 +482,10 @@ export default function MarketplacePreviewPage() {
                         <p>Discount: {offering.discount_percentage}% off</p>
                       )}
                       {offering.availability_months && offering.availability_months.length > 0 && (
-                        <p>Available: {offering.availability_months.join(', ')}</p>
+                        <p>Available: {[...offering.availability_months].sort((a, b) => {
+                          const order = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                          return order.indexOf(a) - order.indexOf(b)
+                        }).join(', ')}</p>
                       )}
                     </div>
                   </div>

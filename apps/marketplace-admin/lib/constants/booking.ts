@@ -60,4 +60,5 @@ export const CURRENCY_OPTIONS = [
   { code: 'INR', label: 'INR - Indian Rupee' },
   { code: 'BRL', label: 'BRL - Brazilian Real' },
   { code: 'MXN', label: 'MXN - Mexican Peso' },
+  { code: 'HKD', label: 'HKD - Hong Kong Dollar' },
 ]
