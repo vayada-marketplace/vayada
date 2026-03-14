@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { XMarkIcon, PlusIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 
@@ -10,19 +10,82 @@ const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Beds', 'Single B
 
 const ROOM_CATEGORIES = ['Standard', 'Deluxe', 'Superior', 'Suite', 'Villa', 'Bungalow', 'Studio', 'Penthouse']
 
-const QUICK_AMENITIES = [
-  { label: 'Private Pool', emoji: '\uD83C\uDFCA' },
-  { label: 'Entire villa', emoji: '\uD83C\uDFE1' },
-  { label: 'Free WiFi', emoji: '\uD83D\uDCF6' },
-  { label: 'Air conditioning', emoji: '\u2744\uFE0F' },
-  { label: 'Pool view', emoji: '\uD83C\uDFCA' },
-  { label: 'Ocean view', emoji: '\uD83C\uDFD6\uFE0F' },
-  { label: 'Mountain view', emoji: '\u26F0\uFE0F' },
-  { label: 'Kitchen', emoji: '\uD83C\uDF73' },
-  { label: 'Flat-screen TV', emoji: '\uD83D\uDCFA' },
-  { label: 'Garden', emoji: '\uD83C\uDF3F' },
-  { label: 'Spa bath', emoji: '\uD83D\uDEC1' },
-  { label: 'Parking', emoji: '\uD83C\uDD7F\uFE0F' },
+const FEATURE_CATEGORIES = [
+  {
+    name: 'VIEWS & LOCATION',
+    items: [
+      { label: 'Sea view', emoji: '\uD83C\uDF0A' },
+      { label: 'Ocean view', emoji: '\uD83C\uDF05' },
+      { label: 'Mountain view', emoji: '\u26F0\uFE0F' },
+      { label: 'Garden view', emoji: '\uD83C\uDF3F' },
+      { label: 'Pool view', emoji: '\uD83C\uDFCA' },
+      { label: 'Beachfront', emoji: '\uD83C\uDFD6\uFE0F' },
+      { label: 'Forest view', emoji: '\uD83C\uDF32' },
+      { label: 'City view', emoji: '\uD83C\uDFD9\uFE0F' },
+      { label: 'Lake view', emoji: '\uD83C\uDFDE\uFE0F' },
+      { label: 'River view', emoji: '\uD83C\uDFDE\uFE0F' },
+    ],
+  },
+  {
+    name: 'OUTDOOR & RECREATION',
+    items: [
+      { label: 'Private Pool', emoji: '\uD83C\uDFCA' },
+      { label: 'Shared Pool', emoji: '\uD83C\uDFCA' },
+      { label: 'Hot tub', emoji: '\uD83D\uDEC1' },
+      { label: 'BBQ', emoji: '\uD83D\uDD25' },
+      { label: 'Outdoor dining area', emoji: '\uD83C\uDF7D\uFE0F' },
+      { label: 'Private terrace', emoji: '\uD83C\uDF05' },
+      { label: 'Balcony', emoji: '\uD83C\uDFE0' },
+      { label: 'Garden', emoji: '\uD83C\uDF3F' },
+      { label: 'Rooftop access', emoji: '\uD83C\uDFD9\uFE0F' },
+    ],
+  },
+  {
+    name: 'SPACE & TYPE',
+    items: [
+      { label: 'Entire villa', emoji: '\uD83C\uDFE1' },
+      { label: 'Entire apartment', emoji: '\uD83C\uDFE2' },
+      { label: 'Private entrance', emoji: '\uD83D\uDEAA' },
+      { label: 'Penthouse', emoji: '\uD83C\uDFD9\uFE0F' },
+      { label: 'Duplex', emoji: '\uD83C\uDFE0' },
+      { label: 'Studio', emoji: '\uD83D\uDECB\uFE0F' },
+    ],
+  },
+]
+
+const AMENITY_CATEGORIES = [
+  {
+    name: 'Internet & Tech',
+    items: ['Free WiFi', 'Flat-screen TV', 'Smart TV', 'Netflix / Streaming', 'Work desk', 'Laptop-friendly workspace'],
+  },
+  {
+    name: 'Kitchen',
+    items: ['Mini Bar', 'Refrigerator', 'Microwave', 'Kitchenware', 'Electric kettle', 'Stovetop', 'Dining table'],
+  },
+  {
+    name: 'Bathroom',
+    items: ['Bath', 'Shower', 'Free toiletries', 'Hairdryer', 'Toilet', 'Toilet paper', 'Hot Tub', 'Towels', 'Slippers', 'Bathrobe'],
+  },
+  {
+    name: 'Climate & Comfort',
+    items: ['Air conditioning', 'Heating', 'Fan', 'Fireplace'],
+  },
+  {
+    name: 'Bedroom',
+    items: ['Extra pillows', 'Blackout curtains', 'Wardrobe', 'Bed linen'],
+  },
+  {
+    name: 'Laundry',
+    items: ['Washing machine', 'Dryer', 'Iron/Ironing board', 'Clothes rack'],
+  },
+  {
+    name: 'Safety & Access',
+    items: ['Safe', '24hr Security', 'Smoke detector', 'First aid kit', 'Fire extinguisher'],
+  },
+  {
+    name: 'Services',
+    items: ['Room service', 'Daily housekeeping', 'Concierge', 'Parking', 'Non-smoking', 'Adults-Only', 'Outdoor furniture'],
+  },
 ]
 
 const BENEFIT_OPTIONS = [
@@ -87,6 +150,8 @@ export default function RoomTypeForm({
   const [activeTab, setActiveTab] = useState<RoomTab>('details')
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
+  const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
+  const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [benefitInput, setBenefitInput] = useState('')
 
   // Local-only fields not in PMS RoomTypeCreate/Update
@@ -646,150 +711,195 @@ export default function RoomTypeForm({
             />
           </div>
 
-          {/* Amenities */}
+          {/* Features Section */}
           <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Amenities & Features</h3>
-              <span className="text-[11px] font-medium text-gray-400">Optional</span>
+              <div className="flex items-center gap-3">
+                <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Features</h3>
+                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Room card tags</span>
+                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal highlights</span>
+              </div>
+              <span className="text-[11px] font-medium text-primary-600">{(form.features || []).length} selected</span>
             </div>
+            <p className="text-[10px] text-gray-400">What makes this room special — guests see these tags directly on the room listing. Choose the 3–6 most compelling highlights.</p>
 
-            <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[12px] font-semibold text-gray-900">Quick-add amenities</span>
-              </div>
-              <p className="text-[10px] text-gray-400 mb-3">First 4-5 shown on room card; all shown in &quot;View Full Amenities&quot; in modal</p>
-
-              <div className="flex flex-wrap gap-2">
-                {QUICK_AMENITIES.map((item) => {
-                  const isSelected = (form.amenities || []).includes(item.label)
-                  return (
-                    <button
-                      key={item.label}
-                      type="button"
-                      onClick={() => {
-                        const amenities = form.amenities || []
-                        if (isSelected) {
-                          updateForm({ amenities: amenities.filter((a) => a !== item.label) })
-                        } else {
-                          updateForm({ amenities: [...amenities, item.label] })
-                        }
-                      }}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                        isSelected
-                          ? 'border-primary-300 bg-primary-50 text-primary-700'
-                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span className="text-[13px]">{item.emoji}</span>
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Custom amenity input */}
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-1.5">Custom Amenity</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={amenityInput}
-                  onChange={(e) => setAmenityInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      const trimmed = amenityInput.trim()
-                      if (trimmed && !(form.amenities || []).includes(trimmed)) {
-                        updateForm({ amenities: [...(form.amenities || []), trimmed] })
-                      }
-                      setAmenityInput('')
-                    }
-                  }}
-                  className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                  placeholder="e.g. Rooftop terrace"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = amenityInput.trim()
-                    if (trimmed && !(form.amenities || []).includes(trimmed)) {
-                      updateForm({ amenities: [...(form.amenities || []), trimmed] })
-                    }
-                    setAmenityInput('')
-                  }}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <PlusIcon className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Selected amenities display */}
-            {(form.amenities || []).length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {(form.amenities || []).map((a, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
-                    {a}
-                    <button type="button" onClick={() => updateForm({ amenities: (form.amenities || []).filter((_, idx) => idx !== i) })} className="text-primary-400 hover:text-primary-600">
-                      <XMarkIcon className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Features */}
-            <div className="border-t border-gray-100 pt-4">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[12px] font-semibold text-gray-900">Features</span>
-              </div>
-              <p className="text-[10px] text-gray-400 mb-2">Additional features like &quot;Mountain View&quot;, &quot;Private Balcony&quot;</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={featureInput}
-                  onChange={(e) => setFeatureInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      const trimmed = featureInput.trim()
-                      if (trimmed && !(form.features || []).includes(trimmed)) {
-                        updateForm({ features: [...(form.features || []), trimmed] })
-                      }
-                      setFeatureInput('')
-                    }
-                  }}
-                  className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                  placeholder="e.g. Mountain View"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = featureInput.trim()
-                    if (trimmed && !(form.features || []).includes(trimmed)) {
-                      updateForm({ features: [...(form.features || []), trimmed] })
-                    }
-                    setFeatureInput('')
-                  }}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <PlusIcon className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              {(form.features || []).length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {(form.features || []).map((f, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-700 text-[11px] font-medium rounded-full">
-                      {f}
-                      <button type="button" onClick={() => updateForm({ features: (form.features || []).filter((_, idx) => idx !== i) })} className="text-gray-400 hover:text-gray-600">
-                        <XMarkIcon className="w-3 h-3" />
-                      </button>
-                    </span>
+            {/* Live Preview */}
+            <div className="bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Live Preview — Room Card</p>
+              <p className="text-[12px] font-semibold text-gray-900">{form.name || 'Room name'} <span className="text-[11px] font-normal text-gray-400">&middot; Up to {form.maxOccupancy} guests</span></p>
+              {(form.features || []).length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {(form.features || []).slice(0, 5).map((f) => (
+                    <span key={f} className="text-[10px] text-gray-600 border border-gray-200 bg-white rounded-full px-2 py-0.5">{f}</span>
                   ))}
+                  {(form.features || []).length > 5 && (
+                    <span className="text-[10px] text-gray-400 border border-gray-200 bg-white rounded-full px-2 py-0.5">+{(form.features || []).length - 5} more</span>
+                  )}
                 </div>
+              ) : (
+                <p className="text-[10px] text-gray-400 mt-1 italic">Select features below to preview card tags...</p>
               )}
             </div>
+
+            {/* Feature Categories */}
+            {FEATURE_CATEGORIES.map((cat) => (
+              <div key={cat.name}>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">{cat.name}</p>
+                <div className="flex flex-wrap gap-2">
+                  {cat.items.map((item) => {
+                    const isSelected = (form.features || []).includes(item.label)
+                    return (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => {
+                          const features = form.features || []
+                          if (isSelected) {
+                            updateForm({ features: features.filter((f) => f !== item.label) })
+                          } else {
+                            updateForm({ features: [...features, item.label] })
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                          isSelected
+                            ? 'border-primary-300 bg-primary-50 text-primary-700'
+                            : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="text-[13px]">{item.emoji}</span>
+                        {item.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <p className="text-[10px] text-gray-400">{(form.features || []).length} features selected &middot; First 5 shown on card</p>
+          </div>
+
+          {/* Amenities Section */}
+          <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Amenities</h3>
+                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal full list</span>
+              </div>
+              <span className="text-[11px] font-medium text-primary-600">{(form.amenities || []).length} selected</span>
+            </div>
+            <p className="text-[10px] text-gray-400">What&apos;s included — guests see these after clicking &quot;View Details&quot;. Group by category for easy scanning.</p>
+
+            <div className="space-y-1">
+              {AMENITY_CATEGORIES.map((cat) => {
+                const amenities = form.amenities || []
+                const selectedCount = cat.items.filter((item) => amenities.includes(item)).length
+                const isExpanded = expandedAmenityCategories.includes(cat.name)
+                const allSelected = selectedCount === cat.items.length
+
+                return (
+                  <div key={cat.name} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isExpanded) {
+                          setExpandedAmenityCategories(prev => prev.filter(c => c !== cat.name))
+                        } else {
+                          setExpandedAmenityCategories(prev => [...prev, cat.name])
+                        }
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                        <span className="text-[12px] font-semibold text-gray-900">{cat.name}</span>
+                      </div>
+                      <span className="text-[11px] text-gray-400">{selectedCount} selected</span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="px-4 pb-4 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (allSelected) {
+                              updateForm({ amenities: amenities.filter(a => !cat.items.includes(a)) })
+                            } else {
+                              updateForm({ amenities: [...new Set([...amenities, ...cat.items])] })
+                            }
+                          }}
+                          className="text-[11px] text-primary-600 font-medium hover:text-primary-700"
+                        >
+                          {allSelected ? 'Deselect all' : 'Select all'}
+                        </button>
+
+                        <div className="space-y-1.5">
+                          {cat.items.map((item) => {
+                            const isSelected = amenities.includes(item)
+                            return (
+                              <button
+                                key={item}
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    updateForm({ amenities: amenities.filter(a => a !== item) })
+                                  } else {
+                                    updateForm({ amenities: [...amenities, item] })
+                                  }
+                                }}
+                                className="flex items-center gap-3 w-full text-left"
+                              >
+                                <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
+                                  isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300'
+                                }`}>
+                                  {isSelected && <CheckIcon className="w-2.5 h-2.5 text-white" />}
+                                </div>
+                                <span className="text-[12px] text-gray-700">{item}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {/* Custom amenity input */}
+                        <div className="flex gap-2 mt-2">
+                          <input
+                            type="text"
+                            value={customAmenityInputs[cat.name] || ''}
+                            onChange={(e) => setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                const trimmed = (customAmenityInputs[cat.name] || '').trim()
+                                if (trimmed && !amenities.includes(trimmed)) {
+                                  updateForm({ amenities: [...amenities, trimmed] })
+                                }
+                                setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
+                              }
+                            }}
+                            className="flex-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                            placeholder="+ Add custom amenity..."
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const trimmed = (customAmenityInputs[cat.name] || '').trim()
+                              if (trimmed && !amenities.includes(trimmed)) {
+                                updateForm({ amenities: [...amenities, trimmed] })
+                              }
+                              setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
+                            }}
+                            className="px-2 py-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
+                          >
+                            <PlusIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <p className="text-[10px] text-gray-400">{(form.amenities || []).length} amenities selected &middot; Shown as &quot;View Full Amenities ({(form.amenities || []).length})&quot; in the room detail modal</p>
           </div>
         </div>
       )}
