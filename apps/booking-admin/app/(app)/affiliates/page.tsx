@@ -18,6 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
   approved: 'bg-emerald-50 text-emerald-700',
   rejected: 'bg-red-50 text-red-700',
   suspended: 'bg-gray-100 text-gray-600',
+  blocked: 'bg-gray-100 text-gray-600',
 }
 
 function getInitials(name: string) {
@@ -83,6 +84,14 @@ export default function AffiliatesPage() {
     affiliatesService.updateStatus(id, 'rejected').then(fetchAffiliates).catch(console.error)
   }
 
+  const handleBlock = (id: string) => {
+    affiliatesService.updateStatus(id, 'suspended').then(fetchAffiliates).catch(console.error)
+  }
+
+  const handleUnblock = (id: string) => {
+    affiliatesService.updateStatus(id, 'approved').then(fetchAffiliates).catch(console.error)
+  }
+
   // Computed stats from affiliate data
   const stats = useMemo(() => {
     const active = affiliates.filter((a) => a.status === 'approved')
@@ -110,10 +119,6 @@ export default function AffiliatesPage() {
       activeAffiliates: active.length,
     }
   }, [affiliates])
-
-  // TODO: payouts due — computed from pending commissions; placeholder for now
-  const payoutsDue = stats.totalCommission * 0.1
-  const payoutsCount = Math.max(1, stats.pending)
 
   // Filtered lists
   const pendingAffiliates = useMemo(() => {
@@ -204,20 +209,6 @@ export default function AffiliatesPage() {
             Avg commission
           </span>
         </div>
-      </div>
-
-      {/* Payout Bar */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-6 flex items-center justify-between">
-        <p className="text-[13px] text-amber-800">
-          <span className="font-semibold">{formatCurrency(payoutsDue)}</span> in payouts due to{' '}
-          <span className="font-semibold">{payoutsCount}</span> affiliates
-        </p>
-        <Link
-          href="/affiliates/payouts"
-          className="text-[13px] font-semibold text-amber-800 hover:text-amber-900 transition-colors"
-        >
-          Process Payouts &rarr;
-        </Link>
       </div>
 
       {/* Stats Cards */}
@@ -510,16 +501,25 @@ export default function AffiliatesPage() {
                         <span
                           className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}
                         >
-                          {a.status}
+                          {a.status === 'suspended' ? 'Blocked' : a.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/affiliates/${a.id}`}
-                          className="text-[12px] text-gray-600 hover:text-gray-900 font-medium"
-                        >
-                          View
-                        </Link>
+                        {a.status === 'approved' ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }}
+                            className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Block
+                          </button>
+                        ) : a.status === 'suspended' ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }}
+                            className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Unblock
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
