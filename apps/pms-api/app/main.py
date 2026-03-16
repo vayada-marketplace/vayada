@@ -25,9 +25,40 @@ logger = logging.getLogger(__name__)
 scheduler = setup_scheduler()
 
 
+async def run_migrations():
+    """Run pending SQL migrations on startup."""
+    from pathlib import Path
+    pool = await Database.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id SERIAL PRIMARY KEY,
+                filename TEXT NOT NULL UNIQUE,
+                executed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """)
+        executed = {r['filename'] for r in await conn.fetch("SELECT filename FROM schema_migrations")}
+        migrations_dir = Path(__file__).parent.parent / "migrations"
+        for f in sorted(migrations_dir.glob("*.sql")):
+            if f.name in executed:
+                continue
+            sql = f.read_text()
+            lines = [l for l in sql.split('\n') if l.strip() and not l.strip().startswith('--')]
+            if not '\n'.join(lines).strip():
+                await conn.execute("INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING", f.name)
+                continue
+            logger.info(f"Running migration {f.name}...")
+            async with conn.transaction():
+                await conn.execute(sql)
+                await conn.execute("INSERT INTO schema_migrations (filename) VALUES ($1)", f.name)
+            logger.info(f"Migration {f.name} completed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Vayada PMS...")
+    await run_migrations()
+    logger.info("Migrations complete")
     scheduler.start()
     logger.info("Scheduler started")
     yield
