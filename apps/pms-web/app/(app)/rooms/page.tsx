@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
-import { roomsService, RoomType } from '@/services/rooms'
+import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
 
 const CATEGORY_STYLES: Record<string, string> = {
   suite: 'bg-blue-50 text-blue-600 border border-blue-200',
@@ -35,12 +35,52 @@ function formatCurrency(amount: number, currency: string): string {
   return `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
 
-function RoomTypeCard({ room }: { room: RoomType }) {
+function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void }) {
   const [expanded, setExpanded] = useState(false)
+  const [addingRoom, setAddingRoom] = useState(false)
+  const [newRoomNumber, setNewRoomNumber] = useState('')
+  const [newRoomFloor, setNewRoomFloor] = useState('')
   const category = getCategoryFromName(room.name)
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES['standard']
 
-  const available = room.totalRooms
+  const typeRooms = rooms.filter(r => r.roomTypeId === room.id)
+  const available = typeRooms.filter(r => r.status === 'available').length
+
+  const handleAddRoom = async () => {
+    if (!newRoomNumber.trim()) return
+    try {
+      await individualRoomsService.create({
+        roomTypeId: room.id,
+        roomNumber: newRoomNumber.trim(),
+        floor: newRoomFloor.trim(),
+      })
+      setNewRoomNumber('')
+      setNewRoomFloor('')
+      setAddingRoom(false)
+      onRoomsChange()
+    } catch (err: any) {
+      alert(err.message || 'Failed to add room')
+    }
+  }
+
+  const handleDeleteRoom = async (roomId: string) => {
+    if (!confirm('Delete this room?')) return
+    try {
+      await individualRoomsService.delete(roomId)
+      onRoomsChange()
+    } catch (err: any) {
+      alert(err.message || 'Cannot delete room (may have bookings)')
+    }
+  }
+
+  const handleStatusChange = async (roomId: string, status: string) => {
+    try {
+      await individualRoomsService.update(roomId, { status })
+      onRoomsChange()
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="border-b border-gray-100 last:border-b-0">
@@ -76,7 +116,7 @@ function RoomTypeCard({ room }: { room: RoomType }) {
             </span>
           </div>
           <p className="text-[12px] text-gray-400 mt-0.5">
-            {room.totalRooms} room{room.totalRooms !== 1 ? 's' : ''}
+            {typeRooms.length} room{typeRooms.length !== 1 ? 's' : ''}
             {room.maxOccupancy > 0 && <> &middot; {room.maxOccupancy} occ</>}
             {room.size > 0 && <> &middot; {room.size}m&sup2;</>}
           </p>
@@ -84,11 +124,9 @@ function RoomTypeCard({ room }: { room: RoomType }) {
 
         {/* Status badges */}
         <div className="flex items-center gap-1.5 mr-6">
-          {available > 0 && (
-            <span className="w-6 h-6 rounded-full bg-green-500 text-white text-[11px] font-bold flex items-center justify-center" title="Available">
-              {available}
-            </span>
-          )}
+          <span className={`w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`} title={`${available} available`}>
+            {typeRooms.length}
+          </span>
         </div>
 
         {/* Price */}
@@ -129,25 +167,87 @@ function RoomTypeCard({ room }: { room: RoomType }) {
           )}
 
           {/* Individual rooms */}
-          {room.totalRooms > 0 ? (
-            Array.from({ length: Math.min(room.totalRooms, 20) }, (_, i) => {
-              const roomNum = String(i + 1).padStart(2, '0')
+          {typeRooms.length > 0 ? (
+            typeRooms.map((r) => {
+              const statusStyles: Record<string, string> = {
+                available: 'bg-green-50 text-green-600 border-green-200',
+                maintenance: 'bg-amber-50 text-amber-600 border-amber-200',
+                out_of_order: 'bg-red-50 text-red-600 border-red-200',
+              }
               return (
                 <div
-                  key={i}
+                  key={r.id}
                   className="flex items-center py-2.5 border-l-2 border-gray-200 pl-4 ml-1 hover:border-primary-400 transition-colors"
                 >
                   <div className="flex-1">
-                    <p className="text-[13px] font-medium text-gray-800">Room #{roomNum}</p>
+                    <p className="text-[13px] font-medium text-gray-800">
+                      #{r.roomNumber}
+                      {r.floor && <span className="text-gray-400 ml-1.5 text-[11px]">Floor {r.floor}</span>}
+                    </p>
                   </div>
-                  <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-green-50 text-green-600 border border-green-200">
-                    Available
-                  </span>
+                  <select
+                    value={r.status}
+                    onChange={(e) => handleStatusChange(r.id, e.target.value)}
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 ${statusStyles[r.status] || statusStyles.available}`}
+                  >
+                    <option value="available">Available</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="out_of_order">Out of Order</option>
+                  </select>
+                  <button
+                    onClick={() => handleDeleteRoom(r.id)}
+                    className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                    title="Delete room"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
                 </div>
               )
             })
           ) : (
-            <p className="text-[12px] text-gray-400 py-2">No rooms configured for this type.</p>
+            <p className="text-[12px] text-gray-400 py-2">No rooms yet. Add rooms so bookings can be assigned.</p>
+          )}
+
+          {/* Add room form */}
+          {addingRoom ? (
+            <div className="flex items-center gap-2 mt-2 pl-4 ml-1 border-l-2 border-primary-300">
+              <input
+                type="text"
+                value={newRoomNumber}
+                onChange={(e) => setNewRoomNumber(e.target.value)}
+                placeholder="Room number (e.g. 101)"
+                className="w-32 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleAddRoom()}
+              />
+              <input
+                type="text"
+                value={newRoomFloor}
+                onChange={(e) => setNewRoomFloor(e.target.value)}
+                placeholder="Floor (opt)"
+                className="w-20 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddRoom()}
+              />
+              <button
+                onClick={handleAddRoom}
+                className="px-3 py-1.5 text-[11px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setAddingRoom(false); setNewRoomNumber(''); setNewRoomFloor('') }}
+                className="px-2 py-1.5 text-[11px] text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingRoom(true)}
+              className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors"
+            >
+              <PlusIcon className="w-3.5 h-3.5" /> Add Room
+            </button>
           )}
         </div>
       )}
@@ -157,15 +257,22 @@ function RoomTypeCard({ room }: { room: RoomType }) {
 
 export default function RoomsPage() {
   const [rooms, setRooms] = useState<RoomType[]>([])
+  const [individualRooms, setIndividualRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
-  useEffect(() => {
-    roomsService.list()
-      .then(setRooms)
+  const loadData = () => {
+    Promise.all([roomsService.list(), individualRoomsService.list()])
+      .then(([types, indRooms]) => { setRooms(types); setIndividualRooms(indRooms) })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  const refreshRooms = () => {
+    individualRoomsService.list().then(setIndividualRooms).catch(console.error)
+  }
 
   const filteredRooms = useMemo(() => {
     if (!searchQuery.trim()) return rooms
@@ -238,7 +345,7 @@ export default function RoomsPage() {
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           {filteredRooms.map((room) => (
-            <RoomTypeCard key={room.id} room={room} />
+            <RoomTypeCard key={room.id} room={room} rooms={individualRooms} onRoomsChange={refreshRooms} />
           ))}
         </div>
       )}

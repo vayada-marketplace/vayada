@@ -51,6 +51,41 @@ export interface RoomTypeCreate {
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>
 
+export interface Room {
+  id: string
+  hotelId: string
+  roomTypeId: string
+  roomTypeName: string
+  roomNumber: string
+  floor: string
+  status: 'available' | 'maintenance' | 'out_of_order'
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RoomCreate {
+  roomTypeId: string
+  roomNumber: string
+  floor?: string
+  status?: string
+  sortOrder?: number
+}
+
+export const individualRoomsService = {
+  list: () =>
+    pmsClient.get<Room[]>('/admin/rooms'),
+
+  create: (data: RoomCreate) =>
+    pmsClient.post<Room>('/admin/rooms', data),
+
+  update: (id: string, data: Partial<RoomCreate>) =>
+    pmsClient.patch<Room>(`/admin/rooms/${id}`, data),
+
+  delete: (id: string) =>
+    pmsClient.delete(`/admin/rooms/${id}`),
+}
+
 export const roomsService = {
   list: () =>
     pmsClient.get<RoomType[]>('/admin/room-types'),
