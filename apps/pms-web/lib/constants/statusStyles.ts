@@ -21,6 +21,7 @@ export const AFFILIATE_STATUS_STYLES: Record<string, string> = {
   approved: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-red-600',
   suspended: 'bg-gray-100 text-gray-600',
+  blocked: 'bg-gray-100 text-gray-600',
 }
 
 export const PAYOUT_STATUS_STYLES: Record<string, string> = {

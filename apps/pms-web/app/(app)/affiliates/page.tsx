@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
 import { affiliatesService, Affiliate, AffiliateListResponse } from '@/services/affiliates'
 import { AFFILIATE_STATUS_STYLES } from '@/lib/constants/statusStyles'
 import FilterTabs from '@/components/FilterTabs'
@@ -12,7 +11,7 @@ const STATUS_TABS = [
   { label: 'Pending', value: 'pending' },
   { label: 'Approved', value: 'approved' },
   { label: 'Rejected', value: 'rejected' },
-  { label: 'Suspended', value: 'suspended' },
+  { label: 'Blocked', value: 'suspended' },
 ]
 
 const USER_TYPE_STYLES: Record<string, string> = {
@@ -27,6 +26,14 @@ export default function AffiliatesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const limit = 20
+
+  const handleBlock = (id: string) => {
+    affiliatesService.updateStatus(id, 'suspended').then(fetchAffiliates).catch(console.error)
+  }
+
+  const handleUnblock = (id: string) => {
+    affiliatesService.updateStatus(id, 'approved').then(fetchAffiliates).catch(console.error)
+  }
 
   const fetchAffiliates = () => {
     setLoading(true)
@@ -112,17 +119,26 @@ export default function AffiliatesPage() {
                       <span className="text-xs text-gray-500 ml-1">({a.commissionPct}%)</span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${AFFILIATE_STATUS_STYLES[a.status] || ''}`}>
-                        {a.status}
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${AFFILIATE_STATUS_STYLES[a.status] || ''}`}>
+                        {a.status === 'suspended' ? 'Blocked' : a.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/affiliates/${a.id}`}
-                        className="text-primary-600 hover:text-primary-700 font-medium"
-                      >
-                        View
-                      </Link>
+                      {a.status === 'approved' ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }}
+                          className="px-3 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Block
+                        </button>
+                      ) : a.status === 'suspended' ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }}
+                          className="px-3 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Unblock
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
