@@ -87,6 +87,7 @@ services:
       # Force the backend to talk to the postgres service inside the Docker network
       DATABASE_URL: postgresql://vayada_user:vayada_password@postgres:5432/vayada_db
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
+      PMS_DATABASE_URL: ${PMS_DATABASE_URL:-}
       # MinIO S3-compatible storage
       S3_BUCKET_NAME: vayada-uploads
       AWS_REGION: us-east-1

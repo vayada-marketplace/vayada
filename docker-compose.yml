@@ -162,6 +162,8 @@ services:
         condition: service_healthy
       auth-postgres:
         condition: service_healthy
+      pms-postgres:
+        condition: service_healthy
       minio:
         condition: service_healthy
     env_file:
@@ -169,6 +171,7 @@ services:
     environment:
       DATABASE_URL: postgresql://vayada_user:vayada_password@marketplace-postgres:5432/vayada_db
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
+      PMS_DATABASE_URL: postgresql://vayada_pms_user:vayada_pms_password@pms-postgres:5432/vayada_pms_db
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001
       S3_BUCKET_NAME: vayada-uploads
       AWS_REGION: us-east-1
