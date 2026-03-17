@@ -889,7 +889,7 @@ export default function RoomTypeForm({
                 <div className="px-4 py-2.5 border-b border-gray-100 space-y-1">
                   {seasons.map((s, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-[10px]">
-                      <span className={`w-2 h-2 rounded-full ${tierDotColors[s.tier] || 'bg-gray-300'}`} />
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#38bdf8','Mid':'#3b82f6','High':'#1d4ed8','Peak':'#4338ca'}[s.tier] || '#9ca3af') }} />
                       <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
                       {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
                       {s.rate && <span className="text-gray-500 ml-auto">${s.rate}/night</span>}
@@ -935,19 +935,18 @@ export default function RoomTypeForm({
                         rate = Math.round(rate * (1 + surchargeNum / 100))
                       }
 
-                      const dotColor = season?.tier ? tierDotColors[season.tier] : ''
+                      const seasonBgHex: Record<string, string> = { 'Low': '#f0f9ff', 'Mid': '#eff6ff', 'High': '#dbeafe', 'Peak': '#e0e7ff' }
+                      const cellBg = !inOp ? '#f9fafb' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
 
                       cells.push(
                         <div
                           key={day}
-                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors ${
-                            !inOp ? 'bg-gray-50 opacity-40' :
-                            season ? 'bg-white border border-gray-100' : 'bg-white'
-                          }`}
+                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border border-gray-100 ${!inOp ? 'opacity-40' : ''}`}
+                          style={{ backgroundColor: cellBg }}
                         >
                           <span className={`text-[10px] font-medium ${isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
                           {inOp && rate > 0 && (
-                            <span className={`text-[8px] font-semibold ${season?.tier === 'Peak' ? 'text-indigo-600' : season?.tier === 'High' ? 'text-blue-700' : season?.tier === 'Mid' ? 'text-blue-500' : 'text-emerald-600'}`}>
+                            <span className={`text-[8px] font-semibold ${isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
                               ${rate}
                             </span>
                           )}
@@ -961,18 +960,14 @@ export default function RoomTypeForm({
 
               {/* Bottom legend */}
               <div className="px-4 py-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap">
-                {seasons.filter(s => s.tier).map((s, idx) => (
-                  <div key={idx} className="flex items-center gap-1">
-                    <span className={`w-2 h-2 rounded-full ${tierDotColors[s.tier] || 'bg-gray-300'}`} />
-                    <span className="text-[9px] text-gray-500">{s.name || s.tier}</span>
-                  </div>
-                ))}
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#38bdf8' }} /><span className="text-[9px] text-gray-500">Low</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3b82f6' }} /><span className="text-[9px] text-gray-500">Mid</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#1d4ed8' }} /><span className="text-[9px] text-gray-500">High</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /><span className="text-[9px] text-gray-500">Peak</span></span>
                 {parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-orange-400" />
-                    <span className="text-[9px] text-gray-500">Wknd {weekendSurcharge}</span>
-                  </div>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /><span className="text-[9px] text-gray-500">Weekend +</span></span>
                 )}
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#d1d5db' }} /><span className="text-[9px] text-gray-500">Closed</span></span>
               </div>
             </div>
           </div>
