@@ -154,16 +154,19 @@ export default function RoomTypeForm({
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [benefitInput, setBenefitInput] = useState('')
 
-  // Local-only fields not in PMS RoomTypeCreate/Update
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
-  const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>([{ from: '2026-01-01', to: '2026-12-31' }])
-  const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]>([])
+  const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
+    form.operatingPeriods?.length ? form.operatingPeriods : [{ from: '2026-01-01', to: '2026-12-31' }]
+  )
+  const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]>(
+    form.seasons || []
+  )
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
-  const [weekendSurcharge, setWeekendSurcharge] = useState('+0%')
-  const [cancellationPolicy, setCancellationPolicy] = useState('Free until 7 days before')
-  const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(true)
+  const [weekendSurcharge, setWeekendSurcharge] = useState(form.weekendSurcharge || '+0%')
+  const [cancellationPolicy, setCancellationPolicy] = useState(form.cancellationPolicy || 'Free until 7 days before')
+  const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState((form.nonRefundableRate ?? null) !== null)
-  const [nonRefundableDiscount, setNonRefundableDiscount] = useState(10)
+  const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
   const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState('')
   const [bedrooms, setBedrooms] = useState(1)
@@ -177,6 +180,20 @@ export default function RoomTypeForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beds])
+
+  // Sync pricing fields -> form
+  useEffect(() => {
+    onChange({
+      ...form,
+      operatingPeriods,
+      seasons,
+      weekendSurcharge,
+      cancellationPolicy,
+      flexibleRateEnabled,
+      nonRefundableDiscount,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableDiscount])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     onChange({ ...form, ...updates })

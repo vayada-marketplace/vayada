@@ -25,6 +25,12 @@ export interface RoomType {
   isActive: boolean
   sortOrder: number
   monthlyRates: Record<string, MonthlyRate>
+  operatingPeriods: { from: string; to: string }[]
+  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
+  weekendSurcharge: string
+  cancellationPolicy: string
+  flexibleRateEnabled: boolean
+  nonRefundableDiscount: number
   createdAt: string
   updatedAt: string
 }
@@ -47,6 +53,12 @@ export interface RoomTypeCreate {
   isActive?: boolean
   sortOrder?: number
   monthlyRates?: Record<string, MonthlyRate>
+  operatingPeriods?: { from: string; to: string }[]
+  seasons?: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
+  weekendSurcharge?: string
+  cancellationPolicy?: string
+  flexibleRateEnabled?: boolean
+  nonRefundableDiscount?: number
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>
