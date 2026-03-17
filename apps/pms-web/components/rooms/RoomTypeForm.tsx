@@ -580,34 +580,32 @@ export default function RoomTypeForm({
                         ? Math.max(1, Math.round((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000 * 60 * 60 * 24)) + 1)
                         : 0
                       return (
-                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3 flex-wrap">
-                          <span className="text-[11px] text-gray-500">Season name</span>
-                          <input
-                            type="text"
-                            value={season.name}
-                            onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
-                            className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                            placeholder="e.g. Low"
-                          />
-                          <select
-                            value={season.tier}
-                            onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], tier: e.target.value }; setSeasons(u) }}
-                            className={`px-2 py-1 rounded-full text-[10px] font-semibold border appearance-none text-center ${tierColors[season.tier] || 'text-gray-600 bg-gray-50 border-gray-200'}`}
-                            style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 6px center', paddingRight: '22px' }}
-                          >
-                            <option value="">Tier</option>
-                            <option value="Low">Low</option>
-                            <option value="Mid">Mid</option>
-                            <option value="High">High</option>
-                            <option value="Peak">Peak</option>
-                          </select>
-                          <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                          <span className="text-[10px] text-gray-400">to</span>
-                          <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                          {dayCount > 0 && <span className="text-[10px] text-gray-400">{dayCount}d</span>}
-                          <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 transition-colors ml-auto">
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                          </button>
+                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] text-gray-400">Season name</span>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={season.tier}
+                                onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], tier: e.target.value }; setSeasons(u) }}
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border appearance-none cursor-pointer ${tierColors[season.tier] || 'text-gray-600 bg-gray-100 border-gray-200'}`}
+                                style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 8px center', paddingRight: '20px' }}
+                              >
+                                <option value="Low">Low</option>
+                                <option value="Mid">Mid</option>
+                                <option value="High">High</option>
+                                <option value="Peak">Peak</option>
+                              </select>
+                              <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="p-1 text-gray-400 hover:text-red-500 transition-colors">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; setSeasons(u) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <span className="text-[10px] text-gray-400">-</span>
+                            <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            {dayCount > 0 && <span className="text-[10px] text-gray-400 shrink-0">{dayCount}d</span>}
+                          </div>
                         </div>
                       )
                     })}
@@ -632,22 +630,18 @@ export default function RoomTypeForm({
                         <tr className="border-b border-gray-100">
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Season</th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Flex Rate</th>
-                          {nonRefundableEnabled && <th className="text-left px-4 py-2 text-gray-500 font-medium">Non-Ref</th>}
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Min Stay</th>
                         </tr>
                       </thead>
                       <tbody>
                         {seasons.map((season, idx) => {
-                          const flexRate = parseFloat(season.rate) || 0
-                          const nonRefRate = Math.round(flexRate * (1 - nonRefundableDiscount / 100))
                           return (
                             <tr key={idx} className="border-b border-gray-50">
                               <td className="px-4 py-2.5">
-                                <div className="flex items-center gap-2">
-                                  {season.tier && <span className={`w-2 h-2 rounded-full ${tierDotColors[season.tier] || 'bg-gray-300'}`} />}
-                                  <span className="font-medium text-gray-900">{season.name || `Season ${idx + 1}`}</span>
-                                  {season.tier && <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${tierColors[season.tier]}`}>{season.tier}</span>}
-                                </div>
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
+                                  {season.tier || 'Low'}
+                                </span>
+                                <span className="text-gray-300 ml-2">&mdash;</span>
                               </td>
                               <td className="px-4 py-2.5">
                                 <div className="flex items-center gap-1">
@@ -661,14 +655,6 @@ export default function RoomTypeForm({
                                   />
                                 </div>
                               </td>
-                              {nonRefundableEnabled && (
-                                <td className="px-4 py-2.5">
-                                  <div className="flex items-center gap-1 text-gray-500">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                                    <span>${nonRefRate}</span>
-                                  </div>
-                                </td>
-                              )}
                               <td className="px-4 py-2.5">
                                 <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
                                   <button
