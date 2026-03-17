@@ -157,7 +157,8 @@ export default function RoomTypeForm({
   // Local-only fields not in PMS RoomTypeCreate/Update
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>([{ from: '2026-01-01', to: '2026-12-31' }])
-  const [seasons, setSeasons] = useState<{ name: string; from: string; to: string; rate: string }[]>([])
+  const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]>([])
+  const [previewMonth, setPreviewMonth] = useState(() => new Date())
   const [weekendSurcharge, setWeekendSurcharge] = useState('+0%')
   const [cancellationPolicy, setCancellationPolicy] = useState('Free until 7 days before')
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(true)
@@ -179,6 +180,47 @@ export default function RoomTypeForm({
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     onChange({ ...form, ...updates })
+  }
+
+  const getYearPercent = (dateStr: string): number => {
+    if (!dateStr) return 0
+    const d = new Date(dateStr)
+    const start = new Date(d.getFullYear(), 0, 1)
+    const end = new Date(d.getFullYear(), 11, 31)
+    return ((d.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100
+  }
+
+  const getSeasonForDate = (day: number) => {
+    const year = previewMonth.getFullYear()
+    const month = previewMonth.getMonth()
+    const date = new Date(year, month, day)
+    const dateStr = date.toISOString().split('T')[0]
+    for (const s of seasons) {
+      if (s.from && s.to && dateStr >= s.from && dateStr <= s.to) return s
+    }
+    return null
+  }
+
+  const isInOperatingPeriod = (day: number) => {
+    const year = previewMonth.getFullYear()
+    const month = previewMonth.getMonth()
+    const date = new Date(year, month, day)
+    const dateStr = date.toISOString().split('T')[0]
+    return operatingPeriods.some(p => p.from && p.to && dateStr >= p.from && dateStr <= p.to)
+  }
+
+  const tierColors: Record<string, string> = {
+    Low: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+    Mid: 'text-blue-600 bg-blue-50 border-blue-200',
+    High: 'text-blue-800 bg-blue-100 border-blue-200',
+    Peak: 'text-indigo-700 bg-indigo-100 border-indigo-200',
+  }
+
+  const tierDotColors: Record<string, string> = {
+    Low: 'bg-emerald-400',
+    Mid: 'bg-blue-400',
+    High: 'bg-blue-600',
+    Peak: 'bg-indigo-500',
   }
 
   return (
@@ -431,270 +473,512 @@ export default function RoomTypeForm({
 
       {/* Tab 2: Pricing & Rates */}
       {activeTab === 'pricing' && (
-        <div className="space-y-8">
-          {/* Section 1: What can guests book? */}
-          <div>
-            <div className="flex items-start gap-3 mb-1">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
-              <div>
-                <h3 className="text-[13px] font-semibold text-gray-900">What can guests book?</h3>
-                <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Left column: 4 sections */}
+          <div className="lg:col-span-3 space-y-8">
+            {/* Section 1: When are you open? */}
+            <div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
+                  <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
+                </div>
               </div>
-            </div>
-            <div className="ml-9 space-y-2.5">
-              {/* Flexible Rate */}
-              <div className={`rounded-xl border px-4 py-3.5 transition-colors ${flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                <div className="flex items-center gap-3">
+              <div className="ml-9">
+                {/* Timeline Bar */}
+                <div className="mb-4">
+                  <div className="flex text-[9px] text-gray-400 mb-1">
+                    {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map(m => (
+                      <span key={m} className="flex-1 text-center">{m}</span>
+                    ))}
+                  </div>
+                  <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
+                    {operatingPeriods.map((period, idx) => {
+                      const start = period.from ? getYearPercent(period.from) : 0
+                      const end = period.to ? getYearPercent(period.to) : 100
+                      const colors = ['bg-primary-200', 'bg-amber-200', 'bg-emerald-200', 'bg-rose-200']
+                      return (
+                        <div
+                          key={idx}
+                          className={`absolute top-0 h-full ${colors[idx % colors.length]} flex items-center justify-center`}
+                          style={{ left: `${start}%`, width: `${Math.max(end - start, 1)}%` }}
+                        >
+                          <span className="text-[9px] font-semibold text-gray-700 truncate px-1">
+                            {idx === 0 && end - start > 90 ? 'Year Round' : `Period ${idx + 1}`}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
+                  {operatingPeriods.map((period, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <input
+                        type="date"
+                        value={period.from}
+                        onChange={(e) => {
+                          const updated = [...operatingPeriods]
+                          updated[idx] = { ...updated[idx], from: e.target.value }
+                          setOperatingPeriods(updated)
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <span className="text-[11px] text-gray-400">to</span>
+                      <input
+                        type="date"
+                        value={period.to}
+                        onChange={(e) => {
+                          const updated = [...operatingPeriods]
+                          updated[idx] = { ...updated[idx], to: e.target.value }
+                          setOperatingPeriods(updated)
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      {operatingPeriods.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
+                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <XMarkIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                   <button
                     type="button"
-                    onClick={() => setFlexibleRateEnabled(!flexibleRateEnabled)}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${flexibleRateEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                    onClick={() => setOperatingPeriods([...operatingPeriods, { from: '', to: '' }])}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                   >
-                    <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${flexibleRateEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                    <PlusIcon className="w-3.5 h-3.5" /> Add period
                   </button>
-                  <svg className="w-4 h-4 text-primary-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-                  <span className="text-[12px] font-semibold text-gray-900">Flexible rate</span>
-                  <span className="text-[11px] text-gray-400">(free cancellation)</span>
                 </div>
-                {flexibleRateEnabled && (
-                  <div className="mt-3 ml-[52px]">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] text-gray-500">Cancellation policy:</span>
-                      <select
-                        value={cancellationPolicy}
-                        onChange={(e) => setCancellationPolicy(e.target.value)}
-                        className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
-                        style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
-                      >
-                        <option>Free until 1 day before</option>
-                        <option>Free until 2 days before</option>
-                        <option>Free until 3 days before</option>
-                        <option>Free until 5 days before</option>
-                        <option>Free until 7 days before</option>
-                        <option>Free until 14 days before</option>
-                        <option>Free until 30 days before</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Non-refundable */}
-              <div className={`rounded-xl border px-4 py-3.5 transition-colors ${nonRefundableEnabled ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !nonRefundableEnabled
-                      setNonRefundableEnabled(next)
-                      if (next) {
-                        updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - nonRefundableDiscount / 100) * 100) / 100 })
-                      } else {
-                        updateForm({ nonRefundableRate: null })
-                      }
-                    }}
-                    className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
-                  >
-                    <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${nonRefundableEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
-                  </button>
-                  <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                  <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
-                  <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
-                </div>
-                {nonRefundableEnabled && flexibleRateEnabled && (
-                  <div className="mt-3 ml-[52px] flex items-center gap-3">
-                    <span className="text-[11px] text-gray-500">Discount:</span>
-                    <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = Math.max(1, nonRefundableDiscount - 5)
-                          setNonRefundableDiscount(next)
-                          updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
-                        }}
-                        className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                      >
-                        &minus;
-                      </button>
-                      <span className="px-3 py-1.5 text-[12px] font-semibold text-gray-900 bg-white min-w-[48px] text-center">
-                        {nonRefundableDiscount}%
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = Math.min(50, nonRefundableDiscount + 5)
-                          setNonRefundableDiscount(next)
-                          updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
-                        }}
-                        className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <span className="text-[11px] text-gray-500">off flexible rate</span>
-                  </div>
-                )}
               </div>
             </div>
-          </div>
 
-          {/* Section 2: When are you open? */}
-          <div>
-            <div className="flex items-start gap-3 mb-1">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
-              <div>
-                <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
-                <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
+            {/* Section 2: Seasonal pricing */}
+            <div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
+                  <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
+                </div>
               </div>
-            </div>
-            <div className="ml-9">
-              <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
-                {operatingPeriods.map((period, idx) => (
-                  <div key={idx} className="flex items-center gap-3">
-                    <input
-                      type="date"
-                      value={period.from}
-                      onChange={(e) => {
-                        const updated = [...operatingPeriods]
-                        updated[idx] = { ...updated[idx], from: e.target.value }
-                        setOperatingPeriods(updated)
-                      }}
-                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                    <span className="text-[11px] text-gray-400">to</span>
-                    <input
-                      type="date"
-                      value={period.to}
-                      onChange={(e) => {
-                        const updated = [...operatingPeriods]
-                        updated[idx] = { ...updated[idx], to: e.target.value }
-                        setOperatingPeriods(updated)
-                      }}
-                      className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                    {operatingPeriods.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
-                        className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                      >
-                        <XMarkIcon className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+              <div className="ml-9">
+                {seasons.length === 0 ? (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
+                    <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
                   </div>
-                ))}
+                ) : (
+                  <div className="space-y-2">
+                    {seasons.map((season, idx) => {
+                      const dayCount = season.from && season.to
+                        ? Math.max(1, Math.round((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000 * 60 * 60 * 24)) + 1)
+                        : 0
+                      return (
+                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3 flex-wrap">
+                          <span className="text-[11px] text-gray-500">Season name</span>
+                          <input
+                            type="text"
+                            value={season.name}
+                            onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
+                            className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            placeholder="e.g. Low"
+                          />
+                          <select
+                            value={season.tier}
+                            onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], tier: e.target.value }; setSeasons(u) }}
+                            className={`px-2 py-1 rounded-full text-[10px] font-semibold border appearance-none text-center ${tierColors[season.tier] || 'text-gray-600 bg-gray-50 border-gray-200'}`}
+                            style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 6px center', paddingRight: '22px' }}
+                          >
+                            <option value="">Tier</option>
+                            <option value="Low">Low</option>
+                            <option value="Mid">Mid</option>
+                            <option value="High">High</option>
+                            <option value="Peak">Peak</option>
+                          </select>
+                          <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          <span className="text-[10px] text-gray-400">to</span>
+                          <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          {dayCount > 0 && <span className="text-[10px] text-gray-400">{dayCount}d</span>}
+                          <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 transition-colors ml-auto">
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
                 <button
                   type="button"
-                  onClick={() => setOperatingPeriods([...operatingPeriods, { from: '', to: '' }])}
-                  className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  onClick={() => setSeasons([...seasons, { name: '', tier: '', from: '', to: '', rate: '', minStay: 1 }])}
+                  className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                 >
-                  <PlusIcon className="w-3.5 h-3.5" /> Add period
+                  <PlusIcon className="w-3.5 h-3.5" /> Add season
                 </button>
+
+                {/* Set rates per season table */}
+                {seasons.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-white overflow-hidden">
+                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                      <span className="text-[11px] font-semibold text-gray-700">Set rates per season</span>
+                    </div>
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="text-left px-4 py-2 text-gray-500 font-medium">Season</th>
+                          <th className="text-left px-4 py-2 text-gray-500 font-medium">Flex Rate</th>
+                          {nonRefundableEnabled && <th className="text-left px-4 py-2 text-gray-500 font-medium">Non-Ref</th>}
+                          <th className="text-left px-4 py-2 text-gray-500 font-medium">Min Stay</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {seasons.map((season, idx) => {
+                          const flexRate = parseFloat(season.rate) || 0
+                          const nonRefRate = Math.round(flexRate * (1 - nonRefundableDiscount / 100))
+                          return (
+                            <tr key={idx} className="border-b border-gray-50">
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  {season.tier && <span className={`w-2 h-2 rounded-full ${tierDotColors[season.tier] || 'bg-gray-300'}`} />}
+                                  <span className="font-medium text-gray-900">{season.name || `Season ${idx + 1}`}</span>
+                                  {season.tier && <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${tierColors[season.tier]}`}>{season.tier}</span>}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-gray-400">$</span>
+                                  <input
+                                    type="number"
+                                    value={season.rate}
+                                    onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
+                                    className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </td>
+                              {nonRefundableEnabled && (
+                                <td className="px-4 py-2.5">
+                                  <div className="flex items-center gap-1 text-gray-500">
+                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                                    <span>${nonRefRate}</span>
+                                  </div>
+                                </td>
+                              )}
+                              <td className="px-4 py-2.5">
+                                <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
+                                  <button
+                                    type="button"
+                                    onClick={() => { const u = [...seasons]; u[idx] = { ...u[idx], minStay: Math.max(1, (u[idx].minStay || 1) - 1) }; setSeasons(u) }}
+                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                  >
+                                    &minus;
+                                  </button>
+                                  <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
+                                    {season.minStay || 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => { const u = [...seasons]; u[idx] = { ...u[idx], minStay: (u[idx].minStay || 1) + 1 }; setSeasons(u) }}
+                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 3: Rate plans */}
+            <div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">What can guests book?</h3>
+                  <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
+                </div>
+              </div>
+              <div className="ml-9 space-y-2.5">
+                {/* Flexible Rate */}
+                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFlexibleRateEnabled(!flexibleRateEnabled)}
+                      className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${flexibleRateEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${flexibleRateEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                    </button>
+                    <svg className="w-4 h-4 text-primary-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                    <span className="text-[12px] font-semibold text-gray-900">Flexible rate</span>
+                    <span className="text-[11px] text-gray-400">(free cancellation)</span>
+                  </div>
+                  {flexibleRateEnabled && (
+                    <div className="mt-3 ml-[52px]">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] text-gray-500">Cancellation policy:</span>
+                        <select
+                          value={cancellationPolicy}
+                          onChange={(e) => setCancellationPolicy(e.target.value)}
+                          className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                          style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
+                        >
+                          <option>Free until 1 day before</option>
+                          <option>Free until 2 days before</option>
+                          <option>Free until 3 days before</option>
+                          <option>Free until 5 days before</option>
+                          <option>Free until 7 days before</option>
+                          <option>Free until 14 days before</option>
+                          <option>Free until 30 days before</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Non-refundable */}
+                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${nonRefundableEnabled ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !nonRefundableEnabled
+                        setNonRefundableEnabled(next)
+                        if (next) {
+                          updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - nonRefundableDiscount / 100) * 100) / 100 })
+                        } else {
+                          updateForm({ nonRefundableRate: null })
+                        }
+                      }}
+                      className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${nonRefundableEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${nonRefundableEnabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                    </button>
+                    <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                    <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
+                    <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
+                  </div>
+                  {nonRefundableEnabled && flexibleRateEnabled && (
+                    <div className="mt-3 ml-[52px] flex items-center gap-3">
+                      <span className="text-[11px] text-gray-500">Discount:</span>
+                      <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = Math.max(1, nonRefundableDiscount - 5)
+                            setNonRefundableDiscount(next)
+                            updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
+                          }}
+                          className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                        >
+                          &minus;
+                        </button>
+                        <span className="px-3 py-1.5 text-[12px] font-semibold text-gray-900 bg-white min-w-[48px] text-center">
+                          {nonRefundableDiscount}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = Math.min(50, nonRefundableDiscount + 5)
+                            setNonRefundableDiscount(next)
+                            updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
+                          }}
+                          className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span className="text-[11px] text-gray-500">off flexible rate</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Section 4: Weekend surcharge */}
+            <div>
+              <div className="flex items-start gap-3 mb-2">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">Do weekends cost more?</h3>
+                  <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
+                </div>
+              </div>
+              <div className="ml-9 flex flex-wrap items-center gap-2">
+                {['+0%', '+10%', '+15%', '+20%'].map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setWeekendSurcharge(opt)}
+                    className={`px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                      weekendSurcharge === opt
+                        ? 'bg-primary-500 text-white border-primary-500'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+                {!['+0%', '+10%', '+15%', '+20%'].includes(weekendSurcharge) ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-gray-500">+</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={weekendSurcharge.replace(/[^0-9]/g, '')}
+                      onChange={(e) => setWeekendSurcharge(`+${e.target.value}%`)}
+                      className="w-14 px-2 py-1.5 bg-white border border-primary-500 rounded-full text-[11px] text-center font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      autoFocus
+                    />
+                    <span className="text-[11px] text-gray-500">%</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setWeekendSurcharge('+%')}
+                    className="px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                  >
+                    Custom
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Section 3: Seasonal pricing */}
-          <div>
-            <div className="flex items-start gap-3 mb-1">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
-              <div>
-                <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
-                <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
-              </div>
-            </div>
-            <div className="ml-9">
-              {seasons.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
-                  <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
+          {/* Right column: LIVE RATE PREVIEW */}
+          <div className="lg:col-span-2">
+            <div className="sticky top-4 rounded-xl border border-gray-200 bg-white overflow-hidden">
+              {/* Header */}
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px]">&#x1F4C5;</span>
+                  <span className="text-[11px] font-bold text-gray-700 uppercase tracking-wider">Live Rate Preview</span>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {seasons.map((season, idx) => (
-                    <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3">
-                      <input
-                        type="text"
-                        value={season.name}
-                        onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
-                        className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                      <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <span className="text-[10px] text-gray-400">to</span>
-                      <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <input
-                        type="number"
-                        placeholder="Rate"
-                        value={season.rate}
-                        onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
-                        className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                      <button type="button" onClick={() => setSeasons(seasons.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 transition-colors">
-                        <XMarkIcon className="w-3.5 h-3.5" />
-                      </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMonth(new Date(previewMonth.getFullYear(), previewMonth.getMonth() - 1, 1))}
+                    className="p-1 rounded hover:bg-gray-200 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+                  </button>
+                  <span className="text-[11px] font-semibold text-gray-700 min-w-[80px] text-center">
+                    {previewMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMonth(new Date(previewMonth.getFullYear(), previewMonth.getMonth() + 1, 1))}
+                    className="p-1 rounded hover:bg-gray-200 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Season legend */}
+              {seasons.length > 0 && (
+                <div className="px-4 py-2.5 border-b border-gray-100 space-y-1">
+                  {seasons.map((s, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-[10px]">
+                      <span className={`w-2 h-2 rounded-full ${tierDotColors[s.tier] || 'bg-gray-300'}`} />
+                      <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
+                      {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
+                      {s.rate && <span className="text-gray-500 ml-auto">${s.rate}/night</span>}
                     </div>
                   ))}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setSeasons([...seasons, { name: '', from: '', to: '', rate: '' }])}
-                className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <PlusIcon className="w-3.5 h-3.5" /> Add season
-              </button>
-            </div>
-          </div>
 
-          {/* Section 4: Weekend surcharge */}
-          <div>
-            <div className="flex items-start gap-3 mb-2">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
-              <div>
-                <h3 className="text-[13px] font-semibold text-gray-900">Do weekends cost more?</h3>
-                <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
+              {/* Calendar grid */}
+              <div className="px-3 py-3">
+                <div className="grid grid-cols-7 gap-0.5 mb-1">
+                  {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+                    <div key={d} className={`text-center text-[9px] font-semibold py-1 ${d === 'Fri' || d === 'Sat' ? 'text-orange-500' : 'text-gray-400'}`}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-0.5">
+                  {(() => {
+                    const year = previewMonth.getFullYear()
+                    const month = previewMonth.getMonth()
+                    const firstDay = new Date(year, month, 1)
+                    const lastDay = new Date(year, month + 1, 0)
+                    const daysInMonth = lastDay.getDate()
+                    // Monday = 0, Sunday = 6
+                    let startDow = firstDay.getDay() - 1
+                    if (startDow < 0) startDow = 6
+                    const surchargeNum = parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) || 0
+
+                    const cells: React.ReactNode[] = []
+                    // Empty cells for days before the 1st
+                    for (let i = 0; i < startDow; i++) {
+                      cells.push(<div key={`empty-${i}`} className="h-10" />)
+                    }
+                    for (let day = 1; day <= daysInMonth; day++) {
+                      const date = new Date(year, month, day)
+                      const dow = date.getDay() // 0=Sun, 5=Fri, 6=Sat
+                      const isWeekend = dow === 5 || dow === 6
+                      const inOp = isInOperatingPeriod(day)
+                      const season = getSeasonForDate(day)
+                      let rate = season ? (parseFloat(season.rate) || 0) : 0
+                      if (isWeekend && rate > 0) {
+                        rate = Math.round(rate * (1 + surchargeNum / 100))
+                      }
+
+                      const dotColor = season?.tier ? tierDotColors[season.tier] : ''
+
+                      cells.push(
+                        <div
+                          key={day}
+                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors ${
+                            !inOp ? 'bg-gray-50 opacity-40' :
+                            season ? 'bg-white border border-gray-100' : 'bg-white'
+                          }`}
+                        >
+                          <span className={`text-[10px] font-medium ${isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
+                          {inOp && rate > 0 && (
+                            <span className={`text-[8px] font-semibold ${season?.tier === 'Peak' ? 'text-indigo-600' : season?.tier === 'High' ? 'text-blue-700' : season?.tier === 'Mid' ? 'text-blue-500' : 'text-emerald-600'}`}>
+                              ${rate}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    }
+                    return cells
+                  })()}
+                </div>
+              </div>
+
+              {/* Bottom legend */}
+              <div className="px-4 py-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap">
+                {seasons.filter(s => s.tier).map((s, idx) => (
+                  <div key={idx} className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${tierDotColors[s.tier] || 'bg-gray-300'}`} />
+                    <span className="text-[9px] text-gray-500">{s.name || s.tier}</span>
+                  </div>
+                ))}
+                {parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) > 0 && (
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-orange-400" />
+                    <span className="text-[9px] text-gray-500">Wknd {weekendSurcharge}</span>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="ml-9 flex flex-wrap items-center gap-2">
-              {['+0%', '+10%', '+15%', '+20%'].map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setWeekendSurcharge(opt)}
-                  className={`px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
-                    weekendSurcharge === opt
-                      ? 'bg-primary-500 text-white border-primary-500'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {opt}
-                </button>
-              ))}
-              {!['+0%', '+10%', '+15%', '+20%'].includes(weekendSurcharge) ? (
-                <div className="flex items-center gap-1">
-                  <span className="text-[11px] text-gray-500">+</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={weekendSurcharge.replace(/[^0-9]/g, '')}
-                    onChange={(e) => setWeekendSurcharge(`+${e.target.value}%`)}
-                    className="w-14 px-2 py-1.5 bg-white border border-primary-500 rounded-full text-[11px] text-center font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    autoFocus
-                  />
-                  <span className="text-[11px] text-gray-500">%</span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setWeekendSurcharge('+%')}
-                  className="px-4 py-1.5 rounded-full text-[11px] font-medium border transition-colors bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                >
-                  Custom
-                </button>
-              )}
-            </div>
           </div>
-
         </div>
       )}
 
