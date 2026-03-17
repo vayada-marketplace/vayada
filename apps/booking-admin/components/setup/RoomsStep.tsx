@@ -20,7 +20,7 @@ export interface RoomType {
   nonRefundableEnabled: boolean
   cancellationPolicy: string
   operatingPeriods: { from: string; to: string }[]
-  seasons: { name: string; from: string; to: string; rate: string }[]
+  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
   weekendSurcharge: string
   currency: string
   images: string[]
@@ -210,6 +210,15 @@ export default function RoomsStep({
   }
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
+  const [previewMonth, setPreviewMonth] = useState(() => new Date())
+
+  const getYearPercent = (dateStr: string): number => {
+    if (!dateStr) return 0
+    const d = new Date(dateStr)
+    const start = new Date(d.getFullYear(), 0, 1)
+    const end = new Date(d.getFullYear(), 11, 31)
+    return ((d.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100
+  }
 
   return (
     <div className="flex-1 overflow-auto">
@@ -491,11 +500,242 @@ export default function RoomsStep({
 
         {/* Pricing & Rates Tab */}
         {activeRoomTab === 'pricing' && (
-          <div className="space-y-8">
-            {/* Section 1: What can guests book? */}
+          <div className="flex gap-6">
+            {/* Left Column: Sections */}
+            <div className="flex-1 space-y-8 min-w-0">
+
+            {/* Section 1: When are you open? */}
             <div>
               <div className="flex items-start gap-3 mb-1">
                 <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
+                  <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
+                </div>
+              </div>
+              <div className="ml-9">
+                {/* Timeline Bar */}
+                <div className="mb-4">
+                  <div className="flex text-[9px] text-gray-400 mb-1">
+                    {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map(m => (
+                      <span key={m} className="flex-1 text-center">{m}</span>
+                    ))}
+                  </div>
+                  <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
+                    {room.operatingPeriods.map((period, idx) => {
+                      const start = period.from ? getYearPercent(period.from) : 0
+                      const end = period.to ? getYearPercent(period.to) : 100
+                      const colors = ['bg-primary-200', 'bg-amber-200', 'bg-emerald-200', 'bg-rose-200']
+                      return (
+                        <div
+                          key={idx}
+                          className={`absolute top-0 h-full ${colors[idx % colors.length]} flex items-center justify-center`}
+                          style={{ left: `${start}%`, width: `${Math.max(end - start, 1)}%` }}
+                        >
+                          <span className="text-[9px] font-semibold text-gray-700 truncate px-1">
+                            {idx === 0 && end - start > 90 ? 'Year Round' : `Period ${idx + 1}`}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
+                  {room.operatingPeriods.map((period, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <input
+                        type="date"
+                        value={period.from}
+                        onChange={(e) => {
+                          const updated = [...room.operatingPeriods]
+                          updated[idx] = { ...updated[idx], from: e.target.value }
+                          updateRoom({ operatingPeriods: updated })
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <span className="text-[11px] text-gray-400">to</span>
+                      <input
+                        type="date"
+                        value={period.to}
+                        onChange={(e) => {
+                          const updated = [...room.operatingPeriods]
+                          updated[idx] = { ...updated[idx], to: e.target.value }
+                          updateRoom({ operatingPeriods: updated })
+                        }}
+                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      {room.operatingPeriods.length > 1 && (
+                        <button
+                          onClick={() => updateRoom({ operatingPeriods: room.operatingPeriods.filter((_, i) => i !== idx) })}
+                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <XMarkIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => updateRoom({ operatingPeriods: [...room.operatingPeriods, { from: '', to: '' }] })}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <PlusIcon className="w-3.5 h-3.5" /> Add period
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Seasonal pricing */}
+            <div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
+                  <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
+                </div>
+              </div>
+              <div className="ml-9">
+                {room.seasons.length === 0 ? (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
+                    <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {room.seasons.map((season, idx) => {
+                      const tierColors: Record<string, string> = {
+                        'Low': 'text-emerald-600 bg-emerald-50 border-emerald-200',
+                        'Mid': 'text-blue-600 bg-blue-50 border-blue-200',
+                        'High': 'text-blue-800 bg-blue-100 border-blue-200',
+                        'Peak': 'text-indigo-700 bg-indigo-100 border-indigo-200',
+                      }
+                      const dayCount = season.from && season.to ? Math.ceil((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000*60*60*24)) : 0
+                      return (
+                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] text-gray-400">Season name</span>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={season.tier}
+                                onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], tier: e.target.value as any }; updateRoom({ seasons: u }) }}
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border appearance-none cursor-pointer ${tierColors[season.tier] || 'text-gray-600 bg-gray-100 border-gray-200'}`}
+                                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', paddingRight: '20px' }}
+                              >
+                                <option value="Low">Low</option>
+                                <option value="Mid">Mid</option>
+                                <option value="High">High</option>
+                                <option value="Peak">Peak</option>
+                              </select>
+                              <button onClick={() => updateRoom({ seasons: room.seasons.filter((_, i) => i !== idx) })} className="p-1 text-gray-400 hover:text-red-500 transition-colors">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input type="date" value={season.from} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], from: e.target.value }; updateRoom({ seasons: u }) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <span className="text-[10px] text-gray-400">-</span>
+                            <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], to: e.target.value }; updateRoom({ seasons: u }) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            {dayCount > 0 && <span className="text-[10px] text-gray-400 shrink-0">{dayCount}d</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                <button
+                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Low', from: '', to: '', rate: '', minStay: 1 }] })}
+                  className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <PlusIcon className="w-3.5 h-3.5" /> Add season
+                </button>
+
+                {/* Set rates per season table */}
+                {room.seasons.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-[11px] font-semibold text-gray-700 mb-2">Set rates per season</p>
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-[10px] text-gray-400">
+                          <th className="text-left pb-2 font-medium">Season</th>
+                          <th className="text-left pb-2 font-medium">Flex Rate</th>
+                          <th className="text-left pb-2 font-medium">Non-Ref</th>
+                          <th className="text-left pb-2 font-medium">Min Stay</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {room.seasons.map((season, idx) => {
+                          const tierColors: Record<string, string> = {
+                            'Low': 'text-emerald-600 bg-emerald-50',
+                            'Mid': 'text-blue-600 bg-blue-50',
+                            'High': 'text-blue-800 bg-blue-100',
+                            'Peak': 'text-indigo-700 bg-indigo-100',
+                          }
+                          const flexRate = parseFloat(season.rate) || 0
+                          const nrRate = Math.round(flexRate * (1 - room.nonRefundableDiscount / 100))
+                          return (
+                            <tr key={idx} className="border-t border-gray-100">
+                              <td className="py-2.5">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
+                                  {season.tier}
+                                </span>
+                                <span className="text-gray-300 ml-2">&mdash;</span>
+                              </td>
+                              <td className="py-2.5">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[11px] text-gray-400">$</span>
+                                  <input
+                                    type="number"
+                                    value={season.rate}
+                                    onChange={(e) => {
+                                      const u = [...room.seasons]
+                                      u[idx] = { ...u[idx], rate: e.target.value }
+                                      updateRoom({ seasons: u })
+                                    }}
+                                    className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[12px] font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                  />
+                                </div>
+                              </td>
+                              <td className="py-2.5">
+                                <div className="flex items-center gap-1">
+                                  <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                                  <span className="text-[12px] text-gray-500">${nrRate}</span>
+                                </div>
+                              </td>
+                              <td className="py-2.5">
+                                <div className="inline-flex items-center gap-0 border border-gray-200 rounded overflow-hidden">
+                                  <button
+                                    onClick={() => {
+                                      const u = [...room.seasons]
+                                      u[idx] = { ...u[idx], minStay: Math.max(1, (season.minStay || 1) - 1) }
+                                      updateRoom({ seasons: u })
+                                    }}
+                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
+                                  >&minus;</button>
+                                  <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
+                                    {season.minStay || 1}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const u = [...room.seasons]
+                                      u[idx] = { ...u[idx], minStay: (season.minStay || 1) + 1 }
+                                      updateRoom({ seasons: u })
+                                    }}
+                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
+                                  >+</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 3: What can guests book? (Rate Plans) */}
+            <div>
+              <div className="flex items-start gap-3 mb-1">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
                 <div>
                   <h3 className="text-[13px] font-semibold text-gray-900">What can guests book?</h3>
                   <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
@@ -581,110 +821,6 @@ export default function RoomsStep({
               </div>
             </div>
 
-            {/* Section 2: When are you open? */}
-            <div>
-              <div className="flex items-start gap-3 mb-1">
-                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
-                <div>
-                  <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
-                  <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
-                </div>
-              </div>
-              <div className="ml-9">
-                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
-                  {room.operatingPeriods.map((period, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <input
-                        type="date"
-                        value={period.from}
-                        onChange={(e) => {
-                          const updated = [...room.operatingPeriods]
-                          updated[idx] = { ...updated[idx], from: e.target.value }
-                          updateRoom({ operatingPeriods: updated })
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="text-[11px] text-gray-400">to</span>
-                      <input
-                        type="date"
-                        value={period.to}
-                        onChange={(e) => {
-                          const updated = [...room.operatingPeriods]
-                          updated[idx] = { ...updated[idx], to: e.target.value }
-                          updateRoom({ operatingPeriods: updated })
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      {room.operatingPeriods.length > 1 && (
-                        <button
-                          onClick={() => updateRoom({ operatingPeriods: room.operatingPeriods.filter((_, i) => i !== idx) })}
-                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                        >
-                          <XMarkIcon className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => updateRoom({ operatingPeriods: [...room.operatingPeriods, { from: '', to: '' }] })}
-                    className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    <PlusIcon className="w-3.5 h-3.5" /> Add period
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Section 3: Seasonal pricing */}
-            <div>
-              <div className="flex items-start gap-3 mb-1">
-                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
-                <div>
-                  <h3 className="text-[13px] font-semibold text-gray-900">How does your pricing change across the year?</h3>
-                  <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
-                </div>
-              </div>
-              <div className="ml-9">
-                {room.seasons.length === 0 ? (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
-                    <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {room.seasons.map((season, idx) => (
-                      <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 flex items-center gap-3">
-                        <input
-                          type="text"
-                          value={season.name}
-                          onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], name: e.target.value }; updateRoom({ seasons: u }) }}
-                          className="w-28 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                        <input type="date" value={season.from} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; updateRoom({ seasons: u }) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                        <span className="text-[10px] text-gray-400">to</span>
-                        <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], to: e.target.value }; updateRoom({ seasons: u }) }} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                        <input
-                          type="number"
-                          placeholder="Rate"
-                          value={season.rate}
-                          onChange={(e) => { const u = [...room.seasons]; u[idx] = { ...u[idx], rate: e.target.value }; updateRoom({ seasons: u }) }}
-                          className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                        <button onClick={() => updateRoom({ seasons: room.seasons.filter((_, i) => i !== idx) })} className="text-gray-400 hover:text-red-500 transition-colors">
-                          <XMarkIcon className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button
-                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', from: '', to: '', rate: '' }] })}
-                  className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <PlusIcon className="w-3.5 h-3.5" /> Add season
-                </button>
-              </div>
-            </div>
-
             {/* Section 4: Weekend surcharge */}
             <div>
               <div className="flex items-start gap-3 mb-2">
@@ -730,6 +866,156 @@ export default function RoomsStep({
                     Custom
                   </button>
                 )}
+              </div>
+            </div>
+
+            </div>
+
+            {/* Right Column: LIVE RATE PREVIEW */}
+            <div className="hidden lg:block w-[380px] shrink-0">
+              <div className="bg-white rounded-xl border border-gray-200 p-5 sticky top-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px]">&#x1F4C5;</span>
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">LIVE RATE PREVIEW</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setPreviewMonth(prev => { const d = new Date(prev); d.setMonth(d.getMonth() - 1); return d })} className="text-gray-400 hover:text-gray-600">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+                    </button>
+                    <span className="text-[12px] font-semibold text-gray-900 min-w-[100px] text-center">
+                      {previewMonth.toLocaleString('en', { month: 'long', year: 'numeric' })}
+                    </span>
+                    <button onClick={() => setPreviewMonth(prev => { const d = new Date(prev); d.setMonth(d.getMonth() + 1); return d })} className="text-gray-400 hover:text-gray-600">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Season legend */}
+                {room.seasons.length > 0 && (
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg space-y-1">
+                    {room.seasons.map((s, i) => {
+                      const flexRate = parseFloat(s.rate) || 0
+                      const nrRate = Math.round(flexRate * (1 - room.nonRefundableDiscount / 100))
+                      const dotColors: Record<string, string> = { 'Low': 'bg-sky-400', 'Mid': 'bg-blue-500', 'High': 'bg-blue-700', 'Peak': 'bg-indigo-700' }
+                      const fromDate = s.from ? new Date(s.from) : null
+                      const toDate = s.to ? new Date(s.to) : null
+                      return (
+                        <div key={i} className="flex items-center gap-2 text-[11px]">
+                          <span className={`w-2 h-2 rounded-full ${dotColors[s.tier] || 'bg-gray-400'}`} />
+                          <span className="font-medium text-gray-700">{s.tier}</span>
+                          <span className="text-gray-400">&middot;</span>
+                          <span className="text-gray-500">
+                            {fromDate ? fromDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'} &ndash; {toDate ? toDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'}
+                          </span>
+                          <span className="text-gray-400">&middot;</span>
+                          <span className="font-bold text-gray-900">${flexRate}/night</span>
+                          {room.nonRefundableEnabled && <span className="text-gray-400">NR: ${nrRate}</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Calendar Grid */}
+                {(() => {
+                  const year = previewMonth.getFullYear()
+                  const month = previewMonth.getMonth()
+                  const firstDay = new Date(year, month, 1)
+                  const lastDay = new Date(year, month + 1, 0)
+                  const startDow = (firstDay.getDay() + 6) % 7
+                  const daysInMonth = lastDay.getDate()
+                  const weeks: (number | null)[][] = []
+                  let week: (number | null)[] = Array(startDow).fill(null)
+                  for (let d = 1; d <= daysInMonth; d++) {
+                    week.push(d)
+                    if (week.length === 7) { weeks.push(week); week = [] }
+                  }
+                  if (week.length > 0) { while (week.length < 7) week.push(null); weeks.push(week) }
+
+                  const getSeasonForDate = (day: number) => {
+                    const date = new Date(year, month, day)
+                    const dateStr = date.toISOString().split('T')[0]
+                    for (const s of room.seasons) {
+                      if (s.from && s.to && dateStr >= s.from && dateStr <= s.to) return s
+                    }
+                    return null
+                  }
+
+                  const isInOperatingPeriod = (day: number) => {
+                    const date = new Date(year, month, day)
+                    const dateStr = date.toISOString().split('T')[0]
+                    return room.operatingPeriods.some(p => p.from && p.to && dateStr >= p.from && dateStr <= p.to)
+                  }
+
+                  const isWeekend = (day: number) => {
+                    const date = new Date(year, month, day)
+                    const dow = date.getDay()
+                    return dow === 5 || dow === 6
+                  }
+
+                  const surchargePercent = parseFloat(room.weekendSurcharge.replace(/[^0-9.]/g, '')) || 0
+
+                  const seasonBgs: Record<string, string> = {
+                    'Low': 'bg-sky-50',
+                    'Mid': 'bg-blue-50',
+                    'High': 'bg-blue-100',
+                    'Peak': 'bg-indigo-100',
+                  }
+                  const weekendBg = 'bg-amber-50'
+
+                  return (
+                    <div>
+                      <div className="grid grid-cols-7 mb-1">
+                        {['MO','TU','WE','TH','FR','SA','SU'].map((d, i) => (
+                          <div key={d} className={`text-[9px] font-semibold text-center py-1 ${i >= 4 ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
+                        ))}
+                      </div>
+                      {weeks.map((week, wi) => (
+                        <div key={wi} className="grid grid-cols-7">
+                          {week.map((day, di) => {
+                            if (day === null) return <div key={di} className="p-1" />
+                            const season = getSeasonForDate(day)
+                            const open = isInOperatingPeriod(day)
+                            const wknd = isWeekend(day)
+                            const flexRate = season ? (parseFloat(season.rate) || 0) : 0
+                            const effectiveRate = wknd ? Math.round(flexRate * (1 + surchargePercent / 100)) : flexRate
+                            const nrRate = Math.round(effectiveRate * (1 - room.nonRefundableDiscount / 100))
+
+                            return (
+                              <div key={di} className={`p-1 border border-gray-50 min-h-[52px] ${!open ? 'bg-gray-100' : wknd && season ? weekendBg : season ? seasonBgs[season.tier] || 'bg-gray-50' : 'bg-white'}`}>
+                                <div className="text-[10px] font-semibold text-gray-700">{day}</div>
+                                {open && season && (
+                                  <>
+                                    <div className="text-[9px] font-bold text-gray-900">
+                                      ${effectiveRate}<span className="text-[7px] font-medium text-primary-500 ml-0.5">FLEX</span>
+                                    </div>
+                                    {room.nonRefundableEnabled && (
+                                      <div className="text-[9px] font-bold text-amber-600">
+                                        ${nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ))}
+                      {/* Legend */}
+                      <div className="flex flex-wrap gap-3 mt-3 text-[9px] text-gray-500">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> Low</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Mid</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-700" /> High</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-700" /> Peak</span>
+                        {surchargePercent > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Weekend+</span>}
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> Closed</span>
+                        {room.nonRefundableEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> NR rate</span>}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
 
