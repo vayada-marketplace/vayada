@@ -34,6 +34,12 @@ class RoomTypeCreate(BaseModel):
     is_active: bool = True
     sort_order: int = 0
     monthly_rates: Optional[Dict[str, MonthlyRate]] = None
+    operating_periods: List[dict] = []
+    seasons: List[dict] = []
+    weekend_surcharge: str = "+0%"
+    cancellation_policy: str = "Free until 7 days before"
+    flexible_rate_enabled: bool = True
+    non_refundable_discount: int = 10
 
 
 class RoomTypeUpdate(BaseModel):
@@ -56,6 +62,12 @@ class RoomTypeUpdate(BaseModel):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     monthly_rates: Optional[Dict[str, MonthlyRate]] = None
+    operating_periods: Optional[List[dict]] = None
+    seasons: Optional[List[dict]] = None
+    weekend_surcharge: Optional[str] = None
+    cancellation_policy: Optional[str] = None
+    flexible_rate_enabled: Optional[bool] = None
+    non_refundable_discount: Optional[int] = None
 
 
 class RoomTypeResponse(BaseModel):
@@ -101,5 +113,11 @@ class RoomTypeAdminResponse(BaseModel):
     is_active: bool
     sort_order: int
     monthly_rates: Dict[str, MonthlyRate] = {}
+    operating_periods: List[dict] = []
+    seasons: List[dict] = []
+    weekend_surcharge: str = "+0%"
+    cancellation_policy: str = "Free until 7 days before"
+    flexible_rate_enabled: bool = True
+    non_refundable_discount: int = 10
     created_at: str
     updated_at: str
