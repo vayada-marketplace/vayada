@@ -656,7 +656,6 @@ export default function RoomsStep({
                         <tr className="text-[10px] text-gray-400">
                           <th className="text-left pb-2 font-medium">Season</th>
                           <th className="text-left pb-2 font-medium">Flex Rate</th>
-                          <th className="text-left pb-2 font-medium">Non-Ref</th>
                           <th className="text-left pb-2 font-medium">Min Stay</th>
                         </tr>
                       </thead>
@@ -668,8 +667,6 @@ export default function RoomsStep({
                             'High': 'text-blue-800 bg-blue-100',
                             'Peak': 'text-indigo-700 bg-indigo-100',
                           }
-                          const flexRate = parseFloat(season.rate) || 0
-                          const nrRate = Math.round(flexRate * (1 - room.nonRefundableDiscount / 100))
                           return (
                             <tr key={idx} className="border-t border-gray-100">
                               <td className="py-2.5">
@@ -691,12 +688,6 @@ export default function RoomsStep({
                                     }}
                                     className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[12px] font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                                   />
-                                </div>
-                              </td>
-                              <td className="py-2.5">
-                                <div className="flex items-center gap-1">
-                                  <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                                  <span className="text-[12px] text-gray-500">${nrRate}</span>
                                 </div>
                               </td>
                               <td className="py-2.5">
