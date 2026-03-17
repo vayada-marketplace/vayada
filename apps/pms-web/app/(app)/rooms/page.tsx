@@ -131,10 +131,18 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
 
         {/* Price */}
         <div className="text-right mr-5 shrink-0">
-          <span className="text-lg font-bold text-gray-900">
-            {formatCurrency(room.baseRate, room.currency)}
-          </span>
-          <p className="text-[10px] text-gray-400">per night</p>
+          {(() => {
+            const seasonRates = (room.seasons || []).map(s => parseFloat(s.rate)).filter(r => r > 0)
+            const displayRate = seasonRates.length > 0 ? Math.min(...seasonRates) : room.baseRate
+            return (
+              <>
+                <span className="text-lg font-bold text-gray-900">
+                  {formatCurrency(displayRate, room.currency)}
+                </span>
+                <p className="text-[10px] text-gray-400">{seasonRates.length > 1 ? 'from / night' : 'per night'}</p>
+              </>
+            )
+          })()}
         </div>
 
         {/* Configure button */}
