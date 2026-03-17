@@ -222,7 +222,7 @@ export default function RoomsStep({
 
   return (
     <div className="flex-1 overflow-auto">
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      <div className={`mx-auto px-6 py-6 ${activeRoomTab === 'pricing' ? 'max-w-6xl' : 'max-w-4xl'}`}>
         {stepIndicators}
         <div className="mb-5">
           <h2 className="text-[18px] font-bold text-gray-900">Rooms & Rates</h2>
@@ -874,7 +874,7 @@ export default function RoomsStep({
             </div>
 
             {/* Right Column: LIVE RATE PREVIEW */}
-            <div className="hidden lg:block w-[380px] shrink-0">
+            <div className="hidden lg:block w-[340px] shrink-0">
               <div className="bg-white rounded-xl border border-gray-200 p-5 sticky top-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
