@@ -581,9 +581,15 @@ export default function RoomTypeForm({
                         : 0
                       return (
                         <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-[10px] text-gray-400">Season name</span>
-                            <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <input
+                              type="text"
+                              value={season.name}
+                              onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], name: e.target.value }; setSeasons(u) }}
+                              placeholder="Season name"
+                              className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder-gray-400"
+                            />
+                            <div className="flex items-center gap-2 shrink-0">
                               <select
                                 value={season.tier}
                                 onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], tier: e.target.value }; setSeasons(u) }}
