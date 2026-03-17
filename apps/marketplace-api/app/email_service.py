@@ -547,10 +547,20 @@ def create_collaboration_approved_email_html(
     listing_name: str,
     listing_location: Optional[str] = None,
     both_approved: bool = False,
+    affiliate_link: Optional[str] = None,
 ) -> str:
     """Email sent when a party approves the terms (and when both have approved)."""
     if both_approved:
         title = "Collaboration Confirmed!"
+        affiliate_section = ""
+        if affiliate_link:
+            affiliate_section = f"""
+            <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0; font-weight: bold; color: #1565c0;">Your Affiliate Link</p>
+                <p style="margin: 0; word-break: break-all;"><a href="{affiliate_link}" style="color: #1565c0;">{affiliate_link}</a></p>
+                <p style="margin: 8px 0 0 0; font-size: 13px; color: #555;">Share this link to earn commission on bookings.</p>
+            </div>
+            """
         content = f"""
             <p>Hi {recipient_name},</p>
             <p>Great news! Both parties have approved the terms. Your collaboration is now confirmed.</p>
@@ -558,6 +568,7 @@ def create_collaboration_approved_email_html(
             <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
                 <p style="margin: 0; color: #2e7d32; font-weight: bold;">The collaboration is now active!</p>
             </div>
+            {affiliate_section}
             {_view_button_html(f"{settings.FRONTEND_URL}/collaborations")}
         """
     else:

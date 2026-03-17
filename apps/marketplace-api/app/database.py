@@ -112,6 +112,47 @@ class AuthDatabase:
             return await connection.fetchval(query, *args)
 
 
+class PmsDatabase:
+    """PMS database connection pool manager (for affiliate creation)"""
+
+    _pool: Optional[asyncpg.Pool] = None
+
+    @classmethod
+    async def get_pool(cls) -> asyncpg.Pool:
+        """Get or create PMS database connection pool"""
+        if cls._pool is None:
+            if not settings.PMS_DATABASE_URL:
+                raise RuntimeError("PMS_DATABASE_URL is not configured")
+            cls._pool = await asyncpg.create_pool(
+                settings.PMS_DATABASE_URL,
+                min_size=1,
+                max_size=3,
+                command_timeout=settings.DATABASE_COMMAND_TIMEOUT
+            )
+        return cls._pool
+
+    @classmethod
+    async def close_pool(cls):
+        """Close PMS database connection pool"""
+        if cls._pool:
+            await cls._pool.close()
+            cls._pool = None
+
+    @classmethod
+    async def fetchrow(cls, query: str, *args):
+        """Fetch a single row"""
+        pool = await cls.get_pool()
+        async with pool.acquire() as connection:
+            return await connection.fetchrow(query, *args)
+
+    @classmethod
+    async def execute(cls, query: str, *args):
+        """Execute a query"""
+        pool = await cls.get_pool()
+        async with pool.acquire() as connection:
+            return await connection.execute(query, *args)
+
+
 async def check_database_connection() -> dict:
     """Check if database connection is working"""
     try:

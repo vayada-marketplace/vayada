@@ -59,6 +59,14 @@ class CreateCollaborationRequest(BaseModel):
         description="Platform deliverables commitment"
     )
 
+    # Affiliate / commission
+    creator_fee: Optional[Decimal] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Creator commission percentage for affiliate tracking"
+    )
+
     # Creator-specific fields
     why_great_fit: Optional[str] = Field(
         None,
@@ -193,6 +201,7 @@ class UpdateCollaborationTermsRequest(BaseModel):
     travel_date_from: Optional[date] = None
     travel_date_to: Optional[date] = None
     platform_deliverables: Optional[List[PlatformDeliverablesItem]] = None
+    creator_fee: Optional[Decimal] = None
 
     @model_validator(mode='after')
     def check_at_least_one_update(self):
@@ -205,7 +214,8 @@ class UpdateCollaborationTermsRequest(BaseModel):
             self.stay_nights,
             self.travel_date_from,
             self.travel_date_to,
-            self.platform_deliverables
+            self.platform_deliverables,
+            self.creator_fee
         ]):
             raise ValueError("At least one term (type, amount, dates or deliverables) must be updated")
         return self
@@ -298,5 +308,10 @@ class CollaborationResponse(BaseModel):
     hotel_agreed_at: Optional[datetime] = None
     creator_agreed_at: Optional[datetime] = None
     term_last_updated_at: Optional[datetime] = None
+
+    # Affiliate tracking
+    creator_fee: Optional[Decimal] = None
+    affiliate_referral_code: Optional[str] = None
+    affiliate_link: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)

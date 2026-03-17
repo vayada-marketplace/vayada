@@ -4,7 +4,7 @@ Collaboration routes for creators and hotels
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from datetime import datetime
-from app.database import Database
+from app.database import Database, PmsDatabase
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
@@ -14,6 +14,8 @@ import logging
 import json
 import uuid
 import asyncio
+import secrets
+from decimal import Decimal
 from .chat import create_system_message
 from app.email_service import (
     send_email,
@@ -203,9 +205,9 @@ async def create_collaboration(
                         paid_amount, discount_percentage,
                         travel_date_from, travel_date_to,
                         preferred_date_from, preferred_date_to,
-                        preferred_months, consent
+                        preferred_months, consent, creator_fee
                     )
-                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                     RETURNING *
                     """,
                     request.initiator_type, creator_id, hotel_id, request.listing_id,
@@ -214,7 +216,7 @@ async def create_collaboration(
                     request.paid_amount, request.discount_percentage,
                     request.travel_date_from, request.travel_date_to,
                     request.preferred_date_from, request.preferred_date_to,
-                    request.preferred_months, request.consent
+                    request.preferred_months, request.consent, request.creator_fee
                 )
                 
                 collaboration_id = collaboration['id']
@@ -287,7 +289,10 @@ async def create_collaboration(
             updated_at=collaboration['updated_at'],
             responded_at=collaboration['responded_at'],
             cancelled_at=collaboration['cancelled_at'],
-            completed_at=collaboration['completed_at']
+            completed_at=collaboration['completed_at'],
+            creator_fee=collaboration['creator_fee'],
+            affiliate_referral_code=collaboration['affiliate_referral_code'],
+            affiliate_link=collaboration['affiliate_link'],
         )
 
     except HTTPException:
@@ -457,7 +462,10 @@ async def respond_to_collaboration_request(
             completed_at=updated['completed_at'],
             hotel_agreed_at=updated['hotel_agreed_at'],
             creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at']
+            term_last_updated_at=updated['term_last_updated_at'],
+            creator_fee=updated.get('creator_fee'),
+            affiliate_referral_code=updated.get('affiliate_referral_code'),
+            affiliate_link=updated.get('affiliate_link'),
         )
 
     except HTTPException:
@@ -577,6 +585,12 @@ async def update_collaboration_terms(
             update_params.append(request.discount_percentage)
             param_idx += 1
             diff_summary.append(f"Discount: {request.discount_percentage}%")
+
+        if request.creator_fee is not None:
+            updates.append(f"creator_fee = ${param_idx}")
+            update_params.append(request.creator_fee)
+            param_idx += 1
+            diff_summary.append(f"Creator Fee: {request.creator_fee}%")
 
         if request.travel_date_from:
             updates.append(f"travel_date_from = ${param_idx}")
@@ -707,7 +721,10 @@ async def update_collaboration_terms(
             completed_at=updated['completed_at'],
             hotel_agreed_at=updated['hotel_agreed_at'],
             creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at']
+            term_last_updated_at=updated['term_last_updated_at'],
+            creator_fee=updated.get('creator_fee'),
+            affiliate_referral_code=updated.get('affiliate_referral_code'),
+            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -784,9 +801,68 @@ async def approve_collaboration_terms(
             "hotel", hotel_id=str(collab['hotel_id']))
 
         if new_status == 'accepted':
+            # Auto-create affiliate in PMS
+            affiliate_link = None
+            try:
+                from app.config import settings as _cfg
+                if _cfg.PMS_DATABASE_URL:
+                    # Get hotel's user_id from marketplace DB
+                    hotel_profile = await HotelRepository.get_profile_by_id(
+                        str(collab['hotel_id']), columns="user_id")
+                    if hotel_profile:
+                        # Look up the hotel in PMS using the shared user_id
+                        pms_hotel = await PmsDatabase.fetchrow(
+                            "SELECT id, slug FROM hotels WHERE user_id = $1",
+                            hotel_profile['user_id']
+                        )
+                        if pms_hotel:
+                            referral_code = secrets.token_urlsafe(8)
+                            commission = collab.get('creator_fee') or Decimal('5.00')
+                            # Get creator social media platforms
+                            social_media = ''
+                            platform_rows = await Database.fetch(
+                                "SELECT name, handle FROM creator_platforms WHERE creator_id = $1",
+                                str(collab['creator_id'])
+                            )
+                            if platform_rows:
+                                social_media = ', '.join(
+                                    f"{r['name']}: @{r['handle']}" for r in platform_rows if r.get('handle')
+                                )
+
+                            pms_affiliate = await PmsDatabase.fetchrow(
+                                """
+                                INSERT INTO affiliates (
+                                    hotel_id, referral_code, full_name, email,
+                                    social_media, user_type, commission_pct, status
+                                ) VALUES ($1, $2, $3, $4, $5, 'creator', $6, 'approved')
+                                RETURNING id, referral_code
+                                """,
+                                pms_hotel['id'], referral_code,
+                                creator_email_name or 'Unknown',
+                                creator_email or '',
+                                social_media,
+                                commission
+                            )
+                            if pms_affiliate:
+                                slug = pms_hotel['slug']
+                                affiliate_link = f"https://{slug}.booking.vayada.com?ref={referral_code}"
+                                # Store on collaboration record
+                                await Database.execute(
+                                    """
+                                    UPDATE collaborations
+                                    SET affiliate_referral_code = $1, affiliate_link = $2
+                                    WHERE id = $3
+                                    """,
+                                    referral_code, affiliate_link, collaboration_id
+                                )
+            except Exception as aff_err:
+                logger.error(f"Failed to create affiliate for collaboration {collaboration_id}: {aff_err}")
+
             # Both approved — notify both parties
             for email, name in [(creator_email, creator_email_name), (hotel_email, hotel_email_name)]:
                 if email:
+                    # Only include affiliate link in creator's email
+                    link_for_email = affiliate_link if email == creator_email else None
                     html = create_collaboration_approved_email_html(
                         recipient_name=name or "there",
                         other_party_name=sender_name,
@@ -794,6 +870,7 @@ async def approve_collaboration_terms(
                         listing_name=updated['listing_name'],
                         listing_location=updated.get('listing_location'),
                         both_approved=True,
+                        affiliate_link=link_for_email,
                     )
                     _send_email_background(email, "Collaboration Confirmed!", html)
         else:
@@ -817,6 +894,10 @@ async def approve_collaboration_terms(
                 _send_email_background(other_email, "Terms Approved — Your Confirmation Needed", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
+
+        # Re-fetch to include any affiliate fields written after acceptance
+        if new_status == 'accepted':
+            updated = await CollaborationRepository.get_full(collaboration_id)
 
         return CollaborationResponse(
             id=str(updated['id']),
@@ -850,7 +931,10 @@ async def approve_collaboration_terms(
             completed_at=updated['completed_at'],
             hotel_agreed_at=updated['hotel_agreed_at'],
             creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at']
+            term_last_updated_at=updated['term_last_updated_at'],
+            creator_fee=updated.get('creator_fee'),
+            affiliate_referral_code=updated.get('affiliate_referral_code'),
+            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -970,7 +1054,10 @@ async def cancel_collaboration(
             completed_at=updated['completed_at'],
             hotel_agreed_at=updated['hotel_agreed_at'],
             creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at']
+            term_last_updated_at=updated['term_last_updated_at'],
+            creator_fee=updated.get('creator_fee'),
+            affiliate_referral_code=updated.get('affiliate_referral_code'),
+            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -1058,7 +1145,10 @@ async def toggle_deliverable(
             completed_at=updated['completed_at'],
             hotel_agreed_at=updated['hotel_agreed_at'],
             creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at']
+            term_last_updated_at=updated['term_last_updated_at'],
+            creator_fee=updated.get('creator_fee'),
+            affiliate_referral_code=updated.get('affiliate_referral_code'),
+            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise

@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.database import Database, AuthDatabase, check_database_connection
+from app.database import Database, AuthDatabase, PmsDatabase, check_database_connection
 from app.config import settings
 from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter
 
@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
     # Startup
     await Database.get_pool()
     await AuthDatabase.get_pool()
+    if settings.PMS_DATABASE_URL:
+        await PmsDatabase.get_pool()
     scheduler_task = asyncio.create_task(_newsletter_scheduler())
     yield
     # Shutdown
@@ -62,6 +64,7 @@ async def lifespan(app: FastAPI):
         await scheduler_task
     except asyncio.CancelledError:
         pass
+    await PmsDatabase.close_pool()
     await AuthDatabase.close_pool()
     await Database.close_pool()
 

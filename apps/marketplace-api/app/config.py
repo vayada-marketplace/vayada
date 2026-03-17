@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Require explicit database URL in env (no baked-in default)
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
     AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
+    PMS_DATABASE_URL: str = Field("", description="PMS PostgreSQL connection string for affiliate creation")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60
