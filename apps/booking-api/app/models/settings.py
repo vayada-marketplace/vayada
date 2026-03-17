@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 
@@ -24,6 +24,8 @@ class PropertySettingsResponse(BaseModel):
 
 
 class PropertySettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     property_name: Optional[str] = None
     reservation_email: Optional[str] = None
     phone_number: Optional[str] = None
