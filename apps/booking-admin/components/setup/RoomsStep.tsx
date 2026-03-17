@@ -900,12 +900,12 @@ export default function RoomsStep({
                     {room.seasons.map((s, i) => {
                       const flexRate = parseFloat(s.rate) || 0
                       const nrRate = Math.round(flexRate * (1 - room.nonRefundableDiscount / 100))
-                      const dotColors: Record<string, string> = { 'Low': 'bg-sky-400', 'Mid': 'bg-blue-500', 'High': 'bg-blue-700', 'Peak': 'bg-indigo-700' }
+                      const dotColorHex: Record<string, string> = { 'Low': '#38bdf8', 'Mid': '#3b82f6', 'High': '#1d4ed8', 'Peak': '#4338ca' }
                       const fromDate = s.from ? new Date(s.from) : null
                       const toDate = s.to ? new Date(s.to) : null
                       return (
                         <div key={i} className="flex items-center gap-2 text-[11px]">
-                          <span className={`w-2 h-2 rounded-full ${dotColors[s.tier] || 'bg-gray-400'}`} />
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColorHex[s.tier] || '#9ca3af' }} />
                           <span className="font-medium text-gray-700">{s.tier}</span>
                           <span className="text-gray-400">&middot;</span>
                           <span className="text-gray-500">
@@ -959,13 +959,14 @@ export default function RoomsStep({
 
                   const surchargePercent = parseFloat(room.weekendSurcharge.replace(/[^0-9.]/g, '')) || 0
 
-                  const seasonBgs: Record<string, string> = {
-                    'Low': 'bg-sky-50',
-                    'Mid': 'bg-blue-50',
-                    'High': 'bg-blue-100',
-                    'Peak': 'bg-indigo-100',
+                  const seasonBgColors: Record<string, string> = {
+                    'Low': '#f0f9ff',
+                    'Mid': '#eff6ff',
+                    'High': '#dbeafe',
+                    'Peak': '#e0e7ff',
                   }
-                  const weekendBg = 'bg-amber-50'
+                  const weekendBgColor = '#fffbeb'
+                  const closedBgColor = '#f3f4f6'
 
                   return (
                     <div>
@@ -984,14 +985,15 @@ export default function RoomsStep({
                             const flexRate = season ? (parseFloat(season.rate) || 0) : 0
                             const effectiveRate = wknd ? Math.round(flexRate * (1 + surchargePercent / 100)) : flexRate
                             const nrRate = Math.round(effectiveRate * (1 - room.nonRefundableDiscount / 100))
+                            const cellBg = !open ? closedBgColor : wknd && season ? weekendBgColor : season ? (seasonBgColors[season.tier] || '#f9fafb') : '#ffffff'
 
                             return (
-                              <div key={di} className={`p-1 border border-gray-50 min-h-[52px] ${!open ? 'bg-gray-100' : wknd && season ? weekendBg : season ? seasonBgs[season.tier] || 'bg-gray-50' : 'bg-white'}`}>
-                                <div className="text-[10px] font-semibold text-gray-700">{day}</div>
+                              <div key={di} className="p-1 border border-gray-50 min-h-[52px] rounded" style={{ backgroundColor: cellBg }}>
+                                <div className={`text-[10px] font-semibold ${wknd && open ? 'text-orange-600' : 'text-gray-700'}`}>{day}</div>
                                 {open && season && (
                                   <>
-                                    <div className="text-[9px] font-bold text-gray-900">
-                                      ${effectiveRate}<span className="text-[7px] font-medium text-primary-500 ml-0.5">FLEX</span>
+                                    <div className={`text-[9px] font-bold ${wknd ? 'text-orange-600' : 'text-emerald-600'}`}>
+                                      ${effectiveRate}
                                     </div>
                                     {room.nonRefundableEnabled && (
                                       <div className="text-[9px] font-bold text-amber-600">
@@ -1007,13 +1009,13 @@ export default function RoomsStep({
                       ))}
                       {/* Legend */}
                       <div className="flex flex-wrap gap-3 mt-3 text-[9px] text-gray-500">
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> Low</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Mid</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-700" /> High</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-700" /> Peak</span>
-                        {surchargePercent > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Weekend+</span>}
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> Closed</span>
-                        {room.nonRefundableEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> NR rate</span>}
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#38bdf8' }} /> Low</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3b82f6' }} /> Mid</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#1d4ed8' }} /> High</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /> Peak</span>
+                        {surchargePercent > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /> Weekend+</span>}
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#d1d5db' }} /> Closed</span>
+                        {room.nonRefundableEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> NR rate</span>}
                       </div>
                     </div>
                   )
