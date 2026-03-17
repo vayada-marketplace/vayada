@@ -60,6 +60,12 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         is_active=room["is_active"],
         sort_order=room["sort_order"],
         monthly_rates=_parse_monthly_rates(room.get("monthly_rates")),
+        operating_periods=parse_jsonb(room.get("operating_periods", [])),
+        seasons=parse_jsonb(room.get("seasons", [])),
+        weekend_surcharge=room.get("weekend_surcharge") or "+0%",
+        cancellation_policy=room.get("cancellation_policy") or "Free until 7 days before",
+        flexible_rate_enabled=room.get("flexible_rate_enabled", True),
+        non_refundable_discount=room.get("non_refundable_discount", 10),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
     )
