@@ -40,6 +40,12 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           isActive: r.isActive,
           sortOrder: r.sortOrder,
           monthlyRates: r.monthlyRates || {},
+          operatingPeriods: r.operatingPeriods || [],
+          seasons: r.seasons || [],
+          weekendSurcharge: r.weekendSurcharge || '+0%',
+          cancellationPolicy: r.cancellationPolicy || 'Free until 7 days before',
+          flexibleRateEnabled: r.flexibleRateEnabled ?? true,
+          nonRefundableDiscount: r.nonRefundableDiscount ?? 10,
         })
       })
       .catch(console.error)
@@ -93,7 +99,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6 max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link href="/rooms" className="text-gray-400 hover:text-gray-600">

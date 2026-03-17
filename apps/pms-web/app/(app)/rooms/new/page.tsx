@@ -49,7 +49,7 @@ export default function NewRoomPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6 max-w-5xl">
       <div className="flex items-center gap-3 mb-6">
         <Link href="/rooms" className="text-gray-400 hover:text-gray-600">
           <ArrowLeftIcon className="w-5 h-5" />
