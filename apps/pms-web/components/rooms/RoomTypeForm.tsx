@@ -644,10 +644,15 @@ export default function RoomTypeForm({
                           return (
                             <tr key={idx} className="border-b border-gray-50">
                               <td className="px-4 py-2.5">
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
-                                  {season.tier || 'Low'}
-                                </span>
-                                <span className="text-gray-300 ml-2">&mdash;</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
+                                    {season.tier || 'Low'}
+                                  </span>
+                                  {season.name
+                                    ? <span className="text-[12px] text-gray-700">{season.name}</span>
+                                    : <span className="text-gray-300">&mdash;</span>
+                                  }
+                                </div>
                               </td>
                               <td className="px-4 py-2.5">
                                 <div className="flex items-center gap-1">
