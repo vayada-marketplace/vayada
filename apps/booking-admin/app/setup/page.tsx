@@ -267,7 +267,7 @@ export default function SetupPage() {
               size: r.roomSize ? Number(r.roomSize) : 0,
               totalRooms: r.totalRooms,
               description: r.description,
-              baseRate: Number(r.baseRate),
+              baseRate: Number(r.baseRate) || (r.seasons.length > 0 ? Number(r.seasons[0].rate) || 0 : 0),
               nonRefundableRate: r.nonRefundableRate ? Number(r.nonRefundableRate) : undefined,
               nonRefundableDiscount: r.nonRefundableEnabled && r.flexibleRateEnabled ? r.nonRefundableDiscount : undefined,
               currency: r.currency || currency,
@@ -275,6 +275,11 @@ export default function SetupPage() {
               amenities: r.amenities,
               features: r.features,
               benefits: r.bookDirectBenefits || [],
+              operatingPeriods: r.operatingPeriods,
+              seasons: r.seasons,
+              weekendSurcharge: r.weekendSurcharge,
+              cancellationPolicy: r.cancellationPolicy,
+              flexibleRateEnabled: r.flexibleRateEnabled,
             })
           } catch {
             // Non-fatal: room creation may fail but setup can continue
