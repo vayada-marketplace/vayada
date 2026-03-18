@@ -203,6 +203,10 @@ export default function SetupPage() {
     setError('')
     setSaving(true)
     try {
+      // Clear any stale hotel selection so the API client doesn't send
+      // an invalid X-Hotel-Id header during setup
+      localStorage.removeItem('selectedHotelId')
+
       // 1. Save property settings (returns hotel data including slug)
       const savedSettings = await settingsService.updatePropertySettings({
         property_name: propertyName,
