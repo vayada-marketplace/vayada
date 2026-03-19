@@ -913,7 +913,7 @@ export default function RoomsStep({
                           </span>
                           <span className="text-gray-400">&middot;</span>
                           <span className="font-bold text-gray-900">${flexRate}/night</span>
-                          {room.nonRefundableEnabled && <span className="text-gray-400">NR: ${nrRate}</span>}
+                          {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="text-gray-400">NR: ${nrRate}</span>}
                         </div>
                       )
                     })}
@@ -995,7 +995,7 @@ export default function RoomsStep({
                                     <div className={`text-[9px] font-bold ${wknd ? 'text-orange-600' : 'text-emerald-600'}`}>
                                       ${effectiveRate}
                                     </div>
-                                    {room.nonRefundableEnabled && (
+                                    {room.nonRefundableEnabled && room.flexibleRateEnabled && (
                                       <div className="text-[9px] font-bold text-amber-600">
                                         ${nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
                                       </div>
@@ -1015,7 +1015,7 @@ export default function RoomsStep({
                         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /> Peak</span>
                         {surchargePercent > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /> Weekend+</span>}
                         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#d1d5db' }} /> Closed</span>
-                        {room.nonRefundableEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> NR rate</span>}
+                        {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> NR rate</span>}
                       </div>
                     </div>
                   )
