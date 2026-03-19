@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
@@ -53,20 +55,32 @@ async def get_design_settings(
     return _hotel_to_design_settings(hotel_data)
 
 
+logger = logging.getLogger(__name__)
+
+
 @router.patch("/settings/design", response_model=DesignSettingsResponse)
 async def update_design_settings(
     data: DesignSettingsUpdate,
     user_id: str = Depends(require_hotel_admin),
     hotel: dict = Depends(require_current_hotel),
 ):
-    updates = {}
-    for api_field, db_col in _DESIGN_FIELD_MAP.items():
-        value = getattr(data, api_field)
-        if value is not None:
-            updates[db_col] = value
+    try:
+        updates = {}
+        for api_field, db_col in _DESIGN_FIELD_MAP.items():
+            value = getattr(data, api_field)
+            if value is not None:
+                updates[db_col] = value
 
-    if updates:
-        await BookingHotelRepository.partial_update(hotel["id"], updates)
+        if updates:
+            await BookingHotelRepository.partial_update(hotel["id"], updates)
 
-    hotel_data = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns=_DESIGN_COLUMNS)
-    return _hotel_to_design_settings(hotel_data)
+        hotel_data = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns=_DESIGN_COLUMNS)
+        return _hotel_to_design_settings(hotel_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update design settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save design settings. Please try again.",
+        )

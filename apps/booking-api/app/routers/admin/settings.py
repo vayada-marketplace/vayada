@@ -1,6 +1,8 @@
 import logging
+import re
 
-from fastapi import APIRouter, HTTPException, Depends
+import asyncpg
+from fastapi import APIRouter, HTTPException, Depends, status
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
@@ -8,6 +10,7 @@ from app.models.setup import SetupStatusResponse, SetupPrefillData
 from app.models.utils import parse_json, slugify
 from app.database import MarketplaceDatabase
 from app.config import settings
+from app.services import cloudflare_service
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,7 @@ _PROPERTY_FIELD_MAP = {
     "supported_languages": "supported_languages",
     "check_in_time": "check_in_time",
     "check_out_time": "check_out_time",
+    "custom_domain": "custom_domain",
     "pay_at_property_enabled": "pay_at_property_enabled",
     "free_cancellation_days": "free_cancellation_days",
     "email_notifications": "email_notifications",
@@ -113,6 +117,7 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         supported_languages=parse_json(hotel.get('supported_languages'), default=['en']),
         check_in_time=hotel.get('check_in_time') or '15:00',
         check_out_time=hotel.get('check_out_time') or '11:00',
+        custom_domain=hotel.get('custom_domain'),
         pay_at_property_enabled=hotel.get('pay_at_property_enabled', False),
         free_cancellation_days=hotel.get('free_cancellation_days', 7),
         email_notifications=hotel.get('email_notifications', True),
@@ -127,6 +132,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     whatsapp_number='', address='', timezone='UTC', default_currency='EUR',
     supported_currencies=[], supported_languages=['en'],
     check_in_time='15:00', check_out_time='11:00',
+    custom_domain=None,
     pay_at_property_enabled=False, free_cancellation_days=7,
     email_notifications=True, new_booking_alerts=True,
     payment_alerts=True, weekly_reports=False,
@@ -150,37 +156,133 @@ async def update_property_settings(
     user_id: str = Depends(require_hotel_admin),
     hotel: dict | None = Depends(get_current_hotel),
 ):
-    if hotel:
-        updates = {}
-        for api_field, db_col in _PROPERTY_FIELD_MAP.items():
-            value = getattr(data, api_field)
-            if value is not None:
-                updates[db_col] = value
+    try:
+        if hotel:
+            updates = {}
+            for api_field, db_col in _PROPERTY_FIELD_MAP.items():
+                value = getattr(data, api_field)
+                if value is not None:
+                    updates[db_col] = value
 
-        if updates:
-            result = await BookingHotelRepository.partial_update(hotel["id"], updates)
+            if updates:
+                result = await BookingHotelRepository.partial_update(hotel["id"], updates)
+            else:
+                result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
         else:
-            result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
-    else:
-        name = data.property_name or ''
-        slug = slugify(name) if name else f"hotel-{user_id[:8]}"
+            name = data.property_name or ''
+            slug = slugify(name) if name else f"hotel-{user_id[:8]}"
 
-        result = await BookingHotelRepository.create(
-            name=name,
-            slug=slug,
-            contact_email=data.reservation_email or '',
-            contact_phone=data.phone_number or '',
-            timezone=data.timezone or 'UTC',
-            currency=data.default_currency or 'EUR',
-            supported_languages=data.supported_languages or ['en'],
-            user_id=user_id,
-            supported_currencies=data.supported_currencies or [],
-            contact_whatsapp=data.whatsapp_number or '',
-            contact_address=data.address or '',
-            email_notifications=data.email_notifications if data.email_notifications is not None else True,
-            new_booking_alerts=data.new_booking_alerts if data.new_booking_alerts is not None else True,
-            payment_alerts=data.payment_alerts if data.payment_alerts is not None else True,
-            weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
+            try:
+                result = await BookingHotelRepository.create(
+                    name=name,
+                    slug=slug,
+                    contact_email=data.reservation_email or '',
+                    contact_phone=data.phone_number or '',
+                    timezone=data.timezone or 'UTC',
+                    currency=data.default_currency or 'EUR',
+                    supported_languages=data.supported_languages or ['en'],
+                    user_id=user_id,
+                    supported_currencies=data.supported_currencies or [],
+                    contact_whatsapp=data.whatsapp_number or '',
+                    contact_address=data.address or '',
+                    email_notifications=data.email_notifications if data.email_notifications is not None else True,
+                    new_booking_alerts=data.new_booking_alerts if data.new_booking_alerts is not None else True,
+                    payment_alerts=data.payment_alerts if data.payment_alerts is not None else True,
+                    weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A property with this name already exists. Please choose a different name.",
+                )
+
+        return _hotel_to_property_settings(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update property settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save property settings. Please try again.",
         )
 
-    return _hotel_to_property_settings(result)
+
+# ── Custom domain management ─────────────────────────────────────
+
+_DOMAIN_RE = re.compile(
+    r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"
+)
+
+
+@router.post("/settings/custom-domain")
+async def connect_custom_domain(
+    data: dict,
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
+):
+    domain = (data.get("domain") or "").strip().lower()
+    if not domain or not _DOMAIN_RE.match(domain):
+        raise HTTPException(status_code=400, detail="Invalid domain format")
+
+    # Check not already taken by another hotel
+    existing = await BookingHotelRepository.get_by_custom_domain(domain)
+    if existing and str(existing["id"]) != str(hotel["id"]):
+        raise HTTPException(status_code=409, detail="Domain is already in use by another property")
+
+    # Register with Cloudflare
+    try:
+        cf_result = await cloudflare_service.create_custom_hostname(domain)
+    except Exception as e:
+        logger.error("Cloudflare create failed for %s: %s", domain, e)
+        raise HTTPException(status_code=502, detail="Failed to register domain with Cloudflare")
+
+    # Save to DB
+    await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": domain})
+
+    return {
+        "domain": domain,
+        "status": cf_result.get("status", "pending"),
+        "ssl_status": cf_result.get("ssl", {}).get("status", "initializing"),
+    }
+
+
+@router.delete("/settings/custom-domain")
+async def disconnect_custom_domain(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
+):
+    current_domain = hotel.get("custom_domain")
+    if not current_domain:
+        raise HTTPException(status_code=404, detail="No custom domain configured")
+
+    # Remove from Cloudflare
+    try:
+        await cloudflare_service.delete_custom_hostname(current_domain)
+    except Exception as e:
+        logger.warning("Cloudflare delete failed for %s: %s", current_domain, e)
+
+    # Clear from DB
+    await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": None})
+    return {"removed": current_domain}
+
+
+@router.get("/settings/custom-domain/status")
+async def get_custom_domain_status(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
+):
+    current_domain = hotel.get("custom_domain")
+    if not current_domain:
+        return {"configured": False}
+
+    status = await cloudflare_service.get_hostname_status(current_domain)
+    if not status:
+        return {"configured": True, "domain": current_domain, "status": "unknown", "ssl_status": "unknown"}
+
+    return {
+        "configured": True,
+        "domain": current_domain,
+        "status": status["status"],
+        "ssl_status": status["ssl_status"],
+        "verification_errors": status.get("verification_errors", []),
+    }
