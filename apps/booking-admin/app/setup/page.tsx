@@ -206,6 +206,7 @@ export default function SetupPage() {
       // Clear any stale hotel selection so the API client doesn't send
       // an invalid X-Hotel-Id header during setup
       localStorage.removeItem('selectedHotelId')
+      const failedRooms: string[] = []
 
       // 1. Save property settings (returns hotel data including slug)
       const savedSettings = await settingsService.updatePropertySettings({
@@ -286,8 +287,12 @@ export default function SetupPage() {
               flexibleRateEnabled: r.flexibleRateEnabled,
             })
           } catch {
-            // Non-fatal: room creation may fail but setup can continue
+            failedRooms.push(r.name)
           }
+        }
+
+        if (failedRooms.length > 0) {
+          console.warn('Some rooms failed to create:', failedRooms)
         }
 
         // 5. Save payment settings
@@ -307,6 +312,11 @@ export default function SetupPage() {
         localStorage.setItem('selectedHotelId', newHotel.id)
       }
 
+      // Store warning about failed rooms so dashboard can show it
+      if (failedRooms.length > 0) {
+        localStorage.setItem('setupWarning', `Some rooms could not be created: ${failedRooms.join(', ')}. You can add them manually from the dashboard.`)
+      }
+
       localStorage.setItem('setupComplete', 'true')
 
       // If the user came from PMS, redirect back there
@@ -319,10 +329,22 @@ export default function SetupPage() {
       }
 
       router.push('/dashboard')
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Setup failed:', err)
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      setError(`Failed to save settings: ${message}`)
+      let message = 'An unexpected error occurred. Please try again.'
+      if (err && typeof err === 'object' && 'data' in err) {
+        const apiErr = err as { data: { detail: string | Array<{ msg: string }> } }
+        if (typeof apiErr.data.detail === 'string') {
+          message = apiErr.data.detail
+        } else if (Array.isArray(apiErr.data.detail)) {
+          message = apiErr.data.detail.map(e => e.msg).join(', ')
+        }
+      } else if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        message = 'Could not connect to the server. Please check your internet connection and try again.'
+      } else if (err instanceof Error) {
+        message = err.message
+      }
+      setError(message)
       setSaving(false)
     }
   }
