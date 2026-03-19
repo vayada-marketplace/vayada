@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { pmsClient } from '@/services/api/pmsClient'
 import {
   BellIcon,
@@ -14,29 +14,11 @@ import {
   LockClosedIcon,
 } from '@heroicons/react/24/outline'
 import { settingsService, type PropertySettings } from '@/services/settings'
-import { CURRENCY_OPTIONS } from '@/lib/constants/options'
+import { CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LANGUAGE_CODES } from '@/lib/constants/options'
+import type { CurrencyOption, LanguageOption } from '@/lib/constants/options'
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
 
 type Tab = 'property' | 'notifications' | 'security' | 'billing'
-
-const LANGUAGE_OPTIONS = [
-  { code: 'en', label: 'English' },
-  { code: 'de', label: 'German' },
-  { code: 'fr', label: 'French' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'it', label: 'Italian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'nl', label: 'Dutch' },
-  { code: 'pl', label: 'Polish' },
-  { code: 'cs', label: 'Czech' },
-  { code: 'ro', label: 'Romanian' },
-  { code: 'hr', label: 'Croatian' },
-  { code: 'tr', label: 'Turkish' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'ar', label: 'Arabic' },
-]
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: '',
@@ -46,8 +28,9 @@ const DEFAULT_SETTINGS: PropertySettings = {
   whatsapp_number: '',
   address: '',
   default_currency: 'EUR',
+  default_language: 'en',
   supported_currencies: [],
-  supported_languages: ['en'],
+  supported_languages: [],
   check_in_time: '15:00',
   check_out_time: '11:00',
   pay_at_property_enabled: false,
@@ -55,7 +38,204 @@ const DEFAULT_SETTINGS: PropertySettings = {
   email_notifications: true,
   new_booking_alerts: true,
   payment_alerts: true,
-  weekly_reports: false,
+}
+
+// ── Custom Select Dropdown ───────────────────────────────────────────
+function FlagSelect<T extends { code: string; flag: string }>({
+  value,
+  onChange,
+  options,
+  getLabel,
+}: {
+  value: string
+  onChange: (code: string) => void
+  options: T[]
+  getLabel: (opt: T) => string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const selected = options.find((o) => o.code === value)
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
+      >
+        <span>{selected ? `${selected.flag} ${getLabel(selected)}` : 'Select...'}</span>
+        <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {options.map((opt) => (
+            <button
+              key={opt.code}
+              type="button"
+              onClick={() => { onChange(opt.code); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-[13px] text-left hover:bg-gray-50 ${opt.code === value ? 'bg-gray-50 font-medium' : ''}`}
+            >
+              {opt.code === value && (
+                <svg className="w-3.5 h-3.5 text-gray-700 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {opt.code !== value && <span className="w-3.5 flex-shrink-0" />}
+              <span>{opt.flag} {getLabel(opt)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Searchable Multi-Select ──────────────────────────────────────────
+function SearchableMultiSelect<T extends { code: string; flag: string }>({
+  selected,
+  onToggle,
+  options,
+  excludeCode,
+  placeholder,
+  getLabel,
+  getSearchLabel,
+  popularCodes,
+  emptyMessage,
+}: {
+  selected: string[]
+  onToggle: (code: string) => void
+  options: T[]
+  excludeCode: string
+  placeholder: string
+  getLabel: (opt: T) => string
+  getSearchLabel: (opt: T) => string
+  popularCodes: string[]
+  emptyMessage: string
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const available = options.filter((o) => o.code !== excludeCode)
+  const filtered = query.trim()
+    ? available.filter((o) => getSearchLabel(o).toLowerCase().includes(query.toLowerCase()))
+    : available
+  const popular = available.filter((o) => popularCodes.includes(o.code))
+
+  return (
+    <div ref={ref}>
+      {/* Search input */}
+      <div className="relative">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder}
+          className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900 placeholder:text-gray-400"
+        />
+        {/* Dropdown */}
+        {open && query.trim() && (
+          <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-[13px] text-gray-400">No results found</p>
+            ) : (
+              filtered.map((opt) => {
+                const isSelected = selected.includes(opt.code)
+                return (
+                  <button
+                    key={opt.code}
+                    type="button"
+                    onClick={() => { onToggle(opt.code); setQuery(''); setOpen(false) }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-[13px] text-left transition-colors ${isSelected ? 'bg-primary-500 text-white' : 'hover:bg-gray-50 text-gray-900'}`}
+                  >
+                    <span>{opt.flag}</span>
+                    <span>{getSearchLabel(opt)}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Popular choices */}
+      <div className="mt-2">
+        <p className="text-[11px] text-gray-400 font-medium mb-1.5">Popular choices &mdash;</p>
+        <div className="flex flex-wrap gap-1.5">
+          {popular.map((opt) => {
+            const isSelected = selected.includes(opt.code)
+            return (
+              <button
+                key={opt.code}
+                type="button"
+                onClick={() => onToggle(opt.code)}
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-medium rounded-full transition-colors ${
+                  isSelected
+                    ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                {opt.flag} {getLabel(opt)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Added items */}
+      {selected.length > 0 ? (
+        <div className="mt-2">
+          <p className="text-[11px] text-gray-400 font-medium mb-1.5">Added ({selected.length}):</p>
+          <div className="flex flex-wrap gap-1.5">
+            {selected.map((code) => {
+              const opt = options.find((o) => o.code === code)
+              if (!opt) return null
+              return (
+                <span
+                  key={code}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-medium rounded-full bg-primary-100 text-primary-700 border border-primary-300"
+                >
+                  {opt.flag} {getLabel(opt)}
+                  <button
+                    type="button"
+                    onClick={() => onToggle(code)}
+                    className="ml-0.5 text-primary-400 hover:text-primary-600"
+                  >
+                    &times;
+                  </button>
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-gray-400 italic">{emptyMessage}</p>
+      )}
+    </div>
+  )
 }
 
 export default function SettingsPage() {
@@ -64,8 +244,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false)
-  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false)
 
   // Email form state
   const [emailForm, setEmailForm] = useState({ new_email: '', password: '' })
@@ -154,37 +332,21 @@ export default function SettingsPage() {
     }
   }
 
-  const addLanguage = (code: string) => {
-    if (!settings.supported_languages.includes(code)) {
-      setSettings({
-        ...settings,
-        supported_languages: [...settings.supported_languages, code],
-      })
-    }
-    setShowLanguageDropdown(false)
-  }
-
-  const removeLanguage = (code: string) => {
+  const toggleCurrency = (code: string) => {
     setSettings({
       ...settings,
-      supported_languages: settings.supported_languages.filter((l) => l !== code),
+      supported_currencies: settings.supported_currencies.includes(code)
+        ? settings.supported_currencies.filter((c) => c !== code)
+        : [...settings.supported_currencies, code],
     })
   }
 
-  const addCurrency = (code: string) => {
-    if (!settings.supported_currencies.includes(code)) {
-      setSettings({
-        ...settings,
-        supported_currencies: [...settings.supported_currencies, code],
-      })
-    }
-    setShowCurrencyDropdown(false)
-  }
-
-  const removeCurrency = (code: string) => {
+  const toggleLanguage = (code: string) => {
     setSettings({
       ...settings,
-      supported_currencies: settings.supported_currencies.filter((c) => c !== code),
+      supported_languages: settings.supported_languages.includes(code)
+        ? settings.supported_languages.filter((l) => l !== code)
+        : [...settings.supported_languages, code],
     })
   }
 
@@ -351,129 +513,81 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Localization card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
-                    <div className="flex items-center gap-1.5 mb-0.5">
+                  {/* Currency & Languages card */}
+                  <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+                    <div className="flex items-center gap-1.5">
                       <GlobeAltIcon className="w-4 h-4 text-gray-700" />
-                      <h2 className="text-sm font-semibold text-gray-900">Localization</h2>
+                      <h2 className="text-sm font-semibold text-gray-900">Currency & Languages</h2>
                     </div>
-                    <p className="text-[13px] text-gray-500 mb-3">Currency and language preferences</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+                    {/* Default Currency & Language */}
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Default Currency
-                        </label>
-                        <select
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Currency <span className="text-gray-700">*</span></label>
+                        <FlagSelect<CurrencyOption>
                           value={settings.default_currency}
-                          onChange={(e) => {
-                            const newPrimary = e.target.value
+                          onChange={(code) => {
                             setSettings({
                               ...settings,
-                              default_currency: newPrimary,
-                              supported_currencies: settings.supported_currencies.filter((c) => c !== newPrimary),
+                              default_currency: code,
+                              supported_currencies: settings.supported_currencies.filter((c) => c !== code),
                             })
                           }}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                        >
-                          {CURRENCY_OPTIONS.map((c) => (
-                            <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
-                          ))}
-                        </select>
+                          options={CURRENCY_OPTIONS}
+                          getLabel={(o) => o.name}
+                        />
                       </div>
                       <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Supported Currencies
-                        </label>
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                          {settings.supported_currencies.map((code) => {
-                            const cur = CURRENCY_OPTIONS.find((c) => c.code === code)
-                            return (
-                              <span
-                                key={code}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[13px] rounded-full"
-                              >
-                                {cur ? `${cur.flag} ${cur.code}` : code}
-                                <button
-                                  onClick={() => removeCurrency(code)}
-                                  className="ml-0.5 text-primary-400 hover:text-primary-600"
-                                >
-                                  &times;
-                                </button>
-                              </span>
-                            )
-                          })}
-                          <div className="relative">
-                            <button
-                              onClick={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 border border-dashed border-gray-300 text-gray-500 text-[13px] rounded-full hover:border-gray-400 hover:text-gray-700"
-                            >
-                              + Add
-                            </button>
-                            {showCurrencyDropdown && (
-                              <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-44 overflow-y-auto">
-                                {CURRENCY_OPTIONS.filter(
-                                  (c) => c.code !== settings.default_currency && !settings.supported_currencies.includes(c.code)
-                                ).map((cur) => (
-                                  <button
-                                    key={cur.code}
-                                    onClick={() => addCurrency(cur.code)}
-                                    className="block w-full text-left px-2.5 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50"
-                                  >
-                                    {cur.flag} {cur.name}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Language <span className="text-gray-700">*</span></label>
+                        <FlagSelect<LanguageOption>
+                          value={settings.default_language || 'en'}
+                          onChange={(code) => {
+                            setSettings({
+                              ...settings,
+                              default_language: code,
+                              supported_languages: settings.supported_languages.filter((l) => l !== code),
+                            })
+                          }}
+                          options={LANGUAGE_OPTIONS}
+                          getLabel={(o) => o.name}
+                        />
                       </div>
-                      <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Supported Languages
-                        </label>
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                          {settings.supported_languages.map((code) => {
-                            const lang = LANGUAGE_OPTIONS.find((l) => l.code === code)
-                            return (
-                              <span
-                                key={code}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[13px] rounded-full"
-                              >
-                                {lang?.label || code}
-                                <button
-                                  onClick={() => removeLanguage(code)}
-                                  className="ml-0.5 text-primary-400 hover:text-primary-600"
-                                >
-                                  &times;
-                                </button>
-                              </span>
-                            )
-                          })}
-                          <div className="relative">
-                            <button
-                              onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 border border-dashed border-gray-300 text-gray-500 text-[13px] rounded-full hover:border-gray-400 hover:text-gray-700"
-                            >
-                              + Add
-                            </button>
-                            {showLanguageDropdown && (
-                              <div className="absolute top-full left-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-44 overflow-y-auto">
-                                {LANGUAGE_OPTIONS.filter(
-                                  (l) => !settings.supported_languages.includes(l.code)
-                                ).map((lang) => (
-                                  <button
-                                    key={lang.code}
-                                    onClick={() => addLanguage(lang.code)}
-                                    className="block w-full text-left px-2.5 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50"
-                                  >
-                                    {lang.label}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                    </div>
+
+                    {/* Additional Currencies */}
+                    <div>
+                      <label className="block text-[13px] text-gray-700 mb-1">
+                        <span className="font-medium">Additional Currencies</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                      </label>
+                      <SearchableMultiSelect<CurrencyOption>
+                        selected={settings.supported_currencies}
+                        onToggle={toggleCurrency}
+                        options={CURRENCY_OPTIONS}
+                        excludeCode={settings.default_currency}
+                        placeholder={`Search currencies, e.g. "Swiss" or "CHF"...`}
+                        getLabel={(o) => o.code}
+                        getSearchLabel={(o) => `${o.name} \u00b7 ${o.code}`}
+                        popularCodes={POPULAR_CURRENCY_CODES}
+                        emptyMessage={`No additional currencies added \u2014 your booking page will show only ${settings.default_currency}`}
+                      />
+                    </div>
+
+                    {/* Additional Languages */}
+                    <div>
+                      <label className="block text-[13px] text-gray-700 mb-1">
+                        <span className="font-medium">Additional Languages</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                      </label>
+                      <SearchableMultiSelect<LanguageOption>
+                        selected={settings.supported_languages}
+                        onToggle={toggleLanguage}
+                        options={LANGUAGE_OPTIONS}
+                        excludeCode={settings.default_language || 'en'}
+                        placeholder={`Search languages, e.g. "German" or "Deutsch"...`}
+                        getLabel={(o) => o.nativeName}
+                        getSearchLabel={(o) => `${o.name} \u00b7 ${o.nativeName}`}
+                        popularCodes={POPULAR_LANGUAGE_CODES}
+                        emptyMessage={`No additional languages added \u2014 your booking page will show only ${(settings.default_language || 'en').toUpperCase()}`}
+                      />
                     </div>
                   </div>
 
@@ -519,12 +633,6 @@ export default function SettingsPage() {
                   description="Get notified about payment events"
                 />
 
-                <ToggleSwitch
-                  enabled={settings.weekly_reports}
-                  onChange={() => updateSetting('weekly_reports', !settings.weekly_reports)}
-                  label="Weekly Reports"
-                  description="Receive weekly performance summaries"
-                />
               </div>
 
               {/* Save button */}

@@ -29,7 +29,6 @@ export interface PropertySettings {
   email_notifications: boolean
   new_booking_alerts: boolean
   payment_alerts: boolean
-  weekly_reports: boolean
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>
