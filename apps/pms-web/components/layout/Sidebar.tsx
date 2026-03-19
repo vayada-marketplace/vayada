@@ -47,14 +47,9 @@ const navItems = [
     icon: CalendarIcon,
   },
   {
-    label: 'Affiliates',
-    href: '/affiliates',
-    icon: AffiliatesIcon,
-  },
-  {
-    label: 'Payouts',
-    href: '/payouts',
-    icon: PayoutsIcon,
+    label: 'Channels',
+    href: '/channel-manager',
+    icon: ChannelsIcon,
   },
   {
     label: 'Settings',
@@ -265,23 +260,14 @@ function CalendarIcon({ className }: { className?: string }) {
   )
 }
 
-function AffiliatesIcon({ className }: { className?: string }) {
+function ChannelsIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  )
-}
-
-function PayoutsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 17l10 5 10-5" />
-      <path d="M2 12l10 5 10-5" />
-      <path d="M12 2L2 7l10 5 10-5L12 2z" />
+      <path d="M4 4h6v6H4z" />
+      <path d="M14 4h6v6h-6z" />
+      <path d="M4 14h6v6H4z" />
+      <path d="M17 14v8" />
+      <path d="M13 18h8" />
     </svg>
   )
 }

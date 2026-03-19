@@ -64,25 +64,6 @@ export interface PaymentSettingsResponse {
   cancellationPolicy: CancellationPolicy
 }
 
-export interface Payout {
-  id: string
-  bookingId: string
-  bookingReference: string | null
-  recipientType: string
-  amount: number
-  currency: string
-  status: string
-  scheduledFor: string
-  completedAt: string | null
-}
-
-export interface PayoutListResponse {
-  payouts: Payout[]
-  total: number
-  limit: number
-  offset: number
-}
-
 export const bookingsService = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
     const qs = buildQueryString(params)
@@ -119,8 +100,4 @@ export const bookingsService = {
   getStripeOnboardingLink: () =>
     pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link'),
 
-  getPayouts: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const qs = buildQueryString(params)
-    return pmsClient.get<PayoutListResponse>(`/admin/payouts${qs}`)
-  },
 }
