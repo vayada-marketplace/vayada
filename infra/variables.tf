@@ -104,6 +104,19 @@ variable "stripe_webhook_secret" {
   default     = ""
 }
 
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for custom hostname management"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID for vayada.com"
+  type        = string
+  default     = "77009db898599f8a81d571050e7c5f15"
+}
+
 variable "alb_sg_id" {
   description = "Existing ALB security group ID"
   type        = string

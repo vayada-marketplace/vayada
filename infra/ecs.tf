@@ -15,6 +15,8 @@ locals {
         { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
         { name = "API_PORT", value = "8001" },
         { name = "PMS_DATABASE_URL", value = "postgresql://vayada_pms_user:${var.db_pms_password}@${var.rds_endpoint}:5432/vayada_pms_db" },
+        { name = "CLOUDFLARE_API_TOKEN", value = var.cloudflare_api_token },
+        { name = "CLOUDFLARE_ZONE_ID", value = var.cloudflare_zone_id },
         { name = "ENVIRONMENT", value = "production" },
         { name = "DEBUG", value = "false" },
       ]
