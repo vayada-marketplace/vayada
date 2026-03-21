@@ -15,6 +15,7 @@ class PropertySettingsResponse(BaseModel):
     supported_languages: list[str]
     check_in_time: str
     check_out_time: str
+    custom_domain: str | None
     pay_at_property_enabled: bool
     free_cancellation_days: int
     email_notifications: bool
@@ -37,6 +38,7 @@ class PropertySettingsUpdate(BaseModel):
     supported_languages: Optional[list[str]] = None
     check_in_time: Optional[str] = None
     check_out_time: Optional[str] = None
+    custom_domain: Optional[str] = None
     pay_at_property_enabled: Optional[bool] = None
     free_cancellation_days: Optional[int] = None
     email_notifications: Optional[bool] = None

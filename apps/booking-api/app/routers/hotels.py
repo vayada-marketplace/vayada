@@ -2,6 +2,7 @@ import logging
 from typing import List
 from fastapi import APIRouter, HTTPException, Query
 from app.models.hotel import HotelResponse, RoomTypeResponse, AddonResponse
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.services.hotel_service import (
     get_hotel_by_slug,
     get_rooms_by_hotel_slug,
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/hotels", tags=["hotels"])
 exchange_router = APIRouter(prefix="/api", tags=["exchange-rates"])
+resolve_router = APIRouter(prefix="/api", tags=["domain-resolution"])
 
 
 @router.get("/{slug}", response_model=HotelResponse)
@@ -49,3 +51,12 @@ async def get_payment_settings(slug: str):
 async def exchange_rates(base: str = Query(default="EUR")):
     rates = await get_rates(base)
     return {"base": base.upper(), "rates": rates}
+
+
+@resolve_router.get("/resolve-domain")
+async def resolve_domain(domain: str = Query(...)):
+    """Resolve a custom domain to the hotel slug."""
+    hotel = await BookingHotelRepository.get_by_custom_domain(domain)
+    if not hotel:
+        raise HTTPException(status_code=404, detail="No hotel found for this domain")
+    return {"slug": hotel["slug"]}

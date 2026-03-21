@@ -24,6 +24,11 @@ class BookingHotelRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def get_by_custom_domain(domain: str) -> Optional[dict]:
+        row = await Database.fetchrow("SELECT * FROM booking_hotels WHERE custom_domain = $1", domain)
+        return dict(row) if row else None
+
+    @staticmethod
     async def get_by_slug_translated(slug: str, locale: str) -> Optional[dict]:
         query = """
             SELECT h.*,

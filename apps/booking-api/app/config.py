@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # Frontend URL (for reset password links)
     FRONTEND_URL: str = Field("http://localhost:3003", description="Frontend URL for reset password links")
 
+    # Cloudflare for SaaS (custom domains)
+    CLOUDFLARE_API_TOKEN: str = Field(default="", description="Cloudflare API token for custom hostname management")
+    CLOUDFLARE_ZONE_ID: str = Field(default="", description="Cloudflare zone ID for vayada.com")
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
