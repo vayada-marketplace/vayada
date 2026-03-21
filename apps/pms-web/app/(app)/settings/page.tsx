@@ -130,11 +130,16 @@ export default function SettingsPage() {
     setError('')
     setSuccess('')
     try {
-      await customDomainService.connect(domainInput.trim().toLowerCase())
-      const status = await customDomainService.getStatus()
-      setDomainStatus(status)
+      const connectedDomain = domainInput.trim().toLowerCase()
+      await customDomainService.connect(connectedDomain)
+      setDomainStatus({
+        configured: true,
+        domain: connectedDomain,
+        status: 'pending',
+        ssl_status: 'initializing',
+      })
       setDomainInput('')
-      setSuccess('Custom domain connected. Please add the DNS record below.')
+      setSuccess('Custom domain connected. Add the DNS record below to activate it.')
     } catch (err: any) {
       setError(err.message || 'Failed to connect domain')
     } finally {
