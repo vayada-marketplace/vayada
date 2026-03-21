@@ -9,11 +9,10 @@ import { uploadSingleImage } from '@/lib/utils/uploadImage'
 import MediaTab from '@/components/design-studio/MediaTab'
 import ColorsTab from '@/components/design-studio/ColorsTab'
 import FontsTab from '@/components/design-studio/FontsTab'
-import FiltersTab from '@/components/design-studio/FiltersTab'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
 
-type Tab = 'media' | 'colors' | 'fonts' | 'filters'
+type Tab = 'media' | 'colors' | 'fonts'
 
 export default function DesignStudioPage() {
   const [activeTab, setActiveTab] = useState<Tab>('media')
@@ -34,10 +33,6 @@ export default function DesignStudioPage() {
   // Fonts state
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
 
-  // Filters state
-  const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel', 'bestRated', 'mountainView'])
-  const [customFilters, setCustomFilters] = useState<Record<string, string>>({})
-  const [newFilterLabel, setNewFilterLabel] = useState('')
 
   useEffect(() => {
     settingsService.getDesignSettings()
@@ -48,8 +43,6 @@ export default function DesignStudioPage() {
         if (settings.primary_color) setPrimaryColor(settings.primary_color)
         if (settings.accent_color) setAccentColor(settings.accent_color)
         if (settings.font_pairing) setSelectedFont(settings.font_pairing)
-        if (settings.booking_filters) setBookingFilters(settings.booking_filters)
-        if (settings.custom_filters) setCustomFilters(settings.custom_filters)
       })
       .catch(() => {
         // Keep attractive defaults on error
@@ -110,8 +103,6 @@ export default function DesignStudioPage() {
         primary_color: primaryColor,
         accent_color: accentColor,
         font_pairing: selectedFont,
-        booking_filters: bookingFilters,
-        custom_filters: customFilters,
       })
       setFeedback({ type: 'success', message: 'Design settings saved successfully' })
     } catch {
@@ -130,7 +121,6 @@ export default function DesignStudioPage() {
     { id: 'media' as const, label: 'Media & Content', icon: MediaIcon },
     { id: 'colors' as const, label: 'Colors', icon: ColorsIcon },
     { id: 'fonts' as const, label: 'Fonts', icon: FontsIcon },
-    { id: 'filters' as const, label: 'Filters', icon: FiltersIcon2 },
   ]
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
@@ -164,7 +154,7 @@ export default function DesignStudioPage() {
         {/* LEFT: Controls panel */}
         <div className="w-[380px] shrink-0 flex flex-col min-h-0">
           {/* Tab bar */}
-          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-4 shrink-0">
+          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -210,13 +200,6 @@ export default function DesignStudioPage() {
               />
             )}
 
-            {activeTab === 'filters' && (
-              <FiltersTab
-                bookingFilters={bookingFilters} setBookingFilters={setBookingFilters}
-                customFilters={customFilters} setCustomFilters={setCustomFilters}
-                newFilterLabel={newFilterLabel} setNewFilterLabel={setNewFilterLabel}
-              />
-            )}
           </div>
 
           {/* Save button */}
@@ -633,14 +616,6 @@ function FontsIcon({ className }: { className?: string }) {
       <path d="M4 7V4h16v3" />
       <path d="M12 4v16" />
       <path d="M8 20h8" />
-    </svg>
-  )
-}
-
-function FiltersIcon2({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
     </svg>
   )
 }

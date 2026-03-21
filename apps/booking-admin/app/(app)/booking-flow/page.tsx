@@ -54,6 +54,7 @@ export default function BookingFlowPage() {
 
   // Rooms state (filters)
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
+  const [customFilters, setCustomFilters] = useState<Record<string, string>>({})
   const [filtersEnabled, setFiltersEnabled] = useState(false)
   const [savingFilters, setSavingFilters] = useState(false)
 
@@ -68,6 +69,9 @@ export default function BookingFlowPage() {
       if (design.booking_filters) {
         setBookingFilters(design.booking_filters)
         setFiltersEnabled(design.booking_filters.length > 0)
+      }
+      if (design.custom_filters) {
+        setCustomFilters(design.custom_filters)
       }
     }).finally(() => setLoading(false))
   }, [])
@@ -183,21 +187,11 @@ export default function BookingFlowPage() {
     setFiltersEnabled((prev) => !prev)
   }
 
-  const handleAddFilter = (label: string) => {
-    if (!bookingFilters.includes(label)) {
-      setBookingFilters((prev) => [...prev, label])
-    }
-  }
-
-  const handleRemoveFilter = (key: string) => {
-    setBookingFilters((prev) => prev.filter((k) => k !== key))
-  }
-
   const handleSaveFilters = async () => {
     try {
       setSavingFilters(true)
       const filters = filtersEnabled ? bookingFilters : []
-      await settingsService.updateDesignSettings({ booking_filters: filters })
+      await settingsService.updateDesignSettings({ booking_filters: filters, custom_filters: customFilters })
       showFeedback('success', 'Filters saved successfully')
     } catch {
       showFeedback('error', 'Failed to save filters')
@@ -256,10 +250,11 @@ export default function BookingFlowPage() {
         {activeTab === 'rooms' && (
           <RoomsTab
             bookingFilters={bookingFilters}
+            setBookingFilters={setBookingFilters}
+            customFilters={customFilters}
+            setCustomFilters={setCustomFilters}
             filtersEnabled={filtersEnabled}
             onToggleFiltersEnabled={handleToggleFiltersEnabled}
-            onAddFilter={handleAddFilter}
-            onRemoveFilter={handleRemoveFilter}
             handleSaveFilters={handleSaveFilters}
             savingFilters={savingFilters}
           />
