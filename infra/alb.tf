@@ -102,3 +102,25 @@ resource "aws_lb_listener_rule" "services" {
     Name = each.key
   }
 }
+
+# Default action: forward unmatched traffic (custom domains) to booking frontend
+resource "aws_lb_listener_rule" "default_booking_frontend" {
+  listener_arn = data.aws_lb_listener.https.arn
+  priority     = 99
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.services["booking-frontend"].arn
+  }
+
+  # Match everything not caught by higher-priority rules
+  condition {
+    path_pattern {
+      values = ["/*"]
+    }
+  }
+
+  tags = {
+    Name = "default-custom-domains"
+  }
+}

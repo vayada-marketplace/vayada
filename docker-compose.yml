@@ -41,7 +41,6 @@ services:
       - "5432:5432"
     volumes:
       - marketplace_postgres_data:/var/lib/postgresql/data
-      - ./marketplace/vayada-creator-marketplace-backend/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vayada_user -d vayada_db"]
       interval: 10s
@@ -61,7 +60,6 @@ services:
       - "5434:5432"
     volumes:
       - booking_postgres_data:/var/lib/postgresql/data
-      - ./booking-engine/vayada-booking-engine-backend/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vayada_booking_user -d vayada_booking_db"]
       interval: 10s
@@ -81,7 +79,6 @@ services:
       - "5435:5432"
     volumes:
       - auth_postgres_data:/var/lib/postgresql/data
-      - ./auth-db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vayada_auth_user -d vayada_auth_db"]
       interval: 10s
@@ -101,7 +98,6 @@ services:
       - "5436:5432"
     volumes:
       - pms_postgres_data:/var/lib/postgresql/data
-      - ./pms/vayada-pms-backend/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vayada_pms_user -d vayada_pms_db"]
       interval: 10s
