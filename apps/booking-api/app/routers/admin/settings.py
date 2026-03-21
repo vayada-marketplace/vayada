@@ -227,14 +227,25 @@ async def connect_custom_domain(
     # Check not already taken by another hotel
     existing = await BookingHotelRepository.get_by_custom_domain(domain)
     if existing and str(existing["id"]) != str(hotel["id"]):
-        raise HTTPException(status_code=409, detail="Domain is already in use by another property")
+        raise HTTPException(status_code=409, detail="This domain is already in use by another property")
+
+    # If already connected to this hotel, just return current status
+    if existing and str(existing["id"]) == str(hotel["id"]):
+        cf_status = await cloudflare_service.get_hostname_status(domain)
+        return {
+            "domain": domain,
+            "status": cf_status.get("status", "pending") if cf_status else "pending",
+            "ssl_status": cf_status.get("ssl_status", "initializing") if cf_status else "initializing",
+        }
 
     # Register with Cloudflare
     try:
         cf_result = await cloudflare_service.create_custom_hostname(domain)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error("Cloudflare create failed for %s: %s", domain, e)
-        raise HTTPException(status_code=502, detail="Failed to register domain with Cloudflare")
+        raise HTTPException(status_code=502, detail=f"Failed to register domain: {e}")
 
     # Save to DB
     await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": domain})

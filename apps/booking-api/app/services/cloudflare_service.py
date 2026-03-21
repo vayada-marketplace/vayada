@@ -41,8 +41,13 @@ async def create_custom_hostname(domain: str) -> dict:
         data = resp.json()
         if not data.get("success"):
             errors = data.get("errors", [])
+            error_codes = [e.get("code") for e in errors]
             logger.error("Cloudflare create_custom_hostname failed: %s", errors)
-            raise RuntimeError(f"Cloudflare API error: {errors}")
+            # 1406 = hostname already exists
+            if 1406 in error_codes:
+                raise ValueError("This domain is already registered. Try removing and re-adding it.")
+            msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
+            raise RuntimeError(msg)
         return data["result"]
 
 
