@@ -29,10 +29,27 @@ export default async function LocaleLayout({
   const headersList = await headers()
   const hostname = headersList.get('host') || ''
   const parts = hostname.split('.')
-  const slug = (parts.length >= 3 && parts[0] !== 'www' ? parts[0] : null)
-    || (parts.length === 2 && !parts[0].includes('localhost') ? parts[0] : null)
-    || process.env.NEXT_PUBLIC_HOTEL_SLUG
-    || 'hotel-alpenrose'
+  const isKnown = hostname.endsWith('.booking.vayada.com') || hostname.includes('localhost')
+
+  let slug: string
+  if (isKnown) {
+    slug = (parts.length >= 3 && parts[0] !== 'www' ? parts[0] : null)
+      || (parts.length === 2 && !parts[0].includes('localhost') ? parts[0] : null)
+      || process.env.NEXT_PUBLIC_HOTEL_SLUG
+      || 'hotel-alpenrose'
+  } else {
+    // Custom domain — resolve via API
+    let resolved: string | null = null
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      const res = await fetch(`${apiUrl}/api/resolve-domain?domain=${encodeURIComponent(hostname.split(':')[0])}`)
+      if (res.ok) {
+        const data = await res.json()
+        resolved = data.slug
+      }
+    } catch {}
+    slug = resolved || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+  }
 
   return (
     <html lang={locale}>
