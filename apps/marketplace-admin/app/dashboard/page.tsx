@@ -39,13 +39,8 @@ export default function DashboardPage() {
   const [successMessage, setSuccessMessage] = useState('')
 
   useEffect(() => {
-    if (!authService.isLoggedIn() || !authService.isAdmin()) {
-      router.push('/login')
-      return
-    }
-
     loadUsers()
-  }, [router, page, filterType, filterStatus])
+  }, [page, filterType, filterStatus])
 
   // Debounced search
   // Debounced search removed for frontend filtering
@@ -161,10 +156,6 @@ export default function DashboardPage() {
     }
   }
 
-  const handleLogout = () => {
-    authService.logout()
-  }
-
   const getStatusBadgeColor = (status: User['status']) => {
     switch (status) {
       case 'verified':
@@ -199,47 +190,19 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow">
-        <div className="px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-              <p className="text-sm text-gray-600">Manage all users in the system</p>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => router.push('/dashboard/hotels')}
-              >
-                Hotels
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => router.push('/dashboard/marketplace')}
-              >
-                Marketplace
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => router.push('/dashboard/collaborations')}
-              >
-                Collaborations
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => router.push('/dashboard/users/create')}
-              >
-                <PlusIcon className="w-5 h-5 mr-2" />
-                Create User
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleLogout}
-              >
-                Logout
-              </Button>
-            </div>
+      <header className="bg-white border-b border-gray-200">
+        <div className="px-6 py-4 flex justify-between items-center">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Users</h1>
+            <p className="text-sm text-gray-500">Manage all users in the system</p>
           </div>
+          <Button
+            variant="primary"
+            onClick={() => router.push('/dashboard/users/create')}
+          >
+            <PlusIcon className="w-5 h-5 mr-2" />
+            Create User
+          </Button>
         </div>
       </header>
 

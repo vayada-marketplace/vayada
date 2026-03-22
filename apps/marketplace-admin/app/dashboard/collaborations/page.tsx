@@ -242,15 +242,15 @@ export default function CollaborationsPage() {
     ];
 
     return (
-        <div className="px-4 sm:px-6 lg:px-8 py-8">
-            <div className="sm:flex sm:items-center mb-8">
-                <div className="sm:flex-auto">
-                    <h1 className="text-2xl font-semibold text-gray-900">Collaborations</h1>
-                    <p className="mt-2 text-sm text-gray-700">
-                        Monitor marketplace activity between Creators and Hotels.
-                    </p>
+        <div>
+            <header className="bg-white border-b border-gray-200">
+                <div className="px-6 py-4">
+                    <h1 className="text-xl font-bold text-gray-900">Collaborations</h1>
+                    <p className="text-sm text-gray-500">Monitor marketplace activity between Creators and Hotels</p>
                 </div>
-            </div>
+            </header>
+
+            <div className="px-6 py-6">
 
             {/* Filters */}
             <div className="mb-6 bg-white p-4 rounded-lg shadow">
@@ -386,6 +386,7 @@ export default function CollaborationsPage() {
                 onClose={() => setSelectedCollaboration(null)}
                 collaboration={selectedCollaboration}
             />
+            </div>
         </div>
     );
 }

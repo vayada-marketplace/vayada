@@ -137,24 +137,10 @@ export default function MarketplacePreviewPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow">
-        <div className="px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => router.push('/dashboard')}
-              >
-                <ArrowLeftIcon className="w-4 h-4 mr-2" />
-                Back
-              </Button>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Marketplace Preview</h1>
-                <p className="text-sm text-gray-600">View the public marketplace as users see it</p>
-              </div>
-            </div>
-          </div>
+      <header className="bg-white border-b border-gray-200">
+        <div className="px-6 py-4">
+          <h1 className="text-xl font-bold text-gray-900">Marketplace</h1>
+          <p className="text-sm text-gray-500">View the public marketplace as users see it</p>
         </div>
       </header>
 
