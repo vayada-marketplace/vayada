@@ -10,6 +10,7 @@ export interface BookingRequestResponse {
 
 export interface PaymentSettings {
   payAtPropertyEnabled: boolean
+  payAtHotelMethods: string[]
   freeCancellationDays: number
 }
 
