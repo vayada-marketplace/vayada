@@ -99,7 +99,11 @@ export default function AddonsPage() {
                   <h3 className="text-base font-bold text-gray-900 mb-1">{addon.name}</h3>
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{addon.description}</p>
                   <div className="flex items-center justify-between">
-                    <p className="text-lg font-bold text-gray-900">{formatPrice(addon.price, addon.currency)}</p>
+                    <p className="text-lg font-bold text-gray-900">
+                      {formatPrice(addon.price, addon.currency)}
+                      {addon.perNight && <span className="text-xs font-normal text-gray-500"> /night</span>}
+                      {addon.perPerson && <span className="text-xs font-normal text-gray-500"> /person</span>}
+                    </p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className={`px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors ${
@@ -141,7 +145,11 @@ export default function AddonsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <p className="text-sm font-bold text-gray-900">{formatPrice(addon.price, addon.currency)}</p>
+                    <p className="text-sm font-bold text-gray-900">
+                      {formatPrice(addon.price, addon.currency)}
+                      {addon.perNight && <span className="text-[10px] font-normal text-gray-500"> /night</span>}
+                      {addon.perPerson && <span className="text-[10px] font-normal text-gray-500"> /person</span>}
+                    </p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
                       className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"

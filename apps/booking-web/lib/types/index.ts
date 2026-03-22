@@ -133,4 +133,5 @@ export interface Addon {
   image: string
   duration?: string
   perPerson?: boolean
+  perNight?: boolean
 }
