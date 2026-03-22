@@ -55,6 +55,12 @@ async def get_rooms_for_guest(
                 if season_rate is not None:
                     base_rate = season_rate
 
+        # If no explicit NR rate, calculate from discount percentage
+        if nr_rate is None and base_rate > 0:
+            discount_pct = room.get("non_refundable_discount")
+            if discount_pct is not None and discount_pct > 0:
+                nr_rate = round(base_rate * (1 - discount_pct / 100), 2)
+
         result.append(
             RoomTypeResponse(
                 id=str(room["id"]),
