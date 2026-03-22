@@ -1,44 +1,27 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { CheckIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { inviteCodesService, type InviteCode, type InviteData } from '@/services/api/inviteCodes'
-import { TrashIcon, ClipboardIcon, CheckIcon, PlusIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { uploadSingleImage, uploadImages } from '@/lib/utils/uploadImage'
+import { FONT_PAIRINGS } from '@/lib/constants/branding'
+import { TrashIcon, ClipboardIcon, PlusIcon } from '@heroicons/react/24/outline'
 
-const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'IDR', 'THB', 'AUD', 'CAD', 'JPY', 'SGD']
+import PropertyStep from '@/components/setup/PropertyStep'
+import BrandMediaStep from '@/components/setup/BrandMediaStep'
+import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
+import PoliciesStep from '@/components/setup/PoliciesStep'
 
-const DEFAULT_PROPERTY = {
-  property_name: '', city: '', country: '', address: '',
-  reservation_email: '', phone_number: '', whatsapp_number: '',
-  instagram: '', facebook: '',
-  default_currency: 'EUR', default_language: 'en',
-  supported_currencies: [] as string[], supported_languages: [] as string[],
-}
+const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
-const DEFAULT_BRANDING = {
-  hero_image: '', primary_color: '#4F46E5', accent_color: '#F5F3EF',
-  font_pairing: 'high-end-serif', description: '',
-  booking_filters: ['includeBreakfast', 'freeCancellation', 'payAtHotel'],
-}
+const STEPS = [
+  { number: 1, label: 'Property' },
+  { number: 2, label: 'Brand & Media' },
+  { number: 3, label: 'Rooms & Rates' },
+  { number: 4, label: 'Policies' },
+]
 
-const DEFAULT_ROOM = {
-  name: '', beds: [{ type: 'King Bed', count: 1 }],
-  maxOccupancy: 2, bedrooms: 1, bathrooms: 1, roomSize: '', totalRooms: 1,
-  description: '', category: 'Standard',
-  baseRate: '', nonRefundableRate: '', nonRefundableDiscount: 10,
-  flexibleRateEnabled: true, nonRefundableEnabled: false,
-  cancellationPolicy: 'Free until 7 days before', currency: 'EUR',
-  images: [] as string[], amenities: [] as string[], features: [] as string[],
-  bookDirectBenefits: [] as string[],
-  operatingPeriods: [{ from: '2026-01-01', to: '2026-12-31' }],
-  seasons: [] as { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[],
-  weekendSurcharge: '+0%',
-}
-
-const DEFAULT_POLICIES = {
-  check_in_time: '15:00', check_out_time: '11:00', minimum_stay: 1,
-  pay_at_property: true, online_card_payment: false, bank_transfer: false,
-  special_requests: true, arrival_time: false, guest_count: false, refer_a_guest: false,
-}
+type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
 
 export default function InviteCodesPage() {
   const [view, setView] = useState<'list' | 'create'>('list')
@@ -46,23 +29,67 @@ export default function InviteCodesPage() {
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  // Create form state
-  const [property, setProperty] = useState({ ...DEFAULT_PROPERTY })
-  const [branding, setBranding] = useState({ ...DEFAULT_BRANDING })
-  const [rooms, setRooms] = useState([{ ...DEFAULT_ROOM }])
-  const [policies, setPolicies] = useState({ ...DEFAULT_POLICIES })
+  // ── Create form state ──
+
+  const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [generatedCode, setGeneratedCode] = useState<string | null>(null)
 
+  // Step 1: Property
+  const [propertyName, setPropertyName] = useState('')
+  const [city, setCity] = useState('')
+  const [country, setCountry] = useState('')
+  const [address, setAddress] = useState('')
+  const [reservationEmail, setReservationEmail] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [whatsapp, setWhatsapp] = useState('')
+  const [instagram, setInstagram] = useState('')
+  const [facebook, setFacebook] = useState('')
+  const [currency, setCurrency] = useState('EUR')
+  const [defaultLanguage, setDefaultLanguage] = useState('en')
+  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([])
+  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([])
+
+  // Step 2: Brand & Media
+  const [heroImage, setHeroImage] = useState('')
+  const [primaryColor, setPrimaryColor] = useState('#4F46E5')
+  const [accentColor, setAccentColor] = useState('#F5F3EF')
+  const [selectedFont, setSelectedFont] = useState('high-end-serif')
+  const [propertyDescription, setPropertyDescription] = useState('')
+  const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel'])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+
+  // Step 3: Rooms
+  const [rooms, setRooms] = useState<RoomType[]>([createEmptyRoom()])
+  const [activeRoomIndex, setActiveRoomIndex] = useState(0)
+  const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>('details')
+  const [amenityInput, setAmenityInput] = useState('')
+  const [featureInput, setFeatureInput] = useState('')
+  const [benefitInput, setBenefitInput] = useState('')
+  const roomFileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
+
+  // Step 4: Policies
+  const [checkInTime, setCheckInTime] = useState('15:00')
+  const [checkOutTime, setCheckOutTime] = useState('11:00')
+  const [minimumStay, setMinimumStay] = useState(1)
+  const [payAtHotel, setPayAtHotel] = useState(true)
+  const [onlineCardPayment, setOnlineCardPayment] = useState(false)
+  const [bankTransfer, setBankTransfer] = useState(false)
+  const [specialRequests, setSpecialRequests] = useState(true)
+  const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false)
+  const [numberOfGuests, setNumberOfGuests] = useState(false)
+  const [enableReferAGuest, setEnableReferAGuest] = useState(false)
+
+  useEffect(() => { loadInvites() }, [])
+
   useEffect(() => {
-    loadInvites()
-  }, [])
+    setRooms(prev => prev.map(r => r.currency ? r : { ...r, currency }))
+  }, [currency])
 
   const loadInvites = async () => {
-    try {
-      const data = await inviteCodesService.list()
-      setInvites(data)
-    } catch { /* ignore */ }
+    try { setInvites(await inviteCodesService.list()) } catch { /* */ }
     finally { setLoading(false) }
   }
 
@@ -78,33 +105,95 @@ export default function InviteCodesPage() {
     setInvites(prev => prev.filter(i => i.id !== id))
   }
 
-  const handleCreate = async () => {
-    if (!property.property_name.trim()) return
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const previewUrl = URL.createObjectURL(file)
+    setHeroImage(previewUrl)
+    try {
+      setUploading(true)
+      const s3Url = await uploadSingleImage(file)
+      URL.revokeObjectURL(previewUrl)
+      setHeroImage(s3Url)
+    } catch { console.error('Image upload failed') }
+    finally { setUploading(false) }
+  }
+
+  const handleRoomImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    try {
+      setUploadingRoomImages(true)
+      const urls = await uploadImages(Array.from(files))
+      setRooms(prev => prev.map((r, i) => i === activeRoomIndex ? { ...r, images: [...r.images, ...urls] } : r))
+    } catch { console.error('Room image upload failed') }
+    finally { setUploadingRoomImages(false); if (roomFileInputRef.current) roomFileInputRef.current.value = '' }
+  }
+
+  const canProceed = (): boolean => {
+    if (step === 1) return !!(propertyName.trim() && city.trim() && country)
+    if (step === 2) return !!(primaryColor && accentColor && selectedFont)
+    if (step === 3) return rooms.every(r => !!(r.name.trim()))
+    return true
+  }
+
+  const handleGenerate = async () => {
     try {
       setSaving(true)
-      const data: InviteData = { property, branding, rooms, policies }
+      const data: InviteData = {
+        property: {
+          property_name: propertyName, city, country, address,
+          reservation_email: reservationEmail, phone_number: phoneNumber,
+          whatsapp_number: whatsapp, instagram, facebook,
+          default_currency: currency, default_language: defaultLanguage,
+          supported_currencies: supportedCurrencies, supported_languages: supportedLanguages,
+        },
+        branding: {
+          hero_image: heroImage.startsWith('blob:') ? '' : heroImage,
+          primary_color: primaryColor, accent_color: accentColor,
+          font_pairing: selectedFont, description: propertyDescription,
+          booking_filters: bookingFilters,
+        },
+        rooms: rooms.map(r => ({
+          ...r,
+          baseRate: r.baseRate,
+          nonRefundableRate: r.nonRefundableRate,
+        })),
+        policies: {
+          check_in_time: checkInTime, check_out_time: checkOutTime,
+          minimum_stay: minimumStay, pay_at_property: payAtHotel,
+          online_card_payment: onlineCardPayment, bank_transfer: bankTransfer,
+          special_requests: specialRequests, arrival_time: estimatedArrivalTime,
+          guest_count: numberOfGuests, refer_a_guest: enableReferAGuest,
+        },
+      }
       const result = await inviteCodesService.create(data)
       setGeneratedCode(result.code)
       loadInvites()
-    } catch {
-      alert('Failed to create invite code')
-    } finally {
-      setSaving(false)
-    }
+    } catch { alert('Failed to create invite code') }
+    finally { setSaving(false) }
   }
 
   const resetForm = () => {
-    setProperty({ ...DEFAULT_PROPERTY })
-    setBranding({ ...DEFAULT_BRANDING })
-    setRooms([{ ...DEFAULT_ROOM }])
-    setPolicies({ ...DEFAULT_POLICIES })
+    setStep(1)
+    setPropertyName(''); setCity(''); setCountry(''); setAddress('')
+    setReservationEmail(''); setPhoneNumber(''); setWhatsapp('')
+    setInstagram(''); setFacebook('')
+    setCurrency('EUR'); setDefaultLanguage('en')
+    setSupportedCurrencies([]); setSupportedLanguages([])
+    setHeroImage(''); setPrimaryColor('#4F46E5'); setAccentColor('#F5F3EF')
+    setSelectedFont('high-end-serif'); setPropertyDescription('')
+    setBookingFilters(['includeBreakfast', 'freeCancellation', 'payAtHotel'])
+    setRooms([createEmptyRoom()]); setActiveRoomIndex(0)
+    setCheckInTime('15:00'); setCheckOutTime('11:00'); setMinimumStay(1)
+    setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
+    setSpecialRequests(true); setEstimatedArrivalTime(false)
+    setNumberOfGuests(false); setEnableReferAGuest(false)
     setGeneratedCode(null)
     setView('list')
   }
 
-  const updateRoom = (index: number, updates: Partial<typeof DEFAULT_ROOM>) => {
-    setRooms(prev => prev.map((r, i) => i === index ? { ...r, ...updates } : r))
-  }
+  // ── Create View ──
 
   if (view === 'create') {
     if (generatedCode) {
@@ -120,15 +209,12 @@ export default function InviteCodesPage() {
               <p className="text-3xl font-mono font-bold text-gray-900 tracking-widest">{generatedCode}</p>
             </div>
             <button
-              onClick={() => { navigator.clipboard.writeText(generatedCode); }}
+              onClick={() => navigator.clipboard.writeText(generatedCode)}
               className="w-full mb-3 py-2.5 bg-primary-500 text-white text-sm font-semibold rounded-lg hover:bg-primary-600 transition-colors"
             >
               Copy Code
             </button>
-            <button
-              onClick={resetForm}
-              className="w-full py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
-            >
+            <button onClick={resetForm} className="w-full py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
               Back to List
             </button>
           </div>
@@ -136,177 +222,143 @@ export default function InviteCodesPage() {
       )
     }
 
-    return (
-      <div>
-        <header className="bg-white border-b border-gray-200">
-          <div className="px-6 py-4 flex items-center gap-3">
-            <button onClick={resetForm} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
-              <ArrowLeftIcon className="w-5 h-5" />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Create Invite</h1>
-              <p className="text-sm text-gray-500">Pre-configure a hotel setup for onboarding</p>
+    const stepIndicators = (
+      <div className="flex items-center justify-center mb-8">
+        {STEPS.map((s, idx) => (
+          <div key={s.number} className="flex items-center">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors shrink-0 ${
+                step > s.number ? 'bg-primary-500 text-white' : step === s.number ? 'bg-primary-500 text-white' : 'bg-gray-200 text-gray-500'
+              }`}>
+                {step > s.number ? <CheckIcon className="w-3.5 h-3.5" /> : s.number}
+              </div>
+              <span className={`text-[12px] font-medium whitespace-nowrap ${step >= s.number ? 'text-gray-900' : 'text-gray-400'}`}>
+                {s.label}
+              </span>
             </div>
+            {idx < STEPS.length - 1 && (
+              <div className={`w-12 h-px mx-3 shrink-0 ${step > s.number ? 'bg-primary-500' : 'bg-gray-300'}`} />
+            )}
           </div>
-        </header>
+        ))}
+      </div>
+    )
 
-        <div className="p-6 max-w-3xl space-y-6">
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
-          {/* Property Details */}
-          <Section title="Property Details">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Hotel Name *" value={property.property_name} onChange={v => setProperty(p => ({ ...p, property_name: v }))} placeholder="e.g. Hotel Alpenrose" />
-              <Field label="City *" value={property.city} onChange={v => setProperty(p => ({ ...p, city: v }))} placeholder="e.g. Innsbruck" />
-              <Field label="Country *" value={property.country} onChange={v => setProperty(p => ({ ...p, country: v }))} placeholder="e.g. Austria" />
-              <Field label="Address" value={property.address} onChange={v => setProperty(p => ({ ...p, address: v }))} placeholder="Full address" />
-              <Field label="Reservation Email" value={property.reservation_email} onChange={v => setProperty(p => ({ ...p, reservation_email: v }))} placeholder="reservations@hotel.com" />
-              <Field label="Phone" value={property.phone_number} onChange={v => setProperty(p => ({ ...p, phone_number: v }))} placeholder="+43 512 123 456" />
-              <Field label="WhatsApp" value={property.whatsapp_number} onChange={v => setProperty(p => ({ ...p, whatsapp_number: v }))} placeholder="+43 512 123 456" />
-              <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Currency</label>
-                <select
-                  value={property.default_currency}
-                  onChange={e => setProperty(p => ({ ...p, default_currency: e.target.value }))}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <Field label="Instagram" value={property.instagram} onChange={v => setProperty(p => ({ ...p, instagram: v }))} placeholder="https://instagram.com/..." />
-              <Field label="Facebook" value={property.facebook} onChange={v => setProperty(p => ({ ...p, facebook: v }))} placeholder="https://facebook.com/..." />
+        {/* Top bar */}
+        <div className="bg-white border-b border-gray-200 px-8 py-3 shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <button onClick={resetForm} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
+                <ArrowLeftIcon className="w-5 h-5" />
+              </button>
+              <span className="font-semibold text-gray-900 text-[15px]">Create Invite</span>
             </div>
-          </Section>
+            <span className="text-[13px] text-gray-500">Step {step} of {STEPS.length}</span>
+          </div>
+        </div>
 
-          {/* Branding */}
-          <Section title="Branding">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Hero Image URL" value={branding.hero_image} onChange={v => setBranding(b => ({ ...b, hero_image: v }))} placeholder="https://images.unsplash.com/..." />
-              <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Primary Color</label>
-                <div className="flex gap-2">
-                  <input type="color" value={branding.primary_color} onChange={e => setBranding(b => ({ ...b, primary_color: e.target.value }))} className="w-8 h-8 rounded cursor-pointer border-0" />
-                  <input type="text" value={branding.primary_color} onChange={e => setBranding(b => ({ ...b, primary_color: e.target.value }))} className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                </div>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Description</label>
-                <textarea
-                  value={branding.description}
-                  onChange={e => setBranding(b => ({ ...b, description: e.target.value }))}
-                  rows={2}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-                  placeholder="A short description of the hotel..."
-                />
-              </div>
-            </div>
-          </Section>
+        {/* Progress bar */}
+        <div className="h-[3px] bg-gray-100 shrink-0">
+          <div className="h-full bg-primary-600 transition-all duration-300" style={{ width: `${(step / STEPS.length) * 100}%` }} />
+        </div>
 
-          {/* Rooms */}
-          <Section title="Room Types">
-            {rooms.map((room, idx) => (
-              <div key={idx} className="border border-gray-200 rounded-lg p-4 mb-3">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-[13px] font-semibold text-gray-900">Room {idx + 1}</h4>
-                  {rooms.length > 1 && (
-                    <button onClick={() => setRooms(prev => prev.filter((_, i) => i !== idx))} className="text-red-500 text-[12px] hover:underline">Remove</button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Name *" value={room.name} onChange={v => updateRoom(idx, { name: v })} placeholder="e.g. Deluxe Double Room" />
-                  <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Category</label>
-                    <select
-                      value={room.category}
-                      onChange={e => updateRoom(idx, { category: e.target.value })}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                      {['Standard', 'Deluxe', 'Superior', 'Suite', 'Villa', 'Bungalow', 'Studio', 'Penthouse'].map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <Field label="Base Rate" value={room.baseRate} onChange={v => updateRoom(idx, { baseRate: v })} placeholder="e.g. 120" type="number" />
-                  <Field label="Total Rooms" value={String(room.totalRooms)} onChange={v => updateRoom(idx, { totalRooms: parseInt(v) || 1 })} type="number" />
-                  <Field label="Max Occupancy" value={String(room.maxOccupancy)} onChange={v => updateRoom(idx, { maxOccupancy: parseInt(v) || 2 })} type="number" />
-                  <Field label="Size (m²)" value={room.roomSize} onChange={v => updateRoom(idx, { roomSize: v })} placeholder="e.g. 28" />
-                  <div className="col-span-2">
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Description</label>
-                    <textarea
-                      value={room.description}
-                      onChange={e => updateRoom(idx, { description: e.target.value })}
-                      rows={2}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-                      placeholder="Room description..."
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Amenities (comma-separated)</label>
-                    <input
-                      type="text"
-                      value={room.amenities.join(', ')}
-                      onChange={e => updateRoom(idx, { amenities: e.target.value.split(',').map(a => a.trim()).filter(Boolean) })}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      placeholder="Free WiFi, Mini Bar, Air Conditioning, ..."
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Features (comma-separated)</label>
-                    <input
-                      type="text"
-                      value={room.features.join(', ')}
-                      onChange={e => updateRoom(idx, { features: e.target.value.split(',').map(f => f.trim()).filter(Boolean) })}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      placeholder="Mountain View, Balcony, Private Terrace, ..."
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-            <button
-              onClick={() => setRooms(prev => [...prev, { ...DEFAULT_ROOM, currency: property.default_currency }])}
-              className="inline-flex items-center gap-1.5 text-[12px] text-primary-600 font-medium hover:underline"
-            >
-              <PlusIcon className="w-3.5 h-3.5" /> Add Room Type
-            </button>
-          </Section>
+        {step === 1 && (
+          <PropertyStep
+            propertyName={propertyName} setPropertyName={setPropertyName}
+            city={city} setCity={setCity}
+            country={country} setCountry={setCountry}
+            address={address} setAddress={setAddress}
+            reservationEmail={reservationEmail} setReservationEmail={setReservationEmail}
+            phoneNumber={phoneNumber} setPhoneNumber={setPhoneNumber}
+            whatsapp={whatsapp} setWhatsapp={setWhatsapp}
+            instagram={instagram} setInstagram={setInstagram}
+            facebook={facebook} setFacebook={setFacebook}
+            currency={currency} setCurrency={setCurrency}
+            defaultLanguage={defaultLanguage} setDefaultLanguage={setDefaultLanguage}
+            supportedCurrencies={supportedCurrencies} setSupportedCurrencies={setSupportedCurrencies}
+            supportedLanguages={supportedLanguages} setSupportedLanguages={setSupportedLanguages}
+            stepIndicators={stepIndicators}
+          />
+        )}
 
-          {/* Policies */}
-          <Section title="Policies & Operations">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Check-in Time</label>
-                <select
-                  value={policies.check_in_time}
-                  onChange={e => setPolicies(p => ({ ...p, check_in_time: e.target.value }))}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`).map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Check-out Time</label>
-                <select
-                  value={policies.check_out_time}
-                  onChange={e => setPolicies(p => ({ ...p, check_out_time: e.target.value }))}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`).map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-4 mt-3">
-              <Toggle label="Pay at Hotel" checked={policies.pay_at_property} onChange={v => setPolicies(p => ({ ...p, pay_at_property: v }))} />
-              <Toggle label="Online Card" checked={policies.online_card_payment} onChange={v => setPolicies(p => ({ ...p, online_card_payment: v }))} />
-              <Toggle label="Bank Transfer" checked={policies.bank_transfer} onChange={v => setPolicies(p => ({ ...p, bank_transfer: v }))} />
-            </div>
-          </Section>
+        {step === 2 && (
+          <BrandMediaStep
+            heroImage={heroImage} setHeroImage={setHeroImage}
+            primaryColor={primaryColor} setPrimaryColor={setPrimaryColor}
+            accentColor={accentColor} setAccentColor={setAccentColor}
+            selectedFont={selectedFont} setSelectedFont={setSelectedFont}
+            propertyDescription={propertyDescription} setPropertyDescription={setPropertyDescription}
+            bookingFilters={bookingFilters} setBookingFilters={setBookingFilters}
+            fileInputRef={fileInputRef}
+            handleImageUpload={handleImageUpload}
+            uploading={uploading}
+            stepIndicators={stepIndicators}
+          />
+        )}
 
-          {/* Generate button */}
+        {step === 3 && (
+          <RoomsStep
+            rooms={rooms} setRooms={setRooms}
+            activeRoomIndex={activeRoomIndex} setActiveRoomIndex={setActiveRoomIndex}
+            activeRoomTab={activeRoomTab} setActiveRoomTab={setActiveRoomTab}
+            amenityInput={amenityInput} setAmenityInput={setAmenityInput}
+            featureInput={featureInput} setFeatureInput={setFeatureInput}
+            benefitInput={benefitInput} setBenefitInput={setBenefitInput}
+            roomFileInputRef={roomFileInputRef}
+            handleRoomImageUpload={handleRoomImageUpload}
+            uploadingRoomImages={uploadingRoomImages}
+            currency={currency}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {step === 4 && (
+          <PoliciesStep
+            checkInTime={checkInTime} setCheckInTime={setCheckInTime}
+            checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
+            minimumStay={minimumStay} setMinimumStay={setMinimumStay}
+            payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
+            onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
+            bankTransfer={bankTransfer} setBankTransfer={setBankTransfer}
+            specialRequests={specialRequests} setSpecialRequests={setSpecialRequests}
+            estimatedArrivalTime={estimatedArrivalTime} setEstimatedArrivalTime={setEstimatedArrivalTime}
+            numberOfGuests={numberOfGuests} setNumberOfGuests={setNumberOfGuests}
+            enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {/* Navigation buttons */}
+        <div className="bg-white border-t border-gray-200 px-8 py-4 flex justify-between shrink-0">
           <button
-            onClick={handleCreate}
-            disabled={saving || !property.property_name.trim()}
-            className="w-full py-3 bg-primary-500 text-white text-sm font-semibold rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+            onClick={() => step > 1 ? setStep(step - 1) : resetForm()}
+            className="px-6 py-2.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-full hover:bg-gray-50 transition-colors"
           >
-            {saving ? 'Generating...' : 'Generate Invite Code'}
+            {step > 1 ? 'Back' : 'Cancel'}
           </button>
+          {step < STEPS.length ? (
+            <button
+              onClick={() => setStep(step + 1)}
+              disabled={!canProceed()}
+              className="px-6 py-2.5 text-[13px] font-medium text-white bg-primary-500 rounded-full hover:bg-primary-600 disabled:opacity-50 transition-colors"
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              onClick={handleGenerate}
+              disabled={saving}
+              className="px-6 py-2.5 text-[13px] font-medium text-white bg-green-600 rounded-full hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              Generate Invite Code
+            </button>
+          )}
         </div>
       </div>
     )
@@ -364,26 +416,16 @@ export default function InviteCodesPage() {
                         inv.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                         inv.status === 'redeemed' ? 'bg-green-100 text-green-800' :
                         'bg-gray-100 text-gray-600'
-                      }`}>
-                        {inv.status}
-                      </span>
+                      }`}>{inv.status}</span>
                     </td>
                     <td className="px-4 py-3 text-gray-500">{new Date(inv.created_at).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-gray-500">{new Date(inv.expires_at).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleCopy(inv.code, inv.id)}
-                          className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-                          title="Copy code"
-                        >
+                        <button onClick={() => handleCopy(inv.code, inv.id)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100" title="Copy code">
                           {copiedId === inv.id ? <CheckIcon className="w-4 h-4 text-green-500" /> : <ClipboardIcon className="w-4 h-4" />}
                         </button>
-                        <button
-                          onClick={() => handleDelete(inv.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50"
-                          title="Delete"
-                        >
+                        <button onClick={() => handleDelete(inv.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50" title="Delete">
                           <TrashIcon className="w-4 h-4" />
                         </button>
                       </div>
@@ -396,48 +438,5 @@ export default function InviteCodesPage() {
         )}
       </div>
     </div>
-  )
-}
-
-// ── Helper Components ──
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-5">
-      <h3 className="text-[14px] font-semibold text-gray-900 mb-3">{title}</h3>
-      {children}
-    </div>
-  )
-}
-
-function Field({ label, value, onChange, placeholder, type = 'text' }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string
-}) {
-  return (
-    <div>
-      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        placeholder={placeholder}
-      />
-    </div>
-  )
-}
-
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer">
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className={`relative w-8 h-[18px] rounded-full transition-colors ${checked ? 'bg-primary-500' : 'bg-gray-300'}`}
-      >
-        <span className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-[14px]' : ''}`} />
-      </button>
-      <span className="text-[12px] text-gray-700">{label}</span>
-    </label>
   )
 }
