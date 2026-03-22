@@ -152,7 +152,7 @@ class RoomTypeRepository:
 
     @staticmethod
     def _find_season_rate(seasons: list, check_in: date) -> Optional[float]:
-        """Find the season rate that covers the check-in date."""
+        """Find the season rate that covers the check-in date. Seasons repeat yearly."""
         for season in seasons:
             rate = season.get("rate")
             if not rate:
@@ -164,8 +164,16 @@ class RoomTypeRepository:
             try:
                 s_from = date.fromisoformat(season_from)
                 s_to = date.fromisoformat(season_to)
-                if s_from <= check_in <= s_to:
-                    return float(rate)
+                # Normalize to check-in year so seasons repeat annually
+                s_from = s_from.replace(year=check_in.year)
+                s_to = s_to.replace(year=check_in.year)
+                # Handle seasons crossing year boundary (e.g., Nov-Feb)
+                if s_from > s_to:
+                    if check_in >= s_from or check_in <= s_to:
+                        return float(rate)
+                else:
+                    if s_from <= check_in <= s_to:
+                        return float(rate)
             except (ValueError, TypeError):
                 continue
         return None
