@@ -297,10 +297,12 @@ export default function InviteCodesPage() {
             accentColor={accentColor} setAccentColor={setAccentColor}
             selectedFont={selectedFont} setSelectedFont={setSelectedFont}
             propertyDescription={propertyDescription} setPropertyDescription={setPropertyDescription}
-            bookingFilters={bookingFilters} setBookingFilters={setBookingFilters}
             fileInputRef={fileInputRef}
             handleImageUpload={handleImageUpload}
             uploading={uploading}
+            propertyName={propertyName}
+            currency={currency}
+            defaultLanguage={defaultLanguage}
             stepIndicators={stepIndicators}
             error=""
             canProceed={canProceed()}
