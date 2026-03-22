@@ -20,6 +20,7 @@ export const MOCK_ROOMS: RoomType[] = [
     bedType: 'Queen Bed',
     remainingRooms: 5,
     features: ['City View', 'Non-smoking', 'Blackout Curtains'],
+    benefits: [],
   },
   {
     id: 'room-2',
@@ -48,6 +49,7 @@ export const MOCK_ROOMS: RoomType[] = [
     bedType: 'King Bed',
     remainingRooms: 3,
     features: ['Mountain View', 'Balcony', 'Non-smoking', 'Seating Area'],
+    benefits: [],
   },
   {
     id: 'room-3',
@@ -78,6 +80,7 @@ export const MOCK_ROOMS: RoomType[] = [
     bedType: 'King Bed + Sofa Bed',
     remainingRooms: 2,
     features: ['Mountain View', 'Balcony', 'Living Area', 'Non-smoking', 'Complimentary Breakfast'],
+    benefits: [],
   },
   {
     id: 'room-4',
@@ -116,5 +119,6 @@ export const MOCK_ROOMS: RoomType[] = [
       'Living & Dining Area',
       'Complimentary Breakfast',
     ],
+    benefits: [],
   },
 ]
