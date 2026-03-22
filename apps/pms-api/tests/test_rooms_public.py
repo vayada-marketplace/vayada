@@ -132,4 +132,5 @@ class TestPublicRooms:
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
         rooms = resp.json()
         assert len(rooms) == 1
-        assert rooms[0]["nonRefundableRate"] is None
+        # non_refundable_discount defaults to 10%, so NR rate = 150 * 0.9 = 135
+        assert rooms[0]["nonRefundableRate"] == 135.0
