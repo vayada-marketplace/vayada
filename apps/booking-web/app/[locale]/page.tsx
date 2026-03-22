@@ -542,7 +542,7 @@ export default function HomePage() {
                               <div className="text-left">
                                 <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                                   {t('nonRefundableRate')}
-                                  <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">{t('off')}</span>
+                                  {discount > 0 && <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">-{discount}% OFF</span>}
                                 </p>
                                 <p className="text-xs text-gray-500">{t('nonRefundableDesc')}</p>
                               </div>
