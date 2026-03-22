@@ -451,18 +451,6 @@ export default function InviteCodesPage() {
                   )}
                 </div>
 
-                {/* Notes */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Billing Notes</h3>
-                  <p className="text-[12px] text-gray-500 mb-4">Special arrangements or conditions</p>
-                  <textarea
-                    value={billingNotes}
-                    onChange={e => setBillingNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
-                    placeholder="e.g. First 3 months free trial, then 5% commission on all bookings"
-                  />
-                </div>
               </div>
 
               {/* Navigation */}
