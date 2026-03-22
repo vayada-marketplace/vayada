@@ -82,6 +82,12 @@ export default function InviteCodesPage() {
   const [numberOfGuests, setNumberOfGuests] = useState(false)
   const [enableReferAGuest, setEnableReferAGuest] = useState(false)
 
+  // Internal: Vayada payment terms (not shown to hotel)
+  const [paymentModel, setPaymentModel] = useState<'commission' | 'fixed'>('commission')
+  const [commissionRate, setCommissionRate] = useState('5')
+  const [fixedMonthlyFee, setFixedMonthlyFee] = useState('')
+  const [billingNotes, setBillingNotes] = useState('')
+
   useEffect(() => { loadInvites() }, [])
 
   useEffect(() => {
@@ -159,6 +165,12 @@ export default function InviteCodesPage() {
           baseRate: r.baseRate,
           nonRefundableRate: r.nonRefundableRate,
         })),
+        internal: {
+          payment_model: paymentModel,
+          commission_rate: paymentModel === 'commission' ? parseFloat(commissionRate) || 0 : undefined,
+          fixed_monthly_fee: paymentModel === 'fixed' ? parseFloat(fixedMonthlyFee) || 0 : undefined,
+          billing_notes: billingNotes || undefined,
+        },
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
           minimum_stay: minimumStay, pay_at_property: payAtHotel,
@@ -189,6 +201,8 @@ export default function InviteCodesPage() {
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
     setSpecialRequests(true); setEstimatedArrivalTime(false)
     setNumberOfGuests(false); setEnableReferAGuest(false)
+    setPaymentModel('commission'); setCommissionRate('5')
+    setFixedMonthlyFee(''); setBillingNotes('')
     setGeneratedCode(null)
     setView('list')
   }
@@ -266,6 +280,62 @@ export default function InviteCodesPage() {
         <div className="h-[3px] bg-gray-100 shrink-0">
           <div className="h-full bg-primary-600 transition-all duration-300" style={{ width: `${(step / STEPS.length) * 100}%` }} />
         </div>
+
+        {/* Internal: Vayada Payment Terms (admin only, not shown to hotel) */}
+        {step === 1 && (
+          <div className="max-w-2xl mx-auto px-8 pt-6">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+              <h3 className="text-[13px] font-semibold text-amber-900 mb-1">Vayada Payment Terms</h3>
+              <p className="text-[11px] text-amber-700 mb-3">Internal only — not visible to the hotel owner</p>
+              <div className="space-y-3">
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="paymentModel" checked={paymentModel === 'commission'} onChange={() => setPaymentModel('commission')} className="accent-amber-600" />
+                    <span className="text-[12px] text-gray-900 font-medium">Commission-based</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="paymentModel" checked={paymentModel === 'fixed'} onChange={() => setPaymentModel('fixed')} className="accent-amber-600" />
+                    <span className="text-[12px] text-gray-900 font-medium">Fixed monthly fee</span>
+                  </label>
+                </div>
+                {paymentModel === 'commission' && (
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Commission Rate (%)</label>
+                    <input
+                      type="number" min="0" max="100" step="0.5"
+                      value={commissionRate}
+                      onChange={e => setCommissionRate(e.target.value)}
+                      className="w-32 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="e.g. 5"
+                    />
+                  </div>
+                )}
+                {paymentModel === 'fixed' && (
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Monthly Fee ({currency})</label>
+                    <input
+                      type="number" min="0" step="1"
+                      value={fixedMonthlyFee}
+                      onChange={e => setFixedMonthlyFee(e.target.value)}
+                      className="w-32 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="e.g. 49"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Billing Notes (optional)</label>
+                  <input
+                    type="text"
+                    value={billingNotes}
+                    onChange={e => setBillingNotes(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="e.g. First 3 months free, then 5% commission"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {step === 1 && (
           <PropertyStep
