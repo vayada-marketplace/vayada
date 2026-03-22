@@ -30,6 +30,10 @@ class PropertySettingsResponse(BaseModel):
     billing_commission_rate: float
     billing_fixed_fee: float
     billing_pending_switch: Optional[str]
+    payout_account_holder: str
+    payout_iban: str
+    payout_bank_name: str
+    payout_swift: str
 
 
 class PropertySettingsUpdate(BaseModel):
@@ -61,3 +65,7 @@ class PropertySettingsUpdate(BaseModel):
     billing_commission_rate: Optional[float] = None
     billing_fixed_fee: Optional[float] = None
     billing_pending_switch: Optional[str] = None
+    payout_account_holder: Optional[str] = None
+    payout_iban: Optional[str] = None
+    payout_bank_name: Optional[str] = None
+    payout_swift: Optional[str] = None

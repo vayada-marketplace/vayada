@@ -108,6 +108,10 @@ _PROPERTY_FIELD_MAP = {
     "billing_commission_rate": "billing_commission_rate",
     "billing_fixed_fee": "billing_fixed_fee",
     "billing_pending_switch": "billing_pending_switch",
+    "payout_account_holder": "payout_account_holder",
+    "payout_iban": "payout_iban",
+    "payout_bank_name": "payout_bank_name",
+    "payout_swift": "payout_swift",
 }
 
 
@@ -140,6 +144,10 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         billing_commission_rate=float(hotel.get('billing_commission_rate') or 5),
         billing_fixed_fee=float(hotel.get('billing_fixed_fee') or 49),
         billing_pending_switch=hotel.get('billing_pending_switch'),
+        payout_account_holder=hotel.get('payout_account_holder') or '',
+        payout_iban=hotel.get('payout_iban') or '',
+        payout_bank_name=hotel.get('payout_bank_name') or '',
+        payout_swift=hotel.get('payout_swift') or '',
     )
 
 
@@ -155,6 +163,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     instagram='', facebook='', twitter='', youtube='',
     billing_active_plan='commission', billing_commission_rate=5,
     billing_fixed_fee=49, billing_pending_switch=None,
+    payout_account_holder='', payout_iban='', payout_bank_name='', payout_swift='',
 )
 
 
