@@ -88,6 +88,7 @@ export interface AddonItem {
   image: string
   duration?: string
   perPerson?: boolean
+  perNight?: boolean
 }
 
 export interface SuperAdminHotel extends HotelSummary {
