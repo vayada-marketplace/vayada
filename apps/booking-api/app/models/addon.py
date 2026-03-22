@@ -16,6 +16,7 @@ class AddonResponse(BaseModel):
     image: str
     duration: Optional[str] = None
     per_person: Optional[bool] = None
+    per_night: Optional[bool] = None
 
 
 class CreateAddonRequest(BaseModel):
@@ -29,6 +30,7 @@ class CreateAddonRequest(BaseModel):
     image: str = ''
     duration: Optional[str] = None
     per_person: Optional[bool] = None
+    per_night: Optional[bool] = None
 
 
 class UpdateAddonRequest(BaseModel):
@@ -42,6 +44,7 @@ class UpdateAddonRequest(BaseModel):
     image: Optional[str] = None
     duration: Optional[str] = None
     per_person: Optional[bool] = None
+    per_night: Optional[bool] = None
 
 
 class AddonSettingsResponse(BaseModel):

@@ -101,6 +101,7 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
             image=row["image"],
             duration=row.get("duration"),
             per_person=row.get("per_person"),
+            per_night=row.get("per_night"),
         )
         for row in rows
     ]

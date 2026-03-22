@@ -1,0 +1,1 @@
+ALTER TABLE booking_addons ADD COLUMN IF NOT EXISTS per_night BOOLEAN DEFAULT false;
