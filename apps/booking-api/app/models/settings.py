@@ -26,6 +26,10 @@ class PropertySettingsResponse(BaseModel):
     facebook: str
     twitter: str
     youtube: str
+    billing_active_plan: str
+    billing_commission_rate: float
+    billing_fixed_fee: float
+    billing_pending_switch: Optional[str]
 
 
 class PropertySettingsUpdate(BaseModel):
@@ -53,3 +57,7 @@ class PropertySettingsUpdate(BaseModel):
     facebook: Optional[str] = None
     twitter: Optional[str] = None
     youtube: Optional[str] = None
+    billing_active_plan: Optional[str] = None
+    billing_commission_rate: Optional[float] = None
+    billing_fixed_fee: Optional[float] = None
+    billing_pending_switch: Optional[str] = None

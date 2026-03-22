@@ -104,6 +104,10 @@ _PROPERTY_FIELD_MAP = {
     "facebook": "social_facebook",
     "twitter": "social_twitter",
     "youtube": "social_youtube",
+    "billing_active_plan": "billing_active_plan",
+    "billing_commission_rate": "billing_commission_rate",
+    "billing_fixed_fee": "billing_fixed_fee",
+    "billing_pending_switch": "billing_pending_switch",
 }
 
 
@@ -132,6 +136,10 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         facebook=hotel.get('social_facebook') or '',
         twitter=hotel.get('social_twitter') or '',
         youtube=hotel.get('social_youtube') or '',
+        billing_active_plan=hotel.get('billing_active_plan') or 'commission',
+        billing_commission_rate=float(hotel.get('billing_commission_rate') or 5),
+        billing_fixed_fee=float(hotel.get('billing_fixed_fee') or 49),
+        billing_pending_switch=hotel.get('billing_pending_switch'),
     )
 
 
@@ -145,6 +153,8 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     email_notifications=True, new_booking_alerts=True,
     payment_alerts=True, weekly_reports=False,
     instagram='', facebook='', twitter='', youtube='',
+    billing_active_plan='commission', billing_commission_rate=5,
+    billing_fixed_fee=49, billing_pending_switch=None,
 )
 
 
