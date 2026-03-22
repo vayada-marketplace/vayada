@@ -57,6 +57,7 @@ export interface RoomType {
   bedType: string
   remainingRooms: number
   features: string[]
+  benefits: string[]
 }
 
 export interface AvailableRoom extends RoomType {
