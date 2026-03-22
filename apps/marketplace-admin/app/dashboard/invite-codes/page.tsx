@@ -421,32 +421,37 @@ export default function InviteCodesPage() {
                   {paymentModel === 'commission' ? (
                     <>
                       <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Commission Rate</h3>
-                      <p className="text-[12px] text-gray-500 mb-4">Percentage charged per booking</p>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number" min="0" max="100" step="0.5"
-                          value={commissionRate}
-                          onChange={e => setCommissionRate(e.target.value)}
-                          className="w-24 px-3 py-2.5 border border-gray-300 rounded-lg text-[15px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                        <span className="text-[15px] font-semibold text-gray-500">%</span>
+                      <p className="text-[12px] text-gray-500 mb-5">Percentage charged per booking</p>
+                      <div className="flex items-center justify-center">
+                        <div className="bg-gray-50 rounded-2xl px-8 py-6 inline-flex items-baseline gap-1">
+                          <input
+                            type="number" min="0" max="100" step="0.5"
+                            value={commissionRate}
+                            onChange={e => setCommissionRate(e.target.value)}
+                            className="w-20 bg-transparent text-4xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-2xl font-bold text-gray-400">%</span>
+                        </div>
                       </div>
+                      <p className="text-center text-[11px] text-gray-400 mt-3">of each booking&apos;s total value</p>
                     </>
                   ) : (
                     <>
                       <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Monthly Fee</h3>
-                      <p className="text-[12px] text-gray-500 mb-4">Fixed amount charged each month</p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[15px] font-semibold text-gray-500">{currency}</span>
-                        <input
-                          type="number" min="0" step="1"
-                          value={fixedMonthlyFee}
-                          onChange={e => setFixedMonthlyFee(e.target.value)}
-                          className="w-32 px-3 py-2.5 border border-gray-300 rounded-lg text-[15px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          placeholder="49"
-                        />
-                        <span className="text-[13px] text-gray-400">/ month</span>
+                      <p className="text-[12px] text-gray-500 mb-5">Fixed amount charged each month</p>
+                      <div className="flex items-center justify-center">
+                        <div className="bg-gray-50 rounded-2xl px-8 py-6 inline-flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-gray-400">{currency}</span>
+                          <input
+                            type="number" min="0" step="1"
+                            value={fixedMonthlyFee}
+                            onChange={e => setFixedMonthlyFee(e.target.value)}
+                            className="w-28 bg-transparent text-4xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            placeholder="49"
+                          />
+                        </div>
                       </div>
+                      <p className="text-center text-[11px] text-gray-400 mt-3">billed monthly</p>
                     </>
                   )}
                 </div>
