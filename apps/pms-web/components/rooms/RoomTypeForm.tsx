@@ -1162,10 +1162,10 @@ export default function RoomTypeForm({
                               if (e.key === 'Enter') {
                                 e.preventDefault()
                                 const trimmed = (customAmenityInputs[cat.name] || '').trim()
-                                if (trimmed && !amenities.includes(trimmed)) {
+                                if (trimmed && !amenities.some(a => a.toLowerCase() === trimmed.toLowerCase())) {
                                   updateForm({ amenities: [...amenities, trimmed] })
+                                  setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                                 }
-                                setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                               }
                             }}
                             className="flex-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
@@ -1175,10 +1175,10 @@ export default function RoomTypeForm({
                             type="button"
                             onClick={() => {
                               const trimmed = (customAmenityInputs[cat.name] || '').trim()
-                              if (trimmed && !amenities.includes(trimmed)) {
+                              if (trimmed && !amenities.some(a => a.toLowerCase() === trimmed.toLowerCase())) {
                                 updateForm({ amenities: [...amenities, trimmed] })
+                                setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                               }
-                              setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                             }}
                             className="px-2 py-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
                           >
