@@ -19,6 +19,7 @@ const STEPS = [
   { number: 2, label: 'Brand & Media' },
   { number: 3, label: 'Rooms & Rates' },
   { number: 4, label: 'Policies' },
+  { number: 5, label: 'Payment Terms' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -281,62 +282,6 @@ export default function InviteCodesPage() {
           <div className="h-full bg-primary-600 transition-all duration-300" style={{ width: `${(step / STEPS.length) * 100}%` }} />
         </div>
 
-        {/* Internal: Vayada Payment Terms (admin only, not shown to hotel) */}
-        {step === 1 && (
-          <div className="max-w-2xl mx-auto px-8 pt-6">
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-              <h3 className="text-[13px] font-semibold text-amber-900 mb-1">Vayada Payment Terms</h3>
-              <p className="text-[11px] text-amber-700 mb-3">Internal only — not visible to the hotel owner</p>
-              <div className="space-y-3">
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="paymentModel" checked={paymentModel === 'commission'} onChange={() => setPaymentModel('commission')} className="accent-amber-600" />
-                    <span className="text-[12px] text-gray-900 font-medium">Commission-based</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="paymentModel" checked={paymentModel === 'fixed'} onChange={() => setPaymentModel('fixed')} className="accent-amber-600" />
-                    <span className="text-[12px] text-gray-900 font-medium">Fixed monthly fee</span>
-                  </label>
-                </div>
-                {paymentModel === 'commission' && (
-                  <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Commission Rate (%)</label>
-                    <input
-                      type="number" min="0" max="100" step="0.5"
-                      value={commissionRate}
-                      onChange={e => setCommissionRate(e.target.value)}
-                      className="w-32 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      placeholder="e.g. 5"
-                    />
-                  </div>
-                )}
-                {paymentModel === 'fixed' && (
-                  <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Monthly Fee ({currency})</label>
-                    <input
-                      type="number" min="0" step="1"
-                      value={fixedMonthlyFee}
-                      onChange={e => setFixedMonthlyFee(e.target.value)}
-                      className="w-32 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      placeholder="e.g. 49"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Billing Notes (optional)</label>
-                  <input
-                    type="text"
-                    value={billingNotes}
-                    onChange={e => setBillingNotes(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    placeholder="e.g. First 3 months free, then 5% commission"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {step === 1 && (
           <PropertyStep
             propertyName={propertyName} setPropertyName={setPropertyName}
@@ -415,10 +360,130 @@ export default function InviteCodesPage() {
             enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
             stepIndicators={stepIndicators}
             error=""
-            saving={saving}
+            saving={false}
             onBack={() => setStep(3)}
-            onComplete={handleGenerate}
+            onComplete={() => setStep(5)}
           />
+        )}
+
+        {/* Step 5: Vayada Payment Terms */}
+        {step === 5 && (
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-2xl mx-auto px-8 py-8">
+              {stepIndicators}
+
+              <div className="text-center mb-8">
+                <h2 className="text-xl font-bold text-gray-900">Payment Terms</h2>
+                <p className="text-sm text-gray-500 mt-1">Internal Vayada billing — not visible to the hotel</p>
+              </div>
+
+              <div className="space-y-6">
+                {/* Payment Model */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                  <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Billing Model</h3>
+                  <p className="text-[12px] text-gray-500 mb-4">How will this hotel be charged?</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentModel('commission')}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        paymentModel === 'commission'
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <svg className={`w-5 h-5 ${paymentModel === 'commission' ? 'text-primary-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M2 12h4l3-9 4 18 3-9h4" /></svg>
+                        <span className={`text-[13px] font-semibold ${paymentModel === 'commission' ? 'text-primary-900' : 'text-gray-700'}`}>Commission</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500">Percentage of each booking</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentModel('fixed')}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        paymentModel === 'fixed'
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <svg className={`w-5 h-5 ${paymentModel === 'fixed' ? 'text-primary-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /><path strokeLinecap="round" d="M7 14h4" /></svg>
+                        <span className={`text-[13px] font-semibold ${paymentModel === 'fixed' ? 'text-primary-900' : 'text-gray-700'}`}>Fixed Fee</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500">Flat monthly subscription</p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Rate / Amount */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                  {paymentModel === 'commission' ? (
+                    <>
+                      <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Commission Rate</h3>
+                      <p className="text-[12px] text-gray-500 mb-4">Percentage charged per booking</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" min="0" max="100" step="0.5"
+                          value={commissionRate}
+                          onChange={e => setCommissionRate(e.target.value)}
+                          className="w-24 px-3 py-2.5 border border-gray-300 rounded-lg text-[15px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        <span className="text-[15px] font-semibold text-gray-500">%</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Monthly Fee</h3>
+                      <p className="text-[12px] text-gray-500 mb-4">Fixed amount charged each month</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[15px] font-semibold text-gray-500">{currency}</span>
+                        <input
+                          type="number" min="0" step="1"
+                          value={fixedMonthlyFee}
+                          onChange={e => setFixedMonthlyFee(e.target.value)}
+                          className="w-32 px-3 py-2.5 border border-gray-300 rounded-lg text-[15px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="49"
+                        />
+                        <span className="text-[13px] text-gray-400">/ month</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                  <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Billing Notes</h3>
+                  <p className="text-[12px] text-gray-500 mb-4">Special arrangements or conditions</p>
+                  <textarea
+                    value={billingNotes}
+                    onChange={e => setBillingNotes(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                    placeholder="e.g. First 3 months free trial, then 5% commission on all bookings"
+                  />
+                </div>
+              </div>
+
+              {/* Navigation */}
+              <div className="flex justify-between mt-8">
+                <button
+                  onClick={() => setStep(4)}
+                  className="px-8 py-2.5 text-[14px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleGenerate}
+                  disabled={saving}
+                  className="px-8 py-2.5 bg-green-600 text-white text-[14px] font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2"
+                >
+                  {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  Generate Invite Code
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     )
