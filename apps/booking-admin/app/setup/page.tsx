@@ -35,6 +35,10 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [prefilled, setPrefilled] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
+  const [inviteError, setInviteError] = useState('')
+  const [applyingInvite, setApplyingInvite] = useState(false)
+  const [appliedInviteCode, setAppliedInviteCode] = useState('')
 
   // Step 1: Your Property
   const [propertyName, setPropertyName] = useState('')
@@ -319,6 +323,17 @@ export default function SetupPage() {
 
       localStorage.setItem('setupComplete', 'true')
 
+      // Mark invite code as redeemed
+      if (appliedInviteCode) {
+        try {
+          const token = localStorage.getItem('access_token')
+          await fetch(`${MARKETPLACE_API_URL}/api/invite-codes/${appliedInviteCode}/redeem`, {
+            method: 'POST',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+        } catch { /* non-critical */ }
+      }
+
       // If the user came from PMS, redirect back there
       const fromPms = localStorage.getItem('setup_from') === 'pms'
       if (fromPms) {
@@ -383,6 +398,84 @@ export default function SetupPage() {
     </div>
   )
 
+  const MARKETPLACE_API_URL = process.env.NEXT_PUBLIC_MARKETPLACE_API_URL || 'https://api.vayada.com'
+
+  const applyInviteCode = async () => {
+    if (!inviteCode.trim()) return
+    setInviteError('')
+    setApplyingInvite(true)
+    try {
+      const res = await fetch(`${MARKETPLACE_API_URL}/api/invite-codes/${inviteCode.trim().toUpperCase()}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setInviteError(err.detail || 'Invalid invite code')
+        setApplyingInvite(false)
+        return
+      }
+      const { data } = await res.json()
+
+      // Prefill property
+      if (data.property) {
+        const p = data.property
+        if (p.property_name) setPropertyName(p.property_name)
+        if (p.city) setCity(p.city)
+        if (p.country) setCountry(p.country)
+        if (p.address) setAddress(p.address)
+        if (p.reservation_email) setReservationEmail(p.reservation_email)
+        if (p.phone_number) setPhoneNumber(p.phone_number)
+        if (p.whatsapp_number) setWhatsapp(p.whatsapp_number)
+        if (p.instagram) setInstagram(p.instagram)
+        if (p.facebook) setFacebook(p.facebook)
+        if (p.default_currency) setCurrency(p.default_currency)
+        if (p.default_language) setDefaultLanguage(p.default_language)
+        if (p.supported_currencies) setSupportedCurrencies(p.supported_currencies)
+        if (p.supported_languages) setSupportedLanguages(p.supported_languages)
+      }
+
+      // Prefill branding
+      if (data.branding) {
+        const b = data.branding
+        if (b.hero_image) setHeroImage(b.hero_image)
+        if (b.primary_color) setPrimaryColor(b.primary_color)
+        if (b.accent_color) setAccentColor(b.accent_color)
+        if (b.font_pairing) setSelectedFont(b.font_pairing)
+        if (b.description) setPropertyDescription(b.description)
+        if (b.booking_filters) setBookingFilters(b.booking_filters)
+      }
+
+      // Prefill rooms
+      if (data.rooms && data.rooms.length > 0) {
+        setRooms(data.rooms.map((r: any) => ({
+          ...createEmptyRoom(),
+          ...r,
+          currency: r.currency || data.property?.default_currency || 'EUR',
+        })))
+      }
+
+      // Prefill policies
+      if (data.policies) {
+        const pol = data.policies
+        if (pol.check_in_time) setCheckInTime(pol.check_in_time)
+        if (pol.check_out_time) setCheckOutTime(pol.check_out_time)
+        if (pol.minimum_stay) setMinimumStay(pol.minimum_stay)
+        if (pol.pay_at_property !== undefined) setPayAtHotel(pol.pay_at_property)
+        if (pol.online_card_payment !== undefined) setOnlineCardPayment(pol.online_card_payment)
+        if (pol.bank_transfer !== undefined) setBankTransfer(pol.bank_transfer)
+        if (pol.special_requests !== undefined) setSpecialRequests(pol.special_requests)
+        if (pol.arrival_time !== undefined) setEstimatedArrivalTime(pol.arrival_time)
+        if (pol.guest_count !== undefined) setNumberOfGuests(pol.guest_count)
+        if (pol.refer_a_guest !== undefined) setEnableReferAGuest(pol.refer_a_guest)
+      }
+
+      setAppliedInviteCode(inviteCode.trim().toUpperCase())
+      setPrefilled(true)
+    } catch {
+      setInviteError('Failed to fetch invite data. Please try again.')
+    } finally {
+      setApplyingInvite(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -417,6 +510,34 @@ export default function SetupPage() {
           style={{ width: `${(step / 5) * 100}%` }}
         />
       </div>
+
+      {/* Invite Code Banner */}
+      {step === 1 && !prefilled && (
+        <div className="max-w-2xl mx-auto px-8 pt-6">
+          <div className="bg-primary-50 border border-primary-200 rounded-xl p-4">
+            <p className="text-[13px] font-semibold text-primary-900 mb-2">Have an invite code?</p>
+            <p className="text-[12px] text-primary-700 mb-3">If Vayada set up your property, enter the code to load your configuration.</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={e => { setInviteCode(e.target.value.toUpperCase()); setInviteError('') }}
+                placeholder="e.g. A7K3-X9M2"
+                className="flex-1 px-3 py-2 border border-primary-300 rounded-lg text-[13px] font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                onKeyDown={e => { if (e.key === 'Enter') applyInviteCode() }}
+              />
+              <button
+                onClick={applyInviteCode}
+                disabled={applyingInvite || !inviteCode.trim()}
+                className="px-4 py-2 bg-primary-600 text-white text-[13px] font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              >
+                {applyingInvite ? 'Loading...' : 'Apply'}
+              </button>
+            </div>
+            {inviteError && <p className="text-[12px] text-red-600 mt-2">{inviteError}</p>}
+          </div>
+        </div>
+      )}
 
       {step === 1 && (
         <PropertyStep
