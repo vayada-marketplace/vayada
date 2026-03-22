@@ -34,6 +34,7 @@ const emptyAddon = {
   image: '',
   duration: '',
   perPerson: false,
+  perNight: false,
 }
 
 export default function BookingFlowPage() {
@@ -100,6 +101,7 @@ export default function BookingFlowPage() {
       image: addon.image,
       duration: addon.duration || '',
       perPerson: addon.perPerson || false,
+      perNight: addon.perNight || false,
     })
     setShowModal(true)
   }
@@ -137,6 +139,7 @@ export default function BookingFlowPage() {
         image: formData.image.startsWith('blob:') ? '' : formData.image,
         duration: formData.duration || undefined,
         perPerson: formData.perPerson,
+        perNight: formData.perNight,
       }
       if (editingAddon) {
         const updated = await settingsService.updateAddon(editingAddon.id, payload)
@@ -457,6 +460,15 @@ export default function BookingFlowPage() {
                 onChange={() => setFormData({ ...formData, perPerson: !formData.perPerson })}
                 label="Per Person Pricing"
                 description="Price is multiplied by number of guests"
+              />
+
+              {/* Per Night toggle */}
+              <ToggleSwitch
+                size="sm"
+                enabled={formData.perNight}
+                onChange={() => setFormData({ ...formData, perNight: !formData.perNight })}
+                label="Per Night Pricing"
+                description="Price is charged for each night of the stay (e.g. daily breakfast)"
               />
             </div>
 
