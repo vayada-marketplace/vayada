@@ -183,8 +183,18 @@ export default function BookingFlowPage() {
 
   // ── Filter handlers (Rooms tab) ──
 
-  const handleToggleFiltersEnabled = () => {
-    setFiltersEnabled((prev) => !prev)
+  const handleToggleFiltersEnabled = async () => {
+    const newEnabled = !filtersEnabled
+    setFiltersEnabled(newEnabled)
+    if (!newEnabled) {
+      // Auto-save when disabling filters
+      try {
+        await settingsService.updateDesignSettings({ booking_filters: [], custom_filters: customFilters })
+      } catch {
+        setFiltersEnabled(true)
+        setFeedback({ type: 'error', message: 'Failed to disable filters' })
+      }
+    }
   }
 
   const handleSaveFilters = async () => {
