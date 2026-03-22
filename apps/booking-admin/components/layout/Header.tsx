@@ -7,39 +7,9 @@ import {
   BellIcon,
   ChevronDownIcon,
   ArrowTopRightOnSquareIcon,
-  CalendarDaysIcon,
-  CreditCardIcon,
-  UserPlusIcon,
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
-
-const notifications = [
-  {
-    id: '1',
-    icon: CalendarDaysIcon,
-    title: 'New booking received',
-    description: 'John Smith booked Ocean View Suite for Jan 15-18',
-    time: '5 min ago',
-    unread: true,
-  },
-  {
-    id: '2',
-    icon: CreditCardIcon,
-    title: 'Payment confirmed',
-    description: '$1,250 received for booking #4521',
-    time: '1 hour ago',
-    unread: true,
-  },
-  {
-    id: '3',
-    icon: UserPlusIcon,
-    title: 'New affiliate signup',
-    description: 'Travel Blogger Jane joined your program',
-    time: '3 hours ago',
-    unread: true,
-  },
-]
 
 export default function Header() {
   const router = useRouter()
@@ -205,45 +175,16 @@ export default function Header() {
             className="relative p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
           >
             <BellIcon className="w-4 h-4" />
-            <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] bg-primary-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-              3
-            </span>
           </button>
 
           {notificationsOpen && (
-            <div className="absolute top-full right-0 mt-1.5 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3">
+            <div className="absolute top-full right-0 mt-1.5 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+              <div className="px-4 py-3">
                 <h3 className="text-[13px] font-semibold text-gray-900">Notifications</h3>
-                <button className="text-xs text-gray-500 hover:text-gray-700 transition-colors">
-                  Mark all read
-                </button>
               </div>
-
-              {/* Notification items */}
-              <div className="divide-y divide-gray-100">
-                {notifications.map((notification) => (
-                  <div key={notification.id} className="flex items-start gap-2.5 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer">
-                    <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center shrink-0">
-                      <notification.icon className="w-4 h-4 text-primary-500" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-gray-900">{notification.title}</p>
-                      <p className="text-xs text-gray-600 mt-0.5">{notification.description}</p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">{notification.time}</p>
-                    </div>
-                    {notification.unread && (
-                      <div className="w-2 h-2 rounded-full bg-primary-500 shrink-0 mt-1.5" />
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Footer */}
-              <div className="border-t border-gray-100">
-                <button className="w-full py-2.5 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors rounded-b-lg">
-                  View all notifications
-                </button>
+              <div className="px-4 py-6 text-center">
+                <BellIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-[13px] text-gray-500">No notifications yet</p>
               </div>
             </div>
           )}
