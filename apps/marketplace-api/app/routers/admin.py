@@ -351,7 +351,7 @@ async def get_user_details(
                     about=hotel_profile['about'],
                     email=user['email'],  # Email comes from users table
                     phone=hotel_profile['phone'],
-                    status=hotel_profile['status'],
+                    status=user['status'],
                     created_at=hotel_profile['created_at'],
                     updated_at=hotel_profile['updated_at'],
                     listings=listings
