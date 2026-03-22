@@ -60,10 +60,9 @@ export interface InviteData {
     weekendSurcharge: string
   }>
   internal?: {
-    payment_model: 'commission' | 'fixed'
-    commission_rate?: number
-    fixed_monthly_fee?: number
-    billing_notes?: string
+    active_plan: 'commission' | 'fixed'
+    commission_rate: number
+    fixed_monthly_fee: number
   }
   policies: {
     check_in_time: string

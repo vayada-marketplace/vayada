@@ -83,11 +83,10 @@ export default function InviteCodesPage() {
   const [numberOfGuests, setNumberOfGuests] = useState(false)
   const [enableReferAGuest, setEnableReferAGuest] = useState(false)
 
-  // Internal: Vayada payment terms (not shown to hotel)
-  const [paymentModel, setPaymentModel] = useState<'commission' | 'fixed'>('commission')
+  // Internal: Vayada payment terms (not shown to hotel during setup)
+  const [activePlan, setActivePlan] = useState<'commission' | 'fixed'>('commission')
   const [commissionRate, setCommissionRate] = useState('5')
-  const [fixedMonthlyFee, setFixedMonthlyFee] = useState('')
-  const [billingNotes, setBillingNotes] = useState('')
+  const [fixedMonthlyFee, setFixedMonthlyFee] = useState('49')
 
   useEffect(() => { loadInvites() }, [])
 
@@ -167,10 +166,9 @@ export default function InviteCodesPage() {
           nonRefundableRate: r.nonRefundableRate,
         })),
         internal: {
-          payment_model: paymentModel,
-          commission_rate: paymentModel === 'commission' ? parseFloat(commissionRate) || 0 : undefined,
-          fixed_monthly_fee: paymentModel === 'fixed' ? parseFloat(fixedMonthlyFee) || 0 : undefined,
-          billing_notes: billingNotes || undefined,
+          active_plan: activePlan,
+          commission_rate: parseFloat(commissionRate) || 0,
+          fixed_monthly_fee: parseFloat(fixedMonthlyFee) || 0,
         },
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
@@ -202,8 +200,8 @@ export default function InviteCodesPage() {
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
     setSpecialRequests(true); setEstimatedArrivalTime(false)
     setNumberOfGuests(false); setEnableReferAGuest(false)
-    setPaymentModel('commission'); setCommissionRate('5')
-    setFixedMonthlyFee(''); setBillingNotes('')
+    setActivePlan('commission'); setCommissionRate('5')
+    setFixedMonthlyFee('49')
     setGeneratedCode(null)
     setView('list')
   }
@@ -374,92 +372,86 @@ export default function InviteCodesPage() {
 
               <div className="text-center mb-8">
                 <h2 className="text-xl font-bold text-gray-900">Payment Terms</h2>
-                <p className="text-sm text-gray-500 mt-1">Internal Vayada billing — not visible to the hotel</p>
+                <p className="text-sm text-gray-500 mt-1">Set pricing for both plans — the hotel can switch between them</p>
               </div>
 
-              <div className="space-y-6">
-                {/* Payment Model */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Billing Model</h3>
-                  <p className="text-[12px] text-gray-500 mb-4">How will this hotel be charged?</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentModel('commission')}
-                      className={`p-4 rounded-xl border-2 text-left transition-all ${
-                        paymentModel === 'commission'
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <svg className={`w-5 h-5 ${paymentModel === 'commission' ? 'text-primary-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M2 12h4l3-9 4 18 3-9h4" /></svg>
-                        <span className={`text-[13px] font-semibold ${paymentModel === 'commission' ? 'text-primary-900' : 'text-gray-700'}`}>Commission</span>
-                      </div>
-                      <p className="text-[11px] text-gray-500">Percentage of each booking</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentModel('fixed')}
-                      className={`p-4 rounded-xl border-2 text-left transition-all ${
-                        paymentModel === 'fixed'
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <svg className={`w-5 h-5 ${paymentModel === 'fixed' ? 'text-primary-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /><path strokeLinecap="round" d="M7 14h4" /></svg>
-                        <span className={`text-[13px] font-semibold ${paymentModel === 'fixed' ? 'text-primary-900' : 'text-gray-700'}`}>Fixed Fee</span>
-                      </div>
-                      <p className="text-[11px] text-gray-500">Flat monthly subscription</p>
-                    </button>
+              {/* Both plans side by side */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {/* Commission Plan */}
+                <div className={`bg-white rounded-xl border-2 p-5 transition-all ${activePlan === 'commission' ? 'border-primary-500 ring-1 ring-primary-200' : 'border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M2 12h4l3-9 4 18 3-9h4" /></svg>
+                      <h3 className="text-[14px] font-semibold text-gray-900">Commission</h3>
+                    </div>
+                    {activePlan === 'commission' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-primary-100 text-primary-700 rounded-full">ACTIVE</span>
+                    )}
                   </div>
+                  <p className="text-[11px] text-gray-500 mb-4">Percentage of each booking</p>
+                  <div className="bg-gray-50 rounded-xl p-4 flex items-baseline justify-center gap-1 mb-4">
+                    <input
+                      type="number" min="0" max="100" step="0.5"
+                      value={commissionRate}
+                      onChange={e => setCommissionRate(e.target.value)}
+                      className="w-16 bg-transparent text-3xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-xl font-bold text-gray-400">%</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActivePlan('commission')}
+                    className={`w-full py-2 text-[12px] font-semibold rounded-lg transition-colors ${
+                      activePlan === 'commission'
+                        ? 'bg-primary-500 text-white'
+                        : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {activePlan === 'commission' ? 'Active Plan' : 'Set as Active'}
+                  </button>
                 </div>
 
-                {/* Rate / Amount */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  {paymentModel === 'commission' ? (
-                    <>
-                      <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Commission Rate</h3>
-                      <p className="text-[12px] text-gray-500 mb-5">Percentage charged per booking</p>
-                      <div className="flex items-center justify-center">
-                        <div className="bg-gray-50 rounded-2xl px-8 py-6 inline-flex items-baseline gap-1">
-                          <input
-                            type="number" min="0" max="100" step="0.5"
-                            value={commissionRate}
-                            onChange={e => setCommissionRate(e.target.value)}
-                            className="w-20 bg-transparent text-4xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                          <span className="text-2xl font-bold text-gray-400">%</span>
-                        </div>
-                      </div>
-                      <p className="text-center text-[11px] text-gray-400 mt-3">of each booking&apos;s total value</p>
-                    </>
-                  ) : (
-                    <>
-                      <h3 className="text-[14px] font-semibold text-gray-900 mb-1">Monthly Fee</h3>
-                      <p className="text-[12px] text-gray-500 mb-5">Fixed amount charged each month</p>
-                      <div className="flex items-center justify-center">
-                        <div className="bg-gray-50 rounded-2xl px-8 py-6 inline-flex items-baseline gap-2">
-                          <span className="text-2xl font-bold text-gray-400">{currency}</span>
-                          <input
-                            type="number" min="0" step="1"
-                            value={fixedMonthlyFee}
-                            onChange={e => setFixedMonthlyFee(e.target.value)}
-                            className="w-28 bg-transparent text-4xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            placeholder="49"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-center text-[11px] text-gray-400 mt-3">billed monthly</p>
-                    </>
-                  )}
+                {/* Fixed Fee Plan */}
+                <div className={`bg-white rounded-xl border-2 p-5 transition-all ${activePlan === 'fixed' ? 'border-primary-500 ring-1 ring-primary-200' : 'border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /><path strokeLinecap="round" d="M7 14h4" /></svg>
+                      <h3 className="text-[14px] font-semibold text-gray-900">Fixed Fee</h3>
+                    </div>
+                    {activePlan === 'fixed' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-primary-100 text-primary-700 rounded-full">ACTIVE</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mb-4">Flat monthly subscription</p>
+                  <div className="bg-gray-50 rounded-xl p-4 flex items-baseline justify-center gap-1.5 mb-4">
+                    <span className="text-lg font-bold text-gray-400">{currency}</span>
+                    <input
+                      type="number" min="0" step="1"
+                      value={fixedMonthlyFee}
+                      onChange={e => setFixedMonthlyFee(e.target.value)}
+                      className="w-20 bg-transparent text-3xl font-bold text-gray-900 text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      placeholder="49"
+                    />
+                    <span className="text-[12px] text-gray-400">/mo</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActivePlan('fixed')}
+                    className={`w-full py-2 text-[12px] font-semibold rounded-lg transition-colors ${
+                      activePlan === 'fixed'
+                        ? 'bg-primary-500 text-white'
+                        : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {activePlan === 'fixed' ? 'Active Plan' : 'Set as Active'}
+                  </button>
                 </div>
-
               </div>
+
+              <p className="text-center text-[11px] text-gray-400 mb-8">The hotel will see both plans and can request to switch for the next month</p>
 
               {/* Navigation */}
-              <div className="flex justify-between mt-8">
+              <div className="flex justify-between">
                 <button
                   onClick={() => setStep(4)}
                   className="px-8 py-2.5 text-[14px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
