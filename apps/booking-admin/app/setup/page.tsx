@@ -39,6 +39,7 @@ export default function SetupPage() {
   const [inviteError, setInviteError] = useState('')
   const [applyingInvite, setApplyingInvite] = useState(false)
   const [appliedInviteCode, setAppliedInviteCode] = useState('')
+  const [showWizard, setShowWizard] = useState(false)
 
   // Step 1: Your Property
   const [propertyName, setPropertyName] = useState('')
@@ -469,6 +470,7 @@ export default function SetupPage() {
 
       setAppliedInviteCode(inviteCode.trim().toUpperCase())
       setPrefilled(true)
+      setShowWizard(true)
     } catch {
       setInviteError('Failed to fetch invite data. Please try again.')
     } finally {
@@ -480,6 +482,71 @@ export default function SetupPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  // Welcome screen with invite code option
+  if (!showWizard && !prefilled) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="bg-white border-b border-gray-200 px-8 py-3 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="32" height="32" rx="6" fill="#4338CA" />
+              <path d="M10 16.5L14 20.5L22 12.5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
+          </div>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="max-w-md w-full space-y-6">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Vayada</h1>
+              <p className="text-sm text-gray-500">Set up your property in just a few minutes</p>
+            </div>
+
+            {/* Invite Code */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="text-[14px] font-semibold text-gray-900 mb-1">Have an invite code?</h2>
+              <p className="text-[12px] text-gray-500 mb-4">If Vayada pre-configured your property, enter the code to load everything.</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={e => { setInviteCode(e.target.value.toUpperCase()); setInviteError('') }}
+                  placeholder="e.g. A7K3-X9M2"
+                  className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-[14px] font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  onKeyDown={e => { if (e.key === 'Enter') applyInviteCode() }}
+                />
+                <button
+                  onClick={applyInviteCode}
+                  disabled={applyingInvite || !inviteCode.trim()}
+                  className="px-5 py-2.5 bg-primary-600 text-white text-[13px] font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {applyingInvite ? 'Loading...' : 'Apply'}
+                </button>
+              </div>
+              {inviteError && <p className="text-[12px] text-red-600 mt-2">{inviteError}</p>}
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-[12px] text-gray-400 font-medium">or</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* Start from scratch */}
+            <button
+              onClick={() => setShowWizard(true)}
+              className="w-full py-3 bg-white border border-gray-300 text-gray-900 text-[14px] font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              Set up manually
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -510,34 +577,6 @@ export default function SetupPage() {
           style={{ width: `${(step / 5) * 100}%` }}
         />
       </div>
-
-      {/* Invite Code Banner */}
-      {step === 1 && !prefilled && (
-        <div className="max-w-2xl mx-auto px-8 pt-6">
-          <div className="bg-primary-50 border border-primary-200 rounded-xl p-4">
-            <p className="text-[13px] font-semibold text-primary-900 mb-2">Have an invite code?</p>
-            <p className="text-[12px] text-primary-700 mb-3">If Vayada set up your property, enter the code to load your configuration.</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inviteCode}
-                onChange={e => { setInviteCode(e.target.value.toUpperCase()); setInviteError('') }}
-                placeholder="e.g. A7K3-X9M2"
-                className="flex-1 px-3 py-2 border border-primary-300 rounded-lg text-[13px] font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                onKeyDown={e => { if (e.key === 'Enter') applyInviteCode() }}
-              />
-              <button
-                onClick={applyInviteCode}
-                disabled={applyingInvite || !inviteCode.trim()}
-                className="px-4 py-2 bg-primary-600 text-white text-[13px] font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-              >
-                {applyingInvite ? 'Loading...' : 'Apply'}
-              </button>
-            </div>
-            {inviteError && <p className="text-[12px] text-red-600 mt-2">{inviteError}</p>}
-          </div>
-        </div>
-      )}
 
       {step === 1 && (
         <PropertyStep
