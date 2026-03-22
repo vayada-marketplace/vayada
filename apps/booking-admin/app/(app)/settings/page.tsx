@@ -42,6 +42,10 @@ const DEFAULT_SETTINGS: PropertySettings = {
   billing_commission_rate: 5,
   billing_fixed_fee: 49,
   billing_pending_switch: null,
+  payout_account_holder: '',
+  payout_iban: '',
+  payout_bank_name: '',
+  payout_swift: '',
 }
 
 // ── Custom Select Dropdown ───────────────────────────────────────────
@@ -907,6 +911,60 @@ export default function SettingsPage() {
                   </p>
                 </div>
               )}
+
+              {/* Payout Details */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">Payout Details</h2>
+                  <p className="text-[12px] text-gray-500 mt-0.5">Bank account where Vayada sends your earnings</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                    <input
+                      type="text"
+                      value={settings.payout_account_holder || ''}
+                      onChange={e => updateSetting('payout_account_holder', e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="e.g. Hotel Alpenrose GmbH"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
+                    <input
+                      type="text"
+                      value={settings.payout_iban || ''}
+                      onChange={e => updateSetting('payout_iban', e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="e.g. AT61 1904 3002 3457 3201"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>
+                    <input
+                      type="text"
+                      value={settings.payout_bank_name || ''}
+                      onChange={e => updateSetting('payout_bank_name', e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="e.g. Erste Bank"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">SWIFT / BIC</label>
+                    <input
+                      type="text"
+                      value={settings.payout_swift || ''}
+                      onChange={e => updateSetting('payout_swift', e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="e.g. GIBAATWWXXX"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <SaveButton onClick={handleSave} saving={saving} />
+                </div>
+              </div>
             </div>
           )}
     </div>

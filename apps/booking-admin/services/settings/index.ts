@@ -35,6 +35,10 @@ export interface PropertySettings {
   billing_commission_rate?: number
   billing_fixed_fee?: number
   billing_pending_switch?: string | null
+  payout_account_holder?: string
+  payout_iban?: string
+  payout_bank_name?: string
+  payout_swift?: string
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>
