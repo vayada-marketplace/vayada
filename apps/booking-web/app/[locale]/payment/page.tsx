@@ -101,6 +101,7 @@ function PaymentPageContent() {
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
+  const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -127,6 +128,7 @@ function PaymentPageContent() {
     if (slug) {
       bookingService.getPaymentSettings(slug).then((settings) => {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled)
+        if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
       })
     }
   }, [slug])
@@ -271,7 +273,13 @@ function PaymentPageContent() {
                       </svg>
                       <span className="font-semibold text-sm text-gray-900">{t('payAtProperty') || 'Pay at Property'}</span>
                     </div>
-                    <p className="text-xs text-gray-500">{t('payAtPropertyNote') || 'Pay when you arrive at the hotel'}</p>
+                    <p className="text-xs text-gray-500">
+                      {payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'cash'
+                        ? (t('payAtPropertyCashOnly') || 'Pay with cash when you arrive (cash only)')
+                        : payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'card'
+                          ? (t('payAtPropertyCardOnly') || 'Pay with card when you arrive')
+                          : (t('payAtPropertyNote') || 'Pay when you arrive at the hotel (cash & card accepted)')}
+                    </p>
                   </button>
                 )}
               </div>
