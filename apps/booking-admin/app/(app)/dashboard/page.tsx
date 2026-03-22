@@ -129,14 +129,6 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-gray-900">Booking Engine</h1>
           <p className="text-lg text-gray-700 mt-1">{propertyName}</p>
           <div className="flex items-center gap-3 mt-2">
-            <a
-              href={bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[13px] text-primary-600 hover:underline"
-            >
-              book.vayada.com/{slug}
-            </a>
             {stats?.live_since && (
               <span className="inline-flex items-center gap-1.5 text-[11px] text-green-600 font-medium">
                 <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
