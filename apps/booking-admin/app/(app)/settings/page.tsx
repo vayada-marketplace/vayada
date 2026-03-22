@@ -926,7 +926,7 @@ export default function SettingsPage() {
                       value={settings.payout_account_holder || ''}
                       onChange={e => updateSetting('payout_account_holder', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. Hotel Alpenrose GmbH"
+                      placeholder="e.g. Sunrise Beach Resort Ltd"
                     />
                   </div>
                   <div className="col-span-2">
@@ -936,7 +936,7 @@ export default function SettingsPage() {
                       value={settings.payout_iban || ''}
                       onChange={e => updateSetting('payout_iban', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. AT61 1904 3002 3457 3201"
+                      placeholder="e.g. GB29 NWBK 6016 1331 9268 19"
                     />
                   </div>
                   <div>
@@ -946,7 +946,7 @@ export default function SettingsPage() {
                       value={settings.payout_bank_name || ''}
                       onChange={e => updateSetting('payout_bank_name', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. Erste Bank"
+                      placeholder="e.g. HSBC Bank"
                     />
                   </div>
                   <div>
@@ -956,7 +956,7 @@ export default function SettingsPage() {
                       value={settings.payout_swift || ''}
                       onChange={e => updateSetting('payout_swift', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. GIBAATWWXXX"
+                      placeholder="e.g. HBUKGB4B"
                     />
                   </div>
                 </div>
