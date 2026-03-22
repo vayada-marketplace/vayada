@@ -1,6 +1,6 @@
 # Vayada
 
-Vayada is a hospitality platform that connects travel creators and influencers with hotels for collaborations, and provides hotels with a direct booking engine for their guests. The platform is composed of two core products — a **Creator Marketplace** and a **Booking Engine** — each with dedicated customer-facing frontends, admin dashboards, and backend APIs, all sharing a centralized authentication system.
+Vayada is a hospitality platform that connects travel creators and influencers with hotels for collaborations, and provides hotels with a direct booking engine and property management system. The platform is composed of three core products — a **Creator Marketplace**, a **Booking Engine**, and a **Property Management System (PMS)** — each with dedicated customer-facing frontends, admin dashboards, and backend APIs, all sharing a centralized authentication system.
 
 ---
 
@@ -12,6 +12,7 @@ Vayada is a hospitality platform that connects travel creators and influencers w
 - [Services](#services)
   - [Creator Marketplace](#creator-marketplace)
   - [Booking Engine](#booking-engine)
+  - [Property Management System](#property-management-system)
   - [Shared Authentication](#shared-authentication)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
@@ -19,13 +20,10 @@ Vayada is a hospitality platform that connects travel creators and influencers w
   - [Seeding Test Data](#seeding-test-data)
 - [Service Ports](#service-ports)
 - [Databases](#databases)
-  - [Auth Database](#auth-database)
-  - [Marketplace Database](#marketplace-database)
-  - [Booking Engine Database](#booking-engine-database)
+- [Infrastructure](#infrastructure)
 - [Environment Variables](#environment-variables)
 - [Git Submodules](#git-submodules)
 - [Scripts](#scripts)
-- [Documentation](#documentation)
 - [Test Accounts](#test-accounts)
 - [Development Workflow](#development-workflow)
 
@@ -34,41 +32,36 @@ Vayada is a hospitality platform that connects travel creators and influencers w
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            Vayada Platform                              │
-│                                                                         │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │     Creator Marketplace     │    │        Booking Engine           │ │
-│  │                             │    │                                 │ │
-│  │  ┌─────────┐ ┌───────────┐ │    │  ┌─────────┐ ┌───────────────┐ │ │
-│  │  │Frontend │ │Admin Panel│ │    │  │Frontend │ │  Admin Panel  │ │ │
-│  │  │ :3000   │ │  :3001    │ │    │  │ :3002   │ │    :3003      │ │ │
-│  │  └────┬────┘ └─────┬─────┘ │    │  └────┬────┘ └──────┬────────┘ │ │
-│  │       │             │       │    │       │              │          │ │
-│  │  ┌────▼─────────────▼─────┐ │    │  ┌────▼──────────────▼───────┐ │ │
-│  │  │   Marketplace Backend  │ │    │  │   Booking Backend         │ │ │
-│  │  │       :8000            │ │    │  │       :8001               │ │ │
-│  │  └────┬───────────────────┘ │    │  └────┬──────────────────────┘ │ │
-│  └───────┼─────────────────────┘    └───────┼────────────────────────┘ │
-│          │                                  │                          │
-│  ┌───────▼──────┐  ┌──────────────┐  ┌──────▼───────┐                 │
-│  │ Marketplace  │  │  Auth DB     │  │  Booking DB  │                 │
-│  │   DB :5432   │  │   :5435      │  │    :5434     │                 │
-│  │  PostgreSQL  │  │  PostgreSQL  │  │  PostgreSQL  │                 │
-│  └──────────────┘  └──────────────┘  └──────────────┘                 │
-│                                                                         │
-│  ┌──────────────┐                                                      │
-│  │    MinIO      │  S3-compatible object storage                       │
-│  │  :9000/:9001  │  for image uploads                                  │
-│  └──────────────┘                                                      │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              Vayada Platform                                │
+│                                                                              │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌───────────────────┐  │
+│  │  Creator Marketplace │  │    Booking Engine     │  │        PMS        │  │
+│  │                      │  │                       │  │                   │  │
+│  │ ┌────────┐ ┌───────┐ │  │ ┌────────┐ ┌───────┐ │  │ ┌───────┐        │  │
+│  │ │Frontend│ │ Admin │ │  │ │Frontend│ │ Admin │ │  │ │Frontend│        │  │
+│  │ │ :3000  │ │ :3001 │ │  │ │ :3002  │ │ :3003 │ │  │ │ :3004  │        │  │
+│  │ └───┬────┘ └───┬───┘ │  │ └───┬────┘ └───┬───┘ │  │ └───┬───┘        │  │
+│  │     │          │      │  │     │          │      │  │     │            │  │
+│  │ ┌───▼──────────▼────┐ │  │ ┌───▼──────────▼────┐ │  │ ┌───▼──────────┐ │  │
+│  │ │ Marketplace API   │ │  │ │  Booking API      │ │  │ │   PMS API    │ │  │
+│  │ │     :8000         │ │  │ │     :8001         │ │  │ │    :8002     │ │  │
+│  │ └───┬───────────────┘ │  │ └───┬───────────────┘ │  │ └───┬─────────┘ │  │
+│  └─────┼────────────────┘  └─────┼────────────────┘  └─────┼───────────┘  │
+│        │                         │                          │              │
+│  ┌─────▼──────┐ ┌──────────┐ ┌───▼──────┐ ┌───────────┐ ┌──▼──────────┐  │
+│  │Marketplace │ │ Auth DB  │ │Booking DB│ │  PMS DB   │ │   MinIO     │  │
+│  │ DB :5432   │ │  :5435   │ │  :5434   │ │  :5436    │ │ :9000/:9001 │  │
+│  │ PostgreSQL │ │PostgreSQL│ │PostgreSQL│ │PostgreSQL │ │ S3 Storage  │  │
+│  └────────────┘ └──────────┘ └──────────┘ └───────────┘ └─────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The platform follows a microservices architecture:
 
-- **Six application services**: Two backends (FastAPI) and four frontends (Next.js)
-- **Three PostgreSQL databases**: One per domain (marketplace, booking, auth)
-- **MinIO**: S3-compatible object storage for creator and hotel images
+- **Eight application services**: Three backends (FastAPI) and five frontends (Next.js)
+- **Four PostgreSQL databases**: One per domain (marketplace, booking, PMS, auth)
+- **MinIO**: S3-compatible object storage for images
 - **Shared auth database**: Centralized user management across all services
 - **Docker Compose orchestration**: All services managed through a single compose file
 
@@ -81,34 +74,36 @@ vayada/
 ├── booking-engine/                     # Booking engine product
 │   ├── vayada-booking-engine-backend/        # FastAPI backend (submodule)
 │   ├── vayada-booking-engine-frontend/       # Next.js guest frontend (submodule)
-│   ├── vayada-booking-engine-frontend-admin/ # Next.js admin dashboard (submodule)
-│   ├── docs/                                 # Booking engine documentation
-│   │   ├── booking-engine-overview.md
-│   │   └── pms-comparison-report.md
-│   └── docker/                               # Docker configuration
+│   └── vayada-booking-engine-frontend-admin/ # Next.js admin dashboard (submodule)
+│
+├── pms/                               # Property Management System
+│   ├── vayada-pms-backend/                   # FastAPI backend (submodule)
+│   └── vayada-pms-frontend/                  # Next.js hotel dashboard (submodule)
 │
 ├── marketplace/                        # Creator marketplace product
 │   ├── vayada-creator-marketplace-backend/        # FastAPI backend (submodule)
 │   ├── vayada-creator-marketplace-frontend/       # Next.js public frontend (submodule)
-│   ├── vayada-creator-marketplace-frontend-admin/ # Next.js admin dashboard (submodule)
-│   ├── docs/                                      # Marketplace documentation
-│   └── docker/                                    # Docker configuration
+│   └── vayada-creator-marketplace-frontend-admin/ # Next.js admin dashboard (submodule)
 │
 ├── auth-db/                            # Shared authentication database
-│   ├── migrations/
-│   │   └── 001_auth_schema.sql               # Auth schema (users, GDPR, consent)
-│   └── migrate_remote.sh                     # Remote migration script
+│   ├── migrations/                           # Auth schema migrations
+│   └── scripts/                              # Migration runner
+│
+├── infra/                              # AWS infrastructure (Terraform)
+│   ├── ecs.tf                                # ECS service definitions
+│   ├── alb.tf                                # ALB and routing rules
+│   ├── ecr.tf                                # Container registries
+│   ├── route53.tf                            # DNS records
+│   └── ...
 │
 ├── scripts/                            # Seed and utility scripts
 │   ├── seed_all.py                           # Master seed runner
 │   ├── seed_users.py                         # Auth DB user seeds
 │   ├── seed_marketplace.py                   # Marketplace DB seeds
-│   └── seed_booking.py                       # Booking DB seeds
+│   ├── seed_booking.py                       # Booking + PMS DB seeds
+│   └── run_migration.sh                      # Remote migration runner
 │
-├── tickets/                            # Technical tickets and plans
-│   └── 001_repository_pattern_refactor.md
-│
-├── docker-compose.yml                  # Full-stack orchestration
+├── docker-compose.yml                  # Full-stack orchestration (13 services)
 ├── .gitmodules                         # Submodule definitions
 └── README.md
 ```
@@ -119,19 +114,20 @@ vayada/
 
 | Layer           | Technology                                      |
 |-----------------|------------------------------------------------|
-| **Backends**    | Python 3.11, FastAPI 0.104, Uvicorn (ASGI)    |
+| **Backends**    | Python 3.11, FastAPI, Uvicorn (ASGI)           |
 | **Frontends**   | Next.js 14 (App Router), React 18, TypeScript  |
-| **Styling**     | Tailwind CSS 3.3, PostCSS                      |
+| **Styling**     | Tailwind CSS, PostCSS                          |
 | **Databases**   | PostgreSQL 15 (Alpine)                         |
-| **ORM / DB**    | AsyncPG 0.30 (async PostgreSQL driver)         |
-| **Auth**        | PyJWT, bcrypt, python-jose (JWT-based)         |
-| **Payments**    | Stripe (React Stripe.js + Stripe.js)           |
+| **ORM / DB**    | AsyncPG (async PostgreSQL driver)              |
+| **Auth**        | JWT-based (PyJWT, bcrypt)                      |
+| **Payments**    | Stripe                                         |
 | **Storage**     | MinIO (S3-compatible), boto3                   |
-| **Images**      | Pillow (server-side processing)                |
-| **i18n**        | next-intl (booking engine)                     |
-| **Icons**       | Heroicons React 2                              |
+| **i18n**        | next-intl (booking engine frontend)            |
+| **Icons**       | Heroicons React                                |
+| **Infra**       | AWS (ECS Fargate, ALB, RDS, ECR, Route53, S3)  |
+| **IaC**         | Terraform                                      |
+| **CI/CD**       | GitHub Actions                                 |
 | **Containers**  | Docker, Docker Compose                         |
-| **Validation**  | Pydantic 2.10                                  |
 
 ---
 
@@ -144,91 +140,86 @@ The marketplace connects travel creators and influencers with hotels for paid co
 **Backend** (`marketplace/vayada-creator-marketplace-backend/`) — Port 8000
 
 - User registration and authentication (creators, hotels, admins)
-- Creator profiles with platforms, categories, and portfolio
-- Hotel listings with location, amenities, and contact details
+- Creator profiles with social platforms, audience analytics, and portfolio
+- Hotel listings with collaboration offerings and creator requirements
 - Collaboration workflow: requests, negotiations, deliverables, messaging
 - Real-time chat between creators and hotels
 - Image upload and processing via MinIO/S3
-- Admin user management and approval workflows
-- GDPR compliance: data export requests, deletion requests, consent tracking
-- Email notifications for verification, password reset, and collaboration events
-
-**API Routes:**
-- `/auth/*` — Registration, login, email verification, password reset
-- `/creators/*` — Creator profiles, stats, collaborations
-- `/hotels/*` — Hotel listings, search, profiles
-- `/marketplace/*` — Discovery, listings, search
-- `/collaborations/*` — Collaboration requests, negotiations, messages
-- `/chat/*` — Real-time conversations and messages
-- `/upload/*` — Image upload to MinIO
-- `/admin/*` — User management, approvals
-- `/consent/*`, `/gdpr/*` — GDPR compliance endpoints
-
-**Frontend** (`marketplace/vayada-creator-marketplace-frontend/`) — Port 3000
-
-- Landing page with hero sections for creators and hotels
-- Marketplace discovery and search
-- Creator and hotel profile pages
-- Responsive design with Tailwind CSS
+- Invite codes for hotel onboarding (pre-configured setups)
+- GDPR compliance: data export, deletion requests, consent tracking
+- Email notifications
 
 **Admin Panel** (`marketplace/vayada-creator-marketplace-frontend-admin/`) — Port 3001
 
-- Admin authentication
-- User management (view, edit, approve, deny creators and hotels)
-- User filtering and search
-- Status management for pending registrations
+- Sidebar navigation: Users, Hotels, Marketplace, Collaborations, Invite Codes
+- User management (view, edit, approve, reject creators and hotels)
+- Hotel booking engine configuration (embedded)
+- Marketplace preview (listings and creators)
+- Collaboration monitoring
+- Invite code creation with full setup wizard (property, branding, rooms, policies, billing terms)
 
 ---
 
 ### Booking Engine
 
-The booking engine allows hotels to accept direct bookings from guests, manage reservations, track affiliates, and customize their booking experience.
+The booking engine allows hotels to accept direct bookings from guests with a fully customizable, white-label booking experience.
 
 **Backend** (`booking-engine/vayada-booking-engine-backend/`) — Port 8001
 
 - Hotel configuration with branding, amenities, social links, and translations
 - Room type management with images, pricing, and availability
-- End-to-end booking flow with guest details and Stripe payment
+- End-to-end booking flow with guest details and payment
 - Affiliate link tracking and commission management
-- Promo code validation and discount application
-- Multi-currency support with exchange rates
-- Hotel onboarding wizard (7-step setup)
-- Admin analytics: revenue, conversions, booking breakdowns
-- PMS (Property Management System) adapter pattern (eZee, Smoobu, SiteMinder)
-
-**API Routes:**
-- `/hotels/{slug}` — Public hotel profile by slug
-- `/hotels/{slug}/rooms` — Room types and availability
-- `/hotels/{slug}/availability` — Date-based availability search
-- `/bookings` — Create and manage bookings
-- `/bookings/{reference}` — Booking lookup by reference
-- `/bookings/validate-promo` — Promo code validation
-- `/affiliates/track/{code}` — Affiliate click tracking
-- `/payments/webhook` — Stripe webhook handler
-- `/admin/*` — Login, bookings, analytics, affiliates, settings, onboarding
+- Multi-currency support with live exchange rates
+- Custom domain support (Cloudflare integration)
+- Property settings API (including billing plans and payout details)
+- Add-on management (transport, wellness, dining, experiences)
 
 **Frontend** (`booking-engine/vayada-booking-engine-frontend/`) — Port 3002
 
-- Hotel landing page with hero image, about section, amenities, and room previews
-- Room listing page with detailed room cards
-- Availability search with date picker and guest selector
-- Checkout flow with guest form, promo code input, and Stripe payment
-- Booking confirmation with reference number
-- Booking lookup by reference and email
+- Hotel landing page with hero, amenities, and room previews
+- Room listing with filters, availability search, and detail modals
+- Dynamic book-direct benefits per room type
+- Checkout flow with guest form and payment
+- Booking confirmation and lookup
 - Affiliate tracking via URL parameters
-- Internationalization support via next-intl
+- Multi-language support (EN, DE, FR, ES, ID)
+- Social media links in footer
+- Custom domain resolution
 
 **Admin Dashboard** (`booking-engine/vayada-booking-engine-frontend-admin/`) — Port 3003
 
-- Admin login and registration
-- Dashboard overview with key metrics
-- Bookings management: list, detail view, cancellation
-- Calendar view for reservations
-- Affiliate management: create links, track performance, view commissions
-- Analytics: revenue charts, conversion rates, booking breakdowns
-- Settings: general hotel info, branding/design, PMS integration, payment config
-- Billing section
-- Onboarding wizard (7 steps): basics, domain, PMS, rooms, payment, branding, review
+- Dashboard with booking metrics
+- Design Studio: hero image, colors, font pairing (live preview)
+- Booking Flow: room filters, add-ons, guest details, payment config
+- Settings: property info, contact, social media, currency/languages, billing
+- Billing tab: view commission/fixed-fee plans, switch for next month, payout details (IBAN)
+- Setup wizard (5 steps) with invite code support for pre-filled onboarding
+
+---
+
+### Property Management System
+
+The PMS provides hotel operations management — rooms, bookings, calendar, and channel management.
+
+**Backend** (`pms/vayada-pms-backend/`) — Port 8002
+
+- Hotel and room type management with seasonal pricing
+- Booking management with room assignment
+- Calendar with availability blocks
+- Public rooms API (serves room data to booking frontend)
+- Image upload to S3
+- Beds24 channel manager integration (two-way sync)
+- Affiliate management and payout scheduling
+
+**Frontend** (`pms/vayada-pms-frontend/`) — Port 3004
+
+- Dashboard with occupancy and revenue metrics
+- Room type management with amenities, features, and benefits
+- Calendar view with drag-and-drop
+- Booking list and detail views
+- Settings: hotel info, integrations
+- Beds24 connection and room mapping
 
 ---
 
@@ -237,18 +228,14 @@ The booking engine allows hotels to accept direct bookings from guests, manage r
 The auth database (`auth-db/`) provides centralized user management for all services.
 
 **Schema tables:**
-- `users` — Core user table (email, password hash, name, type, status, avatar, consent)
+- `users` — Core user table (email, password hash, name, type, status, avatar)
 - `password_reset_tokens` — Token-based password recovery
 - `email_verification_codes` — One-time verification codes
-- `email_verification_tokens` — Long-lived verification tokens
-- `cookie_consent` — Per-visitor cookie preferences
-- `consent_history` — Audit trail of all consent changes
+- `cookie_consent`, `consent_history` — GDPR consent tracking
 - `gdpr_requests` — Data export and deletion requests
 
 **User types:** `hotel`, `creator`, `admin`
 **User statuses:** `pending`, `verified`, `rejected`, `suspended`
-
-Both backends connect to the shared auth database for login, registration, and user verification, ensuring a single source of truth for user identity across the platform.
 
 ---
 
@@ -257,66 +244,51 @@ Both backends connect to the shared auth database for login, registration, and u
 ### Prerequisites
 
 - **Docker** and **Docker Compose** (v2+)
-- **Python 3.11+** (for running seed scripts)
-- **Node.js 18+** and **npm** (for local frontend development)
+- **Python 3.11+** with `asyncpg` and `bcrypt` (for seed scripts)
 - **Git** (with submodule support)
 
 ### Running the Full Stack
 
-1. **Clone the repository with submodules:**
+1. **Clone with submodules:**
 
    ```bash
    git clone --recurse-submodules https://github.com/FlamurMaliqi/vayada.git
    cd vayada
    ```
 
-   If already cloned without submodules:
+2. **Run auth migrations** (auth DB doesn't auto-migrate):
+
    ```bash
-   git submodule update --init --recursive
+   DATABASE_URL="postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db" \
+     python3 auth-db/scripts/run_migrations.py
    ```
 
-2. **Start all services:**
+3. **Start all services:**
 
    ```bash
    docker compose up -d
    ```
 
-   This starts all 10 services: 3 databases, MinIO + setup, 2 backends, and 4 frontends.
-
-3. **Verify services are running:**
+4. **Seed test data:**
 
    ```bash
-   docker compose ps
+   pip install asyncpg bcrypt
+   python scripts/seed_all.py
    ```
 
-4. **Access the applications:**
+5. **Access the applications:**
 
    | Application               | URL                        |
    |---------------------------|----------------------------|
    | Marketplace Frontend      | http://localhost:3000       |
-   | Marketplace Admin Panel   | http://localhost:3001       |
+   | Marketplace Admin         | http://localhost:3001       |
    | Booking Engine Frontend   | http://localhost:3002       |
    | Booking Engine Admin      | http://localhost:3003       |
+   | PMS Frontend              | http://localhost:3004       |
    | Marketplace API Docs      | http://localhost:8000/docs  |
    | Booking Engine API Docs   | http://localhost:8001/docs  |
+   | PMS API Docs              | http://localhost:8002/docs  |
    | MinIO Console             | http://localhost:9001       |
-
-### Seeding Test Data
-
-After the databases are running, populate them with test data:
-
-```bash
-# Install Python dependency
-pip install asyncpg
-
-# Seed everything (users, marketplace data, booking data)
-python scripts/seed_all.py
-
-# Or seed individually:
-python scripts/seed_users.py       # Auth DB: admin, creators, hotels
-python scripts/seed_marketplace.py # Marketplace DB: profiles, listings
-python scripts/seed_booking.py     # Booking DB: hotels, rooms, settings
-```
 
 ---
 
@@ -325,14 +297,17 @@ python scripts/seed_booking.py     # Booking DB: hotels, rooms, settings
 | Service                       | Port  | Description                          |
 |-------------------------------|-------|--------------------------------------|
 | Marketplace Frontend          | 3000  | Public marketplace site              |
-| Marketplace Admin             | 3001  | Marketplace admin dashboard          |
+| Marketplace Admin             | 3001  | Vayada admin dashboard               |
 | Booking Frontend              | 3002  | Guest-facing booking site            |
 | Booking Admin                 | 3003  | Hotel admin dashboard                |
+| PMS Frontend                  | 3004  | Hotel property management            |
 | Marketplace Backend API       | 8000  | Marketplace REST API                 |
 | Booking Backend API           | 8001  | Booking engine REST API              |
+| PMS Backend API               | 8002  | PMS REST API                         |
 | Marketplace PostgreSQL        | 5432  | Marketplace database                 |
 | Booking PostgreSQL            | 5434  | Booking engine database              |
 | Auth PostgreSQL               | 5435  | Shared authentication database       |
+| PMS PostgreSQL                | 5436  | PMS database                         |
 | MinIO API                     | 9000  | S3-compatible object storage         |
 | MinIO Console                 | 9001  | MinIO web management UI              |
 
@@ -340,86 +315,69 @@ python scripts/seed_booking.py     # Booking DB: hotels, rooms, settings
 
 ## Databases
 
-### Auth Database
+| Database      | Port | Name               | User                  |
+|---------------|------|--------------------|-----------------------|
+| Auth          | 5435 | `vayada_auth_db`   | `vayada_auth_user`    |
+| Marketplace   | 5432 | `vayada_db`        | `vayada_user`         |
+| Booking       | 5434 | `vayada_booking_db`| `vayada_booking_user` |
+| PMS           | 5436 | `vayada_pms_db`    | `vayada_pms_user`     |
 
-- **Host:** localhost:5435
-- **Database:** `vayada_auth_db`
-- **User:** `vayada_auth_user`
-- **Password:** `vayada_auth_password`
+All databases use PostgreSQL 15 Alpine with UUID primary keys and timestamp columns. Migrations are in each service's `migrations/` directory.
 
-Tables: `users`, `password_reset_tokens`, `email_verification_codes`, `email_verification_tokens`, `cookie_consent`, `consent_history`, `gdpr_requests`
+---
 
-All tables use UUID primary keys and include created/updated timestamps. The `users` table enforces constraints on `type` (hotel/creator/admin) and `status` (pending/verified/rejected/suspended).
+## Infrastructure
 
-### Marketplace Database
+Production infrastructure is managed with Terraform in the `infra/` directory:
 
-- **Host:** localhost:5432
-- **Database:** `vayada_db`
-- **User:** `vayada_user`
-- **Password:** `vayada_password`
+- **AWS ECS Fargate**: All services run as containers
+- **Application Load Balancer**: Routes traffic by hostname
+- **RDS PostgreSQL**: Single multi-database instance
+- **ECR**: Container registries for each service
+- **Route53**: DNS for `*.booking.vayada.com`, `pms.vayada.com`, `api.vayada.com`, etc.
+- **S3**: Production image storage (`vayada-uploads-prod`)
+- **Cloudflare**: Custom domain SSL for hotel booking engines
+- **GitHub Actions**: CI/CD pipelines per service (test, build, push, deploy)
 
-Contains 28 migrations covering creators, hotels, collaborations, deliverables, chat/messaging, marketplace listings, and GDPR-related tables.
-
-### Booking Engine Database
-
-- **Host:** localhost:5434
-- **Database:** `vayada_booking_db`
-- **User:** `vayada_booking_user`
-- **Password:** `vayada_booking_password`
-
-Tables include: `booking_hotels` (hotel configuration, branding, translations, settings, notifications, supported currencies), room types, bookings, affiliate links, affiliate clicks, promo codes, and admin users. Schema defined across 6 migrations.
+Production domains:
+- `*.booking.vayada.com` — Hotel booking engines (wildcard)
+- `admin.booking.vayada.com` — Booking admin
+- `pms.vayada.com` — PMS frontend
+- `booking-api.vayada.com` — Booking API
+- `pms-api.vayada.com` — PMS API
+- `api.vayada.com` — Marketplace API
+- `admin.vayada.com` — Marketplace admin
 
 ---
 
 ## Environment Variables
 
-### Marketplace Backend
-
-| Variable            | Default                           | Description                    |
-|---------------------|-----------------------------------|--------------------------------|
-| `DATABASE_URL`      | PostgreSQL connection string      | Marketplace database           |
-| `AUTH_DATABASE_URL`  | PostgreSQL connection string      | Auth database                  |
-| `JWT_SECRET`        | —                                 | JWT signing secret             |
-| `MINIO_ENDPOINT`    | `localhost:9000`                  | MinIO S3 endpoint              |
-| `MINIO_ACCESS_KEY`  | `minioadmin`                      | MinIO access key               |
-| `MINIO_SECRET_KEY`  | `minioadmin`                      | MinIO secret key               |
-| `MINIO_BUCKET`      | `vayada-uploads`                  | Upload bucket name             |
-
-### Booking Backend
-
-| Variable                 | Default                       | Description                    |
-|--------------------------|-------------------------------|--------------------------------|
-| `DATABASE_URL`           | PostgreSQL connection string  | Booking database               |
-| `AUTH_DATABASE_URL`       | PostgreSQL connection string  | Auth database                  |
-| `MARKETPLACE_DATABASE_URL`| PostgreSQL connection string | Marketplace database (cross-ref)|
-| `JWT_SECRET`             | —                             | JWT signing secret             |
-| `STRIPE_SECRET_KEY`      | —                             | Stripe API secret key          |
-| `STRIPE_WEBHOOK_SECRET`  | —                             | Stripe webhook signing secret  |
+Key environment variables are configured in `docker-compose.yml` and service `.env` files. See `infra/terraform.tfvars.example` for production variables.
 
 ### Frontends
 
-| Variable              | Default                    | Service               |
-|-----------------------|----------------------------|-----------------------|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`    | Marketplace frontend  |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8001`    | Booking frontend      |
-| `NEXT_PUBLIC_HOTEL_SLUG` | `hotel-alpenrose`       | Booking frontend      |
+| Variable                         | Description                    |
+|----------------------------------|--------------------------------|
+| `NEXT_PUBLIC_API_URL`            | Backend API base URL           |
+| `NEXT_PUBLIC_PMS_URL`            | PMS API URL (booking admin)    |
+| `NEXT_PUBLIC_MARKETPLACE_API_URL`| Marketplace API (invite codes) |
+| `NEXT_PUBLIC_HOTEL_SLUG`         | Default hotel slug             |
+| `NEXT_PUBLIC_BOOKING_ADMIN_URL`  | Booking admin URL (PMS handoff)|
 
 ---
 
 ## Git Submodules
-
-This repository uses Git submodules to manage the six application codebases:
 
 | Submodule                                            | Path                                                    |
 |------------------------------------------------------|---------------------------------------------------------|
 | `vayada-booking-engine-backend`                      | `booking-engine/vayada-booking-engine-backend`          |
 | `vayada-booking-engine-frontend`                     | `booking-engine/vayada-booking-engine-frontend`         |
 | `vayada-booking-engine-frontend-admin`               | `booking-engine/vayada-booking-engine-frontend-admin`   |
+| `vayada-pms-backend`                                 | `pms/vayada-pms-backend`                                |
+| `vayada-pms-frontend`                                | `pms/vayada-pms-frontend`                               |
 | `vayada-creator-marketplace-backend`                 | `marketplace/vayada-creator-marketplace-backend`        |
 | `vayada-creator-marketplace-frontend`                | `marketplace/vayada-creator-marketplace-frontend`       |
 | `vayada-creator-marketplace-frontend-admin`          | `marketplace/vayada-creator-marketplace-frontend-admin` |
-
-**Common submodule commands:**
 
 ```bash
 # Initialize and pull all submodules
@@ -427,78 +385,40 @@ git submodule update --init --recursive
 
 # Pull latest changes for all submodules
 git submodule update --remote --merge
-
-# Check submodule status
-git submodule status
 ```
 
 ---
 
 ## Scripts
 
-The `scripts/` directory contains Python seed scripts for populating databases with test data.
+| Script                 | Description                                            |
+|------------------------|--------------------------------------------------------|
+| `seed_all.py`          | Runs all seeds in sequence (users, marketplace, booking)|
+| `seed_users.py`        | Creates admin, creator, and hotel users in auth DB     |
+| `seed_marketplace.py`  | Creates creator profiles, hotel listings, collaborations|
+| `seed_booking.py`      | Creates hotels, room types, translations, sample bookings|
+| `run_migration.sh`     | Runs migrations against AWS RDS for a given service    |
 
-| Script                 | Target Database | Description                                            |
-|------------------------|-----------------|--------------------------------------------------------|
-| `seed_all.py`          | All             | Master script — runs all seeds in sequence             |
-| `seed_users.py`        | Auth (5435)     | Creates admin, creator, and hotel test users           |
-| `seed_marketplace.py`  | Marketplace (5432) | Creates creator profiles, hotel listings, collaborations |
-| `seed_booking.py`      | Booking (5434)  | Creates 5 test hotels with rooms, settings, and branding |
-
-All scripts use `asyncpg` for async database access and are idempotent (safe to run multiple times).
-
----
-
-## Documentation
-
-Additional documentation is available in the following locations:
-
-| Document                                          | Description                                            |
-|---------------------------------------------------|--------------------------------------------------------|
-| `booking-engine/docs/booking-engine-overview.md`  | Complete booking engine architecture and API spec      |
-| `booking-engine/docs/pms-comparison-report.md`    | PMS provider comparison (eZee, Smoobu, SiteMinder)     |
-| `marketplace/vayada-creator-marketplace-backend/README.md` | Marketplace backend setup and API docs        |
-| `marketplace/vayada-creator-marketplace-frontend/README.md` | Marketplace frontend setup                   |
-| `marketplace/vayada-creator-marketplace-frontend-admin/README.md` | Marketplace admin panel setup          |
-| `tickets/001_repository_pattern_refactor.md`      | Technical ticket: repository pattern refactoring       |
-
-Backend APIs include interactive documentation:
-
-- **Marketplace API (Swagger):** http://localhost:8000/docs
-- **Marketplace API (ReDoc):** http://localhost:8000/redoc
-- **Booking API (Swagger):** http://localhost:8001/docs
-- **Booking API (ReDoc):** http://localhost:8001/redoc
+All seed scripts use `asyncpg` and are idempotent (safe to run multiple times).
 
 ---
 
 ## Test Accounts
 
-After running the seed scripts, the following accounts are available:
+After running `python scripts/seed_all.py`:
 
-### Admin
-
-| Email              | Password    | Type  | Status   |
-|--------------------|-------------|-------|----------|
-| admin@vayada.com   | Vayada123   | admin | verified |
-
-### Creators
-
-| Email              | Password | Status   |
-|--------------------|----------|----------|
-| creator1@mock.com  | Test1234 | verified |
-| creator2@mock.com  | Test1234 | verified |
-| creator3@mock.com  | Test1234 | verified |
-| creator4@mock.com  | Test1234 | pending  |
-
-### Hotels
-
-| Email            | Password | Status   | Booking Engine Hotel        |
-|------------------|----------|----------|-----------------------------|
-| hotel1@mock.com  | Test1234 | verified | Hotel Alpenrose (EUR)       |
-| hotel2@mock.com  | Test1234 | verified | Grand Hotel Riviera (USD)   |
-| hotel3@mock.com  | Test1234 | verified | The Birchwood Lodge          |
-| hotel4@mock.com  | Test1234 | verified | City Center Hotel            |
-| hotel5@mock.com  | Test1234 | pending  | Seaside Retreat              |
+| Email              | Password    | Type    | Notes                          |
+|--------------------|-------------|---------|--------------------------------|
+| admin@vayada.com   | Vayada123   | admin   | Full admin access              |
+| creator1@mock.com  | Test1234    | creator | Verified, with platforms       |
+| creator2@mock.com  | Test1234    | creator | Verified                       |
+| creator3@mock.com  | Test1234    | creator | Pending                        |
+| creator4@mock.com  | Test1234    | creator | Verified                       |
+| hotel1@mock.com    | Test1234    | hotel   | Hotel Alpenrose (EUR)          |
+| hotel2@mock.com    | Test1234    | hotel   | Grand Hotel Riviera (USD)      |
+| hotel3@mock.com    | Test1234    | hotel   | The Birchwood Lodge (GBP)      |
+| hotel4@mock.com    | Test1234    | hotel   | City Center Hotel (minimal)    |
+| hotel5@mock.com    | Test1234    | hotel   | Seaside Retreat (no booking)   |
 
 ---
 
@@ -506,40 +426,29 @@ After running the seed scripts, the following accounts are available:
 
 ### Working on a single service
 
-Each submodule can be developed independently. Navigate into the submodule directory and follow its own README for local development setup.
+Each submodule can be developed independently:
 
-**Backend example:**
 ```bash
-cd marketplace/vayada-creator-marketplace-backend
-python -m venv venv
-source venv/bin/activate
+# Backend
+cd pms/vayada-pms-backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
+uvicorn app.main:app --reload --port 8002
 
-**Frontend example:**
-```bash
+# Frontend
 cd booking-engine/vayada-booking-engine-frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
 ### Running only databases
 
-To work on services locally while only running databases in Docker:
-
 ```bash
-docker compose up -d marketplace-postgres booking-postgres auth-postgres minio minio-setup
+docker compose up -d marketplace-postgres booking-postgres auth-postgres pms-postgres minio minio-setup
 ```
 
-### Stopping all services
+### Full stack
 
 ```bash
-docker compose down
-```
-
-To also remove database volumes:
-
-```bash
-docker compose down -v
+docker compose up -d        # Start everything
+docker compose down          # Stop everything
+docker compose down -v       # Stop and remove volumes
 ```
