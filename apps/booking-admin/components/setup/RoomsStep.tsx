@@ -796,16 +796,25 @@ export default function RoomsStep({
                       <span className="text-[11px] text-gray-500">Discount:</span>
                       <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
                         <button
-                          onClick={() => updateRoom({ nonRefundableDiscount: Math.max(1, room.nonRefundableDiscount - 5) })}
+                          onClick={() => updateRoom({ nonRefundableDiscount: Math.max(1, room.nonRefundableDiscount - 1) })}
                           className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
                         >
                           &minus;
                         </button>
-                        <span className="px-3 py-1.5 text-[12px] font-semibold text-gray-900 bg-white min-w-[48px] text-center">
-                          {room.nonRefundableDiscount}%
-                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={room.nonRefundableDiscount}
+                          onChange={e => {
+                            const val = parseInt(e.target.value)
+                            if (!isNaN(val)) updateRoom({ nonRefundableDiscount: Math.max(1, Math.min(50, val)) })
+                          }}
+                          className="w-12 py-1.5 text-[12px] font-semibold text-gray-900 bg-white text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <span className="text-[12px] font-semibold text-gray-500 pr-1">%</span>
                         <button
-                          onClick={() => updateRoom({ nonRefundableDiscount: Math.min(50, room.nonRefundableDiscount + 5) })}
+                          onClick={() => updateRoom({ nonRefundableDiscount: Math.min(50, room.nonRefundableDiscount + 1) })}
                           className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
                         >
                           +
