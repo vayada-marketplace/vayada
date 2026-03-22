@@ -793,14 +793,116 @@ export default function SettingsPage() {
 
           {/* Billing tab */}
           {activeTab === 'billing' && (
-            <div className="mt-5">
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <DocumentTextIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                <h2 className="text-sm font-semibold text-gray-900 mb-1">Billing & Invoices</h2>
-                <p className="text-[13px] text-gray-500 max-w-sm mx-auto">
-                  Billing is managed by the Vayada team. Contact us at <a href="mailto:billing@vayada.com" className="text-primary-600 hover:underline">billing@vayada.com</a> for any questions about your plan or invoices.
-                </p>
+            <div className="mt-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {/* Commission Plan */}
+                <div className={`bg-white rounded-lg border-2 p-5 transition-all ${
+                  settings.billing_active_plan === 'commission' && !settings.billing_pending_switch
+                    ? 'border-primary-500 ring-1 ring-primary-200'
+                    : settings.billing_pending_switch === 'commission'
+                      ? 'border-amber-400 ring-1 ring-amber-200'
+                      : 'border-gray-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[14px] font-semibold text-gray-900">Commission</h3>
+                    {settings.billing_active_plan === 'commission' && !settings.billing_pending_switch && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">CURRENT</span>
+                    )}
+                    {settings.billing_pending_switch === 'commission' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-gray-500 mb-3">Percentage of each booking</p>
+                  <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
+                    <span className="text-3xl font-bold text-gray-900">{settings.billing_commission_rate || 5}%</span>
+                    <p className="text-[11px] text-gray-400 mt-1">per booking</p>
+                  </div>
+                  {settings.billing_active_plan !== 'commission' && !settings.billing_pending_switch && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await settingsService.updatePropertySettings({ billing_pending_switch: 'commission' })
+                          setSettings(s => ({ ...s, billing_pending_switch: 'commission' }))
+                        } catch { /* */ }
+                      }}
+                      className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Switch from next month
+                    </button>
+                  )}
+                  {settings.billing_pending_switch === 'commission' && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await settingsService.updatePropertySettings({ billing_pending_switch: '' })
+                          setSettings(s => ({ ...s, billing_pending_switch: null }))
+                        } catch { /* */ }
+                      }}
+                      className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                    >
+                      Cancel switch
+                    </button>
+                  )}
+                </div>
+
+                {/* Fixed Fee Plan */}
+                <div className={`bg-white rounded-lg border-2 p-5 transition-all ${
+                  settings.billing_active_plan === 'fixed' && !settings.billing_pending_switch
+                    ? 'border-primary-500 ring-1 ring-primary-200'
+                    : settings.billing_pending_switch === 'fixed'
+                      ? 'border-amber-400 ring-1 ring-amber-200'
+                      : 'border-gray-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-[14px] font-semibold text-gray-900">Fixed Fee</h3>
+                    {settings.billing_active_plan === 'fixed' && !settings.billing_pending_switch && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">CURRENT</span>
+                    )}
+                    {settings.billing_pending_switch === 'fixed' && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
+                  <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
+                    <span className="text-3xl font-bold text-gray-900">{settings.default_currency} {settings.billing_fixed_fee || 49}</span>
+                    <p className="text-[11px] text-gray-400 mt-1">per month</p>
+                  </div>
+                  {settings.billing_active_plan !== 'fixed' && !settings.billing_pending_switch && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await settingsService.updatePropertySettings({ billing_pending_switch: 'fixed' })
+                          setSettings(s => ({ ...s, billing_pending_switch: 'fixed' }))
+                        } catch { /* */ }
+                      }}
+                      className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Switch from next month
+                    </button>
+                  )}
+                  {settings.billing_pending_switch === 'fixed' && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await settingsService.updatePropertySettings({ billing_pending_switch: '' })
+                          setSettings(s => ({ ...s, billing_pending_switch: null }))
+                        } catch { /* */ }
+                      }}
+                      className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                    >
+                      Cancel switch
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {settings.billing_pending_switch && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <p className="text-[13px] text-amber-800">
+                    Your plan will switch to <strong>{settings.billing_pending_switch === 'commission' ? 'Commission' : 'Fixed Fee'}</strong> at the start of next month.
+                  </p>
+                </div>
+              )}
             </div>
           )}
     </div>

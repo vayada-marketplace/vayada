@@ -31,6 +31,10 @@ export interface PropertySettings {
   email_notifications: boolean
   new_booking_alerts: boolean
   payment_alerts: boolean
+  billing_active_plan?: string
+  billing_commission_rate?: number
+  billing_fixed_fee?: number
+  billing_pending_switch?: string | null
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>
