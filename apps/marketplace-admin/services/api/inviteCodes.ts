@@ -59,6 +59,12 @@ export interface InviteData {
     seasons: Array<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }>
     weekendSurcharge: string
   }>
+  internal?: {
+    payment_model: 'commission' | 'fixed'
+    commission_rate?: number
+    fixed_monthly_fee?: number
+    billing_notes?: string
+  }
   policies: {
     check_in_time: string
     check_out_time: string
