@@ -41,8 +41,10 @@ async def get_payment_settings(slug: str):
     hotel = await BookingHotelRepository.get_by_slug(slug)
     if not hotel:
         raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
+    from app.models.utils import parse_json
     return {
         "payAtPropertyEnabled": hotel.get("pay_at_property_enabled", False),
+        "payAtHotelMethods": parse_json(hotel.get("pay_at_hotel_methods"), default=["cash", "card"]),
         "freeCancellationDays": hotel.get("free_cancellation_days", 7),
     }
 
