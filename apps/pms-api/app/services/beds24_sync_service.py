@@ -47,7 +47,7 @@ async def push_availability_for_room_type(
         blocked = await RoomTypeRepository.count_blocked(room_type_id, current, next_day)
         available = max(0, total_rooms - booked - blocked)
 
-        base_rate, _ = RoomTypeRepository.resolve_rate(room_type, current.month)
+        base_rate, _ = RoomTypeRepository.resolve_rate(room_type, current)
 
         calendar_data.append({
             "date": current.isoformat(),
@@ -168,7 +168,7 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
         return
 
     # Resolve rate
-    base_rate, _ = RoomTypeRepository.resolve_rate(room_type, check_in.month)
+    base_rate, _ = RoomTypeRepository.resolve_rate(room_type, check_in)
     total_from_beds24 = beds24_booking.get("price")
     if total_from_beds24 is not None:
         total_amount = float(total_from_beds24)

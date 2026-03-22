@@ -98,7 +98,7 @@ async def create_admin_booking(
     if data.nightly_rate is not None:
         nightly_rate = data.nightly_rate
     else:
-        resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in.month)
+        resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in)
         nightly_rate = resolved_base
     nights = (data.check_out - data.check_in).days
     total_amount = nightly_rate * nights

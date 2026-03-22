@@ -93,7 +93,7 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
-    base_rate, _ = RoomTypeRepository.resolve_rate(room, data.check_in.month)
+    base_rate, _ = RoomTypeRepository.resolve_rate(room, data.check_in)
     nightly_rate = base_rate
     total_amount = nightly_rate * nights
 
@@ -168,7 +168,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError("Check-out must be after check-in")
 
     # Resolve monthly rate for check-in month
-    resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, data.check_in.month)
+    resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, data.check_in)
 
     # Rate-type dependent pricing
     if data.rate_type == "nonrefundable":
