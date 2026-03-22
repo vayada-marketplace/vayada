@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS: PropertySettings = {
   email_notifications: true,
   new_booking_alerts: true,
   payment_alerts: true,
+  billing_active_plan: 'commission',
+  billing_commission_rate: 5,
+  billing_fixed_fee: 49,
+  billing_pending_switch: null,
 }
 
 // ── Custom Select Dropdown ───────────────────────────────────────────
