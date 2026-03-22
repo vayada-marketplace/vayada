@@ -100,6 +100,10 @@ _PROPERTY_FIELD_MAP = {
     "new_booking_alerts": "new_booking_alerts",
     "payment_alerts": "payment_alerts",
     "weekly_reports": "weekly_reports",
+    "instagram": "social_instagram",
+    "facebook": "social_facebook",
+    "twitter": "social_twitter",
+    "youtube": "social_youtube",
 }
 
 
@@ -124,6 +128,10 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         new_booking_alerts=hotel.get('new_booking_alerts', True),
         payment_alerts=hotel.get('payment_alerts', True),
         weekly_reports=hotel.get('weekly_reports', False),
+        instagram=hotel.get('social_instagram') or '',
+        facebook=hotel.get('social_facebook') or '',
+        twitter=hotel.get('social_twitter') or '',
+        youtube=hotel.get('social_youtube') or '',
     )
 
 
@@ -136,6 +144,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     pay_at_property_enabled=False, free_cancellation_days=7,
     email_notifications=True, new_booking_alerts=True,
     payment_alerts=True, weekly_reports=False,
+    instagram='', facebook='', twitter='', youtube='',
 )
 
 
