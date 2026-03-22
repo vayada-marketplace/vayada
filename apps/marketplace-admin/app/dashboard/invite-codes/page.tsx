@@ -283,6 +283,10 @@ export default function InviteCodesPage() {
             supportedCurrencies={supportedCurrencies} setSupportedCurrencies={setSupportedCurrencies}
             supportedLanguages={supportedLanguages} setSupportedLanguages={setSupportedLanguages}
             stepIndicators={stepIndicators}
+            prefilled={false}
+            error=""
+            canProceed={canProceed()}
+            onContinue={() => setStep(2)}
           />
         )}
 
@@ -298,6 +302,10 @@ export default function InviteCodesPage() {
             handleImageUpload={handleImageUpload}
             uploading={uploading}
             stepIndicators={stepIndicators}
+            error=""
+            canProceed={canProceed()}
+            onBack={() => setStep(1)}
+            onContinue={() => setStep(3)}
           />
         )}
 
@@ -314,6 +322,10 @@ export default function InviteCodesPage() {
             uploadingRoomImages={uploadingRoomImages}
             currency={currency}
             stepIndicators={stepIndicators}
+            error=""
+            canProceed={canProceed()}
+            onBack={() => setStep(2)}
+            onContinue={() => setStep(4)}
           />
         )}
 
@@ -330,36 +342,12 @@ export default function InviteCodesPage() {
             numberOfGuests={numberOfGuests} setNumberOfGuests={setNumberOfGuests}
             enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
             stepIndicators={stepIndicators}
+            error=""
+            saving={saving}
+            onBack={() => setStep(3)}
+            onComplete={handleGenerate}
           />
         )}
-
-        {/* Navigation buttons */}
-        <div className="bg-white border-t border-gray-200 px-8 py-4 flex justify-between shrink-0">
-          <button
-            onClick={() => step > 1 ? setStep(step - 1) : resetForm()}
-            className="px-6 py-2.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-full hover:bg-gray-50 transition-colors"
-          >
-            {step > 1 ? 'Back' : 'Cancel'}
-          </button>
-          {step < STEPS.length ? (
-            <button
-              onClick={() => setStep(step + 1)}
-              disabled={!canProceed()}
-              className="px-6 py-2.5 text-[13px] font-medium text-white bg-primary-500 rounded-full hover:bg-primary-600 disabled:opacity-50 transition-colors"
-            >
-              Continue
-            </button>
-          ) : (
-            <button
-              onClick={handleGenerate}
-              disabled={saving}
-              className="px-6 py-2.5 text-[13px] font-medium text-white bg-green-600 rounded-full hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-2"
-            >
-              {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-              Generate Invite Code
-            </button>
-          )}
-        </div>
       </div>
     )
   }
