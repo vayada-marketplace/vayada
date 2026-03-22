@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  MagnifyingGlassIcon,
   BellIcon,
   ChevronDownIcon,
   ArrowTopRightOnSquareIcon,
@@ -13,7 +12,6 @@ import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/setti
 
 export default function Header() {
   const router = useRouter()
-  const [searchQuery, setSearchQuery] = useState('')
   const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([])
   const [selectedHotel, setSelectedHotel] = useState<(HotelSummary | SuperAdminHotel) | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -139,17 +137,6 @@ export default function Header() {
           </span>
         )}
 
-        {/* Search Bar */}
-        <div className="relative">
-          <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search settings..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-56 pl-8 pr-3 py-1.5 text-[13px] bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-gray-400 transition-all"
-          />
-        </div>
       </div>
 
       {/* Right section: Preview + Notifications + Profile */}
