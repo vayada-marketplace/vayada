@@ -10,6 +10,7 @@ interface PoliciesStepProps {
   checkOutTime: string; setCheckOutTime: (v: string) => void
   minimumStay: number; setMinimumStay: (v: number) => void
   payAtHotel: boolean; setPayAtHotel: (v: boolean) => void
+  payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
   onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
   bankTransfer: boolean; setBankTransfer: (v: boolean) => void
   specialRequests: boolean; setSpecialRequests: (v: boolean) => void
@@ -28,6 +29,7 @@ export default function PoliciesStep({
   checkOutTime, setCheckOutTime,
   minimumStay, setMinimumStay,
   payAtHotel, setPayAtHotel,
+  payAtHotelMethods, setPayAtHotelMethods,
   onlineCardPayment, setOnlineCardPayment,
   bankTransfer, setBankTransfer,
   specialRequests, setSpecialRequests,
@@ -95,8 +97,61 @@ export default function PoliciesStep({
           <h3 className="text-[13px] font-semibold text-gray-900">Payment Methods</h3>
           <p className="text-[12px] text-gray-500 mb-2">Choose which payment options are available to guests</p>
 
+          {/* Pay at Hotel */}
+          <div>
+            <button
+              onClick={() => setPayAtHotel(!payAtHotel)}
+              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                payAtHotel
+                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div>
+                <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
+                <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
+              </div>
+              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${payAtHotel ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${payAtHotel ? 'left-4' : 'left-0.5'}`} />
+              </div>
+            </button>
+            {payAtHotel && (
+              <div className="ml-4 mt-2 flex gap-2">
+                {[
+                  { key: 'cash', label: 'Cash' },
+                  { key: 'card', label: 'Card' },
+                ].map((m) => {
+                  const selected = payAtHotelMethods.includes(m.key)
+                  return (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => {
+                        if (selected && payAtHotelMethods.length > 1) {
+                          setPayAtHotelMethods(payAtHotelMethods.filter(v => v !== m.key))
+                        } else if (!selected) {
+                          setPayAtHotelMethods([...payAtHotelMethods, m.key])
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                        selected
+                          ? 'border-primary-500 bg-primary-50 text-primary-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  )
+                })}
+                <span className="text-[11px] text-gray-400 self-center ml-1">
+                  {payAtHotelMethods.length === 2 ? 'Cash & Card accepted' : payAtHotelMethods.includes('cash') ? 'Cash only' : 'Card only'}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Other payment methods */}
           {[
-            { label: 'Pay at Hotel', value: payAtHotel, setter: setPayAtHotel, desc: 'Guests pay upon arrival at the property' },
             { label: 'Online Card Payment', value: onlineCardPayment, setter: setOnlineCardPayment, desc: 'Accept credit/debit card payments online' },
             { label: 'Bank Transfer', value: bankTransfer, setter: setBankTransfer, desc: 'Allow guests to pay via bank transfer' },
           ].map((item) => (

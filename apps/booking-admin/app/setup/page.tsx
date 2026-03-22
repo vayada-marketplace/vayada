@@ -84,6 +84,7 @@ export default function SetupPage() {
   const [checkOutTime, setCheckOutTime] = useState('11:00')
   const [minimumStay, setMinimumStay] = useState(1)
   const [payAtHotel, setPayAtHotel] = useState(true)
+  const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [bankTransfer, setBankTransfer] = useState(false)
   const [specialRequests, setSpecialRequests] = useState(true)
@@ -663,6 +664,7 @@ export default function SetupPage() {
           checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
           minimumStay={minimumStay} setMinimumStay={setMinimumStay}
           payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
+          payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
           bankTransfer={bankTransfer} setBankTransfer={setBankTransfer}
           specialRequests={specialRequests} setSpecialRequests={setSpecialRequests}
