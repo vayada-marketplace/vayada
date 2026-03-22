@@ -513,6 +513,57 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
+                  {/* Social Media card */}
+                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <GlobeAltIcon className="w-4 h-4 text-gray-700" />
+                      <h2 className="text-sm font-semibold text-gray-900">Social Media</h2>
+                    </div>
+                    <p className="text-[13px] text-gray-500 mb-3">Links shown in your booking site footer</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Instagram</label>
+                        <input
+                          type="url"
+                          value={settings.instagram || ''}
+                          onChange={(e) => updateSetting('instagram', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="https://instagram.com/yourhotel"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Facebook</label>
+                        <input
+                          type="url"
+                          value={settings.facebook || ''}
+                          onChange={(e) => updateSetting('facebook', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="https://facebook.com/yourhotel"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Twitter / X</label>
+                        <input
+                          type="url"
+                          value={settings.twitter || ''}
+                          onChange={(e) => updateSetting('twitter', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="https://x.com/yourhotel"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">YouTube</label>
+                        <input
+                          type="url"
+                          value={settings.youtube || ''}
+                          onChange={(e) => updateSetting('youtube', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="https://youtube.com/@yourhotel"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Currency & Languages card */}
                   <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
                     <div className="flex items-center gap-1.5">
