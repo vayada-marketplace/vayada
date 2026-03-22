@@ -327,6 +327,7 @@ services:
       - "3003:3003"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8001
+      - NEXT_PUBLIC_PMS_URL=http://localhost:8002
     volumes:
       - ./booking-engine/vayada-booking-engine-frontend-admin:/app
       - /app/node_modules
@@ -349,6 +350,7 @@ services:
     environment:
       - NEXT_PUBLIC_AUTH_API_URL=http://localhost:8001
       - NEXT_PUBLIC_PMS_API_URL=http://localhost:8002
+      - NEXT_PUBLIC_BOOKING_ADMIN_URL=http://localhost:3003
     volumes:
       - ./pms/vayada-pms-frontend:/app
       - /app/node_modules
