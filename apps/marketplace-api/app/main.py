@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.database import Database, AuthDatabase, PmsDatabase, check_database_connection
 from app.config import settings
-from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter, trips
+from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter, trips, invite_codes
 
 logger = logging.getLogger(__name__)
 
@@ -126,4 +126,5 @@ app.include_router(consent.router)
 app.include_router(gdpr.router)
 app.include_router(newsletter.router)
 app.include_router(trips.router)
+app.include_router(invite_codes.router)
 
