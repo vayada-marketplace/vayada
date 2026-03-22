@@ -793,55 +793,13 @@ export default function SettingsPage() {
 
           {/* Billing tab */}
           {activeTab === 'billing' && (
-            <div className="mt-5 space-y-4">
-              {/* Current Plan card */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-900">Current Plan</h2>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-800">
-                    Active
-                  </span>
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-base font-semibold text-gray-900">Professional Plan</p>
-                  <p className="text-[13px] text-gray-500">
-                    <span className="text-xl font-bold text-gray-900">$99</span> /month
-                  </p>
-                  <p className="text-[13px] text-gray-500">
-                    Next renewal: March 1, 2026
-                  </p>
-                </div>
-                <button className="mt-3 px-3 py-1.5 border border-gray-300 text-[13px] font-medium text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                  Manage Plan
-                </button>
-              </div>
-
-              {/* Payment Method card */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">Payment Method</h2>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-6 bg-blue-600 rounded flex items-center justify-center">
-                      <span className="text-white text-[9px] font-bold">VISA</span>
-                    </div>
-                    <div>
-                      <p className="text-[13px] font-medium text-gray-900">Visa ending in 4242</p>
-                      <p className="text-[11px] text-gray-500">Expires 12/27</p>
-                    </div>
-                  </div>
-                  <button className="px-2.5 py-1 text-[13px] text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                    Edit
-                  </button>
-                </div>
-              </div>
-
-              {/* Billing History card */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">Billing History</h2>
-                <div className="flex flex-col items-center justify-center py-6 text-gray-400">
-                  <DocumentTextIcon className="w-8 h-8 mb-1.5" />
-                  <p className="text-[13px]">No invoices yet</p>
-                </div>
+            <div className="mt-5">
+              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+                <DocumentTextIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <h2 className="text-sm font-semibold text-gray-900 mb-1">Billing & Invoices</h2>
+                <p className="text-[13px] text-gray-500 max-w-sm mx-auto">
+                  Billing is managed by the Vayada team. Contact us at <a href="mailto:billing@vayada.com" className="text-primary-600 hover:underline">billing@vayada.com</a> for any questions about your plan or invoices.
+                </p>
               </div>
             </div>
           )}
