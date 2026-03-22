@@ -12,7 +12,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -500,17 +500,17 @@ COLLABORATIONS = [
         "initiator_type": "creator",
         "status": "negotiating",
         "why_great_fit": "As a food blogger with 200K Instagram followers, I would love to showcase your restaurant and dining experiences. My audience is highly engaged with food and travel content.",
-        "travel_date_from": "2024-05-15",
-        "travel_date_to": "2024-05-20",
+        "travel_date_from": date.today() + timedelta(days=30),
+        "travel_date_to": date.today() + timedelta(days=35),
         "preferred_months": ["May", "Jun"],
         "consent": True,
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 7}]},
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 1}]},
         ],
-        "responded_at": datetime(2024, 1, 10, 12, 0, 0),
-        "hotel_agreed_at": datetime(2024, 1, 10, 12, 0, 0),
-        "creator_agreed_at": datetime(2024, 1, 10, 14, 30, 0),
+        "responded_at": datetime.now() - timedelta(days=5),
+        "hotel_agreed_at": datetime.now() - timedelta(days=5),
+        "creator_agreed_at": datetime.now() - timedelta(days=5, hours=-2),
     },
     {
         "creator_email": "creator4@mock.com",
@@ -519,15 +519,15 @@ COLLABORATIONS = [
         "initiator_type": "creator",
         "status": "declined",
         "why_great_fit": "I specialize in adventure travel content and would love to showcase your ski-in/ski-out chalet. My YouTube channel has 220K subscribers interested in outdoor activities.",
-        "travel_date_from": "2024-12-20",
-        "travel_date_to": "2024-12-27",
+        "travel_date_from": date.today() + timedelta(days=60),
+        "travel_date_to": date.today() + timedelta(days=67),
         "preferred_months": ["Dec", "Jan"],
         "consent": True,
         "platform_deliverables": [
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 2}]},
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 4}]},
         ],
-        "responded_at": datetime(2024, 1, 8, 10, 30, 0),
+        "responded_at": datetime.now() - timedelta(days=10),
     },
     {
         "creator_email": "creator1@mock.com",
@@ -536,16 +536,19 @@ COLLABORATIONS = [
         "initiator_type": "creator",
         "status": "completed",
         "why_great_fit": "Perfect match for my travel content! I've been wanting to visit Bali and your villa looks stunning. My audience would love this destination.",
-        "travel_date_from": "2024-04-10",
-        "travel_date_to": "2024-04-15",
+        "travel_date_from": date.today() - timedelta(days=30),
+        "travel_date_to": date.today() - timedelta(days=25),
         "preferred_months": ["Apr", "May"],
         "consent": True,
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 8}]},
             {"platform": "TikTok", "deliverables": [{"type": "TikTok Video", "quantity": 5}]},
         ],
-        "responded_at": datetime(2024, 1, 5, 14, 0, 0),
-        "completed_at": datetime(2024, 4, 20, 16, 0, 0),
+        "responded_at": datetime.now() - timedelta(days=45),
+        "completed_at": datetime.now() - timedelta(days=20),
+        "creator_fee": Decimal("8.00"),
+        "affiliate_referral_code": "ALEX-GARDEN",
+        "affiliate_link": "https://beachsideboutique.bali/book?ref=ALEX-GARDEN",
     },
     # Hotel-initiated
     {
@@ -556,8 +559,8 @@ COLLABORATIONS = [
         "status": "pending",
         "collaboration_type": "Discount",
         "discount_percentage": 30,
-        "preferred_date_from": "2024-02-01",
-        "preferred_date_to": "2024-02-29",
+        "preferred_date_from": date.today() + timedelta(days=14),
+        "preferred_date_to": date.today() + timedelta(days=44),
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 2}, {"type": "Instagram Stories", "quantity": 4}]},
             {"platform": "Facebook", "deliverables": [{"type": "Facebook Post", "quantity": 1}]},
@@ -572,15 +575,18 @@ COLLABORATIONS = [
         "collaboration_type": "Free Stay",
         "free_stay_min_nights": 3,
         "free_stay_max_nights": 7,
-        "preferred_date_from": "2024-03-01",
-        "preferred_date_to": "2024-05-31",
+        "preferred_date_from": date.today() + timedelta(days=20),
+        "preferred_date_to": date.today() + timedelta(days=90),
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 6}]},
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 1}]},
         ],
-        "responded_at": datetime(2024, 1, 12, 9, 0, 0),
-        "hotel_agreed_at": datetime(2024, 1, 12, 9, 0, 0),
-        "creator_agreed_at": datetime(2024, 1, 12, 10, 15, 0),
+        "responded_at": datetime.now() - timedelta(days=3),
+        "hotel_agreed_at": datetime.now() - timedelta(days=3),
+        "creator_agreed_at": datetime.now() - timedelta(days=3, hours=-1),
+        "creator_fee": Decimal("5.00"),
+        "affiliate_referral_code": "MARC-PARADISE",
+        "affiliate_link": "https://grandparadise.com/book?ref=MARC-PARADISE",
     },
     {
         "creator_email": "creator4@mock.com",
@@ -590,8 +596,8 @@ COLLABORATIONS = [
         "status": "pending",
         "collaboration_type": "Discount",
         "discount_percentage": 25,
-        "preferred_date_from": "2024-09-01",
-        "preferred_date_to": "2024-11-30",
+        "preferred_date_from": date.today() + timedelta(days=45),
+        "preferred_date_to": date.today() + timedelta(days=120),
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 2}]},
             {"platform": "Facebook", "deliverables": [{"type": "Facebook Post", "quantity": 1}]},
@@ -606,8 +612,8 @@ COLLABORATIONS = [
         "collaboration_type": "Free Stay",
         "free_stay_min_nights": 3,
         "free_stay_max_nights": 7,
-        "preferred_date_from": "2024-04-01",
-        "preferred_date_to": "2024-06-30",
+        "preferred_date_from": date.today() + timedelta(days=30),
+        "preferred_date_to": date.today() + timedelta(days=100),
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 2}, {"type": "Instagram Stories", "quantity": 5}]},
             {"platform": "TikTok", "deliverables": [{"type": "TikTok Video", "quantity": 2}]},
@@ -621,15 +627,15 @@ COLLABORATIONS = [
         "status": "accepted",
         "collaboration_type": "Paid",
         "paid_amount": Decimal("3000.00"),
-        "preferred_date_from": "2024-04-01",
-        "preferred_date_to": "2024-08-31",
+        "preferred_date_from": date.today() + timedelta(days=15),
+        "preferred_date_to": date.today() + timedelta(days=150),
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 4}, {"type": "Instagram Stories", "quantity": 8}]},
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 2}]},
         ],
-        "responded_at": datetime(2024, 1, 11, 15, 30, 0),
-        "hotel_agreed_at": datetime(2024, 1, 11, 15, 30, 0),
-        "creator_agreed_at": datetime(2024, 1, 11, 16, 45, 0),
+        "responded_at": datetime.now() - timedelta(days=7),
+        "hotel_agreed_at": datetime.now() - timedelta(days=7),
+        "creator_agreed_at": datetime.now() - timedelta(days=7, hours=-1),
     },
     {
         "creator_email": "creator1@mock.com",
@@ -638,16 +644,93 @@ COLLABORATIONS = [
         "initiator_type": "creator",
         "status": "negotiating",
         "why_great_fit": "I'd love to visit! Let's discuss the dates.",
-        "travel_date_from": "2024-07-10",
-        "travel_date_to": "2024-07-15",
+        "travel_date_from": date.today() + timedelta(days=40),
+        "travel_date_to": date.today() + timedelta(days=45),
         "preferred_months": ["Jul"],
         "consent": True,
         "platform_deliverables": [
             {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 10}]},
         ],
-        "hotel_agreed_at": datetime(2024, 1, 15, 10, 0, 0),
+        "hotel_agreed_at": datetime.now() - timedelta(days=2),
         "creator_agreed_at": None,
-        "term_last_updated_at": datetime(2024, 1, 15, 10, 0, 0),
+        "term_last_updated_at": datetime.now() - timedelta(days=2),
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Trips & External Collaborations
+# ---------------------------------------------------------------------------
+TRIPS = [
+    {
+        "creator_email": "creator1@mock.com",
+        "name": "Bali Spring Trip",
+        "location": "Bali, Indonesia",
+        "start_date": date.today() + timedelta(days=20),
+        "end_date": date.today() + timedelta(days=30),
+        "notes": "Visiting multiple resorts for content creation",
+    },
+    {
+        "creator_email": "creator1@mock.com",
+        "name": "Maldives Summer",
+        "location": "Maldives",
+        "start_date": date.today() + timedelta(days=60),
+        "end_date": date.today() + timedelta(days=70),
+        "notes": "Luxury resort content series",
+    },
+    {
+        "creator_email": "creator4@mock.com",
+        "name": "Swiss Alps Adventure",
+        "location": "Switzerland, Alps",
+        "start_date": date.today() + timedelta(days=45),
+        "end_date": date.today() + timedelta(days=55),
+        "notes": "Skiing and hiking content for winter series",
+    },
+    {
+        "creator_email": "creator2@mock.com",
+        "name": "Croatia Food Tour",
+        "location": "Dubrovnik, Croatia",
+        "start_date": date.today() + timedelta(days=35),
+        "end_date": date.today() + timedelta(days=42),
+        "notes": "Exploring local restaurants and coastal cuisine",
+    },
+]
+
+EXTERNAL_COLLABORATIONS = [
+    {
+        "creator_email": "creator1@mock.com",
+        "trip_name": "Bali Spring Trip",
+        "title": "Ubud Eco Resort Feature",
+        "hotel_name": "Ubud Green Villas",
+        "location": "Ubud, Bali",
+        "collaboration_type": "Free Stay",
+        "start_date": date.today() + timedelta(days=22),
+        "end_date": date.today() + timedelta(days=25),
+        "deliverables": "3 Instagram posts, 1 YouTube vlog, 10 Stories",
+        "notes": "Eco-tourism angle, sustainable travel content",
+    },
+    {
+        "creator_email": "creator4@mock.com",
+        "trip_name": "Swiss Alps Adventure",
+        "title": "Zermatt Ski Lodge Partnership",
+        "hotel_name": "Zermatt Mountain Lodge",
+        "location": "Zermatt, Switzerland",
+        "collaboration_type": "Paid",
+        "start_date": date.today() + timedelta(days=47),
+        "end_date": date.today() + timedelta(days=50),
+        "deliverables": "2 YouTube videos, 5 Instagram posts",
+        "notes": "Paid partnership for winter sports content",
+    },
+    {
+        "creator_email": "creator2@mock.com",
+        "trip_name": "Croatia Food Tour",
+        "title": "Old Town Restaurant Review",
+        "hotel_name": None,
+        "location": "Dubrovnik Old Town, Croatia",
+        "collaboration_type": "Custom / External",
+        "start_date": date.today() + timedelta(days=36),
+        "end_date": date.today() + timedelta(days=38),
+        "deliverables": "1 YouTube food review, 5 Instagram Stories",
+        "notes": "Local restaurant partnership, not hotel-based",
     },
 ]
 
@@ -891,8 +974,9 @@ async def main():
                     preferred_date_from, preferred_date_to,
                     preferred_months, consent,
                     responded_at, completed_at,
-                    hotel_agreed_at, creator_agreed_at, term_last_updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+                    hotel_agreed_at, creator_agreed_at, term_last_updated_at,
+                    creator_fee, affiliate_referral_code, affiliate_link
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
                 RETURNING id
                 """,
                 c["initiator_type"],
@@ -917,6 +1001,9 @@ async def main():
                 c.get("hotel_agreed_at"),
                 c.get("creator_agreed_at"),
                 c.get("term_last_updated_at", datetime.now()),
+                c.get("creator_fee"),
+                c.get("affiliate_referral_code"),
+                c.get("affiliate_link"),
             )
 
             for pi in c["platform_deliverables"]:
@@ -937,7 +1024,60 @@ async def main():
             print(f"  Created: {c['creator_email']} <-> {c['hotel_email']} ({c['status']})")
 
         # ------------------------------------------------------------------
-        # 5. Chat messages
+        # 5. Trips & External Collaborations
+        # ------------------------------------------------------------------
+        print("\nSeeding trips & external collaborations...")
+        trip_db_ids = {}  # (email, trip_name) -> trip.id
+
+        for t in TRIPS:
+            cid = creator_db_ids.get(t["creator_email"])
+            if not cid:
+                print(f"  Skipped trip: creator {t['creator_email']} not found")
+                continue
+            row = await conn.fetchrow(
+                """
+                INSERT INTO trips (creator_id, name, location, start_date, end_date, notes)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
+                """,
+                cid,
+                t["name"],
+                t.get("location"),
+                t["start_date"],
+                t["end_date"],
+                t.get("notes"),
+            )
+            trip_db_ids[(t["creator_email"], t["name"])] = row["id"]
+            print(f"  Created trip: {t['name']} ({t['creator_email']})")
+
+        for ec in EXTERNAL_COLLABORATIONS:
+            cid = creator_db_ids.get(ec["creator_email"])
+            trip_id = trip_db_ids.get((ec["creator_email"], ec["trip_name"]))
+            if not cid:
+                print(f"  Skipped external collab: creator {ec['creator_email']} not found")
+                continue
+            await conn.execute(
+                """
+                INSERT INTO external_collaborations
+                    (creator_id, trip_id, title, hotel_name, location,
+                     collaboration_type, start_date, end_date, deliverables, notes)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                cid,
+                trip_id,
+                ec["title"],
+                ec.get("hotel_name"),
+                ec.get("location"),
+                ec.get("collaboration_type"),
+                ec["start_date"],
+                ec["end_date"],
+                ec.get("deliverables"),
+                ec.get("notes"),
+            )
+            print(f"  Created external collab: {ec['title']}")
+
+        # ------------------------------------------------------------------
+        #  Chat messages
         # ------------------------------------------------------------------
         print("\nSeeding chat messages...")
         all_collabs = await conn.fetch(
@@ -991,7 +1131,7 @@ async def main():
         print(f"  Created {chat_count} messages")
 
         # ------------------------------------------------------------------
-        # 6. Reviews
+        #  Reviews
         # ------------------------------------------------------------------
         print("\nSeeding reviews...")
         reviewable = await conn.fetch(
