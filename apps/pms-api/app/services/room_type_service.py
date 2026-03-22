@@ -43,11 +43,17 @@ async def get_rooms_for_guest(
             remaining = total
 
         if check_in:
-            base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in.month)
+            base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in)
         else:
             base_rate = float(room["base_rate"])
             nr = room.get("non_refundable_rate")
             nr_rate = float(nr) if nr is not None else None
+            # If base_rate is 0, try to use the lowest season rate for display
+            if base_rate == 0:
+                seasons = RoomTypeRepository._parse_seasons(room)
+                season_rate = RoomTypeRepository._get_lowest_season_rate(seasons)
+                if season_rate is not None:
+                    base_rate = season_rate
 
         result.append(
             RoomTypeResponse(
@@ -65,6 +71,7 @@ async def get_rooms_for_guest(
                 bed_type=room["bed_type"],
                 remaining_rooms=remaining,
                 features=parse_jsonb(room["features"]),
+                benefits=parse_jsonb(room.get("benefits", [])),
             )
         )
 

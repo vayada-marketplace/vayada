@@ -144,12 +144,55 @@ class RoomTypeRepository:
         return count or 0
 
     @staticmethod
-    def resolve_rate(room: dict, check_in_month: int) -> Tuple[float, Optional[float]]:
-        """Return (base_rate, non_refundable_rate) using monthly override if present."""
+    def _parse_seasons(room: dict) -> list:
+        seasons = room.get("seasons") or []
+        if isinstance(seasons, str):
+            seasons = json.loads(seasons)
+        return seasons
+
+    @staticmethod
+    def _find_season_rate(seasons: list, check_in: date) -> Optional[float]:
+        """Find the season rate that covers the check-in date."""
+        for season in seasons:
+            rate = season.get("rate")
+            if not rate:
+                continue
+            season_from = season.get("from")
+            season_to = season.get("to")
+            if not season_from or not season_to:
+                continue
+            try:
+                s_from = date.fromisoformat(season_from)
+                s_to = date.fromisoformat(season_to)
+                if s_from <= check_in <= s_to:
+                    return float(rate)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    @staticmethod
+    def _get_lowest_season_rate(seasons: list) -> Optional[float]:
+        """Return the lowest non-zero season rate (for display when no dates selected)."""
+        rates = []
+        for season in seasons:
+            rate = season.get("rate")
+            if rate:
+                try:
+                    r = float(rate)
+                    if r > 0:
+                        rates.append(r)
+                except (ValueError, TypeError):
+                    continue
+        return min(rates) if rates else None
+
+    @staticmethod
+    def resolve_rate(room: dict, check_in: date) -> Tuple[float, Optional[float]]:
+        """Return (base_rate, non_refundable_rate) using monthly override, then season, then base."""
         monthly_rates = room.get("monthly_rates") or {}
         if isinstance(monthly_rates, str):
             monthly_rates = json.loads(monthly_rates)
 
+        check_in_month = check_in.month
         override = monthly_rates.get(str(check_in_month))
         if override:
             base = override.get("base_rate") if override.get("base_rate") is not None else float(room["base_rate"])
@@ -157,6 +200,13 @@ class RoomTypeRepository:
             nr_default = float(nr) if nr is not None else None
             nr_resolved = override.get("non_refundable_rate") if override.get("non_refundable_rate") is not None else nr_default
             return (float(base), float(nr_resolved) if nr_resolved is not None else None)
+
+        # Check seasons
+        seasons = RoomTypeRepository._parse_seasons(room)
+        season_rate = RoomTypeRepository._find_season_rate(seasons, check_in)
+        if season_rate is not None:
+            nr = room.get("non_refundable_rate")
+            return (season_rate, float(nr) if nr is not None else None)
 
         nr = room.get("non_refundable_rate")
         return (float(room["base_rate"]), float(nr) if nr is not None else None)
