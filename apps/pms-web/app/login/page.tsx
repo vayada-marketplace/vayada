@@ -71,7 +71,7 @@ export default function LoginPage() {
               <path d="M8 11h8" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Vayada PMS</h1>
+          <h1 className="text-xl font-bold text-gray-900">vayada PMS</h1>
           <p className="text-[13px] text-gray-500 mt-1">Sign in to manage your property</p>
         </div>
 
