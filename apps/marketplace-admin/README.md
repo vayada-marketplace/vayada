@@ -1,6 +1,6 @@
-# Vayada Admin Frontend
+# vayada Admin Frontend
 
-Admin panel for managing Vayada users, built with Next.js 14.
+Admin panel for managing vayada users, built with Next.js 14.
 
 ## Getting Started
 

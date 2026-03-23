@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">V</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Vayada Admin</h1>
+          <h1 className="text-xl font-bold text-gray-900">vayada Admin</h1>
           <p className="text-[13px] text-gray-500 mt-1">Reset your password</p>
         </div>
 

@@ -36,7 +36,7 @@ export default function Sidebar() {
         </div>
         {!collapsed && (
           <div className="ml-2.5 min-w-0">
-            <p className="text-xs font-semibold text-gray-900 leading-tight">Vayada</p>
+            <p className="text-xs font-semibold text-gray-900 leading-tight">vayada</p>
             <p className="text-[10px] text-gray-500 leading-tight">Admin Dashboard</p>
           </div>
         )}

@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Vayada Admin - Authentication',
-  description: 'Admin authentication for Vayada',
+  title: 'vayada Admin - Authentication',
+  description: 'Admin authentication for vayada',
   icons: {
     icon: '/vayada-logo.svg',
   },

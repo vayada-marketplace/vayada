@@ -84,7 +84,7 @@ export default function InviteCodesPage() {
   const [numberOfGuests, setNumberOfGuests] = useState(false)
   const [enableReferAGuest, setEnableReferAGuest] = useState(false)
 
-  // Internal: Vayada payment terms (not shown to hotel during setup)
+  // Internal: vayada payment terms (not shown to hotel during setup)
   const [activePlan, setActivePlan] = useState<'commission' | 'fixed'>('commission')
   const [commissionRate, setCommissionRate] = useState('5')
   const [fixedMonthlyFee, setFixedMonthlyFee] = useState('49')
@@ -366,7 +366,7 @@ export default function InviteCodesPage() {
           />
         )}
 
-        {/* Step 5: Vayada Payment Terms */}
+        {/* Step 5: vayada Payment Terms */}
         {step === 5 && (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto px-8 py-8">
