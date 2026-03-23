@@ -2,21 +2,18 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { authService } from '@/services/auth'
-import { roomsService } from '@/services/rooms'
 import { bookingsService } from '@/services/bookings'
 
 interface DayStats {
   arrivals: number
   departures: number
-  occupancy: number
-  revpar: number
 }
 
 export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
-  const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0, occupancy: 0, revpar: 0 })
+  const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 })
   const profileRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -36,26 +33,13 @@ export default function Header() {
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]
 
-    Promise.all([
-      roomsService.list(),
-      bookingsService.list({ status: 'confirmed', limit: 500 }),
-    ])
-      .then(([rooms, bookingsRes]) => {
-        const totalRooms = rooms.reduce((sum, r) => sum + r.totalRooms, 0)
+    bookingsService.list({ status: 'confirmed', limit: 500 })
+      .then((bookingsRes) => {
         const bookings = bookingsRes.bookings
         const arrivals = bookings.filter(b => b.checkIn === today).length
         const departures = bookings.filter(b => b.checkOut === today).length
-        const occupied = bookings.filter(b => b.checkIn <= today && b.checkOut > today).length
-        const occupancy = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0
-        const revenue30 = bookings
-          .filter(b => b.checkIn >= thirtyDaysAgoStr)
-          .reduce((sum, b) => sum + b.totalAmount, 0)
-        const revpar = totalRooms > 0 ? Math.round(revenue30 / (totalRooms * 30)) : 0
-        setStats({ arrivals, departures, occupancy, revpar })
+        setStats({ arrivals, departures })
       })
       .catch(console.error)
   }, [])
@@ -90,30 +74,6 @@ export default function Header() {
 
       {/* Right: stats + bell + avatar */}
       <div className="flex items-center gap-3 shrink-0">
-        {/* Occupancy */}
-        <div className="flex flex-col items-end leading-none">
-          <span className="text-[10px] text-gray-400">Occupancy</span>
-          <span className="text-[12px] font-bold text-blue-600">{stats.occupancy}%</span>
-        </div>
-        {/* RevPAR */}
-        <div className="flex flex-col items-end leading-none">
-          <span className="text-[10px] text-gray-400">RevPAR</span>
-          <span className="text-[12px] font-bold text-blue-600">${stats.revpar}</span>
-        </div>
-
-        <div className="h-5 w-px bg-gray-200" />
-
-        {/* Notification bell */}
-        <button className="relative w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-md transition-colors">
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-blue-600 rounded-full text-[8px] text-white flex items-center justify-center font-bold">
-            3
-          </span>
-        </button>
-
         {/* Profile avatar */}
         <div className="relative" ref={profileRef}>
           <button
