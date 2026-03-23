@@ -1,4 +1,4 @@
-# Vayada Booking Engine - Complete Overview
+# vayada Booking Engine - Complete Overview
 
 Everything discussed and decided about the booking engine ecosystem: customer frontend, admin dashboard, and backend.
 
@@ -640,7 +640,7 @@ Decision was made to build frontend first with mock data, then backend to match 
 - **Smoobu + SiteMinder adapters:** After eZee is working
 - **Multi-currency conversion:** Rates in property currency, display in guest currency — approach not decided
 - **Multi-language / localization:** Mentioned but not planned
-- **Vayada billing model:** 49 EUR/month + 1.5% per booking mentioned in dashboard mockups but not in implementation plan
+- **vayada billing model:** 49 EUR/month + 1.5% per booking mentioned in dashboard mockups but not in implementation plan
 - **Payment providers beyond Stripe:** PayPal mentioned in architecture but not planned
 - **Async booking flow:** SQS-based flow in AWS architecture, but simplified to synchronous for MVP
 - **Shared component library:** Decided to defer — build independently now, extract `@vayada/ui` later when patterns stabilize across 3+ projects

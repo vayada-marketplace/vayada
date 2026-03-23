@@ -104,6 +104,12 @@ variable "stripe_webhook_secret" {
   default     = ""
 }
 
+variable "stripe_platform_account_id" {
+  description = "Stripe platform account ID"
+  type        = string
+  default     = ""
+}
+
 variable "cloudflare_api_token" {
   description = "Cloudflare API token for custom hostname management"
   type        = string

@@ -5,6 +5,8 @@ locals {
     "vayada-booking-admin-frontend",
     "vayada-pms-backend",
     "vayada-pms-frontend",
+    "vayada-creator-marketplace-backend",
+    "vayada-admin-frontend",
   ]
 }
 

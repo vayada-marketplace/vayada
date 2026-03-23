@@ -11,7 +11,7 @@ locals {
         { name = "DATABASE_URL", value = "postgresql://vayada_booking_user:${var.db_booking_password}@${var.rds_endpoint}:5432/vayada_booking_db" },
         { name = "AUTH_DATABASE_URL", value = "postgresql://vayada_auth_user:${var.db_auth_password}@${var.rds_endpoint}:5432/vayada_auth_db" },
         { name = "JWT_SECRET_KEY", value = var.jwt_secret_key },
-        { name = "CORS_ORIGINS", value = "https://admin.booking.vayada.com,https://pms.vayada.com" },
+        { name = "CORS_ORIGINS", value = "https://admin.booking.vayada.com,https://admin.vayada.com,https://pms.vayada.com" },
         { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
         { name = "API_PORT", value = "8001" },
         { name = "PMS_DATABASE_URL", value = "postgresql://vayada_pms_user:${var.db_pms_password}@${var.rds_endpoint}:5432/vayada_pms_db" },
@@ -68,6 +68,7 @@ locals {
         { name = "SMTP_FROM", value = "noreply@vayada.com" },
         { name = "STRIPE_SECRET_KEY", value = var.stripe_secret_key },
         { name = "STRIPE_WEBHOOK_SECRET", value = var.stripe_webhook_secret },
+        { name = "STRIPE_PLATFORM_ACCOUNT_ID", value = var.stripe_platform_account_id },
         { name = "ENVIRONMENT", value = "production" },
         { name = "DEBUG", value = "false" },
       ]
@@ -84,15 +85,53 @@ locals {
         { name = "NEXT_PUBLIC_PMS_API_URL", value = "https://pms-api.vayada.com" },
       ]
     }
+    marketplace-backend = {
+      name           = "vayada-marketplace-backend"
+      container_port = 8000
+      cpu            = 256
+      memory         = 512
+      health_check   = "/health"
+      log_group      = "/ecs/vayada-marketplace-backend"
+      environment = [
+        { name = "DATABASE_URL", value = "postgresql://vayada_admin:${var.db_master_password}@${var.rds_endpoint}:5432/postgres?sslmode=require" },
+        { name = "AUTH_DATABASE_URL", value = "postgresql://vayada_auth_user:${var.db_auth_password}@${var.rds_endpoint}:5432/vayada_auth_db?sslmode=require" },
+        { name = "PMS_DATABASE_URL", value = "postgresql://vayada_pms_user:${var.db_pms_password}@${var.rds_endpoint}:5432/vayada_pms_db?sslmode=require" },
+        { name = "JWT_SECRET_KEY", value = var.jwt_secret_key },
+        { name = "CORS_ORIGINS", value = "https://admin.vayada.com" },
+        { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "S3_BUCKET_NAME", value = "vayada-uploads-prod" },
+        { name = "SMTP_HOST", value = "email-smtp.eu-west-1.amazonaws.com" },
+        { name = "SMTP_PORT", value = "587" },
+        { name = "SMTP_USERNAME", value = var.smtp_username },
+        { name = "SMTP_PASSWORD", value = var.smtp_password },
+        { name = "SMTP_FROM", value = "noreply@vayada.com" },
+        { name = "ENVIRONMENT", value = "production" },
+        { name = "DEBUG", value = "false" },
+      ]
+    }
+    marketplace-admin = {
+      name           = "vayada-marketplace-admin"
+      container_port = 3001
+      cpu            = 256
+      memory         = 512
+      health_check   = "/"
+      log_group      = "/ecs/vayada-marketplace-admin"
+      environment = [
+        { name = "NEXT_PUBLIC_API_URL", value = "https://api.vayada.com" },
+      ]
+    }
   }
 
   # Map from service key to ECR repo name
   ecr_repo_map = {
-    "booking-backend"  = "vayada-booking-backend"
-    "booking-frontend" = "vayada-booking-frontend"
-    "booking-admin"    = "vayada-booking-admin-frontend"
-    "pms-backend"      = "vayada-pms-backend"
-    "pms-frontend"     = "vayada-pms-frontend"
+    "booking-backend"     = "vayada-booking-backend"
+    "booking-frontend"    = "vayada-booking-frontend"
+    "booking-admin"       = "vayada-booking-admin-frontend"
+    "pms-backend"         = "vayada-pms-backend"
+    "pms-frontend"        = "vayada-pms-frontend"
+    "marketplace-backend" = "vayada-creator-marketplace-backend"
+    "marketplace-admin"   = "vayada-admin-frontend"
   }
 }
 

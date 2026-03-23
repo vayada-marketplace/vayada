@@ -25,6 +25,16 @@ locals {
       port         = 3004
       health_check = "/"
     }
+    marketplace-backend = {
+      name         = "marketplace-backend-tg"
+      port         = 8000
+      health_check = "/health"
+    }
+    marketplace-admin = {
+      name         = "marketplace-admin-tg"
+      port         = 3001
+      health_check = "/"
+    }
   }
 
   listener_rules = {
@@ -33,10 +43,20 @@ locals {
       host      = "admin.booking.vayada.com"
       target_group = "booking-admin"
     }
+    admin = {
+      priority  = 15
+      host      = "admin.vayada.com"
+      target_group = "marketplace-admin"
+    }
     booking-api = {
       priority  = 20
       host      = "booking-api.vayada.com"
       target_group = "booking-backend"
+    }
+    marketplace-api = {
+      priority  = 25
+      host      = "api.vayada.com"
+      target_group = "marketplace-backend"
     }
     pms-api = {
       priority  = 30
