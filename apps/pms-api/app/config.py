@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # API
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8002
-    API_TITLE: str = "Vayada PMS API"
+    API_TITLE: str = "vayada PMS API"
     API_VERSION: str = "1.0.0"
 
     # Database (PMS own DB)

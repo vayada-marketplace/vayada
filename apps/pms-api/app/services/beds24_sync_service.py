@@ -110,7 +110,7 @@ async def push_availability_for_booking(booking_id: str) -> None:
 
 
 async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
-    """Import a Beds24 booking into Vayada. Handles deduplication and cancellations."""
+    """Import a Beds24 booking into vayada. Handles deduplication and cancellations."""
     beds24_booking_id = str(beds24_booking.get("id", ""))
     if not beds24_booking_id:
         logger.warning("Beds24 booking has no ID, skipping")
@@ -131,7 +131,7 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
                     str(existing["booking_id"]), "cancelled"
                 )
                 logger.info(
-                    "Cancelled Vayada booking %s (Beds24 %s cancelled)",
+                    "Cancelled vayada booking %s (Beds24 %s cancelled)",
                     existing["booking_id"], beds24_booking_id,
                 )
         await Beds24BookingMappingRepository.update_sync_time(
@@ -214,7 +214,7 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
     )
 
     logger.info(
-        "Imported Beds24 booking %s as Vayada booking %s (channel: %s)",
+        "Imported Beds24 booking %s as vayada booking %s (channel: %s)",
         beds24_booking_id, booking_id, channel_source,
     )
 
@@ -253,7 +253,7 @@ async def poll_bookings_for_hotel(hotel_id: str) -> None:
 
 
 async def handle_vayada_cancellation(booking_id: str) -> None:
-    """Propagate a Vayada cancellation to Beds24 if the booking came from there."""
+    """Propagate a vayada cancellation to Beds24 if the booking came from there."""
     try:
         mapping = await Beds24BookingMappingRepository.get_by_booking_id(booking_id)
         if not mapping:

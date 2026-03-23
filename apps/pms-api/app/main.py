@@ -56,13 +56,13 @@ async def run_migrations():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Vayada PMS...")
+    logger.info("Starting vayada PMS...")
     await run_migrations()
     logger.info("Migrations complete")
     scheduler.start()
     logger.info("Scheduler started")
     yield
-    logger.info("Shutting down Vayada PMS...")
+    logger.info("Shutting down vayada PMS...")
     scheduler.shutdown()
     await Database.close_pool()
     await AuthDatabase.close_pool()
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.API_TITLE,
-    description="Vayada Property Management System — rooms & bookings",
+    description="vayada Property Management System — rooms & bookings",
     version=settings.API_VERSION,
     lifespan=lifespan,
     debug=settings.DEBUG,

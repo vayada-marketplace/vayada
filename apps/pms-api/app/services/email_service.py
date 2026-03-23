@@ -45,7 +45,7 @@ def _wrap_html(content: str) -> str:
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">{STYLE}</head>
 <body><div class="wrapper"><div class="card">{content}</div>
-<p class="footer">Vayada &mdash; Hotel Management Platform</p>
+<p class="footer">vayada &mdash; Hotel Management Platform</p>
 </div></body></html>"""
 
 

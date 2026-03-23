@@ -43,7 +43,7 @@ async def _rate_limited_request(
         client = _get_client()
         headers = {"Authorization": f"Bearer {token}"}
         response = await client.request(
-            method, path, headers=headers, json=json, params=params
+            method, path, headers={"token": token}, json=json, params=params
         )
         response.raise_for_status()
         await asyncio.sleep(settings.BEDS24_API_DELAY_SECONDS)
@@ -72,7 +72,7 @@ async def _ensure_valid_token(hotel_id: str) -> str:
         client = _get_client()
         response = await client.get(
             "/authentication/token",
-            headers={"Authorization": f"Bearer {conn['refresh_token']}"},
+            headers={"refreshToken": conn['refresh_token']},
         )
         response.raise_for_status()
         data = response.json()
@@ -95,7 +95,7 @@ async def setup_connection(hotel_id: str, invite_code: str) -> dict:
     client = _get_client()
     response = await client.get(
         "/authentication/setup",
-        params={"code": invite_code},
+        headers={"code": invite_code},
     )
     response.raise_for_status()
     data = response.json()
