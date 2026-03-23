@@ -1,7 +1,7 @@
 """
 Invite codes for hotel onboarding.
 
-Vayada admins create invite codes pre-filled with hotel setup data.
+vayada admins create invite codes pre-filled with hotel setup data.
 Hotel owners enter the code on the setup page to prefill all fields.
 """
 

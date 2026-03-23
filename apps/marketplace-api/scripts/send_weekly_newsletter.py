@@ -230,7 +230,7 @@ async def _send_creator_newsletter(email: str, name: str, country_filter: list |
         new_hotels=new_items,
         frontend_url=settings.FRONTEND_URL,
     )
-    await send_email(email, "Your Weekly Hotel Picks — Vayada", html)
+    await send_email(email, "Your Weekly Hotel Picks — vayada", html)
 
 
 async def _send_hotel_newsletter(email: str, name: str, user_id: str, country_filter: list | None):
@@ -276,7 +276,7 @@ async def _send_hotel_newsletter(email: str, name: str, user_id: str, country_fi
         new_creators=new_items,
         frontend_url=settings.FRONTEND_URL,
     )
-    await send_email(email, "Your Weekly Creator Picks — Vayada", html)
+    await send_email(email, "Your Weekly Creator Picks — vayada", html)
 
 
 if __name__ == "__main__":

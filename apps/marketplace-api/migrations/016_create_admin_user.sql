@@ -2,7 +2,7 @@
 -- Create Admin User
 -- ============================================
 -- Creates the initial admin user for the platform
--- Password: Vayada123 (bcrypt hash)
+-- Password: vayada123 (bcrypt hash)
 
 -- Insert admin user if it doesn't exist
 INSERT INTO users (email, password_hash, name, type, status, email_verified)

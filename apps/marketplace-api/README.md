@@ -1,6 +1,6 @@
-# Vayada Creator Marketplace Backend API
+# vayada Creator Marketplace Backend API
 
-A FastAPI-based backend service for the Vayada Creator Marketplace platform. This API provides authentication, user management, and marketplace functionality.
+A FastAPI-based backend service for the vayada Creator Marketplace platform. This API provides authentication, user management, and marketplace functionality.
 
 ## 🚀 Quick Start
 

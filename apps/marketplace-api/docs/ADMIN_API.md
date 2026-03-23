@@ -1,7 +1,7 @@
 # Admin API Documentation
 
 ## Overview
-Admin endpoints for managing users in the Vayada platform. All endpoints require admin authentication.
+Admin endpoints for managing users in the vayada platform. All endpoints require admin authentication.
 
 ## Authentication
 All admin endpoints require:

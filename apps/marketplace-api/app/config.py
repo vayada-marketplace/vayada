@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # API Configuration
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    API_TITLE: str = "Vayada API"
+    API_TITLE: str = "vayada API"
     API_VERSION: str = "1.0.0"
     
     # Database Configuration
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # Email Configuration
     EMAIL_ENABLED: bool = True
     EMAIL_FROM_ADDRESS: str = Field("noreply@vayada.com", description="Email address to send from")
-    EMAIL_FROM_NAME: str = "Vayada"
+    EMAIL_FROM_NAME: str = "vayada"
     CONTACT_EMAIL: str = Field("t.schreyer@vayada.com", description="Email address to receive contact form submissions")
     FRONTEND_URL: str = Field("https://vayada.com", description="Frontend URL for reset password links")
     

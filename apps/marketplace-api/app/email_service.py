@@ -278,7 +278,7 @@ def create_email_verification_html(verification_code: str, user_name: Optional[s
         <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
             <p>Hi {name},</p>
             
-            <p>Thank you for registering with Vayada! Please use the verification code below to verify your email address:</p>
+            <p>Thank you for registering with vayada! Please use the verification code below to verify your email address:</p>
             
             <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; margin: 30px 0; text-align: center;">
                 <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #007bff; font-family: 'Courier New', monospace;">
@@ -348,7 +348,7 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
         <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
             <p>Hi {user_name},</p>
             
-            <p>Congratulations! Your {profile_type.lower()} profile on Vayada has been completed successfully.</p>
+            <p>Congratulations! Your {profile_type.lower()} profile on vayada has been completed successfully.</p>
             
             <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
                 <p style="margin: 0; color: #2e7d32; font-weight: bold;">✅ Your profile is now complete and ready for review!</p>
@@ -361,7 +361,7 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
             <ul style="color: #666;">
                 <li>Connect with {('hotels' if user_type == 'creator' else 'creators')} on the platform</li>
                 <li>Start receiving collaboration opportunities</li>
-                <li>Build your presence on Vayada</li>
+                <li>Build your presence on vayada</li>
             </ul>
             
             <div style="text-align: center; margin: 30px 0;">
@@ -495,7 +495,7 @@ def create_collaboration_response_email_html(
     else:
         title = "Collaboration Request Declined"
         status_html = '<div style="background-color: #fbe9e7; padding: 15px; border-radius: 5px; margin: 20px 0;"><p style="margin: 0; color: #c62828; font-weight: bold;">Your collaboration request has been declined.</p></div>'
-        next_step = "Don't be discouraged — there are many other opportunities on Vayada!"
+        next_step = "Don't be discouraged — there are many other opportunities on vayada!"
 
     message_section = ""
     if response_message:
@@ -605,7 +605,7 @@ def create_collaboration_cancelled_email_html(
             <p style="margin: 0; color: #c62828; font-weight: bold;">This collaboration has been cancelled.</p>
         </div>
         {reason_section}
-        <p>You can explore other collaboration opportunities on Vayada.</p>
+        <p>You can explore other collaboration opportunities on vayada.</p>
         {_view_button_html(f"{settings.FRONTEND_URL}/collaborations", "Browse Collaborations")}
     """
     return _collaboration_email_wrapper(title, content)
@@ -670,7 +670,7 @@ def create_newsletter_for_creator_html(
                 location=h["location"],
                 description=h.get("description", ""),
                 image_url=h.get("image_url"),
-                badge="New on Vayada",
+                badge="New on vayada",
             )
         new_section = f"""
         <h2 style="font-size: 18px; color: #2c3e50; margin-top: 30px;">New Hotels This Week</h2>
@@ -729,7 +729,7 @@ def create_newsletter_for_hotel_html(
                 location=c["location"],
                 description=(c.get("description", "") + extra),
                 image_url=c.get("image_url"),
-                badge="New on Vayada",
+                badge="New on vayada",
             )
         new_section = f"""
         <h2 style="font-size: 18px; color: #2c3e50; margin-top: 30px;">New Creators This Week</h2>
@@ -779,7 +779,7 @@ def create_password_reset_email_html(reset_link: str, user_name: Optional[str] =
         <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
             <p>Hi {name},</p>
             
-            <p>We received a request to reset your password for your Vayada account. Click the button below to reset your password:</p>
+            <p>We received a request to reset your password for your vayada account. Click the button below to reset your password:</p>
             
             <div style="text-align: center; margin: 30px 0;">
                 <a href="{reset_link}" 

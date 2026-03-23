@@ -258,7 +258,7 @@ async def create_collaboration(
                 listing_location=listing.get('location'),
                 why_great_fit=request.why_great_fit,
             )
-            _send_email_background(recipient_email, "New Collaboration Request on Vayada", html)
+            _send_email_background(recipient_email, "New Collaboration Request on vayada", html)
 
         return CollaborationResponse(
             id=str(collaboration['id']),

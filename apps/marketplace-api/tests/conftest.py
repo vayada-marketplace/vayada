@@ -1,5 +1,5 @@
 """
-Pytest fixtures and configuration for Vayada backend tests.
+Pytest fixtures and configuration for vayada backend tests.
 """
 import os
 

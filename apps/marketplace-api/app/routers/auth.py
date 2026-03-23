@@ -68,7 +68,7 @@ async def send_verification_code(request: SendVerificationCodeRequest):
         # Send email
         email_sent = await send_email(
             to_email=request.email,
-            subject="Verify Your Email - Vayada",
+            subject="Verify Your Email - vayada",
             html_body=html_body
         )
 
@@ -424,7 +424,7 @@ async def forgot_password(request: ForgotPasswordRequest):
             # Send email
             email_sent = await send_email(
                 to_email=user['email'],
-                subject="Reset Your Vayada Password",
+                subject="Reset Your vayada Password",
                 html_body=html_body
             )
 

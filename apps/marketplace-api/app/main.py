@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.API_TITLE,
-    description="Vayada Creator Marketplace Backend API",
+    description="vayada Creator Marketplace Backend API",
     version=settings.API_VERSION,
     lifespan=lifespan,
     debug=settings.DEBUG
@@ -90,7 +90,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Welcome to Vayada API"}
+    return {"message": "Welcome to vayada API"}
 
 
 @app.get("/health")

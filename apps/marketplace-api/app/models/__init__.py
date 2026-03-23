@@ -1,5 +1,5 @@
 """
-Pydantic models for the Vayada Creator Marketplace API
+Pydantic models for the vayada Creator Marketplace API
 
 This module re-exports all models for convenient importing:
     from app.models import RegisterRequest, LoginResponse, etc.
