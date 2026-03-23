@@ -1,4 +1,4 @@
--- Vayada Booking Engine - Initial Schema
+-- vayada Booking Engine - Initial Schema
 -- Creates the booking_hotels table for hotel configuration/display data
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

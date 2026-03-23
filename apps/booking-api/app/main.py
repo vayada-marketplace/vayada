@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.API_TITLE,
-    description="Vayada Booking Engine Backend API",
+    description="vayada Booking Engine Backend API",
     version=settings.API_VERSION,
     lifespan=lifespan,
     debug=settings.DEBUG,
@@ -52,7 +52,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Vayada Booking Engine API"}
+    return {"message": "Welcome to vayada Booking Engine API"}
 
 
 @app.get("/health")

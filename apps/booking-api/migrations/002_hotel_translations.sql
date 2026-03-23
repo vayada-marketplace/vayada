@@ -1,4 +1,4 @@
--- Vayada Booking Engine - Hotel Translations
+-- vayada Booking Engine - Hotel Translations
 -- Stores translated hotel content per locale (fallback to English in base table)
 
 CREATE TABLE IF NOT EXISTS booking_hotel_translations (

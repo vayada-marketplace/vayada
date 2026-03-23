@@ -9,7 +9,7 @@ class TestHealth:
         assert resp.status_code == 200
         body = resp.json()
         assert "message" in body
-        assert "Vayada" in body["message"]
+        assert "vayada" in body["message"]
 
     async def test_health(self, client):
         resp = await client.get("/health")

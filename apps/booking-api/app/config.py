@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # API Configuration
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8001
-    API_TITLE: str = "Vayada Booking Engine API"
+    API_TITLE: str = "vayada Booking Engine API"
     API_VERSION: str = "1.0.0"
 
     # Database Configuration
