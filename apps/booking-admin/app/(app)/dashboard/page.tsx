@@ -20,7 +20,7 @@ const SOURCE_COLORS: Record<string, string> = {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  direct: 'Direct (Vayada)',
+  direct: 'Direct (vayada)',
   'booking.com': 'Booking.com',
   airbnb: 'Airbnb',
   expedia: 'Expedia',
@@ -296,7 +296,7 @@ export default function DashboardPage() {
           {sources && sources.sources.length > 0 && sources.sources[0]?.source === 'direct' && sources.sources[0]?.percentage > 50 && (
             <div className="mt-5 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
               <p className="text-[13px] text-blue-700">
-                {sources.sources[0].percentage}% of bookings came through your Vayada page &mdash; great direct booking share!
+                {sources.sources[0].percentage}% of bookings came through your vayada page &mdash; great direct booking share!
               </p>
             </div>
           )}

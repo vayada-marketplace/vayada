@@ -504,14 +504,14 @@ export default function SetupPage() {
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="max-w-md w-full space-y-6">
             <div className="text-center">
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Vayada</h1>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to vayada</h1>
               <p className="text-sm text-gray-500">Set up your property in just a few minutes</p>
             </div>
 
             {/* Invite Code */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-[14px] font-semibold text-gray-900 mb-1">Have an invite code?</h2>
-              <p className="text-[12px] text-gray-500 mb-4">If Vayada pre-configured your property, enter the code to load everything.</p>
+              <p className="text-[12px] text-gray-500 mb-4">If vayada pre-configured your property, enter the code to load everything.</p>
               <div className="flex gap-2">
                 <input
                   type="text"

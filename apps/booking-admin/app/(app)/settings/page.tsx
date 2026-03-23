@@ -330,7 +330,7 @@ export default function SettingsPage() {
           contactEmail: data.reservation_email,
         })
       } catch {
-        // Non-fatal: PMS sync may fail if not using Vayada PMS
+        // Non-fatal: PMS sync may fail if not using vayada PMS
       }
       setFeedback({ type: 'success', message: 'Settings saved successfully' })
     } catch {
@@ -916,7 +916,7 @@ export default function SettingsPage() {
               <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">Payout Details</h2>
-                  <p className="text-[12px] text-gray-500 mt-0.5">Bank account where Vayada sends your earnings</p>
+                  <p className="text-[12px] text-gray-500 mt-0.5">Bank account where vayada sends your earnings</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2">

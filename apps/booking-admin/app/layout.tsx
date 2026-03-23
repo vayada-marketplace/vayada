@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Vayada Booking Engine - Admin',
-  description: 'Hotel admin dashboard for Vayada Booking Engine',
+  title: 'vayada Booking Engine - Admin',
+  description: 'Hotel admin dashboard for vayada Booking Engine',
   icons: {
     icon: [{ url: '/vayada-logo.png' }],
     apple: [{ url: '/vayada-logo.png' }],

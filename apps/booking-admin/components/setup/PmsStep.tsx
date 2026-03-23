@@ -5,7 +5,7 @@ import { CheckIcon } from '@heroicons/react/24/outline'
 export const PMS_OPTIONS = [
   {
     id: 'vayada',
-    name: 'Vayada PMS',
+    name: 'vayada PMS',
     description: 'All-in-one property management system built for independent hotels and villas.',
     available: true,
     badge: 'Recommended',
@@ -83,7 +83,7 @@ export default function PmsStep({
                 {/* PMS Icon */}
                 <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
                   {pms.id === 'vayada' && (
-                    <img src="/vayada-logo.png" alt="Vayada" className="w-7 h-7 object-contain m-auto" />
+                    <img src="/vayada-logo.png" alt="vayada" className="w-7 h-7 object-contain m-auto" />
                   )}
                   {pms.id === 'cloudbeds' && (
                     <img src="/pms-cloudbeds.png" alt="Cloudbeds" className="w-full h-full object-cover" />
