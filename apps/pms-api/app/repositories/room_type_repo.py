@@ -110,7 +110,11 @@ class RoomTypeRepository:
     async def count_booked(
         room_type_id: str, check_in: date, check_out: date
     ) -> int:
-        """Count overlapping non-cancelled bookings for a room type."""
+        """Count overlapping non-cancelled bookings for a room type.
+
+        Excludes pending bookings with unpaid payment older than 30 min
+        (abandoned or failed payment attempts).
+        """
         count = await Database.fetchval(
             """
             SELECT COUNT(*) FROM bookings
@@ -118,6 +122,11 @@ class RoomTypeRepository:
               AND status IN ('pending', 'confirmed')
               AND check_in < $3
               AND check_out > $2
+              AND NOT (
+                status = 'pending'
+                AND payment_status = 'unpaid'
+                AND created_at < NOW() - INTERVAL '30 minutes'
+              )
             """,
             room_type_id,
             check_in,

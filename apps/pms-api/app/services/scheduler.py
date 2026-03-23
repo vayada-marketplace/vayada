@@ -181,6 +181,25 @@ async def process_affiliate_payouts():
             await PayoutRepository.update_status(payout_id, "failed")
 
 
+async def cancel_stale_unpaid_bookings():
+    """Cancel pending bookings where payment was never completed (30+ min old)."""
+    from app.database import Database
+
+    result = await Database.fetch(
+        """
+        UPDATE bookings
+        SET status = 'cancelled'
+        WHERE status = 'pending'
+          AND payment_status = 'unpaid'
+          AND payment_method = 'card'
+          AND created_at < NOW() - INTERVAL '30 minutes'
+        RETURNING id
+        """
+    )
+    for row in result:
+        logger.info("Cancelled stale unpaid booking: %s", row["id"])
+
+
 async def poll_beds24_bookings():
     """Poll all active Beds24 connections for new/modified bookings."""
     from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
@@ -217,6 +236,13 @@ def setup_scheduler():
         expire_pending_bookings,
         trigger=IntervalTrigger(minutes=1),
         id="expire_pending_bookings",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        cancel_stale_unpaid_bookings,
+        trigger=IntervalTrigger(minutes=10),
+        id="cancel_stale_unpaid_bookings",
         replace_existing=True,
     )
 
