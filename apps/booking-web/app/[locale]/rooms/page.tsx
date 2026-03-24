@@ -1,12 +1,14 @@
 'use client'
 
+import { useEffect } from 'react'
 import Image from 'next/image'
 import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
-import { useHotel, useRooms } from '@/contexts/HotelContext'
+import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
+import { trackEvent } from '@/services/api/tracking'
 
 export default function RoomsPage() {
   const t = useTranslations('rooms')
@@ -14,6 +16,9 @@ export default function RoomsPage() {
   const { hotel } = useHotel()
   const { rooms } = useRooms()
   const { formatPrice } = useCurrency()
+  const { slug } = useSlug()
+
+  useEffect(() => { trackEvent(slug, 'viewed_room') }, [slug])
 
   return (
     <div className="min-h-screen bg-white">

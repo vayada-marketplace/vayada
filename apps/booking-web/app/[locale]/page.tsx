@@ -9,10 +9,11 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import DatePickerCalendar from '@/components/booking/DatePickerCalendar'
 import GuestSelector from '@/components/booking/GuestSelector'
 import RoomDetailModal from '@/components/booking/RoomDetailModal'
-import { useHotel, useRooms, useAddons } from '@/contexts/HotelContext'
+import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate } from '@/lib/constants/booking'
+import { trackEvent } from '@/services/api/tracking'
 
 function PromoPopover({
   open,
@@ -74,6 +75,9 @@ export default function HomePage() {
   const { rooms, loading: roomsLoading } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
+  const { slug } = useSlug()
+
+  useEffect(() => { trackEvent(slug, 'page_visit') }, [slug])
   const [checkIn, setCheckIn] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() + 1)
@@ -276,6 +280,7 @@ export default function HomePage() {
               setGuestsOpen(false)
               setPromoOpen(false)
               setSearching(true)
+              trackEvent(slug, 'searched_dates', { checkIn, checkOut, adults, children })
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
               setTimeout(() => setSearching(false), 800)
             }}
@@ -416,7 +421,7 @@ export default function HomePage() {
               >
                 <div className="flex flex-col md:flex-row">
                   {/* Image Carousel — fills full card height */}
-                  <div className="relative w-full md:w-[420px] md:min-h-[320px] flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => setDetailModalIndex(roomIndex)}>
+                  <div className="relative w-full md:w-[420px] md:min-h-[320px] flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}>
                     <Image
                       src={room.images[imgIdx]}
                       alt={room.name}
@@ -494,7 +499,7 @@ export default function HomePage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => setDetailModalIndex(roomIndex)}
+                        onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}
                         className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-full px-4 py-1.5 hover:bg-gray-50 transition-colors flex-shrink-0"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>

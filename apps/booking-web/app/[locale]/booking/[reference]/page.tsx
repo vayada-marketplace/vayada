@@ -10,6 +10,7 @@ import { useHotel, useSlug } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { Booking } from '@/lib/types'
 import { bookingService } from '@/services/api/booking'
+import { trackEvent } from '@/services/api/tracking'
 
 function CountdownTimer({ deadline }: { deadline: string }) {
   const [timeLeft, setTimeLeft] = useState('')
@@ -55,6 +56,7 @@ export default function BookingConfirmationPage({
   const [withdrawError, setWithdrawError] = useState('')
 
   useEffect(() => {
+    trackEvent(slug, 'completed_booking')
     const stored = sessionStorage.getItem('lastBooking')
     if (stored) {
       try {
@@ -67,7 +69,7 @@ export default function BookingConfirmationPage({
         // ignore
       }
     }
-  }, [params.reference])
+  }, [params.reference, slug])
 
   // Poll for status updates every 30s when pending
   useEffect(() => {

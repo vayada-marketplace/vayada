@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
@@ -12,6 +12,7 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate } from '@/lib/constants/booking'
+import { trackEvent } from '@/services/api/tracking'
 
 const COUNTRIES = [
   'Austria', 'Germany', 'Switzerland', 'United States', 'United Kingdom',
@@ -28,8 +29,11 @@ function BookPageContent() {
   const { rooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
+  const { slug } = useSlug()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || ''
+
+  useEffect(() => { trackEvent(slug, 'started_booking') }, [slug])
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const adultsParam = parseInt(searchParams.get('adults') || '2')
