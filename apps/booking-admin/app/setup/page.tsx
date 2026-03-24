@@ -91,6 +91,7 @@ export default function SetupPage() {
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false)
   const [numberOfGuests, setNumberOfGuests] = useState(false)
   const [enableReferAGuest, setEnableReferAGuest] = useState(false)
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
 
   useEffect(() => {
     async function checkAuth() {
@@ -305,6 +306,7 @@ export default function SetupPage() {
         try {
           await pmsClient.patch('/admin/payment-settings', {
             payAtPropertyEnabled: payAtHotel,
+            paymentProvider: paymentProvider,
           })
         } catch {
           // Non-fatal
@@ -467,6 +469,11 @@ export default function SetupPage() {
         if (pol.arrival_time !== undefined) setEstimatedArrivalTime(pol.arrival_time)
         if (pol.guest_count !== undefined) setNumberOfGuests(pol.guest_count)
         if (pol.refer_a_guest !== undefined) setEnableReferAGuest(pol.refer_a_guest)
+      }
+
+      // Prefill payment provider from internal settings
+      if (data.internal?.payment_provider) {
+        setPaymentProvider(data.internal.payment_provider)
       }
 
       setAppliedInviteCode(inviteCode.trim().toUpperCase())
