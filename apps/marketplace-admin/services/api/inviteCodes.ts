@@ -8,6 +8,7 @@ export interface InviteCode {
   expires_at: string
   hotel_name: string | null
   redeemed_at: string | null
+  setup_data?: InviteData
 }
 
 export interface InviteData {
