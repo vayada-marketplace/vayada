@@ -545,6 +545,7 @@ export default function InviteCodesPage() {
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Code</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Hotel</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Payout</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Created</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Expires</th>
@@ -556,6 +557,11 @@ export default function InviteCodesPage() {
                   <tr key={inv.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono font-semibold text-gray-900">{inv.code}</td>
                     <td className="px-4 py-3 text-gray-700">{inv.hotel_name || '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                        inv.setup_data?.internal?.payment_provider === 'xendit' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'
+                      }`}>{inv.setup_data?.internal?.payment_provider === 'xendit' ? 'Xendit' : 'Stripe'}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                         inv.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
