@@ -81,6 +81,13 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
     }
   }, [hotel?.branding?.primaryColor])
 
+  // Apply accent color (card/section backgrounds)
+  useEffect(() => {
+    if (hotel?.branding?.accentColor) {
+      document.documentElement.style.setProperty('--color-accent', hotel.branding.accentColor)
+    }
+  }, [hotel?.branding?.accentColor])
+
   // Apply branding font pairing as CSS variables + load Google Fonts
   useEffect(() => {
     const pairingId = hotel?.branding?.fontPairing

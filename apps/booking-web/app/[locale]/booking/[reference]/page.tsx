@@ -207,7 +207,7 @@ export default function BookingConfirmationPage({
           )}
 
           {/* Booking Reference */}
-          <div className="bg-gray-50 rounded-xl p-4 mb-8 inline-block">
+          <div className="bg-accent rounded-xl p-4 mb-8 inline-block">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{t('bookingReference')}</p>
             <p className="text-2xl font-bold text-primary-600 tracking-wider">{params.reference}</p>
           </div>
