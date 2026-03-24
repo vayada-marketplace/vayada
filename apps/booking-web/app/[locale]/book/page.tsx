@@ -340,12 +340,17 @@ function BookPageContent() {
                   <span className="text-gray-500">{t('roomLabel')} ({tc('nights', { count: nights })})</span>
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
-                {addonTotal > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">{ts('addons')}</span>
-                    <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
-                  </div>
-                )}
+                {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                  let unitPrice = addon.price
+                  if (addon.perPerson) unitPrice *= adultsParam
+                  if (addon.perNight) unitPrice *= nights
+                  return (
+                    <div key={addon.id} className="flex justify-between text-sm">
+                      <span className="text-gray-500">{addon.name}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Total */}

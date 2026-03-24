@@ -191,6 +191,8 @@ function PaymentPageContent() {
           adults={adultsParam}
           children={childrenParam}
           roomTotal={roomTotal}
+          addons={addons}
+          selectedAddonIds={selectedAddonIds}
           addonTotal={addonTotal}
           grandTotal={grandTotal}
           guestDetails={guestDetails}
@@ -428,12 +430,17 @@ function PaymentPageContent() {
                   <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
-                {addonTotal > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">{ts('addons')}</span>
-                    <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
-                  </div>
-                )}
+                {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                  let unitPrice = addon.price
+                  if (addon.perPerson) unitPrice *= adultsParam
+                  if (addon.perNight) unitPrice *= nights
+                  return (
+                    <div key={addon.id} className="flex justify-between text-sm">
+                      <span className="text-gray-500">{addon.name}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Total */}
@@ -466,6 +473,8 @@ function StripePaymentPage({
   adults,
   children,
   roomTotal,
+  addons,
+  selectedAddonIds,
   addonTotal,
   grandTotal,
   guestDetails,
@@ -549,12 +558,17 @@ function StripePaymentPage({
               <span className="text-gray-500">{room.name}</span>
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
             </div>
-            {addonTotal > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Add-ons</span>
-                <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
-              </div>
-            )}
+            {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
+              let unitPrice = addon.price
+              if (addon.perPerson) unitPrice *= adults
+              if (addon.perNight) unitPrice *= nights
+              return (
+                <div key={addon.id} className="flex justify-between text-sm">
+                  <span className="text-gray-500">{addon.name}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                </div>
+              )
+            })}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">{formatDate(checkIn, locale)} — {formatDate(checkOut, locale)}</span>
               <span className="text-gray-500">{tc('nights', { count: nights })}</span>
