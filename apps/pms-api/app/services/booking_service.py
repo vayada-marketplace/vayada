@@ -4,6 +4,9 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
+
+from app.config import settings
 from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
@@ -56,6 +59,7 @@ def _booking_to_response(booking: dict) -> BookingResponse:
         children=booking["children"],
         nightly_rate=float(booking["nightly_rate"]),
         total_amount=float(booking["total_amount"]),
+        addon_total=float(booking.get("addon_total") or 0),
         currency=booking["currency"],
         status=booking["status"],
         payment_method=booking.get("payment_method"),
@@ -177,7 +181,37 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         nightly_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
     else:
         nightly_rate = resolved_base
-    total_amount = nightly_rate * nights
+    room_total = nightly_rate * nights
+
+    # Calculate addon total from booking engine
+    addon_total = 0.0
+    addon_ids = data.addon_ids or []
+    if addon_ids:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/addons"
+                )
+                resp.raise_for_status()
+                all_addons = resp.json()
+        except Exception as e:
+            logger.warning("Failed to fetch addons for %s: %s", slug, e)
+            all_addons = []
+
+        addon_map = {a["id"]: a for a in all_addons}
+        for aid in addon_ids:
+            addon = addon_map.get(aid)
+            if not addon:
+                continue
+            price = float(addon["price"])
+            if addon.get("perPerson"):
+                price *= data.adults
+            if addon.get("perNight"):
+                price *= nights
+            addon_total += price
+        addon_total = round(addon_total, 2)
+
+    total_amount = room_total + addon_total
 
     # Resolve affiliate
     affiliate_id = None
@@ -220,6 +254,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "payment_status": "unpaid",
         "host_response_deadline": deadline,
         "rate_type": data.rate_type,
+        "addon_ids": addon_ids,
+        "addon_total": addon_total,
     }
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])

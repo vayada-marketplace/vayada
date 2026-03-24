@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr
-from typing import Optional
+from typing import List, Optional
 from datetime import date
 
 
@@ -24,6 +24,7 @@ class BookingCreate(BaseModel):
     referral_code: Optional[str] = None
     payment_method: str = "card"
     rate_type: str = "flexible"
+    addon_ids: List[str] = []
 
 
 class BookingResponse(BaseModel):
@@ -44,6 +45,7 @@ class BookingResponse(BaseModel):
     children: int
     nightly_rate: float
     total_amount: float
+    addon_total: float = 0
     currency: str
     status: str
     payment_method: Optional[str] = None

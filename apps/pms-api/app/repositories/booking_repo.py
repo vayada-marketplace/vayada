@@ -1,3 +1,4 @@
+import json
 import secrets
 import string
 from typing import Optional, List
@@ -33,11 +34,11 @@ class BookingRepository:
                 affiliate_id, referral_code,
                 room_id, channel, status,
                 payment_method, payment_status, host_response_deadline,
-                rate_type
+                rate_type, addon_ids, addon_total
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24
+                $21, $22, $23, $24, $25, $26
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -64,6 +65,8 @@ class BookingRepository:
             data.get("payment_status", "unpaid"),
             data.get("host_response_deadline"),
             data.get("rate_type", "flexible"),
+            json.dumps(data.get("addon_ids", [])),
+            data.get("addon_total", 0),
         )
         return dict(row)
 

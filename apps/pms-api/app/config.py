@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     GENERATE_THUMBNAILS: bool = True
     THUMBNAIL_SIZE: int = 300
 
+    # Booking Engine
+    BOOKING_ENGINE_API_URL: str = Field("http://localhost:8001", description="Booking engine backend URL for addon lookups")
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
