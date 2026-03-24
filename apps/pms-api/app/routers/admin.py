@@ -1,10 +1,18 @@
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
 from app.database import Database, AuthDatabase
-from app.models.hotel import HotelRegister, HotelResponse, SetupStatusResponse
+from app.utils import get_hotel_id, parse_jsonb
+from app.models.hotel import (
+    HotelRegister,
+    HotelResponse,
+    HotelBenefitsUpdate,
+    HotelBenefitsResponse,
+    SetupStatusResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,3 +141,29 @@ async def get_setup_status(
         setup_complete=room_count > 0,
         room_count=room_count,
     )
+
+
+# ── Book Direct Benefits ──────────────────────────────────────────
+
+
+@router.get("/benefits", response_model=HotelBenefitsResponse)
+async def get_benefits(user_id: str = Depends(require_hotel_admin)):
+    hotel_id = await get_hotel_id(user_id)
+    row = await Database.fetchrow(
+        "SELECT benefits FROM hotels WHERE id = $1", hotel_id
+    )
+    return HotelBenefitsResponse(benefits=parse_jsonb(row["benefits"]) if row else [])
+
+
+@router.put("/benefits", response_model=HotelBenefitsResponse)
+async def update_benefits(
+    data: HotelBenefitsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    await Database.execute(
+        "UPDATE hotels SET benefits = $1::jsonb WHERE id = $2",
+        json.dumps(data.benefits),
+        hotel_id,
+    )
+    return HotelBenefitsResponse(benefits=data.benefits)
