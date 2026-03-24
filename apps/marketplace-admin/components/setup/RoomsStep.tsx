@@ -144,7 +144,7 @@ export const AMENITY_CATEGORIES = [
   },
 ]
 
-type RoomTab = 'details' | 'pricing' | 'media'
+type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
 export const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'details', label: 'Room Details' },
   { key: 'pricing', label: 'Pricing & Rates' },
