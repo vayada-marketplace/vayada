@@ -413,55 +413,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Cancellation Policy */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Cancellation Policy</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Free cancellation window (days before check-in)
-              </label>
-              <input
-                type="number"
-                value={freeDays}
-                onChange={(e) => setFreeDays(Number(e.target.value))}
-                min={0}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 max-w-xs"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Guests can cancel for free up to {freeDays} days before check-in.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Partial refund after free window (%)
-              </label>
-              <input
-                type="number"
-                step="1"
-                value={partialRefundPct}
-                onChange={(e) => setPartialRefundPct(Number(e.target.value))}
-                min={0}
-                max={100}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 max-w-xs"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                {partialRefundPct > 0
-                  ? `After the free window, guests receive a ${partialRefundPct}% refund.`
-                  : 'After the free window, no refund is given.'}
-              </p>
-            </div>
-
-            <button
-              onClick={saveCancellationPolicy}
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? 'Saving...' : 'Save Cancellation Policy'}
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   )
