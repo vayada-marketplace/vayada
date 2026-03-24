@@ -88,22 +88,12 @@ const AMENITY_CATEGORIES = [
   },
 ]
 
-const BENEFIT_OPTIONS = [
-  'Welcome Drink on Arrival',
-  '10% Spa Discount',
-  'Late Check-out (subject to availability)',
-  'Early Check-in (subject to availability)',
-  'Free Airport Transfer',
-  'Daily Breakfast Included',
-  'Room Upgrade (subject to availability)',
-]
 
-type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
+type RoomTab = 'details' | 'pricing' | 'media'
 const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'details', label: 'Room Details' },
   { key: 'pricing', label: 'Pricing & Rates' },
   { key: 'media', label: 'Images & Amenities' },
-  { key: 'benefits', label: 'Book Direct Benefits' },
 ]
 
 const SELECT_ARROW_STYLE = {
@@ -152,8 +142,6 @@ export default function RoomTypeForm({
   const [featureInput, setFeatureInput] = useState('')
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
-  const [benefitInput, setBenefitInput] = useState('')
-
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
     form.operatingPeriods?.length ? form.operatingPeriods : [{ from: '2026-01-01', to: '2026-12-31' }]
@@ -1195,106 +1183,6 @@ export default function RoomTypeForm({
 
             <p className="text-[10px] text-gray-400">{(form.amenities || []).length} amenities selected &middot; Shown as &quot;View Full Amenities ({(form.amenities || []).length})&quot; in the room detail modal</p>
           </div>
-        </div>
-      )}
-
-      {/* Tab 4: Book Direct Benefits */}
-      {activeTab === 'benefits' && (
-        <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Book Direct Benefits</h3>
-            <span className="text-[11px] font-medium text-gray-400">Optional</span>
-          </div>
-
-          <p className="text-[11px] text-gray-500">These appear in the room detail modal under a &quot;Book Direct Benefits&quot; section, encouraging guests to book via your website instead of OTAs.</p>
-
-          {/* Predefined benefit options */}
-          <div className="space-y-2">
-            {BENEFIT_OPTIONS.map((benefit) => {
-              const isSelected = benefits.includes(benefit)
-              return (
-                <button
-                  key={benefit}
-                  type="button"
-                  onClick={() => {
-                    if (isSelected) {
-                      updateForm({ benefits: benefits.filter((b) => b !== benefit) })
-                    } else {
-                      updateForm({ benefits: [...benefits, benefit] })
-                    }
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg border text-left transition-colors ${
-                    isSelected
-                      ? 'border-primary-300 bg-primary-50/30'
-                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                  }`}
-                >
-                  <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                    isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300'
-                  }`}>
-                    {isSelected && (
-                      <CheckIcon className="w-2 h-2 text-white" />
-                    )}
-                  </div>
-                  <span className="text-[12px] text-gray-700">{benefit}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Custom benefit input */}
-          <div>
-            <label className="block text-[11px] text-gray-500 mb-1.5">Custom Benefit <span className="text-gray-400">(optional)</span></label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={benefitInput}
-                onChange={(e) => setBenefitInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    const trimmed = benefitInput.trim()
-                    if (trimmed && !benefits.includes(trimmed)) {
-                      updateForm({ benefits: [...benefits, trimmed] })
-                    }
-                    setBenefitInput('')
-                  }
-                }}
-                className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                placeholder="e.g. Complimentary sunset cocktail"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const trimmed = benefitInput.trim()
-                  if (trimmed && !benefits.includes(trimmed)) {
-                    updateForm({ benefits: [...benefits, trimmed] })
-                  }
-                  setBenefitInput('')
-                }}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <PlusIcon className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Selected custom benefits */}
-          {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).length > 0 && (
-            <div className="space-y-1">
-              <span className="text-[10px] text-gray-400 uppercase tracking-wider">Custom benefits</span>
-              <div className="flex flex-wrap gap-2">
-                {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).map((b, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
-                    {b}
-                    <button type="button" onClick={() => updateForm({ benefits: benefits.filter(x => x !== b) })} className="text-primary-400 hover:text-primary-600">
-                      <XMarkIcon className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 

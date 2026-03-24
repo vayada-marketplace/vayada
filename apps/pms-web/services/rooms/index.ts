@@ -102,6 +102,14 @@ export const individualRoomsService = {
     pmsClient.delete(`/admin/rooms/${id}`),
 }
 
+export const benefitsService = {
+  get: () =>
+    pmsClient.get<{ benefits: string[] }>('/admin/benefits'),
+
+  update: (benefits: string[]) =>
+    pmsClient.put<{ benefits: string[] }>('/admin/benefits', { benefits }),
+}
+
 export const roomsService = {
   list: () =>
     pmsClient.get<RoomType[]>('/admin/room-types'),
