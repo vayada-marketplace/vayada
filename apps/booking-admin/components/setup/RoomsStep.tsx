@@ -647,7 +647,7 @@ export default function RoomsStep({
                   </div>
                 )}
                 <button
-                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Low', from: '', to: '', rate: '', minStay: 1 }] })}
+                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Mid', from: '', to: '', rate: '', minStay: 1 }] })}
                   className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <PlusIcon className="w-3.5 h-3.5" /> Add season
