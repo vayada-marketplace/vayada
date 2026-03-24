@@ -532,6 +532,7 @@ export default function HomePage() {
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t('rateOptions')}</p>
                       <div className="space-y-3">
                         {/* Non-Refundable Rate */}
+                        {room.nonRefundableRate != null && (
                         <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200'}`}>
                           <button
                             onClick={() =>
@@ -590,6 +591,7 @@ export default function HomePage() {
                             </div>
                           )}
                         </div>
+                        )}
 
                         {/* Flexible Rate */}
                         <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
