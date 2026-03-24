@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     # Require explicit frontend origins in env (no baked-in default)
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
+    CORS_ORIGIN_REGEX: str = ""
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"  # Comma-separated or "*" for all
     CORS_ALLOW_HEADERS: str = "*"   # Comma-separated or "*" for all
