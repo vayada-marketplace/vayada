@@ -84,7 +84,14 @@ export default function RoomDetailModal({
 
           {/* Right — Details */}
           <div className="md:w-1/2 p-6 overflow-y-auto">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">{room.name}</h2>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-2xl font-bold text-gray-900">{room.name}</h2>
+              {room.category && (
+                <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200">
+                  {room.category}
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-3 text-sm text-gray-500 mb-4 flex-wrap">
               <span className="flex items-center gap-1">
