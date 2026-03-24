@@ -65,6 +65,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         weekend_surcharge=room.get("weekend_surcharge") or "+0%",
         cancellation_policy=room.get("cancellation_policy") or "Free until 7 days before",
         flexible_rate_enabled=room.get("flexible_rate_enabled", True),
+        non_refundable_enabled=room.get("non_refundable_enabled", False),
         non_refundable_discount=room.get("non_refundable_discount", 10),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),

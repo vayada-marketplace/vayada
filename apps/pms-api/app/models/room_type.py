@@ -39,6 +39,7 @@ class RoomTypeCreate(BaseModel):
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
+    non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
 
 
@@ -67,6 +68,7 @@ class RoomTypeUpdate(BaseModel):
     weekend_surcharge: Optional[str] = None
     cancellation_policy: Optional[str] = None
     flexible_rate_enabled: Optional[bool] = None
+    non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
 
 
@@ -118,6 +120,7 @@ class RoomTypeAdminResponse(BaseModel):
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
+    non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
     created_at: str
     updated_at: str

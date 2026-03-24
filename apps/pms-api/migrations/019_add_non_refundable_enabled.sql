@@ -1,0 +1,1 @@
+ALTER TABLE room_types ADD COLUMN IF NOT EXISTS non_refundable_enabled BOOLEAN DEFAULT FALSE;
