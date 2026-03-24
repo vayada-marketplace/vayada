@@ -564,25 +564,19 @@ export default function HomePage() {
                           </button>
                           {expandedRate === 'nonrefundable' && (
                             <div className="px-4 pb-4">
-                              <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('dailyBreakfast', { count: adults })}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('welcomeDrink')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('freeWifi')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('airportTransfer')}
-                                </p>
-                              </div>
+                              {room.benefits && room.benefits.length > 0 && (
+                                <>
+                                  <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
+                                    {room.benefits.map((benefit) => (
+                                      <p key={benefit} className="flex items-center gap-2 text-sm text-gray-600">
+                                        <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                        {benefit}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
                               <button
                                 onClick={() => {
                                   const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=nonrefundable`
@@ -627,25 +621,19 @@ export default function HomePage() {
                           </button>
                           {expandedRate === 'flexible' && (
                             <div className="px-4 pb-4">
-                              <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('dailyBreakfast', { count: adults })}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('welcomeDrink')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('freeWifi')}
-                                </p>
-                                <p className="flex items-center gap-2 text-sm text-gray-600">
-                                  <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                  {t('airportTransfer')}
-                                </p>
-                              </div>
+                              {room.benefits && room.benefits.length > 0 && (
+                                <>
+                                  <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
+                                    {room.benefits.map((benefit) => (
+                                      <p key={benefit} className="flex items-center gap-2 text-sm text-gray-600">
+                                        <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                        {benefit}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
                               <button
                                 onClick={() => {
                                   const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
