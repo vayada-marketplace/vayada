@@ -37,9 +37,9 @@ def validate_image(
         image_format = image.format
         
         # Validate format
-        valid_formats = {'JPEG', 'PNG', 'WEBP', 'GIF'}
+        valid_formats = {'JPEG', 'PNG', 'WEBP', 'GIF', 'AVIF'}
         if image_format not in valid_formats:
-            return False, f"Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF"
+            return False, f"Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF, AVIF"
         
         # Validate dimensions
         # If resizing is enabled, allow larger images (they'll be resized anyway)

@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     S3_USE_PUBLIC_URLS: bool = Field(True, description="Whether to use public URLs or signed URLs")
     
     # Image Upload Configuration
-    MAX_IMAGE_SIZE_MB: int = Field(20, description="Maximum image file size in MB")
-    ALLOWED_IMAGE_TYPES: List[str] = Field(default_factory=lambda: ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif"], description="Allowed MIME types for image uploads")
+    MAX_IMAGE_SIZE_MB: int = Field(50, description="Maximum image file size in MB")
+    ALLOWED_IMAGE_TYPES: List[str] = Field(default_factory=lambda: ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif", "image/avif"], description="Allowed MIME types for image uploads")
     MAX_IMAGE_WIDTH: int = Field(4000, description="Maximum image width in pixels")
     MAX_IMAGE_HEIGHT: int = Field(4000, description="Maximum image height in pixels")
     IMAGE_RESIZE_WIDTH: int = Field(1920, description="Resize width for uploaded images (0 = no resize)")
