@@ -327,6 +327,7 @@ async def create_test_room_type(
     total_rooms: int = 5,
     is_active: bool = True,
     non_refundable_rate: Optional[float] = None,
+    non_refundable_enabled: bool = False,
 ) -> Dict:
     """Create a room type in the PMS database."""
     import json
@@ -337,18 +338,18 @@ async def create_test_room_type(
             hotel_id, name, description, short_description,
             max_occupancy, size, base_rate, non_refundable_rate, currency,
             amenities, images, bed_type, features,
-            total_rooms, is_active, sort_order
+            total_rooms, is_active, sort_order, non_refundable_enabled
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9,
             $10::jsonb, $11::jsonb, $12, $13::jsonb,
-            $14, $15, $16
+            $14, $15, $16, $17
         ) RETURNING *
         """,
         hotel_id, name, "A spacious suite", "Spacious and comfortable",
         2, 45, base_rate, non_refundable_rate, "EUR",
         json.dumps(["WiFi", "Mini Bar"]), json.dumps([]), "King",
         json.dumps(["Mountain View"]),
-        total_rooms, is_active, 0,
+        total_rooms, is_active, 0, non_refundable_enabled,
     )
     return dict(row)
 
