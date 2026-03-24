@@ -88,12 +88,18 @@ export default function InviteCodesPage() {
   const [activePlan, setActivePlan] = useState<'commission' | 'fixed'>('commission')
   const [commissionRate, setCommissionRate] = useState('5')
   const [fixedMonthlyFee, setFixedMonthlyFee] = useState('49')
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
 
   useEffect(() => { loadInvites() }, [])
 
   useEffect(() => {
     setRooms(prev => prev.map(r => r.currency ? r : { ...r, currency }))
   }, [currency])
+
+  // Auto-set payment provider based on country
+  useEffect(() => {
+    setPaymentProvider(country === 'ID' ? 'xendit' : 'stripe')
+  }, [country])
 
   const loadInvites = async () => {
     try { setInvites(await inviteCodesService.list()) } catch { /* */ }
@@ -170,6 +176,7 @@ export default function InviteCodesPage() {
           active_plan: activePlan,
           commission_rate: parseFloat(commissionRate) || 0,
           fixed_monthly_fee: parseFloat(fixedMonthlyFee) || 0,
+          payment_provider: paymentProvider,
         },
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
@@ -450,7 +457,33 @@ export default function InviteCodesPage() {
                 </div>
               </div>
 
-              <p className="text-center text-[11px] text-gray-400 mb-8">The hotel will see both plans and can request to switch for the next month</p>
+              <p className="text-center text-[11px] text-gray-400 mb-6">The hotel will see both plans and can request to switch for the next month</p>
+
+              {/* Payment Provider */}
+              <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+                <h3 className="text-[13px] font-semibold text-gray-900 mb-1">Payout Provider</h3>
+                <p className="text-[11px] text-gray-500 mb-3">Auto-selected based on country. Override if needed.</p>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={paymentProvider === 'stripe'}
+                      onChange={() => setPaymentProvider('stripe')}
+                      className="text-primary-600"
+                    />
+                    <span className="text-sm text-gray-700">Stripe</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={paymentProvider === 'xendit'}
+                      onChange={() => setPaymentProvider('xendit')}
+                      className="text-primary-600"
+                    />
+                    <span className="text-sm text-gray-700">Xendit (Indonesia)</span>
+                  </label>
+                </div>
+              </div>
 
               {/* Navigation */}
               <div className="flex justify-between">
