@@ -55,7 +55,6 @@ export interface InviteData {
     images: string[]
     amenities: string[]
     features: string[]
-    bookDirectBenefits: string[]
     operatingPeriods: Array<{ from: string; to: string }>
     seasons: Array<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }>
     weekendSurcharge: string

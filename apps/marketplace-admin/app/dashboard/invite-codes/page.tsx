@@ -67,7 +67,6 @@ export default function InviteCodesPage() {
   const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>('details')
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
-  const [benefitInput, setBenefitInput] = useState('')
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
 
@@ -339,7 +338,6 @@ export default function InviteCodesPage() {
             activeRoomTab={activeRoomTab} setActiveRoomTab={setActiveRoomTab}
             amenityInput={amenityInput} setAmenityInput={setAmenityInput}
             featureInput={featureInput} setFeatureInput={setFeatureInput}
-            benefitInput={benefitInput} setBenefitInput={setBenefitInput}
             roomFileInputRef={roomFileInputRef}
             handleRoomImageUpload={handleRoomImageUpload}
             uploadingRoomImages={uploadingRoomImages}
