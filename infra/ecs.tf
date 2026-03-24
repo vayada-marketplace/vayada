@@ -66,6 +66,7 @@ locals {
         { name = "SMTP_PORT", value = "587" },
         { name = "SMTP_FROM", value = "noreply@vayada.com" },
         { name = "STRIPE_PLATFORM_ACCOUNT_ID", value = var.stripe_platform_account_id },
+        { name = "BOOKING_ENGINE_API_URL", value = "https://booking-api.vayada.com" },
         { name = "ENVIRONMENT", value = "production" },
         { name = "DEBUG", value = "false" },
       ]
