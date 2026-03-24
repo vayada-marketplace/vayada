@@ -17,9 +17,9 @@ def parse_json(val, default=None):
 
 
 def slugify(text: str) -> str:
-    """Convert text to a URL-safe slug."""
+    """Convert text to a URL-safe subdomain slug (lowercase, no spaces)."""
     text = text.lower().strip()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_]+', '-', text)
+    text = re.sub(r'[^\w-]', '', text)
+    text = re.sub(r'_+', '', text)
     text = re.sub(r'-+', '-', text)
     return text or 'my-hotel'
