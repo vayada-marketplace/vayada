@@ -9,7 +9,7 @@ locals {
       log_group      = "/ecs/vayada-booking-backend"
       environment = [
         { name = "CORS_ORIGINS", value = "https://admin.booking.vayada.com,https://admin.vayada.com,https://pms.vayada.com" },
-        { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
+        { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
         { name = "API_PORT", value = "8001" },
         { name = "CLOUDFLARE_ZONE_ID", value = var.cloudflare_zone_id },
         { name = "ENVIRONMENT", value = "production" },
@@ -58,7 +58,7 @@ locals {
       log_group      = "/ecs/vayada-pms-backend"
       environment = [
         { name = "CORS_ORIGINS", value = "https://pms.vayada.com,https://admin.booking.vayada.com,https://admin.vayada.com" },
-        { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
+        { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
         { name = "API_PORT", value = "8002" },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "S3_BUCKET_NAME", value = "vayada-uploads-prod" },
@@ -101,8 +101,8 @@ locals {
       health_check   = "/health"
       log_group      = "/ecs/vayada-marketplace-backend"
       environment = [
-        { name = "CORS_ORIGINS", value = "https://admin.vayada.com" },
-        { name = "CORS_ORIGIN_REGEX", value = "https://.*\\.vayada\\.com" },
+        { name = "CORS_ORIGINS", value = "https://admin.vayada.com,https://vayada.com" },
+        { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "S3_BUCKET_NAME", value = "vayada-uploads-prod" },
         { name = "SMTP_HOST", value = "email-smtp.eu-west-1.amazonaws.com" },
