@@ -63,6 +63,7 @@ export interface InviteData {
     active_plan: 'commission' | 'fixed'
     commission_rate: number
     fixed_monthly_fee: number
+    payment_provider?: 'stripe' | 'xendit'
   }
   policies: {
     check_in_time: string
