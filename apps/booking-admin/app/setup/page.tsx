@@ -77,7 +77,6 @@ export default function SetupPage() {
   const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>('details')
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
-  const [benefitInput, setBenefitInput] = useState('')
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
 
@@ -294,7 +293,6 @@ export default function SetupPage() {
               images: r.images,
               amenities: r.amenities,
               features: r.features,
-              benefits: r.bookDirectBenefits || [],
               operatingPeriods: r.operatingPeriods,
               seasons: r.seasons,
               weekendSurcharge: r.weekendSurcharge,
@@ -695,7 +693,6 @@ export default function SetupPage() {
           setActiveRoomTab={setActiveRoomTab}
           amenityInput={amenityInput} setAmenityInput={setAmenityInput}
           featureInput={featureInput} setFeatureInput={setFeatureInput}
-          benefitInput={benefitInput} setBenefitInput={setBenefitInput}
           roomFileInputRef={roomFileInputRef}
           uploadingRoomImages={uploadingRoomImages}
           handleRoomImageUpload={handleRoomImageUpload}
