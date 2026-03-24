@@ -40,7 +40,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
   const [addingRoom, setAddingRoom] = useState(false)
   const [newRoomNumber, setNewRoomNumber] = useState('')
   const [newRoomFloor, setNewRoomFloor] = useState('')
-  const category = getCategoryFromName(room.name)
+  const category = room.category ? room.category.toLowerCase() : getCategoryFromName(room.name)
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES['standard']
 
   const typeRooms = rooms.filter(r => r.roomTypeId === room.id)
@@ -112,7 +112,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-semibold text-gray-900">{room.name}</span>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${categoryStyle}`}>
-              {getCategoryLabel(room.name)}
+              {room.category || getCategoryLabel(room.name)}
             </span>
           </div>
           <p className="text-[12px] text-gray-400 mt-0.5">

@@ -168,7 +168,7 @@ export default function RoomTypeForm({
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState((form.nonRefundableRate ?? null) !== null)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
   const benefits: string[] = form.benefits || []
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState(form.category || '')
   const [bedrooms, setBedrooms] = useState(1)
   const [bathrooms, setBathrooms] = useState(1)
 
@@ -443,11 +443,11 @@ export default function RoomTypeForm({
           <div>
             <div className="flex items-center gap-2 mb-1.5">
               <label className="text-[12px] font-semibold text-gray-900">Room Category Tag</label>
-              <span className="text-[10px] text-gray-400">(shows in PMS room list)</span>
+              <span className="text-[10px] text-gray-400">(shown to guests in Booking Engine)</span>
             </div>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => { setCategory(e.target.value); updateForm({ category: e.target.value }) }}
               className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 appearance-none"
               style={SELECT_ARROW_STYLE}
             >
