@@ -26,6 +26,12 @@ async def get_rooms_for_guest(
     if not hotel_id:
         return []
 
+    # Load global benefits from hotel
+    hotel_row = await Database.fetchrow(
+        "SELECT benefits FROM hotels WHERE id = $1", hotel_id
+    )
+    hotel_benefits = parse_jsonb(hotel_row["benefits"]) if hotel_row else []
+
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     result = []
 
@@ -81,7 +87,7 @@ async def get_rooms_for_guest(
                 bed_type=room["bed_type"],
                 remaining_rooms=remaining,
                 features=parse_jsonb(room["features"]),
-                benefits=parse_jsonb(room.get("benefits", [])),
+                benefits=hotel_benefits,
             )
         )
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Optional, List
 
 
 def to_camel(string: str) -> str:
@@ -24,6 +24,18 @@ class HotelResponse(BaseModel):
     contact_email: str
     user_id: str
     created_at: str
+
+
+class HotelBenefitsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    benefits: List[str]
+
+
+class HotelBenefitsResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    benefits: List[str] = []
 
 
 class SetupStatusResponse(BaseModel):
