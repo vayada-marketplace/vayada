@@ -281,6 +281,7 @@ export default function SetupPage() {
               description: r.description,
               baseRate: Number(r.baseRate) || (r.seasons.length > 0 ? Number(r.seasons[0].rate) || 0 : 0),
               nonRefundableRate: r.nonRefundableRate ? Number(r.nonRefundableRate) : undefined,
+              nonRefundableEnabled: r.nonRefundableEnabled,
               nonRefundableDiscount: r.nonRefundableEnabled && r.flexibleRateEnabled ? r.nonRefundableDiscount : undefined,
               currency: r.currency || currency,
               images: r.images,
