@@ -82,7 +82,7 @@ export default function InviteCodesPage() {
   const [specialRequests, setSpecialRequests] = useState(true)
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false)
   const [numberOfGuests, setNumberOfGuests] = useState(false)
-  const [enableReferAGuest, setEnableReferAGuest] = useState(false)
+  const [enableReferAGuest, setEnableReferAGuest] = useState(true)
 
   // Internal: vayada payment terms (not shown to hotel during setup)
   const [activePlan, setActivePlan] = useState<'commission' | 'fixed'>('commission')
