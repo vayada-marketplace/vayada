@@ -15,6 +15,7 @@ import BrandMediaStep from '@/components/setup/BrandMediaStep'
 import PmsStep from '@/components/setup/PmsStep'
 import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
+import AddonsStep, { type SetupAddon } from '@/components/setup/AddonsStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -23,7 +24,8 @@ const STEPS = [
   { number: 2, label: 'Brand & Media' },
   { number: 3, label: 'Choose PMS' },
   { number: 4, label: 'Rooms & Rates' },
-  { number: 5, label: 'Policies' },
+  { number: 5, label: 'Add-ons' },
+  { number: 6, label: 'Policies' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -79,7 +81,10 @@ export default function SetupPage() {
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
 
-  // Step 5: Policies & Operations
+  // Step 5: Add-ons
+  const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([])
+
+  // Step 6: Policies & Operations
   const [checkInTime, setCheckInTime] = useState('14:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
   const [minimumStay, setMinimumStay] = useState(1)
@@ -201,6 +206,9 @@ export default function SetupPage() {
       return rooms.every(r => !!(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1))
     }
     if (step === 5) {
+      return true // add-ons are optional
+    }
+    if (step === 6) {
       return true
     }
     return false
@@ -310,6 +318,25 @@ export default function SetupPage() {
           })
         } catch {
           // Non-fatal
+        }
+      }
+
+      // 6. Create add-ons
+      for (const addon of setupAddons) {
+        try {
+          await settingsService.createAddon({
+            name: addon.name,
+            description: addon.description,
+            price: addon.price,
+            currency: addon.currency,
+            category: addon.category,
+            image: addon.image,
+            duration: addon.duration || undefined,
+            perPerson: addon.perPerson,
+            perNight: addon.perNight,
+          })
+        } catch {
+          // Non-fatal: addons can be added later from Booking Flow settings
         }
       }
 
@@ -456,6 +483,22 @@ export default function SetupPage() {
         })))
       }
 
+      // Prefill addons
+      if (data.addons && data.addons.length > 0) {
+        setSetupAddons(data.addons.map((a: any) => ({
+          _localId: crypto.randomUUID(),
+          name: a.name || '',
+          description: a.description || '',
+          price: a.price || 0,
+          currency: a.currency || data.property?.default_currency || 'EUR',
+          category: a.category || 'experience',
+          image: a.image || '',
+          duration: a.duration || '',
+          perPerson: a.perPerson || false,
+          perNight: a.perNight || false,
+        })))
+      }
+
       // Prefill policies
       if (data.policies) {
         const pol = data.policies
@@ -574,7 +617,7 @@ export default function SetupPage() {
             </svg>
             <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
           </div>
-          <span className="text-[13px] text-gray-500">Step {step} of 5</span>
+          <span className="text-[13px] text-gray-500">Step {step} of 6</span>
         </div>
       </div>
 
@@ -582,7 +625,7 @@ export default function SetupPage() {
       <div className="h-[3px] bg-gray-100 shrink-0">
         <div
           className="h-full bg-primary-600 transition-all duration-300"
-          style={{ width: `${(step / 5) * 100}%` }}
+          style={{ width: `${(step / 6) * 100}%` }}
         />
       </div>
 
@@ -666,6 +709,19 @@ export default function SetupPage() {
       )}
 
       {step === 5 && (
+        <AddonsStep
+          addons={setupAddons}
+          setAddons={setSetupAddons}
+          currency={currency}
+          error={error}
+          canProceed={canProceed()}
+          onBack={() => setStep(4)}
+          onContinue={() => { setError(''); setStep(6) }}
+          stepIndicators={stepIndicators}
+        />
+      )}
+
+      {step === 6 && (
         <PoliciesStep
           checkInTime={checkInTime} setCheckInTime={setCheckInTime}
           checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -680,7 +736,7 @@ export default function SetupPage() {
           enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
           error={error}
           saving={saving}
-          onBack={() => setStep(4)}
+          onBack={() => setStep(5)}
           onComplete={handleComplete}
           stepIndicators={stepIndicators}
         />
