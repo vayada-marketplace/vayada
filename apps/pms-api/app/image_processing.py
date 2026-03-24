@@ -23,9 +23,9 @@ def validate_image(
         image = Image.open(io.BytesIO(file_content))
         image_format = image.format
 
-        valid_formats = {'JPEG', 'PNG', 'WEBP', 'GIF'}
+        valid_formats = {'JPEG', 'PNG', 'WEBP', 'GIF', 'AVIF'}
         if image_format not in valid_formats:
-            return False, "Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF"
+            return False, "Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF, AVIF"
 
         width, height = image.size
         if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:

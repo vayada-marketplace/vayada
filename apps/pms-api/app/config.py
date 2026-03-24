@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     S3_USE_PUBLIC_URLS: bool = True
 
     # Image Processing
-    MAX_IMAGE_SIZE_MB: int = 20
-    ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif"]
+    MAX_IMAGE_SIZE_MB: int = 50
+    ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif", "image/avif"]
     MAX_IMAGE_WIDTH: int = 4000
     MAX_IMAGE_HEIGHT: int = 4000
     IMAGE_RESIZE_WIDTH: int = 1920
