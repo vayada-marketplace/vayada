@@ -444,6 +444,7 @@ async def create_test_payment_settings(
     platform_fee_with_affiliate: float = 2.0,
     pay_at_property_enabled: bool = False,
     stripe_connect_account_id: Optional[str] = None,
+    stripe_connect_onboarded: bool = False,
 ) -> Dict:
     """Create payment settings for a hotel."""
     row = await Database.fetchrow(
@@ -451,19 +452,20 @@ async def create_test_payment_settings(
         INSERT INTO hotel_payment_settings (
             hotel_id, platform_fee_type, platform_fee_value,
             platform_fee_with_affiliate, pay_at_property_enabled,
-            stripe_connect_account_id
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+            stripe_connect_account_id, stripe_connect_onboarded
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (hotel_id) DO UPDATE SET
             platform_fee_type = EXCLUDED.platform_fee_type,
             platform_fee_value = EXCLUDED.platform_fee_value,
             platform_fee_with_affiliate = EXCLUDED.platform_fee_with_affiliate,
             pay_at_property_enabled = EXCLUDED.pay_at_property_enabled,
-            stripe_connect_account_id = EXCLUDED.stripe_connect_account_id
+            stripe_connect_account_id = EXCLUDED.stripe_connect_account_id,
+            stripe_connect_onboarded = EXCLUDED.stripe_connect_onboarded
         RETURNING *
         """,
         hotel_id, platform_fee_type, platform_fee_value,
         platform_fee_with_affiliate, pay_at_property_enabled,
-        stripe_connect_account_id,
+        stripe_connect_account_id, stripe_connect_onboarded,
     )
     return dict(row)
 

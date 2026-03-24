@@ -65,6 +65,11 @@ class TestCreateBookingRequest:
         """Card booking creates a payment intent and returns client_secret."""
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
+        await create_test_payment_settings(
+            str(hotel["id"]),
+            stripe_connect_account_id="acct_test_card",
+            stripe_connect_onboarded=True,
+        )
 
         with patch("app.services.stripe_service.create_payment_intent", new_callable=AsyncMock) as mock_pi:
             mock_pi.return_value = {

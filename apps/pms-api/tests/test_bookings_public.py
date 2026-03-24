@@ -8,6 +8,7 @@ from tests.conftest import (
     create_test_hotel,
     create_test_room_type,
     create_test_booking,
+    create_test_payment_settings,
 )
 
 
@@ -25,6 +26,11 @@ class TestCreateBooking:
         }
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
+        await create_test_payment_settings(
+            str(hotel["id"]),
+            stripe_connect_account_id="acct_test_123",
+            stripe_connect_onboarded=True,
+        )
 
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
