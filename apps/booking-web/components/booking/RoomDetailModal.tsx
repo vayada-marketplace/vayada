@@ -168,6 +168,7 @@ export default function RoomDetailModal({
               </button>
 
               {/* Non-Refundable */}
+              {room.nonRefundableRate != null && (
               <button
                 onClick={() => setSelectedRate('nonrefundable')}
                 className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
@@ -189,6 +190,7 @@ export default function RoomDetailModal({
                   </div>
                 </div>
               </button>
+              )}
             </div>
 
             <button
