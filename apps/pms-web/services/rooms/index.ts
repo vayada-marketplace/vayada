@@ -30,6 +30,7 @@ export interface RoomType {
   weekendSurcharge: string
   cancellationPolicy: string
   flexibleRateEnabled: boolean
+  nonRefundableEnabled: boolean
   nonRefundableDiscount: number
   createdAt: string
   updatedAt: string
@@ -58,6 +59,7 @@ export interface RoomTypeCreate {
   weekendSurcharge?: string
   cancellationPolicy?: string
   flexibleRateEnabled?: boolean
+  nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
 }
 

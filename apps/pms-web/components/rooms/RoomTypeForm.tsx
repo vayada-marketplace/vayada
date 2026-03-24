@@ -165,7 +165,7 @@ export default function RoomTypeForm({
   const [weekendSurcharge, setWeekendSurcharge] = useState(form.weekendSurcharge || '+0%')
   const [cancellationPolicy, setCancellationPolicy] = useState(form.cancellationPolicy || 'Free until 7 days before')
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
-  const [nonRefundableEnabled, setNonRefundableEnabled] = useState((form.nonRefundableRate ?? null) !== null)
+  const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
   const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState('')
@@ -190,10 +190,11 @@ export default function RoomTypeForm({
       weekendSurcharge,
       cancellationPolicy,
       flexibleRateEnabled,
+      nonRefundableEnabled,
       nonRefundableDiscount,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableDiscount])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     onChange({ ...form, ...updates })
