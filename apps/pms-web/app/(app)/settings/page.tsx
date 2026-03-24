@@ -280,29 +280,32 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Stripe Connect */}
+        {/* Payments */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Stripe Connect</h2>
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Payments</h2>
+          <p className="text-xs text-gray-500 mb-4">Connect your bank account to accept online payments from guests.</p>
+
           {stripeAccountId ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                   {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
                 </span>
-                <span className="text-xs text-gray-500 font-mono">{stripeAccountId}</span>
               </div>
               {!stripeOnboarded && (
-                <button
-                  onClick={handleOnboarding}
-                  className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                >
-                  Complete Onboarding
-                </button>
+                <div>
+                  <p className="text-sm text-gray-600 mb-2">Complete your Stripe onboarding to start accepting card payments.</p>
+                  <button
+                    onClick={handleOnboarding}
+                    className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                  >
+                    Complete Onboarding
+                  </button>
+                </div>
               )}
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600">Connect your Stripe account to receive payouts.</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
@@ -330,6 +333,11 @@ export default function SettingsPage() {
                     <option value="IT">Italy</option>
                     <option value="ES">Spain</option>
                     <option value="NL">Netherlands</option>
+                    <option value="ID">Indonesia</option>
+                    <option value="TH">Thailand</option>
+                    <option value="AU">Australia</option>
+                    <option value="SG">Singapore</option>
+                    <option value="JP">Japan</option>
                   </select>
                 </div>
               </div>
@@ -338,140 +346,12 @@ export default function SettingsPage() {
                 disabled={creatingAccount || !connectEmail}
                 className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
               >
-                {creatingAccount ? 'Creating...' : 'Connect Stripe Account'}
+                {creatingAccount ? 'Creating...' : 'Connect Payment Account'}
               </button>
             </div>
           )}
-        </div>
 
-        {/* Payment Provider */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Payout Provider</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-2">Provider for hotel payouts</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={paymentProvider === 'stripe'}
-                    onChange={() => setPaymentProvider('stripe')}
-                    className="text-primary-600"
-                  />
-                  <span className="text-sm text-gray-700">Stripe</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={paymentProvider === 'xendit'}
-                    onChange={() => setPaymentProvider('xendit')}
-                    className="text-primary-600"
-                  />
-                  <span className="text-sm text-gray-700">Xendit (Indonesia)</span>
-                </label>
-              </div>
-            </div>
-
-            {paymentProvider === 'xendit' && (
-              <div className="space-y-3 pt-2 border-t border-gray-100">
-                <p className="text-sm text-gray-500">Enter your Indonesian bank account details for Xendit payouts.</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Bank Channel</label>
-                    <select
-                      value={xenditChannelCode}
-                      onChange={(e) => setXenditChannelCode(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                      <option value="ID_BCA">BCA</option>
-                      <option value="ID_MANDIRI">Mandiri</option>
-                      <option value="ID_BNI">BNI</option>
-                      <option value="ID_BRI">BRI</option>
-                      <option value="ID_PERMATA">Permata</option>
-                      <option value="ID_CIMB">CIMB Niaga</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
-                    <input
-                      type="text"
-                      value={xenditAccountNumber}
-                      onChange={(e) => setXenditAccountNumber(e.target.value)}
-                      placeholder="1234567890"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
-                  <input
-                    type="text"
-                    value={xenditAccountHolderName}
-                    onChange={(e) => setXenditAccountHolderName(e.target.value)}
-                    placeholder="Full name as on bank account"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Platform Fee Settings */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Platform Fee</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-2">Fee Model</label>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={feeType === 'percentage'}
-                    onChange={() => setFeeType('percentage')}
-                    className="text-primary-600"
-                  />
-                  <span className="text-sm text-gray-700">Percentage</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    checked={feeType === 'flat'}
-                    onChange={() => setFeeType('flat')}
-                    className="text-primary-600"
-                  />
-                  <span className="text-sm text-gray-700">Flat Amount</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Standard Fee {feeType === 'percentage' ? '(%)' : '(EUR)'}
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={feeValue}
-                  onChange={(e) => setFeeValue(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Fee with Affiliate {feeType === 'percentage' ? '(%)' : '(EUR)'}
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={feeWithAffiliate}
-                  onChange={(e) => setFeeWithAffiliate(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-            </div>
-
+          <div className="mt-4 pt-4 border-t border-gray-100">
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -479,15 +359,14 @@ export default function SettingsPage() {
                 onChange={(e) => setPayAtProperty(e.target.checked)}
                 className="rounded text-primary-600"
               />
-              <label className="text-sm text-gray-700">Enable &quot;Pay at Property&quot; option for guests</label>
+              <label className="text-sm text-gray-700">Allow guests to pay at the property (cash/card on arrival)</label>
             </div>
-
             <button
               onClick={savePaymentSettings}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              className="mt-3 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
-              {saving ? 'Saving...' : 'Save Payment Settings'}
+              {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>
