@@ -308,7 +308,7 @@ export default function AddonsStep({
                     type="number"
                     min="0"
                     step="0.01"
-                    value={formData.price}
+                    value={formData.price || ''}
                     onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
                     className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
