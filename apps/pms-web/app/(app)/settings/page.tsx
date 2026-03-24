@@ -283,9 +283,51 @@ export default function SettingsPage() {
         {/* Payments */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">Payments</h2>
-          <p className="text-xs text-gray-500 mb-4">Connect your bank account to accept online payments from guests.</p>
+          <p className="text-xs text-gray-500 mb-4">Connect your bank account to receive payouts from guest bookings.</p>
 
-          {stripeAccountId ? (
+          {paymentProvider === 'xendit' ? (
+            /* Xendit — Indonesian bank account */
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Bank</label>
+                  <select
+                    value={xenditChannelCode}
+                    onChange={(e) => setXenditChannelCode(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="ID_BCA">BCA</option>
+                    <option value="ID_MANDIRI">Mandiri</option>
+                    <option value="ID_BNI">BNI</option>
+                    <option value="ID_BRI">BRI</option>
+                    <option value="ID_PERMATA">Permata</option>
+                    <option value="ID_CIMB">CIMB Niaga</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
+                  <input
+                    type="text"
+                    value={xenditAccountNumber}
+                    onChange={(e) => setXenditAccountNumber(e.target.value)}
+                    placeholder="1234567890"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
+                <input
+                  type="text"
+                  value={xenditAccountHolderName}
+                  onChange={(e) => setXenditAccountHolderName(e.target.value)}
+                  placeholder="Full name as on bank account"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+            </div>
+          ) : stripeAccountId ? (
+            /* Stripe Connect — already connected */
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
@@ -294,7 +336,7 @@ export default function SettingsPage() {
               </div>
               {!stripeOnboarded && (
                 <div>
-                  <p className="text-sm text-gray-600 mb-2">Complete your Stripe onboarding to start accepting card payments.</p>
+                  <p className="text-sm text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
                   <button
                     onClick={handleOnboarding}
                     className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
@@ -305,6 +347,7 @@ export default function SettingsPage() {
               )}
             </div>
           ) : (
+            /* Stripe Connect — not yet connected */
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -333,7 +376,6 @@ export default function SettingsPage() {
                     <option value="IT">Italy</option>
                     <option value="ES">Spain</option>
                     <option value="NL">Netherlands</option>
-                    <option value="ID">Indonesia</option>
                     <option value="TH">Thailand</option>
                     <option value="AU">Australia</option>
                     <option value="SG">Singapore</option>
