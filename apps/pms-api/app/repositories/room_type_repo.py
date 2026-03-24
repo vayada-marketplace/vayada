@@ -28,21 +28,22 @@ class RoomTypeRepository:
         row = await Database.fetchrow(
             """
             INSERT INTO room_types (
-                hotel_id, name, description, short_description,
+                hotel_id, name, category, description, short_description,
                 max_occupancy, size, base_rate, non_refundable_rate, currency,
                 amenities, images, bed_type, features, benefits,
                 total_rooms, is_active, sort_order, monthly_rates,
                 operating_periods, seasons, weekend_surcharge,
                 cancellation_policy, flexible_rate_enabled, non_refundable_discount
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10::jsonb, $11::jsonb, $12, $13::jsonb, $14::jsonb,
-                $15, $16, $17, $18::jsonb,
-                $19::jsonb, $20::jsonb, $21, $22, $23, $24
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11::jsonb, $12::jsonb, $13, $14::jsonb, $15::jsonb,
+                $16, $17, $18, $19::jsonb,
+                $20::jsonb, $21::jsonb, $22, $23, $24, $25
             ) RETURNING *
             """,
             hotel_id,
             data["name"],
+            data.get("category", ""),
             data.get("description", ""),
             data.get("short_description", ""),
             data.get("max_occupancy", 2),

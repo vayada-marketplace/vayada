@@ -65,6 +65,7 @@ async def get_rooms_for_guest(
             RoomTypeResponse(
                 id=str(room["id"]),
                 name=room["name"],
+                category=room.get("category", ""),
                 description=room["description"],
                 short_description=room["short_description"],
                 max_occupancy=room["max_occupancy"],

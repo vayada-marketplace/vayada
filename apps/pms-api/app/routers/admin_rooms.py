@@ -44,6 +44,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         id=str(room["id"]),
         hotel_id=str(room["hotel_id"]),
         name=room["name"],
+        category=room.get("category", ""),
         description=room["description"],
         short_description=room["short_description"],
         max_occupancy=room["max_occupancy"],
