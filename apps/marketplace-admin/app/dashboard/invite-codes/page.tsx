@@ -11,6 +11,7 @@ import PropertyStep from '@/components/setup/PropertyStep'
 import BrandMediaStep from '@/components/setup/BrandMediaStep'
 import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
+import BenefitsStep from '@/components/setup/BenefitsStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -18,8 +19,9 @@ const STEPS = [
   { number: 1, label: 'Property' },
   { number: 2, label: 'Brand & Media' },
   { number: 3, label: 'Rooms & Rates' },
-  { number: 4, label: 'Policies' },
-  { number: 5, label: 'Payment Terms' },
+  { number: 4, label: 'Benefits' },
+  { number: 5, label: 'Policies' },
+  { number: 6, label: 'Payment Terms' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -70,7 +72,10 @@ export default function InviteCodesPage() {
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
 
-  // Step 4: Policies
+  // Step 4: Benefits
+  const [benefits, setBenefits] = useState<string[]>([])
+
+  // Step 5: Policies
   const [checkInTime, setCheckInTime] = useState('15:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
   const [minimumStay, setMinimumStay] = useState(1)
@@ -177,6 +182,7 @@ export default function InviteCodesPage() {
           fixed_monthly_fee: parseFloat(fixedMonthlyFee) || 0,
           payment_provider: paymentProvider,
         },
+        benefits,
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
           minimum_stay: minimumStay, pay_at_property: payAtHotel,
@@ -203,6 +209,7 @@ export default function InviteCodesPage() {
     setSelectedFont('high-end-serif'); setPropertyDescription('')
     setBookingFilters(['includeBreakfast', 'freeCancellation', 'payAtHotel'])
     setRooms([createEmptyRoom()]); setActiveRoomIndex(0)
+    setBenefits([])
     setCheckInTime('15:00'); setCheckOutTime('11:00'); setMinimumStay(1)
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
     setSpecialRequests(true); setEstimatedArrivalTime(false)
@@ -351,6 +358,18 @@ export default function InviteCodesPage() {
         )}
 
         {step === 4 && (
+          <BenefitsStep
+            benefits={benefits}
+            setBenefits={setBenefits}
+            error=""
+            canProceed={canProceed()}
+            onBack={() => setStep(3)}
+            onContinue={() => setStep(5)}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {step === 5 && (
           <PoliciesStep
             checkInTime={checkInTime} setCheckInTime={setCheckInTime}
             checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -366,13 +385,13 @@ export default function InviteCodesPage() {
             stepIndicators={stepIndicators}
             error=""
             saving={false}
-            onBack={() => setStep(3)}
-            onComplete={() => setStep(5)}
+            onBack={() => setStep(4)}
+            onComplete={() => setStep(6)}
           />
         )}
 
-        {/* Step 5: vayada Payment Terms */}
-        {step === 5 && (
+        {/* Step 6: vayada Payment Terms */}
+        {step === 6 && (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto px-8 py-8">
               {stepIndicators}
@@ -486,7 +505,7 @@ export default function InviteCodesPage() {
               {/* Navigation */}
               <div className="flex justify-between">
                 <button
-                  onClick={() => setStep(4)}
+                  onClick={() => setStep(5)}
                   className="px-8 py-2.5 text-[14px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   Back

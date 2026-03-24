@@ -65,6 +65,7 @@ export interface InviteData {
     fixed_monthly_fee: number
     payment_provider?: 'stripe' | 'xendit'
   }
+  benefits?: string[]
   policies: {
     check_in_time: string
     check_out_time: string
