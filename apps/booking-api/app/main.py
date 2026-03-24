@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.database import Database, AuthDatabase, MarketplaceDatabase, PmsDatabase, check_database_connection
 from app.config import settings
-from app.routers import hotels, auth, admin
+from app.routers import hotels, auth, admin, events
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ async def health_db():
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(events.router)
 app.include_router(hotels.router)
 app.include_router(hotels.exchange_router)
 app.include_router(hotels.resolve_router)

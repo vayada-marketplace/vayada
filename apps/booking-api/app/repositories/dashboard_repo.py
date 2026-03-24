@@ -1,10 +1,12 @@
 """
-Dashboard repository — queries PMS database for booking stats.
+Dashboard repository — queries PMS database for booking stats
+and booking_events table for funnel/page-view analytics.
 """
 import logging
 from datetime import date, timedelta
-from app.database import PmsDatabase
+from app.database import Database, PmsDatabase
 from app.config import settings
+from app.repositories.event_repo import EventRepository
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +45,17 @@ class DashboardRepository:
         return row["id"] if row else None
 
     @staticmethod
+    async def _get_hotel_slug(user_id: str) -> str | None:
+        """Find the booking engine hotel slug for a given user."""
+        row = await Database.fetchrow(
+            "SELECT slug FROM booking_hotels WHERE user_id = $1 LIMIT 1", user_id
+        )
+        return row["slug"] if row else None
+
+    @staticmethod
     async def get_stats(user_id: str, range_key: str = "today") -> dict:
         hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
+        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
         if not hotel_id:
             return {
                 "revenue": 0, "revenue_previous": 0,
@@ -102,6 +113,13 @@ class DashboardRepository:
             hotel_id,
         )
 
+        # Real page view counts from booking_events
+        page_views = 0
+        page_views_previous = 0
+        if hotel_slug:
+            page_views = await EventRepository.count_by_type(hotel_slug, "page_visit", start, end)
+            page_views_previous = await EventRepository.count_by_type(hotel_slug, "page_visit", prev_start, prev_end)
+
         return {
             "revenue": float(current["revenue"]),
             "revenue_previous": float(previous["revenue"]),
@@ -109,8 +127,8 @@ class DashboardRepository:
             "bookings_previous": previous["bookings"],
             "avg_nightly_rate": round(float(current["avg_rate"]), 2),
             "avg_nightly_rate_previous": round(float(previous["avg_rate"]), 2),
-            "page_views": 0,
-            "page_views_previous": 0,
+            "page_views": page_views,
+            "page_views_previous": page_views_previous,
             "next_arrival": str(next_arrival_row["check_in"]) if next_arrival_row and next_arrival_row["check_in"] else None,
             "live_since": str(live_since_row["first"].date()) if live_since_row and live_since_row["first"] else None,
         }
@@ -154,49 +172,20 @@ class DashboardRepository:
 
     @staticmethod
     async def get_conversion_funnel(user_id: str, range_key: str = "month") -> dict:
-        """
-        Conversion funnel based on booking data.
-        Without page view tracking, we estimate from booking stages.
-        """
-        hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
-        if not hotel_id:
+        """Conversion funnel based on real tracked events."""
+        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
+        if not hotel_slug:
             return {"steps": []}
 
         start, end, _, _ = _date_range(range_key)
 
-        # Total bookings (completed flow)
-        completed = await PmsDatabase.fetchval(
-            """
-            SELECT COUNT(*) FROM bookings
-            WHERE hotel_id = $1 AND status = 'confirmed'
-              AND created_at::date >= $2 AND created_at::date <= $3
-            """,
-            hotel_id, start, end,
-        )
+        counts = await EventRepository.count_all_types(hotel_slug, start, end)
 
-        # Started but not completed (pending + cancelled + expired)
-        started = await PmsDatabase.fetchval(
-            """
-            SELECT COUNT(*) FROM bookings
-            WHERE hotel_id = $1
-              AND created_at::date >= $2 AND created_at::date <= $3
-            """,
-            hotel_id, start, end,
-        )
-
-        # Estimate funnel from booking data
-        # Without page view tracking, we work backwards from bookings
-        completed = completed or 0
-        started = started or 0
-
-        # Rough estimates based on typical hotel conversion rates
-        viewed_room = max(started * 4, completed * 5) if started > 0 else 0
-        searched = max(viewed_room * 2, completed * 8) if viewed_room > 0 else 0
-        page_visits = max(searched * 1.4, completed * 12) if searched > 0 else 0
-
-        page_visits = int(page_visits)
-        searched = int(searched)
-        viewed_room = int(viewed_room)
+        page_visits = counts.get("page_visit", 0)
+        searched = counts.get("searched_dates", 0)
+        viewed_room = counts.get("viewed_room", 0)
+        started = counts.get("started_booking", 0)
+        completed = counts.get("completed_booking", 0)
 
         if page_visits == 0:
             return {"steps": [
@@ -219,6 +208,7 @@ class DashboardRepository:
     async def get_sparklines(user_id: str, range_key: str = "today") -> dict:
         """Return 7-point sparkline data for each stat."""
         hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
+        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
         if not hotel_id:
             return {
                 "revenue": [0] * 7,
@@ -230,7 +220,6 @@ class DashboardRepository:
         today = date.today()
         days = []
         if range_key == "month":
-            # 7 x ~4-day buckets over 30 days
             for i in range(7):
                 d_start = today - timedelta(days=29 - i * 4)
                 d_end = today - timedelta(days=max(0, 29 - (i + 1) * 4 + 1))
@@ -240,7 +229,6 @@ class DashboardRepository:
                 d = today - timedelta(days=6 - i)
                 days.append((d, d))
         else:
-            # Last 7 days for "today" sparkline
             for i in range(7):
                 d = today - timedelta(days=6 - i)
                 days.append((d, d))
@@ -248,6 +236,7 @@ class DashboardRepository:
         revenue = []
         bookings = []
         avg_rate = []
+        page_views = []
 
         for d_start, d_end in days:
             row = await PmsDatabase.fetchrow(
@@ -267,9 +256,14 @@ class DashboardRepository:
             bookings.append(row["cnt"])
             avg_rate.append(round(float(row["rate"]), 2))
 
+            pv = 0
+            if hotel_slug:
+                pv = await EventRepository.count_by_type(hotel_slug, "page_visit", d_start, d_end)
+            page_views.append(pv)
+
         return {
             "revenue": revenue,
             "bookings": bookings,
             "avg_rate": avg_rate,
-            "page_views": [0] * 7,
+            "page_views": page_views,
         }
