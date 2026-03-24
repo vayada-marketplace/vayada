@@ -64,7 +64,7 @@
     "nonRefundableRate": "Nicht erstattbarer Tarif",
     "nonRefundableDesc": "Nicht erstattbar",
     "off": "-15% RABATT",
-    "perNightly": "{price}/pro",
+    "perNightly": "{price} / pro Nacht",
     "includes": "Inklusive:",
     "dailyBreakfast": "Tägliches Frühstück für {count}",
     "welcomeDrink": "Willkommensgetränk",

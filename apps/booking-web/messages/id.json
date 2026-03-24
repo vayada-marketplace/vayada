@@ -64,7 +64,7 @@
     "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",
-    "perNightly": "{price}/per",
+    "perNightly": "{price} / per malam",
     "includes": "Termasuk:",
     "dailyBreakfast": "Sarapan harian untuk {count}",
     "welcomeDrink": "Minuman selamat datang",
