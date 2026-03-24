@@ -113,6 +113,7 @@ export interface Booking {
   children: number
   nightlyRate: number
   totalAmount: number
+  addonTotal?: number
   currency: string
   status: 'confirmed' | 'pending' | 'cancelled' | 'expired'
   paymentMethod?: string | null

@@ -11,7 +11,7 @@ import StepIndicator from '@/components/booking/StepIndicator'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { getNonRefundableRate } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculateAddonTotal } from '@/lib/constants/booking'
 import { trackEvent } from '@/services/api/tracking'
 
 const COUNTRIES = [
@@ -62,6 +62,10 @@ function BookPageContent() {
     : room?.baseRate ?? 0
   const roomTotal = room ? nightlyRate * nights : 0
 
+  const selectedAddonIds = (searchParams.get('addons') || '').split(',').filter(Boolean)
+  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights)
+  const grandTotal = roomTotal + addonTotal
+
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -97,6 +101,7 @@ function BookPageContent() {
         guestPhone: phone,
         specialRequests,
         referralCode,
+        addonIds: selectedAddonIds,
       }))
 
       // Redirect to payment page with booking params
@@ -166,11 +171,28 @@ function BookPageContent() {
                 </div>
               </div>
 
+              {/* Selected Addons */}
+              {selectedAddonIds.length > 0 && (
+                <div className="pb-5 border-b border-gray-100">
+                  {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                    let unitPrice = addon.price
+                    if (addon.perPerson) unitPrice *= adultsParam
+                    if (addon.perNight) unitPrice *= nights
+                    return (
+                      <div key={addon.id} className="flex items-center justify-between pt-3">
+                        <p className="text-sm text-gray-700">{addon.name}</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               {/* Total */}
               <div className="flex items-center justify-between pt-4">
                 <p className="text-base font-bold text-gray-900">{tc('total')}</p>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
+                  <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
                   <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                 </div>
               </div>
@@ -318,6 +340,12 @@ function BookPageContent() {
                   <span className="text-gray-500">{t('roomLabel')} ({tc('nights', { count: nights })})</span>
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
+                {addonTotal > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">{ts('addons')}</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
+                  </div>
+                )}
               </div>
 
               {/* Total */}
@@ -325,7 +353,7 @@ function BookPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>

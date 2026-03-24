@@ -11,6 +11,8 @@ import StepIndicator from '@/components/booking/StepIndicator'
 import { ADDON_CATEGORIES } from '@/lib/mock/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
+import { calculateNights } from '@/lib/utils'
+import { calculateAddonTotal } from '@/lib/constants/booking'
 
 export default function AddonsPage() {
   const router = useRouter()
@@ -24,6 +26,11 @@ export default function AddonsPage() {
   const [activeCategory, setActiveCategory] = useState('all')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const currentStep = 2
+
+  const checkIn = searchParams.get('checkIn') || ''
+  const checkOut = searchParams.get('checkOut') || ''
+  const adultsParam = parseInt(searchParams.get('adults') || '2')
+  const nights = calculateNights(checkIn, checkOut)
 
   const STEPS = [
     { number: 1, label: ts('rooms') },
@@ -133,7 +140,11 @@ export default function AddonsPage() {
               </h3>
             </div>
             <div className="space-y-3 mb-5">
-              {addons.filter((a) => addedIds.has(a.id)).map((addon) => (
+              {addons.filter((a) => addedIds.has(a.id)).map((addon) => {
+                let computedPrice = addon.price
+                if (addon.perPerson) computedPrice *= adultsParam
+                if (addon.perNight) computedPrice *= nights
+                return (
                 <div key={addon.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-gray-100">
                   <div className="flex items-center gap-3">
                     <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
@@ -146,9 +157,7 @@ export default function AddonsPage() {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {formatPrice(addon.price, addon.currency)}
-                      {addon.perNight && <span className="text-[10px] font-normal text-gray-500"> /night</span>}
-                      {addon.perPerson && <span className="text-[10px] font-normal text-gray-500"> /person</span>}
+                      {formatPrice(computedPrice, addon.currency)}
                     </p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
@@ -158,13 +167,14 @@ export default function AddonsPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
             <div className="flex items-center justify-between pt-4 border-t border-primary-100">
               <p className="text-sm text-gray-500">{t('addonsTotal')}</p>
               <p className="text-xl font-bold text-gray-900">
                 {formatPrice(
-                  addons.filter((a) => addedIds.has(a.id)).reduce((sum, a) => sum + a.price, 0),
+                  calculateAddonTotal(addons, Array.from(addedIds), adultsParam, nights),
                   hotel.currency
                 )}
               </p>
@@ -184,7 +194,13 @@ export default function AddonsPage() {
             {t('backToRooms')}
           </button>
           <button
-            onClick={() => router.push(`/book?${searchParams.toString()}`)}
+            onClick={() => {
+              const params = new URLSearchParams(searchParams.toString())
+              if (addedIds.size > 0) {
+                params.set('addons', Array.from(addedIds).join(','))
+              }
+              router.push(`/book?${params.toString()}`)
+            }}
             className="px-8 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"
           >
             {t('proceedToGuest')}

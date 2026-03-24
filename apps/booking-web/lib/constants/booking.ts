@@ -1,6 +1,26 @@
+import { Addon } from '@/lib/types'
+
 /** Multiplier applied to base rate for non-refundable pricing (15% discount) */
 export const NON_REFUNDABLE_DISCOUNT = 0.85
 
 export function getNonRefundableRate(baseRate: number, nonRefundableRate?: number | null): number {
   return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT)
+}
+
+/** Calculate the total price for selected addons, accounting for perPerson and perNight flags. */
+export function calculateAddonTotal(
+  addons: Addon[],
+  selectedIds: string[],
+  adults: number,
+  nights: number,
+): number {
+  let total = 0
+  for (const addon of addons) {
+    if (!selectedIds.includes(addon.id)) continue
+    let price = addon.price
+    if (addon.perPerson) price *= adults
+    if (addon.perNight) price *= nights
+    total += price
+  }
+  return Math.round(total * 100) / 100
 }

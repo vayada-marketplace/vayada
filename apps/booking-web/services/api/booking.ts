@@ -59,6 +59,7 @@ export const bookingService = {
     referralCode?: string
     paymentMethod?: string
     rateType?: string
+    addonIds?: string[]
   }): Promise<BookingRequestResponse> {
     const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings`, data)
     return handleResponse(res, 'Booking failed')

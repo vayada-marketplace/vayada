@@ -10,11 +10,11 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import StripeProvider from '@/components/StripeProvider'
-import { useHotel, useRooms, useSlug } from '@/contexts/HotelContext'
+import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
-import { getNonRefundableRate } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculateAddonTotal } from '@/lib/constants/booking'
 
 interface GuestDetails {
   roomTypeId: string
@@ -24,6 +24,7 @@ interface GuestDetails {
   guestPhone: string
   specialRequests: string
   referralCode?: string
+  addonIds?: string[]
 }
 
 function CardPaymentForm({
@@ -70,6 +71,7 @@ function PaymentPageContent() {
   const tb = useTranslations('book')
   const { hotel } = useHotel()
   const { rooms } = useRooms()
+  const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
@@ -99,6 +101,9 @@ function PaymentPageContent() {
   const roomTotal = room ? nightlyRate * nights : 0
 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
+  const selectedAddonIds = guestDetails?.addonIds || []
+  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights)
+  const grandTotal = roomTotal + addonTotal
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
@@ -148,6 +153,7 @@ function PaymentPageContent() {
         children: childrenParam,
         paymentMethod: isNonRefundable ? 'card' : paymentMethod,
         rateType,
+        addonIds: selectedAddonIds,
       })
 
       const booking = result.booking
@@ -185,6 +191,8 @@ function PaymentPageContent() {
           adults={adultsParam}
           children={childrenParam}
           roomTotal={roomTotal}
+          addonTotal={addonTotal}
+          grandTotal={grandTotal}
           guestDetails={guestDetails}
           bookingId={bookingId}
           bookingReference={bookingReference!}
@@ -323,7 +331,7 @@ function PaymentPageContent() {
                   {paymentMethod === 'card' ? t.rich('agreeTerms', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                    amount: formatPrice(roomTotal, room?.currency || 'EUR'),
+                    amount: formatPrice(grandTotal, room?.currency || 'EUR'),
                   }) : t.rich('agreeTermsProperty', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
@@ -420,6 +428,12 @@ function PaymentPageContent() {
                   <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
+                {addonTotal > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">{ts('addons')}</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
+                  </div>
+                )}
               </div>
 
               {/* Total */}
@@ -427,7 +441,7 @@ function PaymentPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
@@ -452,6 +466,8 @@ function StripePaymentPage({
   adults,
   children,
   roomTotal,
+  addonTotal,
+  grandTotal,
   guestDetails,
   bookingId,
   bookingReference,
@@ -503,7 +519,7 @@ function StripePaymentPage({
         nights,
         adults,
         children,
-        totalAmount: roomTotal,
+        totalAmount: grandTotal,
         currency: room.currency,
         status: 'pending',
         paymentMethod: 'card',
@@ -528,14 +544,24 @@ function StripePaymentPage({
             {t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.'}
           </p>
 
-          <div className="mb-6 p-4 bg-gray-50 rounded-xl">
-            <div className="flex justify-between text-sm mb-2">
+          <div className="mb-6 p-4 bg-gray-50 rounded-xl space-y-2">
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">{room.name}</span>
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
             </div>
+            {addonTotal > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Add-ons</span>
+                <span className="font-semibold text-gray-900">{formatPrice(addonTotal, room.currency)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">{formatDate(checkIn, locale)} — {formatDate(checkOut, locale)}</span>
               <span className="text-gray-500">{tc('nights', { count: nights })}</span>
+            </div>
+            <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
+              <span className="font-semibold text-gray-900">Total</span>
+              <span className="font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</span>
             </div>
           </div>
 
@@ -560,7 +586,7 @@ function StripePaymentPage({
           >
             {submitting
               ? (t('processing') || 'Processing...')
-              : (t('authorizePayment') || `Authorize ${formatPrice(roomTotal, room.currency)}`)
+              : (t('authorizePayment') || `Authorize ${formatPrice(grandTotal, room.currency)}`)
             }
           </button>
 
