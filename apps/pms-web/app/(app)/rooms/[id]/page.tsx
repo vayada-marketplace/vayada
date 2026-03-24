@@ -24,6 +24,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
         setRoom(r)
         setForm({
           name: r.name,
+          category: r.category || '',
           description: r.description,
           shortDescription: r.shortDescription,
           maxOccupancy: r.maxOccupancy,

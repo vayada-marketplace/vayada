@@ -9,6 +9,7 @@ export interface RoomType {
   id: string
   hotelId: string
   name: string
+  category: string
   description: string
   shortDescription: string
   maxOccupancy: number
@@ -38,6 +39,7 @@ export interface RoomType {
 
 export interface RoomTypeCreate {
   name: string
+  category?: string
   description?: string
   shortDescription?: string
   maxOccupancy?: number
