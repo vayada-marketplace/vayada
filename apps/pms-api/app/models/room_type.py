@@ -18,6 +18,7 @@ class RoomTypeCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     name: str
+    category: str = ""
     description: str = ""
     short_description: str = ""
     max_occupancy: int = 2
@@ -47,6 +48,7 @@ class RoomTypeUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     name: Optional[str] = None
+    category: Optional[str] = None
     description: Optional[str] = None
     short_description: Optional[str] = None
     max_occupancy: Optional[int] = None
@@ -78,6 +80,7 @@ class RoomTypeResponse(BaseModel):
 
     id: str
     name: str
+    category: str = ""
     description: str
     short_description: str
     max_occupancy: int
@@ -99,6 +102,7 @@ class RoomTypeAdminResponse(BaseModel):
     id: str
     hotel_id: str
     name: str
+    category: str = ""
     description: str
     short_description: str
     max_occupancy: int
