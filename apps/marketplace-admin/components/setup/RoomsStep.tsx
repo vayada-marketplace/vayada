@@ -26,7 +26,6 @@ export interface RoomType {
   images: string[]
   amenities: string[]
   features: string[]
-  bookDirectBenefits: string[]
 }
 
 export const createEmptyRoom = (): RoomType => ({
@@ -52,16 +51,14 @@ export const createEmptyRoom = (): RoomType => ({
   images: [],
   amenities: [],
   features: [],
-  bookDirectBenefits: [],
 })
 
 export const getRoomCompleteness = (room: RoomType): { done: number; total: number } => {
   let done = 0
-  const total = 4
+  const total = 3
   if (room.name.trim() && room.maxOccupancy >= 1 && room.totalRooms >= 1) done++
   if (room.flexibleRateEnabled || room.nonRefundableEnabled) done++
   if (room.images.length > 0) done++
-  if (room.bookDirectBenefits.length > 0) done++
   return { done, total }
 }
 
@@ -147,22 +144,11 @@ export const AMENITY_CATEGORIES = [
   },
 ]
 
-export const BENEFIT_OPTIONS = [
-  'Welcome Drink on Arrival',
-  '10% Spa Discount',
-  'Late Check-out (subject to availability)',
-  'Early Check-in (subject to availability)',
-  'Free Airport Transfer',
-  'Daily Breakfast Included',
-  'Room Upgrade (subject to availability)',
-]
-
-type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
+type RoomTab = 'details' | 'pricing' | 'media'
 export const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'details', label: 'Room Details' },
   { key: 'pricing', label: 'Pricing & Rates' },
   { key: 'media', label: 'Images, Features & Amenities' },
-  { key: 'benefits', label: 'Book Direct Benefits' },
 ]
 
 interface RoomsStepProps {
@@ -174,7 +160,6 @@ interface RoomsStepProps {
   setActiveRoomTab: (v: RoomTab) => void
   amenityInput: string; setAmenityInput: (v: string) => void
   featureInput: string; setFeatureInput: (v: string) => void
-  benefitInput: string; setBenefitInput: (v: string) => void
   roomFileInputRef: RefObject<HTMLInputElement>
   uploadingRoomImages: boolean
   handleRoomImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
@@ -193,7 +178,6 @@ export default function RoomsStep({
   setActiveRoomIndex,
   activeRoomTab,
   setActiveRoomTab,
-  benefitInput, setBenefitInput,
   roomFileInputRef,
   uploadingRoomImages,
   handleRoomImageUpload,
@@ -1296,87 +1280,6 @@ export default function RoomsStep({
               </div>
 
               <p className="text-[10px] text-gray-400">{room.amenities.length} amenities selected &middot; Shown as &quot;View Full Amenities ({room.amenities.length})&quot; in the room detail modal</p>
-            </div>
-          </div>
-        )}
-
-        {/* Book Direct Benefits Tab */}
-        {activeRoomTab === 'benefits' && (
-          <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Book Direct Benefits</h3>
-              <span className="text-[11px] font-medium text-gray-400">Optional</span>
-            </div>
-
-            <p className="text-[11px] text-gray-500">These appear in the room detail modal under a &quot;Book Direct Benefits&quot; section, encouraging guests to book via your website instead of OTAs.</p>
-
-            {/* Predefined benefit options */}
-            <div className="space-y-2">
-              {BENEFIT_OPTIONS.map((benefit) => {
-                const isSelected = room.bookDirectBenefits.includes(benefit)
-                return (
-                  <button
-                    key={benefit}
-                    onClick={() => {
-                      if (isSelected) {
-                        updateRoom({ bookDirectBenefits: room.bookDirectBenefits.filter((b) => b !== benefit) })
-                      } else {
-                        updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, benefit] })
-                      }
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg border text-left transition-colors ${
-                      isSelected
-                        ? 'border-primary-300 bg-primary-50/30'
-                        : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                    }`}
-                  >
-                    <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                      isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300'
-                    }`}>
-                      {isSelected && (
-                        <CheckIcon className="w-2 h-2 text-white" />
-                      )}
-                    </div>
-                    <span className="text-[12px] text-gray-700">{benefit}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* Custom benefit input */}
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-1.5">Custom Benefit <span className="text-gray-400">(optional)</span></label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={benefitInput}
-                  onChange={(e) => setBenefitInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      const trimmed = benefitInput.trim()
-                      if (trimmed && !room.bookDirectBenefits.includes(trimmed)) {
-                        updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, trimmed] })
-                      }
-                      setBenefitInput('')
-                    }
-                  }}
-                  className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                  placeholder="e.g. Complimentary sunset cocktail"
-                />
-                <button
-                  onClick={() => {
-                    const trimmed = benefitInput.trim()
-                    if (trimmed && !room.bookDirectBenefits.includes(trimmed)) {
-                      updateRoom({ bookDirectBenefits: [...room.bookDirectBenefits, trimmed] })
-                    }
-                    setBenefitInput('')
-                  }}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <PlusIcon className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </div>
           </div>
         )}
