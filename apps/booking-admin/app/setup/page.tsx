@@ -16,6 +16,7 @@ import PmsStep from '@/components/setup/PmsStep'
 import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
 import AddonsStep, { type SetupAddon } from '@/components/setup/AddonsStep'
+import BenefitsStep from '@/components/setup/BenefitsStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -25,7 +26,8 @@ const STEPS = [
   { number: 3, label: 'Choose PMS' },
   { number: 4, label: 'Rooms & Rates' },
   { number: 5, label: 'Add-ons' },
-  { number: 6, label: 'Policies' },
+  { number: 6, label: 'Benefits' },
+  { number: 7, label: 'Policies' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -82,6 +84,9 @@ export default function SetupPage() {
 
   // Step 5: Add-ons
   const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([])
+
+  // Step 6: Benefits
+  const [benefits, setBenefits] = useState<string[]>([])
 
   // Step 6: Policies & Operations
   const [checkInTime, setCheckInTime] = useState('14:00')
@@ -336,6 +341,15 @@ export default function SetupPage() {
           })
         } catch {
           // Non-fatal: addons can be added later from Booking Flow settings
+        }
+      }
+
+      // 7. Save benefits
+      if (benefits.length > 0 && selectedPms === 'vayada') {
+        try {
+          await pmsClient.put('/admin/benefits', { benefits })
+        } catch {
+          // Non-fatal: benefits can be added later from Settings
         }
       }
 
@@ -616,7 +630,7 @@ export default function SetupPage() {
             </svg>
             <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
           </div>
-          <span className="text-[13px] text-gray-500">Step {step} of 6</span>
+          <span className="text-[13px] text-gray-500">Step {step} of 7</span>
         </div>
       </div>
 
@@ -624,7 +638,7 @@ export default function SetupPage() {
       <div className="h-[3px] bg-gray-100 shrink-0">
         <div
           className="h-full bg-primary-600 transition-all duration-300"
-          style={{ width: `${(step / 6) * 100}%` }}
+          style={{ width: `${(step / 7) * 100}%` }}
         />
       </div>
 
@@ -720,6 +734,18 @@ export default function SetupPage() {
       )}
 
       {step === 6 && (
+        <BenefitsStep
+          benefits={benefits}
+          setBenefits={setBenefits}
+          error={error}
+          canProceed={canProceed()}
+          onBack={() => setStep(5)}
+          onContinue={() => { setError(''); setStep(7) }}
+          stepIndicators={stepIndicators}
+        />
+      )}
+
+      {step === 7 && (
         <PoliciesStep
           checkInTime={checkInTime} setCheckInTime={setCheckInTime}
           checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -734,7 +760,7 @@ export default function SetupPage() {
           enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
           error={error}
           saving={saving}
-          onBack={() => setStep(5)}
+          onBack={() => setStep(6)}
           onComplete={handleComplete}
           stepIndicators={stepIndicators}
         />
