@@ -75,7 +75,7 @@ export default function RoomsPage() {
                   {room.amenities.slice(0, 4).map((amenity) => (
                     <span
                       key={amenity}
-                      className="px-2.5 py-1 bg-gray-50 text-gray-600 rounded-md text-xs font-medium"
+                      className="px-2.5 py-1 bg-accent text-gray-600 rounded-md text-xs font-medium"
                     >
                       {amenity}
                     </span>

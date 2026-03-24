@@ -298,7 +298,7 @@ function PaymentPageContent() {
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
                     {t('cardAuthExplanation') || 'Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires.'}
                   </div>
-                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm text-gray-600">
+                  <div className="flex items-center gap-2 p-3 bg-accent rounded-xl text-sm text-gray-600">
                     <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
@@ -544,7 +544,7 @@ function StripePaymentPage({
             {t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.'}
           </p>
 
-          <div className="mb-6 p-4 bg-gray-50 rounded-xl space-y-2">
+          <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">{room.name}</span>
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>

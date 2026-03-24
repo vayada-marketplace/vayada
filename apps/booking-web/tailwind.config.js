@@ -58,6 +58,10 @@ module.exports = {
           700: '#1d4ed8',
           800: '#1e40af',
         },
+        // Brand - Accent (background accent for cards/sections)
+        accent: {
+          DEFAULT: 'var(--color-accent, #F5F3EF)',
+        },
         // Semantic - UI Colors
         surface: {
           DEFAULT: '#f9f8f6',
