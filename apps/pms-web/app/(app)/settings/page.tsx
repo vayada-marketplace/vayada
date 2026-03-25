@@ -3,18 +3,6 @@
 import { useState, useEffect } from 'react'
 import { bookingsService, PaymentSettings, CancellationPolicy } from '@/services/bookings'
 import { customDomainService, CustomDomainStatus } from '@/services/custom-domain'
-import { benefitsService } from '@/services/rooms'
-import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
-
-const BENEFIT_OPTIONS = [
-  'Welcome Drink on Arrival',
-  '10% Spa Discount',
-  'Late Check-out (subject to availability)',
-  'Early Check-in (subject to availability)',
-  'Free Airport Transfer',
-  'Daily Breakfast Included',
-  'Room Upgrade (subject to availability)',
-]
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -54,18 +42,9 @@ export default function SettingsPage() {
   const [freeDays, setFreeDays] = useState(7)
   const [partialRefundPct, setPartialRefundPct] = useState(0)
 
-  // Book Direct Benefits
-  const [benefits, setBenefits] = useState<string[]>([])
-  const [benefitInput, setBenefitInput] = useState('')
-  const [savingBenefits, setSavingBenefits] = useState(false)
-
   useEffect(() => {
     customDomainService.getStatus()
       .then(setDomainStatus)
-      .catch(console.error)
-
-    benefitsService.get()
-      .then((res) => setBenefits(res.benefits))
       .catch(console.error)
 
     bookingsService.getPaymentSettings()
@@ -130,20 +109,6 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to save')
     } finally {
       setSaving(false)
-    }
-  }
-
-  const saveBenefits = async () => {
-    setSavingBenefits(true)
-    setError('')
-    setSuccess('')
-    try {
-      await benefitsService.update(benefits)
-      setSuccess('Book Direct Benefits saved')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save benefits')
-    } finally {
-      setSavingBenefits(false)
     }
   }
 
@@ -499,107 +464,6 @@ export default function SettingsPage() {
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
-        </div>
-
-        {/* Book Direct Benefits */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Book Direct Benefits</h2>
-          <p className="text-xs text-gray-500 mb-4">These appear in the room detail modal, encouraging guests to book via your website instead of OTAs. Benefits apply to all rooms.</p>
-
-          <div className="space-y-2 mb-4">
-            {BENEFIT_OPTIONS.map((benefit) => {
-              const isSelected = benefits.includes(benefit)
-              return (
-                <button
-                  key={benefit}
-                  type="button"
-                  onClick={() => {
-                    if (isSelected) {
-                      setBenefits(benefits.filter((b) => b !== benefit))
-                    } else {
-                      setBenefits([...benefits, benefit])
-                    }
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg border text-left transition-colors ${
-                    isSelected
-                      ? 'border-primary-300 bg-primary-50/30'
-                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                  }`}
-                >
-                  <div className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                    isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300'
-                  }`}>
-                    {isSelected && (
-                      <CheckIcon className="w-2 h-2 text-white" />
-                    )}
-                  </div>
-                  <span className="text-[12px] text-gray-700">{benefit}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Custom benefit input */}
-          <div className="mb-4">
-            <label className="block text-[11px] text-gray-500 mb-1.5">Custom Benefit <span className="text-gray-400">(optional)</span></label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={benefitInput}
-                onChange={(e) => setBenefitInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    const trimmed = benefitInput.trim()
-                    if (trimmed && !benefits.includes(trimmed)) {
-                      setBenefits([...benefits, trimmed])
-                    }
-                    setBenefitInput('')
-                  }
-                }}
-                className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                placeholder="e.g. Complimentary sunset cocktail"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const trimmed = benefitInput.trim()
-                  if (trimmed && !benefits.includes(trimmed)) {
-                    setBenefits([...benefits, trimmed])
-                  }
-                  setBenefitInput('')
-                }}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <PlusIcon className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Selected custom benefits */}
-          {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).length > 0 && (
-            <div className="mb-4 space-y-1">
-              <span className="text-[10px] text-gray-400 uppercase tracking-wider">Custom benefits</span>
-              <div className="flex flex-wrap gap-2">
-                {benefits.filter(b => !BENEFIT_OPTIONS.includes(b)).map((b, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
-                    {b}
-                    <button type="button" onClick={() => setBenefits(benefits.filter(x => x !== b))} className="text-primary-400 hover:text-primary-600">
-                      <XMarkIcon className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={saveBenefits}
-            disabled={savingBenefits}
-            className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-          >
-            {savingBenefits ? 'Saving...' : 'Save Benefits'}
-          </button>
         </div>
 
       </div>
