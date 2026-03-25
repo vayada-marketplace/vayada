@@ -38,6 +38,7 @@ export interface Hotel {
   contact: HotelContact
   bookingFilters: string[]
   customFilters?: Record<string, string>
+  filterRooms?: Record<string, string[]>
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
   supportedLanguages: string[]
