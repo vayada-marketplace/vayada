@@ -92,7 +92,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
       const converted = convertPrice(amount, fromCurrency)
-      return new Intl.NumberFormat(undefined, {
+      return new Intl.NumberFormat('en', {
         style: 'currency',
         currency: selectedCurrency,
         minimumFractionDigits: 0,

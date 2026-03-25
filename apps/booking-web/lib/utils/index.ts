@@ -17,8 +17,8 @@ function resolveLocale(locale?: string): string {
   return LOCALE_MAP[locale || 'en'] || 'en-GB'
 }
 
-export function formatCurrency(amount: number, currency: string = 'EUR', locale?: string): string {
-  return new Intl.NumberFormat(resolveLocale(locale), {
+export function formatCurrency(amount: number, currency: string = 'EUR'): string {
+  return new Intl.NumberFormat('en', {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,
