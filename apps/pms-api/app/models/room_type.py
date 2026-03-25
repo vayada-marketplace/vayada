@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional, List, Dict
+
+MAX_ROOM_SIZE = 1000
 
 
 def to_camel(string: str) -> str:
@@ -43,6 +45,13 @@ class RoomTypeCreate(BaseModel):
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
 
+    @field_validator("size")
+    @classmethod
+    def validate_size(cls, v: int) -> int:
+        if v > MAX_ROOM_SIZE:
+            raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
 
 class RoomTypeUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -72,6 +81,13 @@ class RoomTypeUpdate(BaseModel):
     flexible_rate_enabled: Optional[bool] = None
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
+
+    @field_validator("size")
+    @classmethod
+    def validate_size(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v > MAX_ROOM_SIZE:
+            raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
 
 
 class RoomTypeResponse(BaseModel):
