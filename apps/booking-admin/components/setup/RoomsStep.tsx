@@ -446,6 +446,7 @@ export default function RoomsStep({
                   onChange={(e) => updateRoom({ totalRooms: Math.max(1, Number(e.target.value)) })}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                 />
+                <p className="text-[10px] text-gray-400 mt-1">Number of units available for this room type</p>
               </div>
             </div>
 
