@@ -22,6 +22,8 @@ export interface InviteData {
     whatsapp_number: string
     instagram: string
     facebook: string
+    twitter?: string
+    youtube?: string
     default_currency: string
     default_language: string
     supported_currencies: string[]
