@@ -23,6 +23,9 @@ class PropertySettingsResponse(BaseModel):
     new_booking_alerts: bool
     payment_alerts: bool
     weekly_reports: bool
+    special_requests_enabled: bool
+    arrival_time_enabled: bool
+    guest_count_enabled: bool
     instagram: str
     facebook: str
     twitter: str
@@ -59,6 +62,9 @@ class PropertySettingsUpdate(BaseModel):
     new_booking_alerts: Optional[bool] = None
     payment_alerts: Optional[bool] = None
     weekly_reports: Optional[bool] = None
+    special_requests_enabled: Optional[bool] = None
+    arrival_time_enabled: Optional[bool] = None
+    guest_count_enabled: Optional[bool] = None
     instagram: Optional[str] = None
     facebook: Optional[str] = None
     twitter: Optional[str] = None
