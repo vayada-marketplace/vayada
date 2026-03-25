@@ -32,6 +32,8 @@ export interface Booking {
   addonIds: string[]
   addonTotal: number
   addonQuantities: Record<string, number>
+  estimatedArrivalTime: string | null
+  numberOfGuests: number | null
   guestWithdrawn: boolean
   createdAt: string
   updatedAt: string
