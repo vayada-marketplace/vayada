@@ -24,7 +24,9 @@
     "contact": "Contact",
     "phone": "Téléphone",
     "email": "E-mail",
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "qty": "Qté",
+    "perPerson": "par personne"
   },
   "nav": {
     "contact": "Contact",

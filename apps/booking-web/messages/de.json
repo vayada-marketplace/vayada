@@ -24,7 +24,9 @@
     "contact": "Kontakt",
     "phone": "Telefon",
     "email": "E-Mail",
-    "loading": "Wird geladen..."
+    "loading": "Wird geladen...",
+    "qty": "Anz",
+    "perPerson": "pro Person"
   },
   "nav": {
     "contact": "Kontakt",

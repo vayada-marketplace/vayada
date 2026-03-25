@@ -7,7 +7,7 @@ export function getNonRefundableRate(baseRate: number, nonRefundableRate?: numbe
   return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT)
 }
 
-/** Calculate the total price for selected addons, accounting for perPerson and perNight flags. */
+/** Calculate the total price for selected addons, accounting for perPerson, perNight, and quantity. */
 export function calculateAddonTotal(
   addons: Addon[],
   selectedIds: string[],
@@ -18,9 +18,11 @@ export function calculateAddonTotal(
   let total = 0
   for (const addon of addons) {
     if (!selectedIds.includes(addon.id)) continue
+    const qty = quantities?.[addon.id] ?? 1
     let price = addon.price
     if (addon.perPerson) price *= adults
-    if (addon.perNight) price *= (quantities?.[addon.id] ?? nights)
+    if (addon.perNight) price *= nights
+    price *= qty
     total += price
   }
   return Math.round(total * 100) / 100

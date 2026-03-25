@@ -440,12 +440,14 @@ function PaymentPageContent() {
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                  const qty = addonQuantities[addon.id] ?? 1
                   let unitPrice = addon.price
                   if (addon.perPerson) unitPrice *= adultsParam
-                  if (addon.perNight) unitPrice *= (addonQuantities[addon.id] ?? nights)
+                  if (addon.perNight) unitPrice *= nights
+                  unitPrice *= qty
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{addon.name}</span>
+                      <span className="text-gray-500">{addon.name}{qty > 1 ? ` ×${qty}` : ''}</span>
                       <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
                     </div>
                   )
@@ -570,12 +572,14 @@ function StripePaymentPage({
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
             </div>
             {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
+              const qty = addonQuantities?.[addon.id] ?? 1
               let unitPrice = addon.price
               if (addon.perPerson) unitPrice *= adults
-              if (addon.perNight) unitPrice *= (addonQuantities?.[addon.id] ?? nights)
+              if (addon.perNight) unitPrice *= nights
+              unitPrice *= qty
               return (
                 <div key={addon.id} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{addon.name}</span>
+                  <span className="text-gray-500">{addon.name}{qty > 1 ? ` ×${qty}` : ''}</span>
                   <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
                 </div>
               )

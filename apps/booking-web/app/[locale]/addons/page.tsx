@@ -52,21 +52,23 @@ export default function AddonsPage() {
 
   const selectedIds = Object.keys(selections)
 
-  const toggleAddon = (id: string, perNight?: boolean) => {
+  const MAX_QUANTITY = 10
+
+  const toggleAddon = (id: string) => {
     setSelections((prev) => {
       if (prev[id] !== undefined) {
         const next = { ...prev }
         delete next[id]
         return next
       }
-      return { ...prev, [id]: perNight ? nights : 1 }
+      return { ...prev, [id]: 1 }
     })
   }
 
   const setQuantity = (id: string, qty: number) => {
     setSelections((prev) => ({
       ...prev,
-      [id]: Math.max(1, Math.min(qty, nights)),
+      [id]: Math.max(1, Math.min(qty, MAX_QUANTITY)),
     }))
   }
 
@@ -126,7 +128,7 @@ export default function AddonsPage() {
                       {addon.perNight && <span className="text-xs font-normal text-gray-500"> /night</span>}
                       {addon.perPerson && <span className="text-xs font-normal text-gray-500"> /person</span>}
                     </p>
-                    {isAdded && addon.perNight ? (
+                    {isAdded ? (
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => setQuantity(addon.id, selections[addon.id] - 1)}
@@ -135,12 +137,12 @@ export default function AddonsPage() {
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
                         </button>
-                        <span className="w-14 text-center text-sm font-semibold text-gray-900">
-                          {selections[addon.id]}/{nights}
+                        <span className="w-8 text-center text-sm font-semibold text-gray-900">
+                          {selections[addon.id]}
                         </span>
                         <button
                           onClick={() => setQuantity(addon.id, selections[addon.id] + 1)}
-                          disabled={selections[addon.id] >= nights}
+                          disabled={selections[addon.id] >= MAX_QUANTITY}
                           className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
@@ -154,14 +156,10 @@ export default function AddonsPage() {
                       </div>
                     ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); toggleAddon(addon.id, addon.perNight) }}
-                        className={`px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors ${
-                          isAdded
-                            ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
-                            : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-                        }`}
+                        onClick={(e) => { e.stopPropagation(); toggleAddon(addon.id) }}
+                        className="px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors bg-white text-gray-700 border-gray-300 hover:border-gray-400"
                       >
-                        {isAdded ? t('added') : t('add')}
+                        {t('add')}
                       </button>
                     )}
                   </div>
@@ -187,7 +185,8 @@ export default function AddonsPage() {
                 const qty = selections[addon.id]
                 let computedPrice = addon.price
                 if (addon.perPerson) computedPrice *= adultsParam
-                if (addon.perNight) computedPrice *= qty
+                if (addon.perNight) computedPrice *= nights
+                computedPrice *= qty
                 return (
                 <div key={addon.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-gray-100">
                   <div className="flex items-center gap-3">
@@ -196,11 +195,11 @@ export default function AddonsPage() {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{addon.name}</p>
-                      {addon.perNight ? (
-                        <p className="text-xs text-gray-500">{qty} of {nights} {tc('nights')}</p>
-                      ) : (
-                        <p className="text-xs text-gray-500">{addon.description}</p>
-                      )}
+                      <p className="text-xs text-gray-500">
+                        {qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
+                        {addon.perPerson && qty > 1 ? ` · ${tc('perPerson')}` : ''}
+                        {addon.perNight ? ` · ${tc('nights', { count: nights })}` : ''}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
@@ -246,8 +245,8 @@ export default function AddonsPage() {
               const params = new URLSearchParams(searchParams.toString())
               if (selectedIds.length > 0) {
                 params.set('addons', selectedIds.map((id) => {
-                  const addon = addons.find((a) => a.id === id)
-                  return addon?.perNight ? `${id}:${selections[id]}` : id
+                  const qty = selections[id]
+                  return qty > 1 ? `${id}:${qty}` : id
                 }).join(','))
               }
               router.push(`/book?${params.toString()}`)
@@ -265,7 +264,7 @@ export default function AddonsPage() {
           open
           onClose={() => setDetailIndex(null)}
           isAdded={selections[filteredAddons[detailIndex].id] !== undefined}
-          onToggle={() => toggleAddon(filteredAddons[detailIndex].id, filteredAddons[detailIndex].perNight)}
+          onToggle={() => toggleAddon(filteredAddons[detailIndex].id)}
           currentIndex={detailIndex}
           totalAddons={filteredAddons.length}
           onPrev={() => setDetailIndex(detailIndex > 0 ? detailIndex - 1 : filteredAddons.length - 1)}
