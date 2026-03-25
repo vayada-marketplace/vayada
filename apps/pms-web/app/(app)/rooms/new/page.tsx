@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
+import { bookingsService } from '@/services/bookings'
 import RoomTypeForm from '@/components/rooms/RoomTypeForm'
 
 export default function NewRoomPage() {
@@ -29,6 +30,15 @@ export default function NewRoomPage() {
     sortOrder: 0,
     monthlyRates: {},
   })
+
+  useEffect(() => {
+    bookingsService.getPaymentSettings()
+      .then((res) => {
+        const c = res.paymentSettings.defaultCurrency
+        if (c) setForm((prev) => ({ ...prev, currency: c }))
+      })
+      .catch(console.error)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { roomsService, RoomType } from '@/services/rooms'
 import { bookingsService, Booking } from '@/services/bookings'
+import { formatCurrency } from '@/lib/formatCurrency'
 
 function getToday() {
   return new Date().toISOString().split('T')[0]
@@ -30,6 +31,7 @@ function getInitials(first: string, last: string) {
 export default function DashboardPage() {
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [hotelCurrency, setHotelCurrency] = useState('EUR')
   const [loading, setLoading] = useState(true)
 
   const today = getToday()
@@ -38,10 +40,12 @@ export default function DashboardPage() {
     Promise.all([
       roomsService.list(),
       bookingsService.list({ status: 'confirmed', limit: 500 }),
+      bookingsService.getPaymentSettings(),
     ])
-      .then(([roomsList, bookingsRes]) => {
+      .then(([roomsList, bookingsRes, settingsRes]) => {
         setRooms(roomsList)
         setBookings(bookingsRes.bookings)
+        setHotelCurrency(settingsRes.paymentSettings.defaultCurrency || 'EUR')
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -120,8 +124,6 @@ export default function DashboardPage() {
     )
   }
 
-  const currencySymbol = bookings[0]?.currency === 'EUR' ? '€' : '$'
-
   const dateLabel = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
@@ -163,7 +165,7 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Revenue This Month"
-          value={`${currencySymbol}${revenueThisMonth.toLocaleString('en-US', { maximumFractionDigits: 0 })}`}
+          value={formatCurrency(revenueThisMonth, hotelCurrency)}
           sub="Last 30 days"
           icon={<DollarIcon />}
         />

@@ -27,6 +27,10 @@ export default function SettingsPage() {
   const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null)
   const [domainLoading, setDomainLoading] = useState(false)
 
+  // Currency
+  const [currency, setCurrency] = useState('EUR')
+  const [savingCurrency, setSavingCurrency] = useState(false)
+
   // Payment settings
   const [feeType, setFeeType] = useState('percentage')
   const [feeValue, setFeeValue] = useState(8)
@@ -73,6 +77,7 @@ export default function SettingsPage() {
         setPayAtProperty(ps.payAtPropertyEnabled)
         setStripeAccountId(ps.stripeConnectAccountId)
         setStripeOnboarded(ps.stripeConnectOnboarded)
+        setCurrency(ps.defaultCurrency || 'EUR')
         setPaymentProvider(ps.paymentProvider || 'stripe')
         setXenditChannelCode(ps.xenditChannelCode || 'ID_BCA')
         setXenditAccountNumber(ps.xenditAccountNumber || '')
@@ -139,6 +144,20 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to save benefits')
     } finally {
       setSavingBenefits(false)
+    }
+  }
+
+  const saveCurrency = async () => {
+    setSavingCurrency(true)
+    setError('')
+    setSuccess('')
+    try {
+      await bookingsService.updatePaymentSettings({ defaultCurrency: currency })
+      setSuccess('Currency saved')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save currency')
+    } finally {
+      setSavingCurrency(false)
     }
   }
 
@@ -240,6 +259,40 @@ export default function SettingsPage() {
       )}
 
       <div className="space-y-8">
+        {/* Currency */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Currency</h2>
+          <p className="text-xs text-gray-500 mb-4">Choose the display currency for prices across your dashboard.</p>
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="EUR">EUR — Euro (€)</option>
+            <option value="USD">USD — US Dollar ($)</option>
+            <option value="GBP">GBP — British Pound (£)</option>
+            <option value="CHF">CHF — Swiss Franc</option>
+            <option value="IDR">IDR — Indonesian Rupiah (Rp)</option>
+            <option value="THB">THB — Thai Baht (฿)</option>
+            <option value="AUD">AUD — Australian Dollar (A$)</option>
+            <option value="SGD">SGD — Singapore Dollar (S$)</option>
+            <option value="JPY">JPY — Japanese Yen (¥)</option>
+            <option value="MYR">MYR — Malaysian Ringgit</option>
+            <option value="PHP">PHP — Philippine Peso</option>
+            <option value="VND">VND — Vietnamese Dong</option>
+            <option value="INR">INR — Indian Rupee</option>
+            <option value="KRW">KRW — South Korean Won</option>
+            <option value="NZD">NZD — New Zealand Dollar</option>
+          </select>
+          <button
+            onClick={saveCurrency}
+            disabled={savingCurrency}
+            className="mt-3 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {savingCurrency ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+
         {/* Custom Domain */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Custom Domain</h2>

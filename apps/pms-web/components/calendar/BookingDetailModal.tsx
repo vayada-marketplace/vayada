@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { bookingsService, Booking } from '@/services/bookings'
+import { formatCurrency } from '@/lib/formatCurrency'
 import { CHANNEL_COLORS, getChannelLabel } from '@/lib/constants/statusStyles'
 import Modal from '@/components/Modal'
 
@@ -224,16 +225,16 @@ export default function BookingDetailModal({
               <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">
-                    {booking.currency} {booking.nightlyRate.toFixed(2)} x {booking.nights} night{booking.nights !== 1 ? 's' : ''}
+                    {formatCurrency(booking.nightlyRate, booking.currency)} x {booking.nights} night{booking.nights !== 1 ? 's' : ''}
                   </span>
                   <span className="font-medium text-gray-900">
-                    {booking.currency} {booking.totalAmount.toFixed(2)}
+                    {formatCurrency(booking.totalAmount, booking.currency)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
                   <span className="font-medium text-gray-900">Total Amount</span>
                   <span className="font-bold text-gray-900">
-                    {booking.currency} {booking.totalAmount.toFixed(2)}
+                    {formatCurrency(booking.totalAmount, booking.currency)}
                   </span>
                 </div>
               </div>
@@ -259,7 +260,7 @@ export default function BookingDetailModal({
                     Are you sure you want to cancel this booking?
                   </p>
                   <p className="text-xs text-red-600 mt-1">
-                    {booking.guestFirstName} {booking.guestLastName} &middot; {booking.checkIn} &rarr; {booking.checkOut} &middot; {booking.currency} {booking.totalAmount.toFixed(2)}
+                    {booking.guestFirstName} {booking.guestLastName} &middot; {booking.checkIn} &rarr; {booking.checkOut} &middot; {formatCurrency(booking.totalAmount, booking.currency)}
                   </p>
                 </div>
                 <div className="flex gap-2">

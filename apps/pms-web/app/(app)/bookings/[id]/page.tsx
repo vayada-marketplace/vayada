@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { bookingsService, Booking } from '@/services/bookings'
+import { formatCurrency } from '@/lib/formatCurrency'
 import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from '@/lib/constants/statusStyles'
 
 function CountdownTimer({ deadline }: { deadline: string }) {
@@ -239,7 +240,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">Nightly Rate</span>
-              <span className="font-medium text-gray-900">{booking.currency} {booking.nightlyRate.toFixed(2)}</span>
+              <span className="font-medium text-gray-900">{formatCurrency(booking.nightlyRate, booking.currency)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Nights</span>
@@ -247,24 +248,24 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             </div>
             <div className="flex justify-between pt-2 border-t border-gray-100">
               <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900">{booking.currency} {booking.totalAmount.toFixed(2)}</span>
+              <span className="font-bold text-gray-900">{formatCurrency(booking.totalAmount, booking.currency)}</span>
             </div>
             {booking.platformFeeAmount != null && (
               <>
                 <div className="flex justify-between pt-2 border-t border-gray-100">
                   <span className="text-gray-500">Platform Fee</span>
-                  <span className="font-medium text-gray-600">-{booking.currency} {booking.platformFeeAmount.toFixed(2)}</span>
+                  <span className="font-medium text-gray-600">-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
                 </div>
                 {booking.affiliateCommissionAmount != null && booking.affiliateCommissionAmount > 0 && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Affiliate Commission</span>
-                    <span className="font-medium text-gray-600">{booking.currency} {booking.affiliateCommissionAmount.toFixed(2)}</span>
+                    <span className="font-medium text-gray-600">{formatCurrency(booking.affiliateCommissionAmount, booking.currency)}</span>
                   </div>
                 )}
                 {booking.propertyPayoutAmount != null && (
                   <div className="flex justify-between pt-2 border-t border-gray-100">
                     <span className="font-semibold text-gray-900">Property Payout</span>
-                    <span className="font-bold text-green-600">{booking.currency} {booking.propertyPayoutAmount.toFixed(2)}</span>
+                    <span className="font-bold text-green-600">{formatCurrency(booking.propertyPayoutAmount, booking.currency)}</span>
                   </div>
                 )}
               </>

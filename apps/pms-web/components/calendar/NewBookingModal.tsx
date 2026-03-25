@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CalendarRoomType, CalendarRoom, CreateAdminBookingPayload } from '@/services/calendar'
+import { formatCurrency } from '@/lib/formatCurrency'
 import Modal from '@/components/Modal'
 
 interface NewBookingModalProps {
@@ -232,7 +233,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nightly Rate {selectedRoomType ? `(${selectedRoomType.currency})` : ''}
+                Nightly Rate{selectedRoomType ? ` (${selectedRoomType.currency})` : ''}
               </label>
               <input
                 type="number"

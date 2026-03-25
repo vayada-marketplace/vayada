@@ -52,6 +52,7 @@ export interface PaymentSettings {
   xenditChannelCode: string | null
   xenditAccountNumber: string | null
   xenditAccountHolderName: string | null
+  defaultCurrency: string
 }
 
 export interface CancellationPolicy {
