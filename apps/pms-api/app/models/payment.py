@@ -43,6 +43,7 @@ class HotelPaymentSettings(BaseModel):
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
+    default_currency: str = "EUR"
 
 
 class HotelPaymentSettingsUpdate(BaseModel):
@@ -56,6 +57,7 @@ class HotelPaymentSettingsUpdate(BaseModel):
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
+    default_currency: Optional[str] = None
 
 
 class CancellationPolicy(BaseModel):

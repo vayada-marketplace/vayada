@@ -43,6 +43,7 @@ async def get_payment_settings(
             xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
             xendit_account_number=settings.get("xendit_account_number") if settings else None,
             xendit_account_holder_name=settings.get("xendit_account_holder_name") if settings else None,
+            default_currency=settings.get("default_currency", "EUR") if settings else "EUR",
         ).model_dump(by_alias=True),
         "cancellationPolicy": CancellationPolicy(
             free_cancellation_days=policy["free_cancellation_days"] if policy else 7,
