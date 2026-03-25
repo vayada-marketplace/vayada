@@ -196,6 +196,20 @@ export default function RoomTypeForm({
     return ((d.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100
   }
 
+  const overlappingSeasonIndices = (() => {
+    const indices = new Set<number>()
+    for (let i = 0; i < seasons.length; i++) {
+      for (let j = i + 1; j < seasons.length; j++) {
+        const a = seasons[i], b = seasons[j]
+        if (a.from && a.to && b.from && b.to && a.from <= b.to && b.from <= a.to) {
+          indices.add(i)
+          indices.add(j)
+        }
+      }
+    }
+    return indices
+  })()
+
   const getSeasonForDate = (day: number) => {
     const year = previewMonth.getFullYear()
     const month = previewMonth.getMonth()
@@ -587,7 +601,7 @@ export default function RoomTypeForm({
                         ? Math.max(1, Math.round((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000 * 60 * 60 * 24)) + 1)
                         : 0
                       return (
-                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3">
+                        <div key={idx} className={`rounded-xl border px-4 py-3 ${overlappingSeasonIndices.has(idx) ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50/50'}`}>
                           <div className="flex items-center gap-2 mb-2">
                             <input
                               type="text"
@@ -623,6 +637,9 @@ export default function RoomTypeForm({
                       )
                     })}
                   </div>
+                )}
+                {overlappingSeasonIndices.size > 0 && (
+                  <p className="mt-2 text-[11px] text-red-600 font-medium">Season date ranges must not overlap. Please adjust the highlighted seasons.</p>
                 )}
                 <button
                   type="button"
@@ -1209,7 +1226,7 @@ export default function RoomTypeForm({
         </Link>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || overlappingSeasonIndices.size > 0}
           className="px-6 py-2 bg-primary-600 text-white text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : submitLabel}
