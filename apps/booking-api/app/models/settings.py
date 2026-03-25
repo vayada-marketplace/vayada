@@ -11,6 +11,7 @@ class PropertySettingsResponse(BaseModel):
     address: str
     timezone: str
     default_currency: str
+    default_language: str
     supported_currencies: list[str]
     supported_languages: list[str]
     check_in_time: str
@@ -47,6 +48,7 @@ class PropertySettingsUpdate(BaseModel):
     address: Optional[str] = None
     timezone: Optional[str] = None
     default_currency: Optional[str] = None
+    default_language: Optional[str] = None
     supported_currencies: Optional[list[str]] = None
     supported_languages: Optional[list[str]] = None
     check_in_time: Optional[str] = None
