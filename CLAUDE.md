@@ -22,3 +22,71 @@ When the user pastes ticket content and says "create worktree" (or similar):
 When the user asks to clean up a worktree:
 1. `git worktree remove ../vayada-<TICKET-ID>`
 2. Optionally delete the branch if merged: `git branch -d feature/<ticket-id-lowercase>`
+
+## Merge & Ship Worktree
+
+When the user says "merge worktree" / "ship worktree" / "finish worktree" (or similar) for a given `<TICKET-ID>`:
+
+1. **Identify changed submodules** in the worktree:
+   ```
+   git -C ../vayada-<TICKET-ID> diff --name-only HEAD main -- | grep /
+   ```
+   Cross-reference with `git -C ../vayada-<TICKET-ID> submodule status` to find which submodules have new commits on the feature branch.
+
+2. **For each changed submodule**, merge the feature branch into its main branch:
+   ```
+   cd <submodule-path>                         # inside the worktree
+   git checkout main
+   git merge feature/<ticket-id-lowercase> --no-ff -m "Merge feature/<ticket-id-lowercase> into main"
+   git push origin main
+   cd -
+   ```
+   If the merge has conflicts, stop and ask the user to resolve them before continuing.
+
+3. **Update the parent repo** to point to the new submodule commits:
+   ```
+   cd ~/git/vayada                             # back in the main worktree
+   git submodule update --remote --merge        # pull latest main for each submodule
+   git add -A
+   git commit -m "Update submodules: merge feature/<ticket-id-lowercase>"
+   git push origin main
+   ```
+
+4. **Clean up the worktree and branch**:
+   ```
+   git worktree remove ../vayada-<TICKET-ID>
+   git branch -d feature/<ticket-id-lowercase>
+   ```
+   Also delete the remote feature branch in each submodule that had one:
+   ```
+   git -C <submodule-path> push origin --delete feature/<ticket-id-lowercase>
+   ```
+
+5. Confirm to the user that everything has been merged, pushed, and cleaned up.
+
+## Merge & Ship ALL Worktrees
+
+When the user says "merge all worktrees" / "ship all" / "finish all worktrees" (or similar):
+
+1. **List all active worktrees** (excluding the main one):
+   ```
+   git worktree list
+   ```
+   Filter out the main worktree (`~/git/vayada`). The remaining entries are feature worktrees. Extract each `<TICKET-ID>` from the worktree path (e.g. `../vayada-VAY-123` → `VAY-123`).
+
+2. **Show the user a summary** of all worktrees that will be merged and ask for confirmation before proceeding.
+
+3. **For each worktree**, run the full "Merge & Ship Worktree" flow (steps 1–4 from above), but **defer the parent repo push** — only do the submodule merges and pushes per worktree.
+
+4. **After all worktrees are processed**, do a single parent repo update:
+   ```
+   cd ~/git/vayada
+   git submodule update --remote --merge
+   git add -A
+   git commit -m "Update submodules: merge all feature branches"
+   git push origin main
+   ```
+
+5. **Clean up all worktrees and branches** that were successfully merged. Skip any that had conflicts (those should have been flagged to the user during step 3).
+
+6. Print a final summary listing which worktrees were merged successfully and which (if any) were skipped due to conflicts.

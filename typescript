@@ -1,0 +1,23 @@
+Script started on Sun Mar 22 05:17:16 2026
+[0m[49m[39m[27m[24m[K
+
+[2A7[0m[49m[39m]133;A[0m[49m[34m[34m~[0m[34m[49m[34m/git/[34mvayada[0m[34m[49m[34m[0m[34m[49m[34m[0m[34m[49m[30m[0m[30m[49m[39m                                                                     [0m[49m[36m05:17:16[0m[36m[49m[36m[0m[36m[49m[36m[0m[36m[49m[39m
+[0m[49m[32m>[0m[32m[49m[32m[0m[32m[49m[30m[0m[30m[49m[39m [0m[49m[39m]133;B[?2004h[?25l8[0m[49m[39m[27m[24m[J]2;flamurmaliqi@MacBook-Pro-von-Flamur-2:~/git/vayada]1;~/git/vayada]7;file://MacBook-Pro-von-Flamur-2.local/Users/flamurmaliqi/git/vayada\[0m[34m[49m[39m[27m[24m[1m[7m%[27m[1m[0m                                                                                         [0m[49m[39m[27m[24m[K[0m[27m[24m[J[0m[49m[39m]133;A
+[A[0m[49m[34m[34m~[0m[34m[49m[34m/git/[34mvayada[0m[34m[49m[34m[0m[34m[49m[34m[0m[34m[49m [0m[34m[49m[33m[32mmain [33m!7 [34m?1[0m[34m[49m[33m[0m[33m[49m[30m[0m[30m[49m[39m                                                          [0m[49m[36m05:17:16[0m[36m[49m[36m[0m[36m[49m[36m[0m[36m[49m[39m
+[0m[49m[32m>[0m[32m[49m[32m[0m[32m[49m[30m[0m[30m[49m[39m [0m[49m[39m]133;B[K[?1h=[?25h[?2004hö lls[?1l>[?25l[?2004l[A[0m[27m[24m[J]133;A[0m[49m[27m[24m[32m>[0m[32m[49m[39m[27m[24m ]133;Bls[K[?25h
+]2;eza]1;ls]133;C;[1;36mauth-db[0m         docker-compose.yml  [1;36mmarketplace[0m  [1;4;33mREADME.md[0m  [1;36mtickets[0m
+[1;36mbooking-engine[0m  [1;36minfra[0m               [1;36mpms[0m          [1;36mscripts[0m    typescript
+[1m[7m%[27m[1m[0m                                                                                          ]2;flamurmaliqi@MacBook-Pro-von-Flamur-2:~/git/vayada]1;~/git/vayada]7;file://MacBook-Pro-von-Flamur-2.local/Users/flamurmaliqi/git/vayada\]133;D;0[0m[27m[24m[J[0m[49m[39m]133;A
+
+[A[0m[49m[34m[34m~[0m[34m[49m[34m/git/[34mvayada[0m[34m[49m[34m[0m[34m[49m[34m[0m[34m[49m [0m[34m[49m[33m[32mmain [33m!7 [34m?1[0m[34m[49m[33m[0m[33m[49m[30m[0m[30m[49m[39m                                                          [0m[49m[36m05:17:19[0m[36m[49m[36m[0m[36m[49m[36m[0m[36m[49m[39m
+[0m[49m[32m>[0m[32m[49m[32m[0m[32m[49m[30m[0m[30m[49m[39m [0m[49m[39m]133;B[K[?1h=[?2004hccd c  ccd scripts[1m/[0m[0m [?1l>[?25l[?2004l[A[A[0m[27m[24m[J]133;A[0m[49m[27m[24m[32m>[0m[32m[49m[39m[27m[24m ]133;Bcd scripts[K[?25h
+]2;cd scripts]1;cd]133;C;[1m[7m%[27m[1m[0m                                                                                          ]2;flamurmaliqi@MacBook-Pro-von-Flamur-2:~/git/vayada/scripts]1;..ayada/scripts]7;file://MacBook-Pro-von-Flamur-2.local/Users/flamurmaliqi/git/vayada/scripts\]133;D;0[0m[27m[24m[J[0m[49m[39m]133;A
+
+[A[0m[49m[34m[34m~[0m[34m[49m[34m/git/[34mvayada[0m[34m[49m[34m/[34mscripts[0m[34m[49m[34m[0m[34m[49m[34m[0m[34m[49m [0m[34m[49m[33m[32mmain [33m!7 [34m?1[0m[34m[49m[33m[0m[33m[49m[30m[0m[30m[49m[39m                                                  [0m[49m[36m05:17:24[0m[36m[49m[36m[0m[36m[49m[36m[0m[36m[49m[39m
+[0m[49m[32m>[0m[32m[49m[32m[0m[32m[49m[30m[0m[30m[49m[39m [0m[49m[39m]133;B[K[?1h=[?2004hlls[?1l>[?25l[?2004l[A[A[0m[27m[24m[J]133;A[0m[49m[27m[24m[32m>[0m[32m[49m[39m[27m[24m ]133;Bls[K[?25h
+]2;eza]1;ls]133;C;[31mrun_migration.sh[0m  [1;33mseed_booking.py[0m      [1;33mseed_users.py[0m
+[1;33mseed_all.py[0m       [1;33mseed_marketplace.py[0m
+[1m[7m%[27m[1m[0m                                                                                          ]2;flamurmaliqi@MacBook-Pro-von-Flamur-2:~/git/vayada/scripts]1;..ayada/scripts]7;file://MacBook-Pro-von-Flamur-2.local/Users/flamurmaliqi/git/vayada/scripts\]133;D;0[0m[27m[24m[J[0m[49m[39m]133;A
+
+[A[0m[49m[34m[34m~[0m[34m[49m[34m/git/[34mvayada[0m[34m[49m[34m/[34mscripts[0m[34m[49m[34m[0m[34m[49m[34m[0m[34m[49m [0m[34m[49m[33m[32mmain [33m!7 [34m?1[0m[34m[49m[33m[0m[33m[49m[30m[0m[30m[49m[39m                                                  [0m[49m[36m05:17:25[0m[36m[49m[36m[0m[36m[49m[36m[0m[36m[49m[39m
+[0m[49m[32m>[0m[32m[49m[32m[0m[32m[49m[30m[0m[30m[49m[39m [0m[49m[39m]133;B[K[?1h=[?2004h
