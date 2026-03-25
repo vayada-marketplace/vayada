@@ -4,6 +4,20 @@ from typing import Optional, List, Dict
 MAX_ROOM_SIZE = 1000
 
 
+def _validate_no_season_overlap(seasons: list) -> list:
+    """Raise ValueError if any two seasons have overlapping date ranges."""
+    for i, a in enumerate(seasons):
+        for b in seasons[i + 1:]:
+            if a.get("from") and a.get("to") and b.get("from") and b.get("to"):
+                if a["from"] <= b["to"] and b["from"] <= a["to"]:
+                    raise ValueError(
+                        f"Season date ranges overlap: "
+                        f"{a.get('name', 'Unnamed')} ({a['from']} – {a['to']}) and "
+                        f"{b.get('name', 'Unnamed')} ({b['from']} – {b['to']})"
+                    )
+    return seasons
+
+
 def to_camel(string: str) -> str:
     parts = string.split("_")
     return parts[0] + "".join(w.capitalize() for w in parts[1:])
@@ -52,6 +66,11 @@ class RoomTypeCreate(BaseModel):
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
         return v
 
+    @field_validator("seasons")
+    @classmethod
+    def validate_seasons(cls, v: List[dict]) -> List[dict]:
+        return _validate_no_season_overlap(v)
+
 
 class RoomTypeUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -87,6 +106,13 @@ class RoomTypeUpdate(BaseModel):
     def validate_size(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("seasons")
+    @classmethod
+    def validate_seasons(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+        if v is not None:
+            _validate_no_season_overlap(v)
         return v
 
 
