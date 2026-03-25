@@ -21,7 +21,7 @@ export default function NewRoomPage() {
     nonRefundableRate: null,
     currency: 'EUR',
     bedType: '',
-    totalRooms: 1,
+    totalRooms: 2,
     amenities: [],
     features: [],
     images: [],
