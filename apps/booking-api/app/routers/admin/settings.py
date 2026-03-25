@@ -220,6 +220,10 @@ async def update_property_settings(
                     new_booking_alerts=data.new_booking_alerts if data.new_booking_alerts is not None else True,
                     payment_alerts=data.payment_alerts if data.payment_alerts is not None else True,
                     weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
+                    social_instagram=data.instagram or '',
+                    social_facebook=data.facebook or '',
+                    social_twitter=data.twitter or '',
+                    social_youtube=data.youtube or '',
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(
