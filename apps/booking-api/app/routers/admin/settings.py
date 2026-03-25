@@ -1,8 +1,10 @@
 import logging
 import re
+from typing import List
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, status
+from pydantic import BaseModel
 from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
@@ -328,3 +330,31 @@ async def get_custom_domain_status(
         "ssl_status": status["ssl_status"],
         "verification_errors": status.get("verification_errors", []),
     }
+
+
+# ── Book Direct Benefits ──────────────────────────────────────────
+
+
+class BenefitsUpdate(BaseModel):
+    benefits: List[str]
+
+
+@router.get("/benefits")
+async def get_benefits(
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict | None = Depends(get_current_hotel),
+):
+    if not hotel:
+        return {"benefits": []}
+    row = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns="benefits")
+    return {"benefits": parse_json(row.get("benefits")) if row else []}
+
+
+@router.put("/benefits")
+async def update_benefits(
+    data: BenefitsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
+):
+    await BookingHotelRepository.partial_update(hotel["id"], {"benefits": data.benefits})
+    return {"benefits": data.benefits}

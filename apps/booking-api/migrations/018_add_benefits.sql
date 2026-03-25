@@ -1,0 +1,1 @@
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS benefits JSONB NOT NULL DEFAULT '[]';
