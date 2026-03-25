@@ -69,7 +69,6 @@ export interface InviteData {
   policies: {
     check_in_time: string
     check_out_time: string
-    minimum_stay: number
     pay_at_property: boolean
     online_card_payment: boolean
     bank_transfer: boolean

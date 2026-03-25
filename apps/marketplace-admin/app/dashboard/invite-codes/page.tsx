@@ -78,7 +78,6 @@ export default function InviteCodesPage() {
   // Step 5: Policies
   const [checkInTime, setCheckInTime] = useState('15:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
-  const [minimumStay, setMinimumStay] = useState(1)
   const [payAtHotel, setPayAtHotel] = useState(true)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
@@ -185,7 +184,7 @@ export default function InviteCodesPage() {
         benefits,
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
-          minimum_stay: minimumStay, pay_at_property: payAtHotel,
+          pay_at_property: payAtHotel,
           online_card_payment: onlineCardPayment, bank_transfer: bankTransfer,
           special_requests: specialRequests, arrival_time: estimatedArrivalTime,
           guest_count: numberOfGuests, refer_a_guest: enableReferAGuest,
@@ -373,7 +372,6 @@ export default function InviteCodesPage() {
           <PoliciesStep
             checkInTime={checkInTime} setCheckInTime={setCheckInTime}
             checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
-            minimumStay={minimumStay} setMinimumStay={setMinimumStay}
             payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
             payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
             onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}

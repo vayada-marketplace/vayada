@@ -8,7 +8,6 @@ export const TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
 interface PoliciesStepProps {
   checkInTime: string; setCheckInTime: (v: string) => void
   checkOutTime: string; setCheckOutTime: (v: string) => void
-  minimumStay: number; setMinimumStay: (v: number) => void
   payAtHotel: boolean; setPayAtHotel: (v: boolean) => void
   payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
   onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
@@ -27,7 +26,6 @@ interface PoliciesStepProps {
 export default function PoliciesStep({
   checkInTime, setCheckInTime,
   checkOutTime, setCheckOutTime,
-  minimumStay, setMinimumStay,
   payAtHotel, setPayAtHotel,
   payAtHotelMethods, setPayAtHotelMethods,
   onlineCardPayment, setOnlineCardPayment,
@@ -54,7 +52,7 @@ export default function PoliciesStep({
         {/* Check-in & Check-out */}
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3 mb-4">
           <h3 className="text-[13px] font-semibold text-gray-900">Check-in & Check-out</h3>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-in Time</label>
               <select
@@ -78,16 +76,6 @@ export default function PoliciesStep({
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Minimum Stay (nights)</label>
-              <input
-                type="number"
-                min={1}
-                value={minimumStay}
-                onChange={(e) => setMinimumStay(Math.max(1, Number(e.target.value)))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-              />
             </div>
           </div>
         </div>
