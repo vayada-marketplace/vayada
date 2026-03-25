@@ -210,12 +210,14 @@ function BookPageContent() {
               {selectedAddonIds.length > 0 && (
                 <div className="pb-5 border-b border-gray-100">
                   {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                    const qty = addonQuantities[addon.id] ?? 1
                     let unitPrice = addon.price
                     if (addon.perPerson) unitPrice *= adultsParam
-                    if (addon.perNight) unitPrice *= (addonQuantities[addon.id] ?? nights)
+                    if (addon.perNight) unitPrice *= nights
+                    unitPrice *= qty
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
-                        <p className="text-sm text-gray-700">{addon.name}</p>
+                        <p className="text-sm text-gray-700">{addon.name}{qty > 1 ? ` ×${qty}` : ''}</p>
                         <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</p>
                       </div>
                     )
@@ -416,12 +418,14 @@ function BookPageContent() {
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
+                  const qty = addonQuantities[addon.id] ?? 1
                   let unitPrice = addon.price
                   if (addon.perPerson) unitPrice *= adultsParam
                   if (addon.perNight) unitPrice *= nights
+                  unitPrice *= qty
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{addon.name}</span>
+                      <span className="text-gray-500">{addon.name}{qty > 1 ? ` ×${qty}` : ''}</span>
                       <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
                     </div>
                   )

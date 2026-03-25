@@ -24,7 +24,9 @@
     "contact": "Kontak",
     "phone": "Telepon",
     "email": "Email",
-    "loading": "Memuat..."
+    "loading": "Memuat...",
+    "qty": "Jml",
+    "perPerson": "per orang"
   },
   "nav": {
     "contact": "Kontak",

@@ -24,7 +24,9 @@
     "contact": "Contact",
     "phone": "Phone",
     "email": "Email",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "qty": "Qty",
+    "perPerson": "per person"
   },
   "nav": {
     "contact": "Contact",
