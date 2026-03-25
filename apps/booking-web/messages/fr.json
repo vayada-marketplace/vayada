@@ -107,6 +107,7 @@
     "estimatedArrival": "Heure d'arrivée estimée",
     "selectArrival": "Sélectionner une heure d'arrivée",
     "iDontKnow": "Je ne sais pas encore",
+    "numberOfGuests": "Nombre de voyageurs",
     "specialRequests": "Demandes spéciales",
     "specialRequestsPlaceholder": "Des demandes spéciales ou préférences pour votre séjour...",
     "backToAddons": "Retour aux suppléments",

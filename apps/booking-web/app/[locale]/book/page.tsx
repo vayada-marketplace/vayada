@@ -9,6 +9,7 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
+import { bookingService } from '@/services/api/booking'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate, calculateAddonTotal } from '@/lib/constants/booking'
@@ -18,6 +19,11 @@ const COUNTRIES = [
   'Austria', 'Germany', 'Switzerland', 'United States', 'United Kingdom',
   'France', 'Italy', 'Netherlands', 'Spain', 'Australia', 'Canada', 'Japan',
 ]
+
+const ARRIVAL_TIMES = Array.from({ length: 24 }, (_, i) => {
+  const h = i.toString().padStart(2, '0')
+  return `${h}:00`
+})
 
 function BookPageContent() {
   const router = useRouter()
@@ -78,8 +84,27 @@ function BookPageContent() {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [specialRequests, setSpecialRequests] = useState('')
+  const [estimatedArrivalTime, setEstimatedArrivalTime] = useState('')
+  const [numberOfGuests, setNumberOfGuests] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [guestFormSettings, setGuestFormSettings] = useState<{
+    specialRequestsEnabled: boolean
+    arrivalTimeEnabled: boolean
+    guestCountEnabled: boolean
+  }>({ specialRequestsEnabled: true, arrivalTimeEnabled: false, guestCountEnabled: false })
+
+  useEffect(() => {
+    if (slug) {
+      bookingService.getPaymentSettings(slug).then((settings) => {
+        setGuestFormSettings({
+          specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
+          arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
+          guestCountEnabled: settings.guestCountEnabled ?? false,
+        })
+      })
+    }
+  }, [slug])
 
   const handleSubmit = async () => {
     if (!firstName || !lastName || !email || !phone) {
@@ -106,7 +131,9 @@ function BookPageContent() {
         guestLastName: lastName,
         guestEmail: email,
         guestPhone: phone,
-        specialRequests,
+        specialRequests: guestFormSettings.specialRequestsEnabled ? specialRequests : undefined,
+        estimatedArrivalTime: guestFormSettings.arrivalTimeEnabled && estimatedArrivalTime ? estimatedArrivalTime : undefined,
+        numberOfGuests: guestFormSettings.guestCountEnabled && numberOfGuests ? parseInt(numberOfGuests) : undefined,
         referralCode,
         addonIds: selectedAddonIds,
         addonQuantities,
@@ -280,19 +307,59 @@ function BookPageContent() {
                   </div>
                 </div>
 
+                {/* Estimated Arrival Time */}
+                {guestFormSettings.arrivalTimeEnabled && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                      {t('estimatedArrival')}
+                    </label>
+                    <select
+                      value={estimatedArrivalTime}
+                      onChange={(e) => setEstimatedArrivalTime(e.target.value)}
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.75rem_center] bg-no-repeat"
+                    >
+                      <option value="">{t('selectArrival')}</option>
+                      {ARRIVAL_TIMES.map((time) => (
+                        <option key={time} value={time}>{time}</option>
+                      ))}
+                      <option value="unknown">{t('iDontKnow')}</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Number of Guests */}
+                {guestFormSettings.guestCountEnabled && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                      {t('numberOfGuests')}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={numberOfGuests}
+                      onChange={(e) => setNumberOfGuests(e.target.value)}
+                      placeholder="2"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                )}
+
                 {/* Special Requests */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">
-                    {t('specialRequests')}
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={specialRequests}
-                    onChange={(e) => setSpecialRequests(e.target.value)}
-                    placeholder={t('specialRequestsPlaceholder')}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400 resize-y"
-                  />
-                </div>
+                {guestFormSettings.specialRequestsEnabled && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                      {t('specialRequests')}
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={specialRequests}
+                      onChange={(e) => setSpecialRequests(e.target.value)}
+                      placeholder={t('specialRequestsPlaceholder')}
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400 resize-y"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

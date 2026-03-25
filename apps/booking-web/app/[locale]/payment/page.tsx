@@ -23,6 +23,8 @@ interface GuestDetails {
   guestEmail: string
   guestPhone: string
   specialRequests: string
+  estimatedArrivalTime?: string
+  numberOfGuests?: number
   referralCode?: string
   addonIds?: string[]
   addonQuantities?: Record<string, number>

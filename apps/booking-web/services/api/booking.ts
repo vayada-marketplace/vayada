@@ -12,6 +12,9 @@ export interface PaymentSettings {
   payAtPropertyEnabled: boolean
   payAtHotelMethods?: string[]
   freeCancellationDays: number
+  specialRequestsEnabled?: boolean
+  arrivalTimeEnabled?: boolean
+  guestCountEnabled?: boolean
 }
 
 export interface BookingStatus {
@@ -52,6 +55,8 @@ export const bookingService = {
     guestEmail: string
     guestPhone: string
     specialRequests?: string
+    estimatedArrivalTime?: string
+    numberOfGuests?: number
     checkIn: string
     checkOut: string
     adults: number
