@@ -14,8 +14,9 @@ import RoomsTab from '@/components/booking-flow/RoomsTab'
 import AddonsTab from '@/components/booking-flow/AddonsTab'
 import DetailsTab from '@/components/booking-flow/DetailsTab'
 import PaymentTab from '@/components/booking-flow/PaymentTab'
+import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 
-type Tab = 'rooms' | 'addons' | 'details' | 'payment'
+type Tab = 'rooms' | 'addons' | 'details' | 'payment' | 'benefits'
 
 const CATEGORIES = [
   { value: 'transport', label: 'Transport' },
@@ -53,6 +54,11 @@ export default function BookingFlowPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const addonFileInputRef = useRef<HTMLInputElement>(null)
 
+  // Benefits state
+  const [benefits, setBenefits] = useState<string[]>([])
+  const [benefitInput, setBenefitInput] = useState('')
+  const [savingBenefits, setSavingBenefits] = useState(false)
+
   // Rooms state (filters)
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
   const [customFilters, setCustomFilters] = useState<Record<string, string>>({})
@@ -67,10 +73,12 @@ export default function BookingFlowPage() {
       settingsService.listAddons().catch(() => []),
       settingsService.getAddonSettings().catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
       settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {}, filter_rooms: {} } as DesignSettings)),
+      settingsService.getBenefits().catch(() => ({ benefits: [] })),
       settingsService.getPropertySettings().catch(() => null),
-    ]).then(([addonList, settings, design, property]) => {
+    ]).then(([addonList, settings, design, benefitsRes, property]) => {
       setAddons(addonList)
       setAddonSettings(settings)
+      setBenefits(benefitsRes.benefits || [])
       if (design.booking_filters) {
         setBookingFilters(design.booking_filters)
         setFiltersEnabled(design.booking_filters.length > 0)
@@ -229,9 +237,24 @@ export default function BookingFlowPage() {
     }
   }
 
+  // ── Benefits handlers ──
+
+  const handleSaveBenefits = async () => {
+    try {
+      setSavingBenefits(true)
+      await settingsService.updateBenefits(benefits)
+      showFeedback('success', 'Benefits saved successfully')
+    } catch {
+      showFeedback('error', 'Failed to save benefits')
+    } finally {
+      setSavingBenefits(false)
+    }
+  }
+
   const tabs = [
     { id: 'rooms' as const, label: 'Rooms', icon: RoomsIcon },
     { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
+    { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
     { id: 'details' as const, label: 'Details', icon: DetailsIcon },
     { id: 'payment' as const, label: 'Payment', icon: PaymentIcon },
   ]
@@ -257,7 +280,7 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-4 shrink-0 max-w-lg">
+      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5 shrink-0 max-w-xl">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -302,6 +325,17 @@ export default function BookingFlowPage() {
             openEditModal={openEditModal}
             handleDeleteAddon={handleDeleteAddon}
             handleToggleAddonSetting={handleToggleAddonSetting}
+          />
+        )}
+
+        {activeTab === 'benefits' && (
+          <BenefitsTab
+            benefits={benefits}
+            setBenefits={setBenefits}
+            benefitInput={benefitInput}
+            setBenefitInput={setBenefitInput}
+            saveBenefits={handleSaveBenefits}
+            savingBenefits={savingBenefits}
           />
         )}
 
@@ -545,6 +579,15 @@ function DetailsIcon({ className }: { className?: string }) {
       <rect x="9" y="3" width="6" height="4" rx="1" />
       <path d="M9 12h6" />
       <path d="M9 16h6" />
+    </svg>
+  )
+}
+
+function BenefitsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 12l2 2 4-4" />
+      <path d="M12 3a9 9 0 100 18 9 9 0 000-18z" />
     </svg>
   )
 }
