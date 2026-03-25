@@ -53,6 +53,7 @@ class HotelResponse(BaseModel):
     social_links: Optional[HotelSocialLinks] = None
     booking_filters: List[str] = []
     custom_filters: Dict[str, str] = {}
+    filter_rooms: Dict[str, List[str]] = {}
     branding: Optional[HotelBranding] = None
 
 

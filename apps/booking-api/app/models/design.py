@@ -11,6 +11,7 @@ class DesignSettingsResponse(BaseModel):
     font_pairing: str
     booking_filters: List[str] = []
     custom_filters: Dict[str, str] = {}
+    filter_rooms: Dict[str, List[str]] = {}
 
 
 class DesignSettingsUpdate(BaseModel):
@@ -22,3 +23,4 @@ class DesignSettingsUpdate(BaseModel):
     font_pairing: Optional[str] = None
     booking_filters: Optional[List[str]] = None
     custom_filters: Optional[Dict[str, str]] = None
+    filter_rooms: Optional[Dict[str, List[str]]] = None
