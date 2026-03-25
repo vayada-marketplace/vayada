@@ -8,9 +8,11 @@ on:
       - 'app/**'
       - 'components/**'
       - 'lib/**'
+      - 'public/**'
       - 'Dockerfile'
       - 'package.json'
       - 'next.config.js'
+      - 'tailwind.config.js'
       - '.github/workflows/deploy.yml'
 
 env:
