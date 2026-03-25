@@ -38,6 +38,22 @@ class HotelBenefitsResponse(BaseModel):
     benefits: List[str] = []
 
 
+class GuestFormSettingsResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    special_requests_enabled: bool = True
+    arrival_time_enabled: bool = False
+    guest_count_enabled: bool = False
+
+
+class GuestFormSettingsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    special_requests_enabled: Optional[bool] = None
+    arrival_time_enabled: Optional[bool] = None
+    guest_count_enabled: Optional[bool] = None
+
+
 class SetupStatusResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 

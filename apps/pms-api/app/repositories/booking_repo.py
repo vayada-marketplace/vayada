@@ -29,7 +29,8 @@ class BookingRepository:
             INSERT INTO bookings (
                 hotel_id, room_type_id, booking_reference,
                 guest_first_name, guest_last_name, guest_email, guest_phone,
-                special_requests, check_in, check_out,
+                special_requests, estimated_arrival_time, number_of_guests,
+                check_in, check_out,
                 adults, children, nightly_rate, total_amount, currency,
                 affiliate_id, referral_code,
                 room_id, channel, status,
@@ -37,8 +38,8 @@ class BookingRepository:
                 rate_type, addon_ids, addon_total, addon_quantities
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26, $27
+                $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -49,6 +50,8 @@ class BookingRepository:
             data["guest_email"],
             data["guest_phone"],
             data.get("special_requests", ""),
+            data.get("estimated_arrival_time"),
+            data.get("number_of_guests"),
             data["check_in"],
             data["check_out"],
             data.get("adults", 1),

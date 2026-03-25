@@ -15,6 +15,7 @@ from app.services.booking_service import (
 )
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.database import Database
 from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
@@ -121,12 +122,20 @@ async def get_status(
 
 @router.get("/{slug}/payment-settings")
 async def get_payment_settings(slug: str):
-    """Public endpoint to check if pay-at-property is enabled."""
+    """Public endpoint to check if pay-at-property is enabled and guest form settings."""
     hotel_id = await get_hotel_id_by_slug(slug)
     settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
 
+    hotel = await Database.fetchrow(
+        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
+        "FROM hotels WHERE id = $1", hotel_id,
+    )
+
     return {
         "payAtPropertyEnabled": settings["pay_at_property_enabled"] if settings else False,
         "freeCancellationDays": policy["free_cancellation_days"] if policy else 7,
+        "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,
+        "arrivalTimeEnabled": hotel["arrival_time_enabled"] if hotel else False,
+        "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
     }
