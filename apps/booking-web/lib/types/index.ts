@@ -8,7 +8,7 @@ export interface HotelContact {
 export interface HotelSocialLinks {
   facebook?: string
   instagram?: string
-  twitter?: string
+  tiktok?: string
   youtube?: string
 }
 
