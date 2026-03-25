@@ -427,10 +427,11 @@ export default function RoomsStep({
                 <input
                   type="number"
                   min={0}
+                  max={1000}
                   value={room.roomSize}
-                  onChange={(e) => updateRoom({ roomSize: e.target.value })}
+                  onChange={(e) => updateRoom({ roomSize: String(Math.min(parseInt(e.target.value) || 0, 1000)) })}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-                  placeholder="150"
+                  placeholder="50"
                 />
               </div>
               <div>
