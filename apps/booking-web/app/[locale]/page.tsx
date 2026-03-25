@@ -90,7 +90,7 @@ export default function HomePage() {
   })
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
-  const [roomCount] = useState(1)
+  // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [currentStep] = useState(1)
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -241,7 +241,7 @@ export default function HomePage() {
                   {tc('adults', { count: adults })}
                   {children > 0 && `, ${tc('children', { count: children })}`}
                 </p>
-                <p className="text-sm text-gray-500">{tc('room', { count: roomCount })}</p>
+                <p className="text-sm text-gray-500">{tc('guests')}</p>
               </div>
             </button>
             <GuestSelector
@@ -413,11 +413,13 @@ export default function HomePage() {
           ) : filteredRooms.map((room, roomIndex) => {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
-            const flexibleTotal = room.baseRate * nights
+            const totalGuests = adults + children
+            const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy)
+            const flexibleTotal = room.baseRate * nights * requiredRooms
             const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
-            const nonRefundableTotal = nonRefundableNightly * nights
+            const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms
             const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
-            const soldOut = room.remainingRooms <= 0
+            const soldOut = room.remainingRooms < requiredRooms
 
             return (
               <div
@@ -492,7 +494,10 @@ export default function HomePage() {
                     <div className="flex items-start justify-between mb-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-bold text-gray-900">{room.name}</h3>
+                          <h3 className="text-xl font-bold text-gray-900">
+                            {requiredRooms > 1 && <span className="text-primary-600">{requiredRooms}× </span>}
+                            {room.name}
+                          </h3>
                           {room.category && (
                             <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200">
                               {room.category}
@@ -592,7 +597,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=nonrefundable`
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${requiredRooms}&rateType=nonrefundable`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -651,7 +656,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=flexible`
+                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${requiredRooms}&rateType=flexible`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -686,7 +691,8 @@ export default function HomePage() {
           onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
           onSelectRate={(rateType) => {
             const room = filteredRooms[detailModalIndex]
-            const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rateType=${rateType}`
+            const modalRequiredRooms = Math.ceil((adults + children) / room.maxOccupancy)
+            const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${modalRequiredRooms}&rateType=${rateType}`
             router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
           }}
         />

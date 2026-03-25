@@ -84,6 +84,7 @@ function PaymentPageContent() {
   const checkOut = searchParams.get('checkOut') || ''
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
+  const roomsParam = parseInt(searchParams.get('rooms') || '1')
   const currentStep = 4
 
   const STEPS = [
@@ -101,7 +102,7 @@ function PaymentPageContent() {
   const nightlyRate = isNonRefundable
     ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
     : room?.baseRate ?? 0
-  const roomTotal = room ? nightlyRate * nights : 0
+  const roomTotal = room ? nightlyRate * nights * roomsParam : 0
 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
@@ -155,6 +156,7 @@ function PaymentPageContent() {
         checkOut,
         adults: adultsParam,
         children: childrenParam,
+        numberOfRooms: roomsParam,
         paymentMethod: isNonRefundable ? 'card' : paymentMethod,
         rateType,
         addonIds: selectedAddonIds,
@@ -208,6 +210,7 @@ function PaymentPageContent() {
           formatPrice={formatPrice}
           formatDate={formatDate}
           locale={locale}
+          roomsParam={roomsParam}
         />
       </StripeProvider>
     )
@@ -409,7 +412,7 @@ function PaymentPageContent() {
                   <Image src={room.images[0]} alt={room.name} fill className="object-cover" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-gray-900">{room.name}</p>
+                  <p className="text-sm font-bold text-gray-900">{roomsParam > 1 ? `${roomsParam}× ` : ''}{room.name}</p>
                   <p className="text-xs text-gray-500">{isNonRefundable ? tb('nonRefundableRate') : tb('flexibleRate')}</p>
                 </div>
               </div>
@@ -491,6 +494,7 @@ function StripePaymentPage({
   formatPrice,
   formatDate,
   locale,
+  roomsParam,
 }: any) {
   const stripe = useStripe()
   const elements = useElements()
@@ -562,7 +566,7 @@ function StripePaymentPage({
 
           <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">{room.name}</span>
+              <span className="text-gray-500">{roomsParam > 1 ? `${roomsParam}× ` : ''}{room.name}</span>
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
             </div>
             {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {

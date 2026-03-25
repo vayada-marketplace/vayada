@@ -44,6 +44,7 @@ function BookPageContent() {
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
+  const roomsParam = parseInt(searchParams.get('rooms') || '1')
   const rateType = searchParams.get('rateType') || 'flexible'
 
   const hasAddons = addons.length > 0
@@ -66,7 +67,7 @@ function BookPageContent() {
   const nightlyRate = rateType === 'nonrefundable'
     ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
     : room?.baseRate ?? 0
-  const roomTotal = room ? nightlyRate * nights : 0
+  const roomTotal = room ? nightlyRate * nights * roomsParam : 0
 
   const addonEntries = (searchParams.get('addons') || '').split(',').filter(Boolean)
   const selectedAddonIds: string[] = []
@@ -146,6 +147,7 @@ function BookPageContent() {
         checkOut,
         adults: String(adultsParam),
         children: String(childrenParam),
+        rooms: String(roomsParam),
         rateType,
       })
       router.push(`/payment?${params.toString()}`)
@@ -195,7 +197,7 @@ function BookPageContent() {
                   <Image src={room.images[0]} alt={room.name} fill className="object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900">{room.name}</p>
+                  <p className="text-sm font-bold text-gray-900">{roomsParam > 1 ? `${roomsParam}× ` : ''}{room.name}</p>
                   <p className="text-sm text-gray-500">
                     {formatDate(checkIn, locale)} - {formatDate(checkOut, locale)} &middot; {tc('nights', { count: nights })}
                   </p>

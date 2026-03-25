@@ -61,6 +61,7 @@ export const bookingService = {
     checkOut: string
     adults: number
     children: number
+    numberOfRooms?: number
     referralCode?: string
     paymentMethod?: string
     rateType?: string
