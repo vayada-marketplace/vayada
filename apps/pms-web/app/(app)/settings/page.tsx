@@ -1,10 +1,28 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { bookingsService, PaymentSettings, CancellationPolicy } from '@/services/bookings'
 import { customDomainService, CustomDomainStatus } from '@/services/custom-domain'
 import { benefitsService } from '@/services/rooms'
 import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
+
+const CURRENCIES = [
+  { value: 'AUD', label: 'AUD — Australian Dollar (A$)' },
+  { value: 'CHF', label: 'CHF — Swiss Franc' },
+  { value: 'EUR', label: 'EUR — Euro (€)' },
+  { value: 'GBP', label: 'GBP — British Pound (£)' },
+  { value: 'IDR', label: 'IDR — Indonesian Rupiah (Rp)' },
+  { value: 'INR', label: 'INR — Indian Rupee' },
+  { value: 'JPY', label: 'JPY — Japanese Yen (¥)' },
+  { value: 'KRW', label: 'KRW — South Korean Won' },
+  { value: 'MYR', label: 'MYR — Malaysian Ringgit' },
+  { value: 'NZD', label: 'NZD — New Zealand Dollar' },
+  { value: 'PHP', label: 'PHP — Philippine Peso' },
+  { value: 'SGD', label: 'SGD — Singapore Dollar (S$)' },
+  { value: 'THB', label: 'THB — Thai Baht (฿)' },
+  { value: 'USD', label: 'USD — US Dollar ($)' },
+  { value: 'VND', label: 'VND — Vietnamese Dong' },
+]
 
 const BENEFIT_OPTIONS = [
   'Welcome Drink on Arrival',
@@ -15,6 +33,66 @@ const BENEFIT_OPTIONS = [
   'Daily Breakfast Included',
   'Room Upgrade (subject to availability)',
 ]
+
+function CurrencySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const filtered = CURRENCIES.filter(
+    (c) => c.label.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const selectedLabel = CURRENCIES.find((c) => c.value === value)?.label ?? value
+
+  return (
+    <div ref={ref} className="relative w-full max-w-xs">
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setSearch('') }}
+        className="w-full px-3 py-2 text-sm text-left border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white flex items-center justify-between"
+      >
+        <span>{selectedLabel}</span>
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search currency..."
+            autoFocus
+            className="w-full px-3 py-2 text-sm border-b border-gray-200 focus:outline-none rounded-t-lg"
+          />
+          <ul className="max-h-60 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-sm text-gray-400">No results</li>
+            ) : (
+              filtered.map((c) => (
+                <li
+                  key={c.value}
+                  onClick={() => { onChange(c.value); setOpen(false) }}
+                  className={`px-3 py-2 text-sm cursor-pointer hover:bg-primary-50 ${c.value === value ? 'bg-primary-50 font-medium text-primary-700' : 'text-gray-700'}`}
+                >
+                  {c.label}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -263,27 +341,7 @@ export default function SettingsPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">Currency</h2>
           <p className="text-xs text-gray-500 mb-4">Choose the display currency for prices across your dashboard.</p>
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <option value="EUR">EUR — Euro (€)</option>
-            <option value="USD">USD — US Dollar ($)</option>
-            <option value="GBP">GBP — British Pound (£)</option>
-            <option value="CHF">CHF — Swiss Franc</option>
-            <option value="IDR">IDR — Indonesian Rupiah (Rp)</option>
-            <option value="THB">THB — Thai Baht (฿)</option>
-            <option value="AUD">AUD — Australian Dollar (A$)</option>
-            <option value="SGD">SGD — Singapore Dollar (S$)</option>
-            <option value="JPY">JPY — Japanese Yen (¥)</option>
-            <option value="MYR">MYR — Malaysian Ringgit</option>
-            <option value="PHP">PHP — Philippine Peso</option>
-            <option value="VND">VND — Vietnamese Dong</option>
-            <option value="INR">INR — Indian Rupee</option>
-            <option value="KRW">KRW — South Korean Won</option>
-            <option value="NZD">NZD — New Zealand Dollar</option>
-          </select>
+          <CurrencySelect value={currency} onChange={setCurrency} />
           <button
             onClick={saveCurrency}
             disabled={savingCurrency}
