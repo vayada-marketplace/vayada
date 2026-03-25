@@ -15,7 +15,7 @@ When the user pastes ticket content and says "create worktree" (or similar):
    ```
 4. Tell the user to open a new terminal tab and run:
    ```
-   cd ~/git/vayada-<TICKET-ID> && claude
+   cd ~/git/vayada-<TICKET-ID> && claude --enable-auto-mode
    ```
 5. Summarize the ticket so the user can paste it into the new Claude session as context.
 
