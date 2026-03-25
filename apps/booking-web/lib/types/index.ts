@@ -41,6 +41,7 @@ export interface Hotel {
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
   supportedLanguages: string[]
+  referAGuestEnabled?: boolean
 }
 
 export interface RoomType {
