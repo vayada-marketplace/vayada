@@ -40,6 +40,7 @@ export interface Hotel {
   customFilters?: Record<string, string>
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
+  supportedLanguages: string[]
 }
 
 export interface RoomType {
