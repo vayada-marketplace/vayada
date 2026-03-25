@@ -64,11 +64,16 @@ async def get_rooms_for_guest(
         # Only provide NR rate when non-refundable is enabled
         if not room.get("non_refundable_enabled", False):
             nr_rate = None
-        elif nr_rate is None and base_rate > 0:
-            # If no explicit NR rate, calculate from discount percentage
+        elif room.get("flexible_rate_enabled", True):
+            # Flexible + NR: calculate NR rate from discount percentage
             discount_pct = room.get("non_refundable_discount")
             if discount_pct is not None and discount_pct > 0:
                 nr_rate = round(base_rate * (1 - discount_pct / 100), 2)
+            elif nr_rate is None or nr_rate == 0:
+                nr_rate = base_rate
+        else:
+            # NR only (no flexible): non-refundable rate is the base rate
+            nr_rate = base_rate
 
         result.append(
             RoomTypeResponse(
