@@ -41,6 +41,10 @@ export default function AddonsPage() {
     { number: 4, label: ts('payment') },
   ]
 
+  const availableCategories = ADDON_CATEGORIES.filter(
+    (cat) => cat.key === 'all' || addons.some((a) => a.category === cat.key)
+  )
+
   const filteredAddons =
     activeCategory === 'all'
       ? addons
@@ -83,7 +87,7 @@ export default function AddonsPage() {
 
         {/* Category Filters */}
         <div className="flex items-center gap-2 mb-8 flex-wrap">
-          {ADDON_CATEGORIES.map((cat) => (
+          {availableCategories.map((cat) => (
             <button
               key={cat.key}
               onClick={() => setActiveCategory(cat.key)}
