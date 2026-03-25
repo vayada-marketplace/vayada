@@ -51,6 +51,7 @@ export interface DesignSettings {
   font_pairing: string
   booking_filters: string[]
   custom_filters: Record<string, string>
+  filter_rooms: Record<string, string[]>
 }
 
 export type DesignSettingsUpdate = Partial<DesignSettings>

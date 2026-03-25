@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import {
-  PlusIcon,
   XMarkIcon,
   PhotoIcon,
 } from '@heroicons/react/24/outline'
-import { settingsService, type AddonItem, type AddonSettings, type DesignSettings } from '@/services/settings'
+import { settingsService, type AddonItem, type AddonSettings, type DesignSettings, type PropertySettings } from '@/services/settings'
+import { pmsClient } from '@/services/api/pmsClient'
 import { ToggleSwitch, FeedbackAlert } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
 
@@ -56,15 +56,19 @@ export default function BookingFlowPage() {
   // Rooms state (filters)
   const [bookingFilters, setBookingFilters] = useState<string[]>([])
   const [customFilters, setCustomFilters] = useState<Record<string, string>>({})
+  const [filterRooms, setFilterRooms] = useState<Record<string, string[]>>({})
   const [filtersEnabled, setFiltersEnabled] = useState(false)
   const [savingFilters, setSavingFilters] = useState(false)
+  const [pmsRooms, setPmsRooms] = useState<{ id: string; name: string }[]>([])
+  const [pmsRoomsLoading, setPmsRoomsLoading] = useState(false)
 
   useEffect(() => {
     Promise.all([
       settingsService.listAddons().catch(() => []),
       settingsService.getAddonSettings().catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
-      settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {} } as DesignSettings)),
-    ]).then(([addonList, settings, design]) => {
+      settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {}, filter_rooms: {} } as DesignSettings)),
+      settingsService.getPropertySettings().catch(() => null),
+    ]).then(([addonList, settings, design, property]) => {
       setAddons(addonList)
       setAddonSettings(settings)
       if (design.booking_filters) {
@@ -73,6 +77,17 @@ export default function BookingFlowPage() {
       }
       if (design.custom_filters) {
         setCustomFilters(design.custom_filters)
+      }
+      if (design.filter_rooms) {
+        setFilterRooms(design.filter_rooms)
+      }
+      // Fetch rooms from PMS
+      if (property?.slug) {
+        setPmsRoomsLoading(true)
+        pmsClient.get<{ id: string; name: string }[]>(`/api/hotels/${property.slug}/rooms`)
+          .then((rooms) => setPmsRooms(rooms.map((r) => ({ id: r.id, name: r.name }))))
+          .catch(() => setPmsRooms([]))
+          .finally(() => setPmsRoomsLoading(false))
       }
     }).finally(() => setLoading(false))
   }, [])
@@ -192,7 +207,7 @@ export default function BookingFlowPage() {
     if (!newEnabled) {
       // Auto-save when disabling filters
       try {
-        await settingsService.updateDesignSettings({ booking_filters: [], custom_filters: customFilters })
+        await settingsService.updateDesignSettings({ booking_filters: [], custom_filters: customFilters, filter_rooms: {} })
       } catch {
         setFiltersEnabled(true)
         setFeedback({ type: 'error', message: 'Failed to disable filters' })
@@ -204,7 +219,8 @@ export default function BookingFlowPage() {
     try {
       setSavingFilters(true)
       const filters = filtersEnabled ? bookingFilters : []
-      await settingsService.updateDesignSettings({ booking_filters: filters, custom_filters: customFilters })
+      const rooms = filtersEnabled ? filterRooms : {}
+      await settingsService.updateDesignSettings({ booking_filters: filters, custom_filters: customFilters, filter_rooms: rooms })
       showFeedback('success', 'Filters saved successfully')
     } catch {
       showFeedback('error', 'Failed to save filters')
@@ -266,10 +282,14 @@ export default function BookingFlowPage() {
             setBookingFilters={setBookingFilters}
             customFilters={customFilters}
             setCustomFilters={setCustomFilters}
+            filterRooms={filterRooms}
+            setFilterRooms={setFilterRooms}
             filtersEnabled={filtersEnabled}
             onToggleFiltersEnabled={handleToggleFiltersEnabled}
             handleSaveFilters={handleSaveFilters}
             savingFilters={savingFilters}
+            rooms={pmsRooms}
+            roomsLoading={pmsRoomsLoading}
           />
         )}
 
