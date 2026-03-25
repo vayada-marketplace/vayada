@@ -29,6 +29,9 @@ export interface Booking {
   platformFeeAmount: number | null
   affiliateCommissionAmount: number | null
   propertyPayoutAmount: number | null
+  addonIds: string[]
+  addonTotal: number
+  addonQuantities: Record<string, number>
   guestWithdrawn: boolean
   createdAt: string
   updatedAt: string

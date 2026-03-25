@@ -212,6 +212,26 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         </div>
 
+        {/* Addons */}
+        {booking.addonIds.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">Add-ons</h2>
+            <div className="space-y-2 text-sm">
+              {booking.addonIds.map((addonId) => {
+                const qty = booking.addonQuantities[addonId]
+                return (
+                  <div key={addonId} className="flex justify-between">
+                    <span className="text-gray-700 font-mono text-xs">{addonId}</span>
+                    {qty && (
+                      <span className="text-gray-500">{qty} night{qty !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Payment Information */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Payment</h2>
@@ -245,6 +265,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <span className="text-gray-500">Nights</span>
               <span className="font-medium text-gray-900">{booking.nights}</span>
             </div>
+            {booking.addonTotal > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Addons</span>
+                <span className="font-medium text-gray-900">{booking.currency} {booking.addonTotal.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between pt-2 border-t border-gray-100">
               <span className="font-semibold text-gray-900">Total</span>
               <span className="font-bold text-gray-900">{booking.currency} {booking.totalAmount.toFixed(2)}</span>
