@@ -1,4 +1,5 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+import json
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import Dict, List, Optional
 from datetime import date
 
@@ -108,6 +109,20 @@ class BookingAdminResponse(BaseModel):
     guest_withdrawn: bool = False
     created_at: str
     updated_at: str
+
+    @field_validator("addon_ids", mode="before")
+    @classmethod
+    def parse_addon_ids(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator("addon_quantities", mode="before")
+    @classmethod
+    def parse_addon_quantities(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 
 class BookingStatusUpdate(BaseModel):
