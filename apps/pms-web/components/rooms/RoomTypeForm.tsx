@@ -6,7 +6,7 @@ import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/reac
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 
-const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Beds', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
+const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Bed', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
 const ROOM_CATEGORIES = ['Standard', 'Deluxe', 'Superior', 'Suite', 'Villa', 'Bungalow', 'Studio', 'Penthouse']
 
