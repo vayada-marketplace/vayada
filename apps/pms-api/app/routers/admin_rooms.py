@@ -61,6 +61,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         is_active=room["is_active"],
         sort_order=room["sort_order"],
         monthly_rates=_parse_monthly_rates(room.get("monthly_rates")),
+        daily_rates=parse_jsonb(room.get("daily_rates", {})),
         operating_periods=parse_jsonb(room.get("operating_periods", [])),
         seasons=parse_jsonb(room.get("seasons", [])),
         weekend_surcharge=room.get("weekend_surcharge") or "+0%",
@@ -112,6 +113,8 @@ async def create_room_type(
         }
     else:
         payload["monthly_rates"] = {}
+    if not payload.get("daily_rates"):
+        payload["daily_rates"] = {}
     room = await RoomTypeRepository.create(hotel_id, payload)
     return _room_to_admin(room)
 
