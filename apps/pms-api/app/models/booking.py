@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import date
 
 
@@ -25,6 +25,7 @@ class BookingCreate(BaseModel):
     payment_method: str = "card"
     rate_type: str = "flexible"
     addon_ids: List[str] = []
+    addon_quantities: Dict[str, int] = {}
 
 
 class BookingResponse(BaseModel):
@@ -101,6 +102,9 @@ class BookingAdminResponse(BaseModel):
     platform_fee_amount: Optional[float] = None
     affiliate_commission_amount: Optional[float] = None
     property_payout_amount: Optional[float] = None
+    addon_ids: List[str] = []
+    addon_total: float = 0
+    addon_quantities: Dict[str, int] = {}
     guest_withdrawn: bool = False
     created_at: str
     updated_at: str

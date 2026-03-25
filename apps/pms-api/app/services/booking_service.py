@@ -186,6 +186,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # Calculate addon total from booking engine
     addon_total = 0.0
     addon_ids = data.addon_ids or []
+    addon_quantities = data.addon_quantities or {}
     if addon_ids:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
@@ -207,7 +208,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             if addon.get("perPerson"):
                 price *= data.adults
             if addon.get("perNight"):
-                price *= nights
+                qty = addon_quantities.get(aid, nights)
+                qty = max(1, min(qty, nights))
+                price *= qty
             addon_total += price
         addon_total = round(addon_total, 2)
 
@@ -256,6 +259,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "rate_type": data.rate_type,
         "addon_ids": addon_ids,
         "addon_total": addon_total,
+        "addon_quantities": addon_quantities,
     }
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
