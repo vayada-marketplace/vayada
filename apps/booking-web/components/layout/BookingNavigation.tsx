@@ -563,6 +563,7 @@ export default function BookingNavigation() {
               </div>
 
               {/* Refer a Guest */}
+              {hotel.referAGuestEnabled && (
               <button
                 onClick={() => setReferOpen(true)}
                 className="px-5 py-2 text-sm font-semibold text-white border-2 border-white/60 rounded-full hover:bg-white/10 transition-colors flex items-center gap-2"
@@ -572,6 +573,7 @@ export default function BookingNavigation() {
                 </svg>
                 {t('referGuest')}
               </button>
+              )}
 
               {/* Language */}
               <div className="relative">
@@ -641,12 +643,14 @@ export default function BookingNavigation() {
               >
                 {t('contact')}
               </button>
+              {hotel.referAGuestEnabled && (
               <button
                 onClick={() => { setReferOpen(true); setIsMenuOpen(false) }}
                 className="block w-full text-left text-white hover:text-white/80 py-2 font-medium"
               >
                 {t('referGuest')}
               </button>
+              )}
             </div>
           </div>
         )}
