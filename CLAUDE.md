@@ -4,7 +4,7 @@
 
 When the user pastes ticket content and says "create worktree" (or similar):
 
-1. Extract the ticket ID from the content (e.g. VAY-123)
+1. Extract the ticket ID from the content (e.g. VAY-123). If no ticket ID is found, generate a short kebab-case slug from the context/input (e.g. `fix-currency-display`, `add-room-photos`). Use this slug in place of the ticket ID for all subsequent steps.
 2. Create a git worktree:
    ```
    git worktree add ../vayada-<TICKET-ID> -b feature/<ticket-id-lowercase>
