@@ -55,6 +55,8 @@ export default function SetupPage() {
   const [whatsapp, setWhatsapp] = useState('')
   const [instagram, setInstagram] = useState('')
   const [facebook, setFacebook] = useState('')
+  const [twitter, setTwitter] = useState('')
+  const [youtube, setYoutube] = useState('')
   const [currency, setCurrency] = useState('USD')
   const [defaultLanguage, setDefaultLanguage] = useState('en')
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([])
@@ -238,6 +240,8 @@ export default function SetupPage() {
         country,
         instagram,
         facebook,
+        twitter,
+        youtube,
         default_currency: currency,
         default_language: defaultLanguage,
         supported_currencies: supportedCurrencies,
@@ -470,6 +474,8 @@ export default function SetupPage() {
         if (p.whatsapp_number) setWhatsapp(p.whatsapp_number)
         if (p.instagram) setInstagram(p.instagram)
         if (p.facebook) setFacebook(p.facebook)
+        if (p.twitter) setTwitter(p.twitter)
+        if (p.youtube) setYoutube(p.youtube)
         if (p.default_currency) setCurrency(p.default_currency)
         if (p.default_language) setDefaultLanguage(p.default_language)
         if (p.supported_currencies) setSupportedCurrencies(p.supported_currencies)
@@ -653,6 +659,8 @@ export default function SetupPage() {
           whatsapp={whatsapp} setWhatsapp={setWhatsapp}
           instagram={instagram} setInstagram={setInstagram}
           facebook={facebook} setFacebook={setFacebook}
+          twitter={twitter} setTwitter={setTwitter}
+          youtube={youtube} setYoutube={setYoutube}
           currency={currency} setCurrency={setCurrency}
           defaultLanguage={defaultLanguage} setDefaultLanguage={setDefaultLanguage}
           supportedCurrencies={supportedCurrencies} setSupportedCurrencies={setSupportedCurrencies}
