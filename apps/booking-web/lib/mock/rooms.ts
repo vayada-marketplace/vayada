@@ -113,7 +113,7 @@ export const MOCK_ROOMS: RoomType[] = [
       'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=800&q=80',
       'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&q=80',
     ],
-    bedType: 'King Bed + Twin Beds',
+    bedType: 'King Bed + Twin Bed',
     remainingRooms: 1,
     features: [
       '360° Mountain View',
