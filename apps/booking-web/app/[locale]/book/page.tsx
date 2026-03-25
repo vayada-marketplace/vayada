@@ -62,8 +62,15 @@ function BookPageContent() {
     : room?.baseRate ?? 0
   const roomTotal = room ? nightlyRate * nights : 0
 
-  const selectedAddonIds = (searchParams.get('addons') || '').split(',').filter(Boolean)
-  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights)
+  const addonEntries = (searchParams.get('addons') || '').split(',').filter(Boolean)
+  const selectedAddonIds: string[] = []
+  const addonQuantities: Record<string, number> = {}
+  for (const entry of addonEntries) {
+    const [id, qtyStr] = entry.split(':')
+    selectedAddonIds.push(id)
+    if (qtyStr) addonQuantities[id] = parseInt(qtyStr)
+  }
+  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights, addonQuantities)
   const grandTotal = roomTotal + addonTotal
 
   const [firstName, setFirstName] = useState('')
@@ -102,6 +109,7 @@ function BookPageContent() {
         specialRequests,
         referralCode,
         addonIds: selectedAddonIds,
+        addonQuantities,
       }))
 
       // Redirect to payment page with booking params
@@ -177,7 +185,7 @@ function BookPageContent() {
                   {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                     let unitPrice = addon.price
                     if (addon.perPerson) unitPrice *= adultsParam
-                    if (addon.perNight) unitPrice *= nights
+                    if (addon.perNight) unitPrice *= (addonQuantities[addon.id] ?? nights)
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
                         <p className="text-sm text-gray-700">{addon.name}</p>
