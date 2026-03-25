@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 VALID_EVENT_TYPES = {
     "page_visit",
-    "searched_dates",
     "viewed_room",
     "started_booking",
     "completed_booking",
