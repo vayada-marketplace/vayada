@@ -41,6 +41,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           isActive: r.isActive,
           sortOrder: r.sortOrder,
           monthlyRates: r.monthlyRates || {},
+          dailyRates: r.dailyRates || {},
           operatingPeriods: r.operatingPeriods || [],
           seasons: r.seasons || [],
           weekendSurcharge: r.weekendSurcharge || '+0%',

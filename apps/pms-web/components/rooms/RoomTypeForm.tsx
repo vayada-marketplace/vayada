@@ -156,6 +156,9 @@ export default function RoomTypeForm({
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
+  const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
+  const [editingDay, setEditingDay] = useState<string | null>(null)
+  const [editingDayValue, setEditingDayValue] = useState('')
   const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState(form.category || '')
   const [bedrooms, setBedrooms] = useState(1)
@@ -181,9 +184,10 @@ export default function RoomTypeForm({
       flexibleRateEnabled,
       nonRefundableEnabled,
       nonRefundableDiscount,
+      dailyRates,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     onChange({ ...form, ...updates })
@@ -795,7 +799,7 @@ export default function RoomTypeForm({
                               </td>
                               <td className="px-4 py-2.5">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-gray-400">{getCurrencySymbol(form.currency || 'USD')}</span>
+                                  <span className="text-gray-400">{getCurrencySymbol(form.currency || 'EUR')}</span>
                                   <input
                                     type="number"
                                     value={season.rate}
@@ -1043,7 +1047,7 @@ export default function RoomTypeForm({
                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#38bdf8','Mid':'#3b82f6','High':'#1d4ed8','Peak':'#4338ca'}[s.tier] || '#9ca3af') }} />
                       <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
                       {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
-                      {s.rate && <span className="text-gray-500 ml-auto">{getCurrencySymbol(form.currency || 'USD')}{s.rate}/night</span>}
+                      {s.rate && <span className="text-gray-500 ml-auto">{getCurrencySymbol(form.currency || 'EUR')}{s.rate}/night</span>}
                     </div>
                   ))}
                 </div>
@@ -1087,25 +1091,70 @@ export default function RoomTypeForm({
                       }
 
                       const dateStr = date.toISOString().split('T')[0]
-                      const inGap = inOp && !season && isInSeasonGap(dateStr)
+                      const hasDailyOverride = dailyRates[dateStr] !== undefined
+                      const displayRate = hasDailyOverride ? dailyRates[dateStr] : rate
+                      const inGap = inOp && !season && !hasDailyOverride && isInSeasonGap(dateStr)
                       const seasonBgHex: Record<string, string> = { 'Low': '#f0f9ff', 'Mid': '#eff6ff', 'High': '#dbeafe', 'Peak': '#e0e7ff' }
-                      const cellBg = !inOp ? '#f9fafb' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
+                      const cellBg = !inOp ? '#f9fafb' : hasDailyOverride ? '#fefce8' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
+                      const isEditing = editingDay === dateStr
+                      const currencySymbol = getCurrencySymbol(form.currency || 'EUR')
 
                       cells.push(
                         <div
                           key={day}
-                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border ${!inOp ? 'opacity-40 border-gray-100' : inGap ? 'border-red-200' : 'border-gray-100'}`}
+                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border cursor-pointer ${!inOp ? 'opacity-40 border-gray-100' : hasDailyOverride ? 'border-amber-300 ring-1 ring-amber-200' : inGap ? 'border-red-200' : 'border-gray-100 hover:border-primary-300'}`}
                           style={{ backgroundColor: cellBg }}
-                          title={inGap ? 'No season — no price for this date' : undefined}
+                          title={hasDailyOverride ? `Daily override: ${currencySymbol}${dailyRates[dateStr]} (click to edit, right-click to remove)` : inGap ? 'No season — click to set a daily rate' : 'Click to set a daily rate override'}
+                          onClick={() => {
+                            if (!inOp) return
+                            setEditingDay(dateStr)
+                            setEditingDayValue(hasDailyOverride ? String(dailyRates[dateStr]) : displayRate > 0 ? String(displayRate) : '')
+                          }}
+                          onContextMenu={(e) => {
+                            if (!hasDailyOverride) return
+                            e.preventDefault()
+                            const next = { ...dailyRates }
+                            delete next[dateStr]
+                            setDailyRates(next)
+                          }}
                         >
-                          <span className={`text-[10px] font-medium ${inGap ? 'text-red-600' : isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
-                          {inOp && rate > 0 && (
-                            <span className={`text-[8px] font-semibold ${isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
-                              {getCurrencySymbol(form.currency || 'USD')}{rate}
-                            </span>
-                          )}
-                          {inGap && (
-                            <span className="text-[7px] font-semibold text-red-400">no price</span>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min={0}
+                              autoFocus
+                              value={editingDayValue}
+                              onChange={(e) => setEditingDayValue(e.target.value)}
+                              onBlur={() => {
+                                const val = parseFloat(editingDayValue)
+                                if (val > 0) {
+                                  setDailyRates({ ...dailyRates, [dateStr]: val })
+                                } else {
+                                  const next = { ...dailyRates }
+                                  delete next[dateStr]
+                                  setDailyRates(next)
+                                }
+                                setEditingDay(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                                if (e.key === 'Escape') { setEditingDay(null) }
+                              }}
+                              className="w-full h-full text-[9px] text-center bg-white border-0 outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <>
+                              <span className={`text-[10px] font-medium ${inGap ? 'text-red-600' : isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
+                              {inOp && displayRate > 0 && (
+                                <span className={`text-[8px] font-semibold ${hasDailyOverride ? 'text-amber-600' : isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
+                                  {currencySymbol}{displayRate}
+                                </span>
+                              )}
+                              {inGap && (
+                                <span className="text-[7px] font-semibold text-red-400">no price</span>
+                              )}
+                            </>
                           )}
                         </div>
                       )
@@ -1113,6 +1162,14 @@ export default function RoomTypeForm({
                     return cells
                   })()}
                 </div>
+              </div>
+
+              {/* Daily overrides hint */}
+              <div className="px-4 py-2 border-t border-gray-100 bg-gray-50/50">
+                <p className="text-[9px] text-gray-400">Click a date to set a daily price override. Right-click an override to remove it.</p>
+                {Object.keys(dailyRates).length > 0 && (
+                  <p className="text-[9px] text-amber-600 font-medium mt-0.5">{Object.keys(dailyRates).length} daily override{Object.keys(dailyRates).length !== 1 ? 's' : ''} set</p>
+                )}
               </div>
 
               {/* Bottom legend */}
@@ -1123,6 +1180,9 @@ export default function RoomTypeForm({
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /><span className="text-[9px] text-gray-500">Peak</span></span>
                 {parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) > 0 && (
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /><span className="text-[9px] text-gray-500">Weekend +</span></span>
+                )}
+                {Object.keys(dailyRates).length > 0 && (
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} /><span className="text-[9px] text-gray-500">Override</span></span>
                 )}
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#d1d5db' }} /><span className="text-[9px] text-gray-500">Closed</span></span>
               </div>
