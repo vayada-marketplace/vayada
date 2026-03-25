@@ -18,7 +18,7 @@ class RoomTypeCreate(BaseModel):
     images: List[str] = []
     bed_type: str = ''
     features: List[str] = []
-    total_rooms: int = 1
+    total_rooms: int = 2
     is_active: bool = True
     sort_order: int = 0
 
