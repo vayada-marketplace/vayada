@@ -285,7 +285,6 @@ export default function HomePage() {
               setGuestsOpen(false)
               setPromoOpen(false)
               setSearching(true)
-              trackEvent(slug, 'searched_dates', { checkIn, checkOut, adults, children })
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
               setTimeout(() => setSearching(false), 800)
             }}
