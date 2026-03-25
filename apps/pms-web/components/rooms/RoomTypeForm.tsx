@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
@@ -145,7 +145,7 @@ export default function RoomTypeForm({
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
-    form.operatingPeriods?.length ? form.operatingPeriods : [{ from: '2026-01-01', to: '2026-12-31' }]
+    form.operatingPeriods?.length ? form.operatingPeriods : [{ from: '01-01', to: '12-31' }]
   )
   const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]>(
     form.seasons || []
@@ -189,12 +189,18 @@ export default function RoomTypeForm({
     onChange({ ...form, ...updates })
   }
 
-  const getYearPercent = (dateStr: string): number => {
-    if (!dateStr) return 0
-    const d = new Date(dateStr)
-    const start = new Date(d.getFullYear(), 0, 1)
-    const end = new Date(d.getFullYear(), 11, 31)
-    return ((d.getTime() - start.getTime()) / (end.getTime() - start.getTime())) * 100
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]
+
+  const getYearPercent = (mmdd: string): number => {
+    if (!mmdd) return 0
+    const [mm, dd] = mmdd.split('-').map(Number)
+    if (!mm || !dd) return 0
+    // Day of year out of 366 (leap year for max days)
+    let dayOfYear = 0
+    for (let i = 0; i < mm - 1; i++) dayOfYear += DAYS_IN_MONTH[i]
+    dayOfYear += dd
+    return (dayOfYear / 366) * 100
   }
 
   const overlappingSeasonIndices = (() => {
@@ -223,11 +229,14 @@ export default function RoomTypeForm({
   }
 
   const isInOperatingPeriod = (day: number) => {
-    const year = previewMonth.getFullYear()
     const month = previewMonth.getMonth()
-    const date = new Date(year, month, day)
-    const dateStr = date.toISOString().split('T')[0]
-    return operatingPeriods.some(p => p.from && p.to && dateStr >= p.from && dateStr <= p.to)
+    const mmdd = `${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return operatingPeriods.some(p => {
+      if (!p.from || !p.to) return false
+      // Handle cross-year periods (e.g. 11-01 to 02-28)
+      if (p.from > p.to) return mmdd >= p.from || mmdd <= p.to
+      return mmdd >= p.from && mmdd <= p.to
+    })
   }
 
   const tierColors: Record<string, string> = {
@@ -505,7 +514,7 @@ export default function RoomTypeForm({
                 <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
                 <div>
                   <h3 className="text-[13px] font-semibold text-gray-900">When are you open?</h3>
-                  <p className="text-[11px] text-gray-400">Everything outside these dates is automatically closed</p>
+                  <p className="text-[11px] text-gray-400">Operating periods repeat every year — dates outside are automatically closed</p>
                 </div>
               </div>
               <div className="ml-9">
@@ -521,14 +530,27 @@ export default function RoomTypeForm({
                       const start = period.from ? getYearPercent(period.from) : 0
                       const end = period.to ? getYearPercent(period.to) : 100
                       const colors = ['bg-primary-200', 'bg-amber-200', 'bg-emerald-200', 'bg-rose-200']
+                      const color = colors[idx % colors.length]
+                      // Handle cross-year periods (e.g. Nov to Feb)
+                      if (period.from && period.to && period.from > period.to) {
+                        return (
+                          <React.Fragment key={idx}>
+                            <div className={`absolute top-0 h-full ${color}`} style={{ left: `${start}%`, width: `${100 - start}%` }} />
+                            <div className={`absolute top-0 h-full ${color} flex items-center justify-center`} style={{ left: '0%', width: `${end}%` }}>
+                              <span className="text-[9px] font-semibold text-gray-700 truncate px-1">Period {idx + 1}</span>
+                            </div>
+                          </React.Fragment>
+                        )
+                      }
+                      const width = Math.max(end - start, 1)
                       return (
                         <div
                           key={idx}
-                          className={`absolute top-0 h-full ${colors[idx % colors.length]} flex items-center justify-center`}
-                          style={{ left: `${start}%`, width: `${Math.max(end - start, 1)}%` }}
+                          className={`absolute top-0 h-full ${color} flex items-center justify-center`}
+                          style={{ left: `${start}%`, width: `${width}%` }}
                         >
                           <span className="text-[9px] font-semibold text-gray-700 truncate px-1">
-                            {idx === 0 && end - start > 90 ? 'Year Round' : `Period ${idx + 1}`}
+                            {idx === 0 && width > 90 ? 'Year Round' : `Period ${idx + 1}`}
                           </span>
                         </div>
                       )
@@ -537,40 +559,77 @@ export default function RoomTypeForm({
                 </div>
 
                 <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
-                  {operatingPeriods.map((period, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <input
-                        type="date"
-                        value={period.from}
-                        onChange={(e) => {
-                          const updated = [...operatingPeriods]
-                          updated[idx] = { ...updated[idx], from: e.target.value }
-                          setOperatingPeriods(updated)
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="text-[11px] text-gray-400">to</span>
-                      <input
-                        type="date"
-                        value={period.to}
-                        onChange={(e) => {
-                          const updated = [...operatingPeriods]
-                          updated[idx] = { ...updated[idx], to: e.target.value }
-                          setOperatingPeriods(updated)
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      {operatingPeriods.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
-                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                        >
-                          <XMarkIcon className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {operatingPeriods.map((period, idx) => {
+                    const fromMonth = period.from ? parseInt(period.from.split('-')[0]) : 0
+                    const fromDay = period.from ? parseInt(period.from.split('-')[1]) : 0
+                    const toMonth = period.to ? parseInt(period.to.split('-')[0]) : 0
+                    const toDay = period.to ? parseInt(period.to.split('-')[1]) : 0
+                    const updatePeriod = (field: 'from' | 'to', month: number, day: number) => {
+                      const updated = [...operatingPeriods]
+                      const maxDay = month ? DAYS_IN_MONTH[month - 1] : 31
+                      const clampedDay = Math.min(day, maxDay)
+                      updated[idx] = { ...updated[idx], [field]: month && clampedDay ? `${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}` : '' }
+                      setOperatingPeriods(updated)
+                    }
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 flex-1">
+                          <select
+                            value={fromDay}
+                            onChange={(e) => updatePeriod('from', fromMonth, parseInt(e.target.value) || 0)}
+                            className="w-[52px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          >
+                            <option value={0}>—</option>
+                            {Array.from({ length: fromMonth ? DAYS_IN_MONTH[fromMonth - 1] : 31 }, (_, i) => (
+                              <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={fromMonth}
+                            onChange={(e) => updatePeriod('from', parseInt(e.target.value) || 0, fromDay)}
+                            className="w-[68px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          >
+                            <option value={0}>—</option>
+                            {MONTHS.map((m, i) => (
+                              <option key={m} value={i + 1}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <span className="text-[11px] text-gray-400">to</span>
+                        <div className="flex items-center gap-1 flex-1">
+                          <select
+                            value={toDay}
+                            onChange={(e) => updatePeriod('to', toMonth, parseInt(e.target.value) || 0)}
+                            className="w-[52px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          >
+                            <option value={0}>—</option>
+                            {Array.from({ length: toMonth ? DAYS_IN_MONTH[toMonth - 1] : 31 }, (_, i) => (
+                              <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={toMonth}
+                            onChange={(e) => updatePeriod('to', parseInt(e.target.value) || 0, toDay)}
+                            className="w-[68px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          >
+                            <option value={0}>—</option>
+                            {MONTHS.map((m, i) => (
+                              <option key={m} value={i + 1}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {operatingPeriods.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                   <button
                     type="button"
                     onClick={() => setOperatingPeriods([...operatingPeriods, { from: '', to: '' }])}
