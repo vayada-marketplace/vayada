@@ -18,6 +18,29 @@ def _validate_no_season_overlap(seasons: list) -> list:
     return seasons
 
 
+def _validate_no_season_gaps(seasons: list) -> list:
+    """Raise ValueError if there are gaps between consecutive seasons."""
+    from datetime import date, timedelta
+
+    valid = [s for s in seasons if s.get("from") and s.get("to")]
+    if len(valid) < 2:
+        return seasons
+    sorted_seasons = sorted(valid, key=lambda s: s["from"])
+    gaps = []
+    for i in range(len(sorted_seasons) - 1):
+        end = date.fromisoformat(sorted_seasons[i]["to"])
+        next_start = date.fromisoformat(sorted_seasons[i + 1]["from"])
+        if end + timedelta(days=1) < next_start:
+            gap_from = end + timedelta(days=1)
+            gap_to = next_start - timedelta(days=1)
+            gaps.append(f"{gap_from.isoformat()} – {gap_to.isoformat()}")
+    if gaps:
+        raise ValueError(
+            f"Season date ranges have gaps (dates with no price): {'; '.join(gaps)}"
+        )
+    return seasons
+
+
 def to_camel(string: str) -> str:
     parts = string.split("_")
     return parts[0] + "".join(w.capitalize() for w in parts[1:])
@@ -69,7 +92,8 @@ class RoomTypeCreate(BaseModel):
     @field_validator("seasons")
     @classmethod
     def validate_seasons(cls, v: List[dict]) -> List[dict]:
-        return _validate_no_season_overlap(v)
+        _validate_no_season_overlap(v)
+        return _validate_no_season_gaps(v)
 
 
 class RoomTypeUpdate(BaseModel):
@@ -113,6 +137,7 @@ class RoomTypeUpdate(BaseModel):
     def validate_seasons(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
         if v is not None:
             _validate_no_season_overlap(v)
+            _validate_no_season_gaps(v)
         return v
 
 

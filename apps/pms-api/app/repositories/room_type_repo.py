@@ -1,7 +1,10 @@
 import json
+import logging
 from typing import Optional, List, Tuple
 from datetime import date
 from app.database import Database
+
+logger = logging.getLogger(__name__)
 
 
 class RoomTypeRepository:
@@ -228,6 +231,14 @@ class RoomTypeRepository:
         if season_rate is not None:
             nr = room.get("non_refundable_rate")
             return (season_rate, float(nr) if nr is not None else None)
+
+        if seasons:
+            logger.warning(
+                "Check-in date %s falls in a gap between seasons for room %s — "
+                "falling back to base rate",
+                check_in.isoformat(),
+                room.get("id", "unknown"),
+            )
 
         nr = room.get("non_refundable_rate")
         return (float(room["base_rate"]), float(nr) if nr is not None else None)
