@@ -7,6 +7,7 @@ locals {
     "/ecs/vayada-pms-frontend",
     "/ecs/vayada-marketplace-backend",
     "/ecs/vayada-marketplace-admin",
+    "/ecs/vayada-affiliate-dashboard",
   ]
 }
 

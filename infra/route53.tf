@@ -6,6 +6,7 @@ locals {
     "pms-api"          = "pms-api.vayada.com"
     "pms"              = "pms.vayada.com"
     "custom-booking"   = "custom.booking.vayada.com"
+    "affiliate"        = "affiliate.vayada.com"
   }
 }
 

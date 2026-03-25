@@ -7,6 +7,7 @@ locals {
     "vayada-pms-frontend",
     "vayada-creator-marketplace-backend",
     "vayada-admin-frontend",
+    "vayada-affiliate-dashboard",
   ]
 }
 
