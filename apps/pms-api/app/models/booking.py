@@ -18,6 +18,8 @@ class BookingCreate(BaseModel):
     guest_email: EmailStr
     guest_phone: str
     special_requests: str = ""
+    estimated_arrival_time: Optional[str] = None
+    number_of_guests: Optional[int] = None
     check_in: date
     check_out: date
     adults: int = 1
@@ -85,6 +87,8 @@ class BookingAdminResponse(BaseModel):
     guest_email: str
     guest_phone: str
     special_requests: str
+    estimated_arrival_time: Optional[str] = None
+    number_of_guests: Optional[int] = None
     check_in: str
     check_out: str
     nights: int

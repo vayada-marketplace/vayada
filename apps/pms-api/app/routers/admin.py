@@ -11,6 +11,8 @@ from app.models.hotel import (
     HotelResponse,
     HotelBenefitsUpdate,
     HotelBenefitsResponse,
+    GuestFormSettingsResponse,
+    GuestFormSettingsUpdate,
     SetupStatusResponse,
 )
 
@@ -167,3 +169,50 @@ async def update_benefits(
         hotel_id,
     )
     return HotelBenefitsResponse(benefits=data.benefits)
+
+
+# ── Guest Form Settings ──────────────────────────────────────────
+
+
+@router.get("/guest-form-settings", response_model=GuestFormSettingsResponse)
+async def get_guest_form_settings(user_id: str = Depends(require_hotel_admin)):
+    hotel_id = await get_hotel_id(user_id)
+    row = await Database.fetchrow(
+        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
+        "FROM hotels WHERE id = $1",
+        hotel_id,
+    )
+    if not row:
+        return GuestFormSettingsResponse()
+    return GuestFormSettingsResponse(
+        special_requests_enabled=row["special_requests_enabled"],
+        arrival_time_enabled=row["arrival_time_enabled"],
+        guest_count_enabled=row["guest_count_enabled"],
+    )
+
+
+@router.patch("/guest-form-settings", response_model=GuestFormSettingsResponse)
+async def update_guest_form_settings(
+    data: GuestFormSettingsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if updates:
+        set_clauses = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(updates))
+        values = list(updates.values())
+        values.append(hotel_id)
+        await Database.execute(
+            f"UPDATE hotels SET {set_clauses} WHERE id = ${len(values)}",
+            *values,
+        )
+    row = await Database.fetchrow(
+        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
+        "FROM hotels WHERE id = $1",
+        hotel_id,
+    )
+    return GuestFormSettingsResponse(
+        special_requests_enabled=row["special_requests_enabled"],
+        arrival_time_enabled=row["arrival_time_enabled"],
+        guest_count_enabled=row["guest_count_enabled"],
+    )
