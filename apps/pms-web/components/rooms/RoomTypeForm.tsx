@@ -779,7 +779,7 @@ export default function RoomTypeForm({
                         <button
                           type="button"
                           onClick={() => {
-                            const next = Math.max(1, nonRefundableDiscount - 5)
+                            const next = Math.max(1, nonRefundableDiscount - 1)
                             setNonRefundableDiscount(next)
                             updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
                           }}
@@ -787,13 +787,25 @@ export default function RoomTypeForm({
                         >
                           &minus;
                         </button>
-                        <span className="px-3 py-1.5 text-[12px] font-semibold text-gray-900 bg-white min-w-[48px] text-center">
-                          {nonRefundableDiscount}%
-                        </span>
+                        <div className="relative flex items-center bg-white min-w-[48px]">
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={nonRefundableDiscount}
+                            onChange={(e) => {
+                              const val = Math.max(1, Math.min(50, parseInt(e.target.value) || 1))
+                              setNonRefundableDiscount(val)
+                              updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - val / 100) * 100) / 100 })
+                            }}
+                            className="w-[40px] px-1 py-1.5 text-[12px] font-semibold text-gray-900 text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-[12px] font-semibold text-gray-900 pr-1">%</span>
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
-                            const next = Math.min(50, nonRefundableDiscount + 5)
+                            const next = Math.min(50, nonRefundableDiscount + 1)
                             setNonRefundableDiscount(next)
                             updateForm({ nonRefundableRate: Math.round((form.baseRate || 0) * (1 - next / 100) * 100) / 100 })
                           }}
