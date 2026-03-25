@@ -85,6 +85,7 @@ class RoomTypeCreate(BaseModel):
     is_active: bool = True
     sort_order: int = 0
     monthly_rates: Optional[Dict[str, MonthlyRate]] = None
+    daily_rates: Optional[Dict[str, float]] = None
     operating_periods: List[dict] = []
     seasons: List[dict] = []
     weekend_surcharge: str = "+0%"
@@ -133,6 +134,7 @@ class RoomTypeUpdate(BaseModel):
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     monthly_rates: Optional[Dict[str, MonthlyRate]] = None
+    daily_rates: Optional[Dict[str, float]] = None
     operating_periods: Optional[List[dict]] = None
     seasons: Optional[List[dict]] = None
     weekend_surcharge: Optional[str] = None
@@ -210,6 +212,7 @@ class RoomTypeAdminResponse(BaseModel):
     is_active: bool
     sort_order: int
     monthly_rates: Dict[str, MonthlyRate] = {}
+    daily_rates: Dict[str, float] = {}
     operating_periods: List[dict] = []
     seasons: List[dict] = []
     weekend_surcharge: str = "+0%"

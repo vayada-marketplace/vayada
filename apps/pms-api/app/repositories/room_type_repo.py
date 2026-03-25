@@ -34,16 +34,16 @@ class RoomTypeRepository:
                 hotel_id, name, category, description, short_description,
                 max_occupancy, size, base_rate, non_refundable_rate, currency,
                 amenities, images, bed_type, features, benefits,
-                total_rooms, is_active, sort_order, monthly_rates,
+                total_rooms, is_active, sort_order, monthly_rates, daily_rates,
                 operating_periods, seasons, weekend_surcharge,
                 cancellation_policy, flexible_rate_enabled, non_refundable_discount,
                 non_refundable_enabled
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11::jsonb, $12::jsonb, $13, $14::jsonb, $15::jsonb,
-                $16, $17, $18, $19::jsonb,
-                $20::jsonb, $21::jsonb, $22, $23, $24, $25,
-                $26
+                $16, $17, $18, $19::jsonb, $20::jsonb,
+                $21::jsonb, $22::jsonb, $23, $24, $25, $26,
+                $27
             ) RETURNING *
             """,
             hotel_id,
@@ -65,6 +65,7 @@ class RoomTypeRepository:
             data.get("is_active", True),
             data.get("sort_order", 0),
             json.dumps(data.get("monthly_rates", {})),
+            json.dumps(data.get("daily_rates", {})),
             json.dumps(data.get("operating_periods", [])),
             json.dumps(data.get("seasons", [])),
             data.get("weekend_surcharge", "+0%"),
@@ -84,7 +85,7 @@ class RoomTypeRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col in ("amenities", "images", "features", "benefits", "monthly_rates", "operating_periods", "seasons"):
+            if col in ("amenities", "images", "features", "benefits", "monthly_rates", "daily_rates", "operating_periods", "seasons"):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
@@ -234,7 +235,17 @@ class RoomTypeRepository:
 
     @staticmethod
     def resolve_rate(room: dict, check_in: date) -> Tuple[float, Optional[float]]:
-        """Return (base_rate, non_refundable_rate) using monthly override, then season, then base."""
+        """Return (base_rate, non_refundable_rate) using daily override, then monthly, then season, then base."""
+        # 1. Check daily rate override first (highest priority)
+        daily_rates = room.get("daily_rates") or {}
+        if isinstance(daily_rates, str):
+            daily_rates = json.loads(daily_rates)
+        daily_override = daily_rates.get(check_in.isoformat())
+        if daily_override is not None:
+            nr = room.get("non_refundable_rate")
+            return (float(daily_override), float(nr) if nr is not None else None)
+
+        # 2. Check monthly override
         monthly_rates = room.get("monthly_rates") or {}
         if isinstance(monthly_rates, str):
             monthly_rates = json.loads(monthly_rates)
