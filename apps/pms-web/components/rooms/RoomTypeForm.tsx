@@ -211,6 +211,36 @@ export default function RoomTypeForm({
     return indices
   })()
 
+  // Detect gaps between seasons
+  const seasonGaps = (() => {
+    const valid = seasons.filter(s => s.from && s.to)
+    if (valid.length < 2) return []
+    const sorted = [...valid].sort((a, b) => a.from.localeCompare(b.from))
+    const gaps: { from: string; to: string }[] = []
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const endDate = new Date(sorted[i].to)
+      const nextStart = new Date(sorted[i + 1].from)
+      // Add one day to end date to check adjacency
+      const dayAfterEnd = new Date(endDate)
+      dayAfterEnd.setDate(dayAfterEnd.getDate() + 1)
+      if (dayAfterEnd < nextStart) {
+        // There's a gap
+        const gapFrom = new Date(dayAfterEnd)
+        const gapTo = new Date(nextStart)
+        gapTo.setDate(gapTo.getDate() - 1)
+        gaps.push({
+          from: gapFrom.toISOString().split('T')[0],
+          to: gapTo.toISOString().split('T')[0],
+        })
+      }
+    }
+    return gaps
+  })()
+
+  const isInSeasonGap = (dateStr: string) => {
+    return seasonGaps.some(g => dateStr >= g.from && dateStr <= g.to)
+  }
+
   const getSeasonForDate = (day: number) => {
     const year = previewMonth.getFullYear()
     const month = previewMonth.getMonth()
@@ -643,6 +673,24 @@ export default function RoomTypeForm({
                 {overlappingSeasonIndices.size > 0 && (
                   <p className="mt-2 text-[11px] text-red-600 font-medium">Season date ranges must not overlap. Please adjust the highlighted seasons.</p>
                 )}
+                {seasonGaps.length > 0 && (
+                  <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-[11px] text-amber-700 font-medium mb-1">Gaps detected — the following dates have no season and therefore no price:</p>
+                    <ul className="list-disc list-inside text-[11px] text-amber-600">
+                      {seasonGaps.map((gap, i) => {
+                        const from = new Date(gap.from)
+                        const to = new Date(gap.to)
+                        const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                        const days = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                        return (
+                          <li key={i}>
+                            {fmt(from)}{gap.from !== gap.to ? ` – ${fmt(to)}` : ''} ({days} day{days > 1 ? 's' : ''} uncovered)
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setSeasons([...seasons, { name: '', tier: '', from: '', to: '', rate: '', minStay: 1 }])}
@@ -973,20 +1021,26 @@ export default function RoomTypeForm({
                         rate = Math.round(rate * (1 + surchargeNum / 100))
                       }
 
+                      const dateStr = date.toISOString().split('T')[0]
+                      const inGap = inOp && !season && isInSeasonGap(dateStr)
                       const seasonBgHex: Record<string, string> = { 'Low': '#f0f9ff', 'Mid': '#eff6ff', 'High': '#dbeafe', 'Peak': '#e0e7ff' }
-                      const cellBg = !inOp ? '#f9fafb' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
+                      const cellBg = !inOp ? '#f9fafb' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
 
                       cells.push(
                         <div
                           key={day}
-                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border border-gray-100 ${!inOp ? 'opacity-40' : ''}`}
+                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border ${!inOp ? 'opacity-40 border-gray-100' : inGap ? 'border-red-200' : 'border-gray-100'}`}
                           style={{ backgroundColor: cellBg }}
+                          title={inGap ? 'No season — no price for this date' : undefined}
                         >
-                          <span className={`text-[10px] font-medium ${isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
+                          <span className={`text-[10px] font-medium ${inGap ? 'text-red-600' : isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
                           {inOp && rate > 0 && (
                             <span className={`text-[8px] font-semibold ${isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
                               {getCurrencySymbol(form.currency || 'USD')}{rate}
                             </span>
+                          )}
+                          {inGap && (
+                            <span className="text-[7px] font-semibold text-red-400">no price</span>
                           )}
                         </div>
                       )
@@ -1228,7 +1282,7 @@ export default function RoomTypeForm({
         </Link>
         <button
           type="submit"
-          disabled={saving || overlappingSeasonIndices.size > 0}
+          disabled={saving || overlappingSeasonIndices.size > 0 || seasonGaps.length > 0}
           className="px-6 py-2 bg-primary-600 text-white text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : submitLabel}
