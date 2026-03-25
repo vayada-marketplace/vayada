@@ -76,7 +76,7 @@ class DashboardRepository:
                 COALESCE(AVG(nightly_rate), 0) as avg_rate
             FROM bookings
             WHERE hotel_id = $1
-              AND status IN ('confirmed', 'pending')
+              AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             """,
             hotel_id, start, end,
@@ -91,7 +91,7 @@ class DashboardRepository:
                 COALESCE(AVG(nightly_rate), 0) as avg_rate
             FROM bookings
             WHERE hotel_id = $1
-              AND status IN ('confirmed', 'pending')
+              AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             """,
             hotel_id, prev_start, prev_end,
@@ -149,7 +149,7 @@ class DashboardRepository:
                 COUNT(*) as count
             FROM bookings
             WHERE hotel_id = $1
-              AND status IN ('confirmed', 'pending')
+              AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             GROUP BY COALESCE(channel, 'direct')
             ORDER BY revenue DESC
@@ -247,7 +247,7 @@ class DashboardRepository:
                     COALESCE(AVG(nightly_rate), 0) as rate
                 FROM bookings
                 WHERE hotel_id = $1
-                  AND status IN ('confirmed', 'pending')
+                  AND status = 'confirmed'
                   AND created_at::date >= $2 AND created_at::date <= $3
                 """,
                 hotel_id, d_start, d_end,
