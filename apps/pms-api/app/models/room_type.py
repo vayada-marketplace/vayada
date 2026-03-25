@@ -31,7 +31,7 @@ class RoomTypeCreate(BaseModel):
     bed_type: str = ""
     features: List[str] = []
     benefits: List[str] = []
-    total_rooms: int = 1
+    total_rooms: int = 2
     is_active: bool = True
     sort_order: int = 0
     monthly_rates: Optional[Dict[str, MonthlyRate]] = None
