@@ -94,6 +94,7 @@ class RoomTypeResponse(BaseModel):
     remaining_rooms: int
     features: List[str]
     benefits: List[str] = []
+    flexible_rate_enabled: bool = True
 
 
 class RoomTypeAdminResponse(BaseModel):

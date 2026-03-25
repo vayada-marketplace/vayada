@@ -93,6 +93,7 @@ async def get_rooms_for_guest(
                 remaining_rooms=remaining,
                 features=parse_jsonb(room["features"]),
                 benefits=hotel_benefits,
+                flexible_rate_enabled=room.get("flexible_rate_enabled", True),
             )
         )
 
