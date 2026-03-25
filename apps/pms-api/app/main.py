@@ -17,6 +17,7 @@ from app.routers.admin_beds24 import router as admin_beds24_router
 from app.routers.upload import router as upload_router
 from app.routers.affiliates import router as affiliates_router
 from app.routers.webhooks import router as webhooks_router
+from app.routers.admin_messaging import router as admin_messaging_router
 from app.services.scheduler import setup_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -96,6 +97,7 @@ app.include_router(admin_beds24_router)
 app.include_router(upload_router)
 app.include_router(affiliates_router)
 app.include_router(webhooks_router)
+app.include_router(admin_messaging_router)
 
 
 @app.get("/health")

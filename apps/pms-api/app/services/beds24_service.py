@@ -167,6 +167,28 @@ async def get_bookings(
     return data if isinstance(data, list) else data.get("data", [])
 
 
+async def get_messages(
+    hotel_id: str,
+    *,
+    modified_since: Optional[datetime] = None,
+) -> List[dict]:
+    """Fetch messages from Beds24 for all bookings."""
+    token = await _ensure_valid_token(hotel_id)
+    params = {}
+    if modified_since:
+        params["modifiedSince"] = modified_since.strftime("%Y-%m-%dT%H:%M:%S")
+
+    data = await _rate_limited_request("GET", "/bookings/messages", token, params=params)
+    return data if isinstance(data, list) else data.get("data", [])
+
+
+async def send_message(hotel_id: str, beds24_booking_id: str, message: str) -> dict:
+    """Send a message via Beds24 (routes to OTA channel)."""
+    token = await _ensure_valid_token(hotel_id)
+    payload = [{"bookingId": beds24_booking_id, "message": message, "type": "host"}]
+    return await _rate_limited_request("POST", "/bookings/messages", token, json=payload)
+
+
 async def cancel_booking(hotel_id: str, beds24_booking_id: str) -> dict:
     """Cancel a booking on Beds24."""
     token = await _ensure_valid_token(hotel_id)

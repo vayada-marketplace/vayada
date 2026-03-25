@@ -213,6 +213,20 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
         channel_source=channel_source,
     )
 
+    # Auto-create conversation for messaging
+    try:
+        from app.services.messaging_service import get_or_create_conversation
+        await get_or_create_conversation(
+            hotel_id=hotel_id,
+            booking_id=booking_id,
+            channel=channel_source,
+            guest_name=guest_name,
+            guest_email=beds24_booking.get("guestEmail", ""),
+            beds24_booking_id=beds24_booking_id,
+        )
+    except Exception as e:
+        logger.error("Failed to create conversation for booking %s: %s", booking_id, e)
+
     logger.info(
         "Imported Beds24 booking %s as vayada booking %s (channel: %s)",
         beds24_booking_id, booking_id, channel_source,
