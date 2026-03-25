@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { roomsService, RoomType } from '@/services/rooms'
 import { bookingsService, Booking } from '@/services/bookings'
 import { formatCurrency } from '@/lib/formatCurrency'
+import { getCurrencySymbol } from '@/lib/utils'
 
 function getToday() {
   return new Date().toISOString().split('T')[0]
@@ -123,6 +124,8 @@ export default function DashboardPage() {
       </div>
     )
   }
+
+  const currencySymbol = getCurrencySymbol(bookings[0]?.currency || 'USD')
 
   const dateLabel = new Date().toLocaleDateString('en-US', {
     weekday: 'long',

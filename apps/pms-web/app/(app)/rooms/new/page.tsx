@@ -20,7 +20,7 @@ export default function NewRoomPage() {
     size: 0,
     baseRate: 0,
     nonRefundableRate: null,
-    currency: 'EUR',
+    currency: 'USD',
     bedType: '',
     totalRooms: 2,
     amenities: [],
@@ -31,6 +31,7 @@ export default function NewRoomPage() {
     monthlyRates: {},
   })
 
+  // Inherit currency from payment settings (authoritative source)
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {

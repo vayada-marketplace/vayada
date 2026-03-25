@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
+import { getCurrencySymbol } from '@/lib/utils'
 
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Bed', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
@@ -680,7 +681,7 @@ export default function RoomTypeForm({
                               </td>
                               <td className="px-4 py-2.5">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-gray-400">$</span>
+                                  <span className="text-gray-400">{getCurrencySymbol(form.currency || 'USD')}</span>
                                   <input
                                     type="number"
                                     value={season.rate}
@@ -928,7 +929,7 @@ export default function RoomTypeForm({
                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#38bdf8','Mid':'#3b82f6','High':'#1d4ed8','Peak':'#4338ca'}[s.tier] || '#9ca3af') }} />
                       <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
                       {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
-                      {s.rate && <span className="text-gray-500 ml-auto">${s.rate}/night</span>}
+                      {s.rate && <span className="text-gray-500 ml-auto">{getCurrencySymbol(form.currency || 'USD')}{s.rate}/night</span>}
                     </div>
                   ))}
                 </div>
@@ -983,7 +984,7 @@ export default function RoomTypeForm({
                           <span className={`text-[10px] font-medium ${isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
                           {inOp && rate > 0 && (
                             <span className={`text-[8px] font-semibold ${isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
-                              ${rate}
+                              {getCurrencySymbol(form.currency || 'USD')}{rate}
                             </span>
                           )}
                         </div>
