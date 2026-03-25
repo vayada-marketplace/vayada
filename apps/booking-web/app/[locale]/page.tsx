@@ -601,6 +601,7 @@ export default function HomePage() {
                         )}
 
                         {/* Flexible Rate */}
+                        {room.flexibleRateEnabled !== false && (
                         <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
                           <button
                             onClick={() =>
@@ -656,6 +657,7 @@ export default function HomePage() {
                             </div>
                           )}
                         </div>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -155,6 +155,7 @@ export default function RoomDetailModal({
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Select Your Rate</p>
             <div className="space-y-3">
               {/* Flexible Rate */}
+              {room.flexibleRateEnabled !== false && (
               <button
                 onClick={() => setSelectedRate('flexible')}
                 className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
@@ -173,6 +174,7 @@ export default function RoomDetailModal({
                   </div>
                 </div>
               </button>
+              )}
 
               {/* Non-Refundable */}
               {room.nonRefundableRate != null && (

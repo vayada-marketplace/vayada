@@ -59,6 +59,7 @@ export interface RoomType {
   remainingRooms: number
   features: string[]
   benefits: string[]
+  flexibleRateEnabled: boolean
 }
 
 export interface AvailableRoom extends RoomType {
