@@ -13,10 +13,10 @@ import { uploadSingleImage } from '@/lib/utils/uploadImage'
 import { getCurrencySymbol } from '@/lib/utils'
 
 const CATEGORIES = [
-  { value: 'transport', label: 'Transport' },
-  { value: 'wellness', label: 'Wellness' },
   { value: 'dining', label: 'Dining' },
   { value: 'experience', label: 'Experience' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'wellness', label: 'Wellness' },
   { value: 'other', label: 'Other' },
 ]
 

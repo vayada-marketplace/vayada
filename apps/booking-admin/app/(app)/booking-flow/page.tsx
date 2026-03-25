@@ -19,10 +19,10 @@ import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 type Tab = 'rooms' | 'addons' | 'details' | 'payment' | 'benefits'
 
 const CATEGORIES = [
-  { value: 'transport', label: 'Transport' },
-  { value: 'wellness', label: 'Wellness' },
   { value: 'dining', label: 'Dining' },
   { value: 'experience', label: 'Experience' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'wellness', label: 'Wellness' },
   { value: 'other', label: 'Other' },
 ]
 
