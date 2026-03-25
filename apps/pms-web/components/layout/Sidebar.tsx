@@ -32,10 +32,11 @@ interface NavItem {
   badge?: number
 }
 
-const navItems: NavItem[] = [
+const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { label: 'Dashboard', href: '/dashboard', icon: DashboardIcon },
   { label: 'Calendar', href: '/calendar', icon: CalendarIcon },
   { label: 'Reservations', href: '/bookings', icon: ReservationsIcon },
+  { label: 'Inbox', href: '/inbox', icon: InboxIcon },
   { label: 'Rooms & Rates', href: '/rooms', icon: RoomsIcon },
   { label: 'Channel Manager', href: '/channel-manager', icon: ChannelsIcon },
   { label: 'Settings', href: '/settings', icon: SettingsIcon },
@@ -45,6 +46,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const switcherRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -56,6 +58,33 @@ export default function Sidebar() {
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  // Poll unread message count
+  useEffect(() => {
+    async function fetchUnread() {
+      try {
+        const token = localStorage.getItem('access_token')
+        if (!token) return
+        const pmsUrl = process.env.NEXT_PUBLIC_PMS_API_URL || 'http://localhost:8002'
+        const res = await fetch(`${pmsUrl}/admin/conversations/unread-count`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setUnreadCount(data.unreadCount || 0)
+        }
+      } catch {}
+    }
+    fetchUnread()
+    const interval = setInterval(fetchUnread, 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const navItems: NavItem[] = BASE_NAV_ITEMS.map(item =>
+    item.label === 'Inbox' && unreadCount > 0
+      ? { ...item, badge: unreadCount }
+      : item
+  )
 
   return (
     <aside
@@ -253,6 +282,14 @@ function ChannelsIcon({ className }: { className?: string }) {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  )
+}
+
+function InboxIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   )
 }
