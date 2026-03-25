@@ -8,6 +8,7 @@ import { useRouter } from '@/i18n/navigation'
 import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
+import AddonDetailModal from '@/components/booking/AddonDetailModal'
 import { ADDON_CATEGORIES } from '@/lib/mock/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
@@ -25,6 +26,7 @@ export default function AddonsPage() {
   const { formatPrice } = useCurrency()
   const [activeCategory, setActiveCategory] = useState('all')
   const [selections, setSelections] = useState<Record<string, number>>({})
+  const [detailIndex, setDetailIndex] = useState<number | null>(null)
   const currentStep = 2
 
   const checkIn = searchParams.get('checkIn') || ''
@@ -98,14 +100,15 @@ export default function AddonsPage() {
 
         {/* Add-on Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
-          {filteredAddons.map((addon) => {
+          {filteredAddons.map((addon, idx) => {
             const isAdded = selections[addon.id] !== undefined
             return (
               <div
                 key={addon.id}
-                className={`bg-white border rounded-2xl overflow-hidden transition-shadow hover:shadow-lg ${
+                className={`bg-white border rounded-2xl overflow-hidden transition-shadow hover:shadow-lg cursor-pointer ${
                   isAdded ? 'border-primary-500 shadow-md' : 'border-gray-200'
                 }`}
+                onClick={() => setDetailIndex(idx)}
               >
                 <div className="relative h-48">
                   <Image src={addon.image} alt={addon.name} fill className="object-cover" />
@@ -120,7 +123,7 @@ export default function AddonsPage() {
                       {addon.perPerson && <span className="text-xs font-normal text-gray-500"> /person</span>}
                     </p>
                     {isAdded && addon.perNight ? (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => setQuantity(addon.id, selections[addon.id] - 1)}
                           disabled={selections[addon.id] <= 1}
@@ -147,7 +150,7 @@ export default function AddonsPage() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => toggleAddon(addon.id, addon.perNight)}
+                        onClick={(e) => { e.stopPropagation(); toggleAddon(addon.id, addon.perNight) }}
                         className={`px-5 py-1.5 rounded-full text-sm font-semibold border-2 transition-colors ${
                           isAdded
                             ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
@@ -251,6 +254,20 @@ export default function AddonsPage() {
           </button>
         </div>
       </div>
+
+      {detailIndex !== null && filteredAddons[detailIndex] && (
+        <AddonDetailModal
+          addon={filteredAddons[detailIndex]}
+          open
+          onClose={() => setDetailIndex(null)}
+          isAdded={selections[filteredAddons[detailIndex].id] !== undefined}
+          onToggle={() => toggleAddon(filteredAddons[detailIndex].id, filteredAddons[detailIndex].perNight)}
+          currentIndex={detailIndex}
+          totalAddons={filteredAddons.length}
+          onPrev={() => setDetailIndex(detailIndex > 0 ? detailIndex - 1 : filteredAddons.length - 1)}
+          onNext={() => setDetailIndex(detailIndex < filteredAddons.length - 1 ? detailIndex + 1 : 0)}
+        />
+      )}
 
       <BookingFooter />
     </div>
