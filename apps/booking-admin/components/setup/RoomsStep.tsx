@@ -585,7 +585,15 @@ export default function RoomsStep({
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {room.seasons.map((season, idx) => {
+                    {(() => {
+                      const overlapIdx = new Set<number>()
+                      for (let i = 0; i < room.seasons.length; i++) {
+                        for (let j = i + 1; j < room.seasons.length; j++) {
+                          const a = room.seasons[i], b = room.seasons[j]
+                          if (a.from && a.to && b.from && b.to && a.from <= b.to && b.from <= a.to) { overlapIdx.add(i); overlapIdx.add(j) }
+                        }
+                      }
+                      return room.seasons.map((season, idx) => {
                       const tierColors: Record<string, string> = {
                         'Low': 'text-emerald-600 bg-emerald-50 border-emerald-200',
                         'Mid': 'text-blue-600 bg-blue-50 border-blue-200',
@@ -594,7 +602,7 @@ export default function RoomsStep({
                       }
                       const dayCount = season.from && season.to ? Math.ceil((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000*60*60*24)) : 0
                       return (
-                        <div key={idx} className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3">
+                        <div key={idx} className={`rounded-xl border px-4 py-3 ${overlapIdx.has(idx) ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50/50'}`}>
                           <div className="flex items-center gap-2 mb-2">
                             <input
                               type="text"
@@ -628,9 +636,10 @@ export default function RoomsStep({
                           </div>
                         </div>
                       )
-                    })}
+                    })})()}
                   </div>
                 )}
+                {(() => { const hasOverlap = room.seasons.some((a, i) => room.seasons.some((b, j) => i < j && a.from && a.to && b.from && b.to && a.from <= b.to && b.from <= a.to)); return hasOverlap ? <p className="mt-2 text-[11px] text-red-600 font-medium">Season date ranges must not overlap. Please adjust the highlighted seasons.</p> : null })()}
                 <button
                   onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Mid', from: '', to: '', rate: '', minStay: 1 }] })}
                   className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
