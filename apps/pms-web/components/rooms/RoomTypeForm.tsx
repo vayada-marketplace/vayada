@@ -800,9 +800,14 @@ export default function RoomTypeForm({
                                     type="number"
                                     value={season.rate}
                                     onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
-                                    className="w-16 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    className={`w-16 px-2 py-1 bg-gray-50 border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${!season.rate || Number(season.rate) <= 0 ? 'border-red-400' : 'border-gray-200'}`}
                                     placeholder="0"
+                                    min="1"
+                                    required
                                   />
+                                  {(!season.rate || Number(season.rate) <= 0) && (
+                                    <span className="text-[10px] text-red-500">Required</span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-4 py-2.5">

@@ -56,6 +56,10 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.seasons?.some(s => !s.rate || Number(s.rate) <= 0)) {
+      setError('Every season must have a rate greater than 0')
+      return
+    }
     setSaving(true)
     setError('')
     setSuccess('')
