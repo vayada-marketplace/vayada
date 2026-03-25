@@ -252,6 +252,30 @@ export default function BookingDetailModal({
               </div>
             )}
 
+            {/* Estimated Arrival Time */}
+            {booking.estimatedArrivalTime && (
+              <div className="mb-6">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  Estimated Arrival Time
+                </h3>
+                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">
+                  {booking.estimatedArrivalTime}
+                </p>
+              </div>
+            )}
+
+            {/* Number of Guests */}
+            {booking.numberOfGuests != null && (
+              <div className="mb-6">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  Number of Guests
+                </h3>
+                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">
+                  {booking.numberOfGuests}
+                </p>
+              </div>
+            )}
+
             {/* Actions */}
             {showCancelConfirm ? (
               <div className="pt-2 border-t border-gray-200">

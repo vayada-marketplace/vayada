@@ -181,6 +181,18 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <p className="font-medium text-gray-900 whitespace-pre-wrap">{booking.specialRequests}</p>
             </div>
           )}
+          {booking.estimatedArrivalTime && (
+            <div className="mt-4 text-sm">
+              <p className="text-gray-500">Estimated Arrival Time</p>
+              <p className="font-medium text-gray-900">{booking.estimatedArrivalTime}</p>
+            </div>
+          )}
+          {booking.numberOfGuests != null && (
+            <div className="mt-4 text-sm">
+              <p className="text-gray-500">Number of Guests</p>
+              <p className="font-medium text-gray-900">{booking.numberOfGuests}</p>
+            </div>
+          )}
         </div>
 
         {/* Stay Details */}
