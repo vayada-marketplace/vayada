@@ -29,6 +29,18 @@ def _validate_no_season_overlap(seasons: list) -> list:
     return seasons
 
 
+def _validate_season_rates(seasons: list) -> list:
+    """Raise ValueError if any season has a missing or zero rate."""
+    for s in seasons:
+        rate = s.get("rate")
+        if rate is None or rate == "" or float(rate) <= 0:
+            name = s.get("name") or "Unnamed"
+            raise ValueError(
+                f"Season \"{name}\" must have a rate greater than 0"
+            )
+    return seasons
+
+
 def _validate_no_season_gaps(seasons: list) -> list:
     """Raise ValueError if there are gaps between consecutive seasons."""
     from datetime import date, timedelta
@@ -109,6 +121,7 @@ class RoomTypeCreate(BaseModel):
     @field_validator("seasons")
     @classmethod
     def validate_seasons(cls, v: List[dict]) -> List[dict]:
+        _validate_season_rates(v)
         _validate_no_season_overlap(v)
         return _validate_no_season_gaps(v)
 
@@ -161,6 +174,7 @@ class RoomTypeUpdate(BaseModel):
     @classmethod
     def validate_seasons(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
         if v is not None:
+            _validate_season_rates(v)
             _validate_no_season_overlap(v)
             _validate_no_season_gaps(v)
         return v
