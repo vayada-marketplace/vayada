@@ -35,7 +35,7 @@ export const createEmptyRoom = (): RoomType => ({
   bedrooms: 1,
   bathrooms: 1,
   roomSize: '',
-  totalRooms: 1,
+  totalRooms: 2,
   description: '',
   category: '',
   baseRate: '',
