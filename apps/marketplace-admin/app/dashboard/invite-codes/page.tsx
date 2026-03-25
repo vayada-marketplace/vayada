@@ -48,6 +48,8 @@ export default function InviteCodesPage() {
   const [whatsapp, setWhatsapp] = useState('')
   const [instagram, setInstagram] = useState('')
   const [facebook, setFacebook] = useState('')
+  const [twitter, setTwitter] = useState('')
+  const [youtube, setYoutube] = useState('')
   const [currency, setCurrency] = useState('EUR')
   const [defaultLanguage, setDefaultLanguage] = useState('en')
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([])
@@ -161,7 +163,7 @@ export default function InviteCodesPage() {
         property: {
           property_name: propertyName, city, country, address,
           reservation_email: reservationEmail, phone_number: phoneNumber,
-          whatsapp_number: whatsapp, instagram, facebook,
+          whatsapp_number: whatsapp, instagram, facebook, twitter, youtube,
           default_currency: currency, default_language: defaultLanguage,
           supported_currencies: supportedCurrencies, supported_languages: supportedLanguages,
         },
@@ -305,6 +307,8 @@ export default function InviteCodesPage() {
             whatsapp={whatsapp} setWhatsapp={setWhatsapp}
             instagram={instagram} setInstagram={setInstagram}
             facebook={facebook} setFacebook={setFacebook}
+            twitter={twitter} setTwitter={setTwitter}
+            youtube={youtube} setYoutube={setYoutube}
             currency={currency} setCurrency={setCurrency}
             defaultLanguage={defaultLanguage} setDefaultLanguage={setDefaultLanguage}
             supportedCurrencies={supportedCurrencies} setSupportedCurrencies={setSupportedCurrencies}
