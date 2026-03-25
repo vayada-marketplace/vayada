@@ -321,6 +321,7 @@ export default function SetupPage() {
           await pmsClient.patch('/admin/payment-settings', {
             payAtPropertyEnabled: payAtHotel,
             paymentProvider: paymentProvider,
+            defaultCurrency: currency,
           })
         } catch {
           // Non-fatal
