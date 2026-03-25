@@ -38,13 +38,17 @@ async def get_rooms_for_guest(
     for room in rooms:
         total = room["total_rooms"]
         if check_in and check_out:
-            booked = await RoomTypeRepository.count_booked(
-                str(room["id"]), check_in, check_out
-            )
-            blocked = await RoomTypeRepository.count_blocked(
-                str(room["id"]), check_in, check_out
-            )
-            remaining = max(0, total - booked - blocked)
+            # Check if the stay falls within operating periods
+            if not RoomTypeRepository.is_date_in_operating_periods(room, check_in):
+                remaining = 0
+            else:
+                booked = await RoomTypeRepository.count_booked(
+                    str(room["id"]), check_in, check_out
+                )
+                blocked = await RoomTypeRepository.count_blocked(
+                    str(room["id"]), check_in, check_out
+                )
+                remaining = max(0, total - booked - blocked)
         else:
             remaining = total
 

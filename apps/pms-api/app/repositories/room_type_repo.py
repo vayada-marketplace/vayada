@@ -157,6 +157,29 @@ class RoomTypeRepository:
         return count or 0
 
     @staticmethod
+    def is_date_in_operating_periods(room: dict, check_date: date) -> bool:
+        """Check if a date falls within any operating period (MM-DD, recurring yearly)."""
+        periods = room.get("operating_periods") or []
+        if isinstance(periods, str):
+            periods = json.loads(periods)
+        if not periods:
+            return True  # No periods defined = always open
+        mmdd = f"{check_date.month:02d}-{check_date.day:02d}"
+        for p in periods:
+            p_from = p.get("from", "")
+            p_to = p.get("to", "")
+            if not p_from or not p_to:
+                continue
+            # Handle cross-year periods (e.g. 11-01 to 02-28)
+            if p_from > p_to:
+                if mmdd >= p_from or mmdd <= p_to:
+                    return True
+            else:
+                if p_from <= mmdd <= p_to:
+                    return True
+        return False
+
+    @staticmethod
     def _parse_seasons(room: dict) -> list:
         seasons = room.get("seasons") or []
         if isinstance(seasons, str):
