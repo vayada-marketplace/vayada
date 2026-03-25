@@ -594,6 +594,7 @@ export default function RoomTypeForm({
                     const fromDay = period.from ? parseInt(period.from.split('-')[1]) : 0
                     const toMonth = period.to ? parseInt(period.to.split('-')[0]) : 0
                     const toDay = period.to ? parseInt(period.to.split('-')[1]) : 0
+                    const isInvalid = period.from && period.to && period.to < period.from
                     const updatePeriod = (field: 'from' | 'to', month: number, day: number) => {
                       const updated = [...operatingPeriods]
                       const maxDay = month ? DAYS_IN_MONTH[month - 1] : 31
@@ -602,7 +603,8 @@ export default function RoomTypeForm({
                       setOperatingPeriods(updated)
                     }
                     return (
-                      <div key={idx} className="flex items-center gap-2">
+                      <div key={idx}>
+                        <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1 flex-1">
                           <select
                             value={fromDay}
@@ -630,7 +632,7 @@ export default function RoomTypeForm({
                           <select
                             value={toDay}
                             onChange={(e) => updatePeriod('to', toMonth, parseInt(e.target.value) || 0)}
-                            className="w-[52px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            className={`w-[52px] px-1.5 py-2 bg-white border rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isInvalid ? 'border-red-400' : 'border-gray-200'}`}
                           >
                             <option value={0}>—</option>
                             {Array.from({ length: toMonth ? DAYS_IN_MONTH[toMonth - 1] : 31 }, (_, i) => (
@@ -640,7 +642,7 @@ export default function RoomTypeForm({
                           <select
                             value={toMonth}
                             onChange={(e) => updatePeriod('to', parseInt(e.target.value) || 0, toDay)}
-                            className="w-[68px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            className={`w-[68px] px-1.5 py-2 bg-white border rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isInvalid ? 'border-red-400' : 'border-gray-200'}`}
                           >
                             <option value={0}>—</option>
                             {MONTHS.map((m, i) => (
@@ -658,6 +660,10 @@ export default function RoomTypeForm({
                           </button>
                         )}
                       </div>
+                      {isInvalid && (
+                        <p className="ml-0 mt-1 text-[10px] text-red-500">End date must be after start date</p>
+                      )}
+                    </div>
                     )
                   })}
                   <button
@@ -1341,7 +1347,7 @@ export default function RoomTypeForm({
         </Link>
         <button
           type="submit"
-          disabled={saving || overlappingSeasonIndices.size > 0 || seasonGaps.length > 0}
+          disabled={saving || overlappingSeasonIndices.size > 0 || seasonGaps.length > 0 || operatingPeriods.some(p => p.from && p.to && p.to < p.from)}
           className="px-6 py-2 bg-primary-600 text-white text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : submitLabel}
