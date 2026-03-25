@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { bookingsService, PaymentSettings, CancellationPolicy } from '@/services/bookings'
 import { customDomainService, CustomDomainStatus } from '@/services/custom-domain'
 import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { COUNTRIES } from '@/lib/constants/countries'
 
 const CURRENCY_OPTIONS = [
   { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
@@ -497,19 +498,11 @@ export default function SettingsPage() {
                     onChange={(e) => setConnectCountry(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
-                    <option value="AT">Austria</option>
-                    <option value="DE">Germany</option>
-                    <option value="CH">Switzerland</option>
-                    <option value="US">United States</option>
-                    <option value="GB">United Kingdom</option>
-                    <option value="FR">France</option>
-                    <option value="IT">Italy</option>
-                    <option value="ES">Spain</option>
-                    <option value="NL">Netherlands</option>
-                    <option value="TH">Thailand</option>
-                    <option value="AU">Australia</option>
-                    <option value="SG">Singapore</option>
-                    <option value="JP">Japan</option>
+                    {COUNTRIES.map((country) => (
+                      <option key={country.code} value={country.code}>
+                        {country.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
