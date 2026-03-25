@@ -132,6 +132,18 @@ locals {
       ]
       secrets = []
     }
+    affiliate-dashboard = {
+      name           = "vayada-affiliate-dashboard"
+      container_port = 3005
+      cpu            = 256
+      memory         = 512
+      health_check   = "/"
+      log_group      = "/ecs/vayada-affiliate-dashboard"
+      environment = [
+        { name = "NEXT_PUBLIC_API_URL", value = "https://api.vayada.com" },
+      ]
+      secrets = []
+    }
   }
 
   # Map from service key to ECR repo name
@@ -143,6 +155,7 @@ locals {
     "pms-frontend"        = "vayada-pms-frontend"
     "marketplace-backend" = "vayada-creator-marketplace-backend"
     "marketplace-admin"   = "vayada-admin-frontend"
+    "affiliate-dashboard" = "vayada-affiliate-dashboard"
   }
 }
 

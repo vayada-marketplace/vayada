@@ -35,6 +35,11 @@ locals {
       port         = 3001
       health_check = "/"
     }
+    affiliate-dashboard = {
+      name         = "affiliate-dashboard-tg"
+      port         = 3005
+      health_check = "/"
+    }
   }
 
   listener_rules = {
@@ -67,6 +72,11 @@ locals {
       priority  = 40
       host      = "pms.vayada.com"
       target_group = "pms-frontend"
+    }
+    affiliate = {
+      priority  = 45
+      host      = "affiliate.vayada.com"
+      target_group = "affiliate-dashboard"
     }
     booking-frontend = {
       priority  = 50
