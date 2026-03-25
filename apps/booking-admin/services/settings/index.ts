@@ -11,7 +11,7 @@ export interface PropertySettings {
   country?: string
   instagram?: string
   facebook?: string
-  twitter?: string
+  tiktok?: string
   youtube?: string
   default_currency: string
   default_language?: string

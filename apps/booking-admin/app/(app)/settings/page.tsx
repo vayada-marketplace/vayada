@@ -595,13 +595,13 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Twitter / X</label>
+                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">TikTok</label>
                         <input
                           type="url"
-                          value={settings.twitter || ''}
-                          onChange={(e) => updateSetting('twitter', e.target.value)}
+                          value={settings.tiktok || ''}
+                          onChange={(e) => updateSetting('tiktok', e.target.value)}
                           className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          placeholder="https://x.com/yourhotel"
+                          placeholder="https://www.tiktok.com/@yourhotel"
                         />
                       </div>
                       <div>
