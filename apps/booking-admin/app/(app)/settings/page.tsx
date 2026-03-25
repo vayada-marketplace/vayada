@@ -263,6 +263,11 @@ export default function SettingsPage() {
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  // Book Direct Benefits
+  const [benefits, setBenefits] = useState<string[]>([])
+  const [benefitInput, setBenefitInput] = useState('')
+  const [savingBenefits, setSavingBenefits] = useState(false)
+
   const handleChangeEmail = async () => {
     try {
       setChangingEmail(true)
@@ -314,6 +319,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchSettings()
+    settingsService.getBenefits()
+      .then((res) => setBenefits(res.benefits))
+      .catch(() => {})
   }, [fetchSettings])
 
   const handleSave = async () => {
@@ -360,6 +368,43 @@ export default function SettingsPage() {
 
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
     setSettings({ ...settings, [key]: value })
+  }
+
+  const BENEFIT_OPTIONS = [
+    'Welcome Drink on Arrival',
+    '10% Spa Discount',
+    'Late Check-out (subject to availability)',
+    'Early Check-in (subject to availability)',
+    'Free Airport Transfer',
+    'Daily Breakfast Included',
+    'Room Upgrade (subject to availability)',
+  ]
+
+  const addCustomBenefit = () => {
+    const trimmed = benefitInput.trim()
+    if (trimmed && !benefits.includes(trimmed)) {
+      setBenefits([...benefits, trimmed])
+    }
+    setBenefitInput('')
+  }
+
+  const saveBenefits = async () => {
+    setSavingBenefits(true)
+    setFeedback(null)
+    try {
+      await settingsService.updateBenefits(benefits)
+      // Also sync to PMS backend for room display
+      try {
+        await pmsClient.put('/admin/benefits', { benefits })
+      } catch {
+        // Non-fatal: PMS sync may fail if not using vayada PMS
+      }
+      setFeedback({ type: 'success', message: 'Book Direct Benefits saved' })
+    } catch {
+      setFeedback({ type: 'error', message: 'Failed to save benefits' })
+    } finally {
+      setSavingBenefits(false)
+    }
   }
 
   const tabs = [
@@ -648,6 +693,83 @@ export default function SettingsPage() {
                         emptyMessage={`No additional languages added \u2014 your booking page will show only ${(settings.default_language || 'en').toUpperCase()}`}
                       />
                     </div>
+                  </div>
+
+                  {/* Book Direct Benefits */}
+                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                    <h2 className="text-sm font-semibold text-gray-900">Book Direct Benefits</h2>
+                    <p className="text-[13px] text-gray-500 mt-0.5 mb-3">Encourage guests to book directly. These appear in the room detail modal and apply to all rooms.</p>
+
+                    <div className="space-y-2 mb-4">
+                      {BENEFIT_OPTIONS.map((benefit) => {
+                        const isSelected = benefits.includes(benefit)
+                        return (
+                          <label key={benefit} className="flex items-center gap-2.5 cursor-pointer group">
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-primary-500 border-primary-500' : 'border-gray-300 group-hover:border-gray-400'}`}>
+                              {isSelected && (
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                              )}
+                            </div>
+                            <span className="text-[13px] text-gray-700">{benefit}</span>
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={isSelected}
+                              onChange={() => {
+                                if (isSelected) {
+                                  setBenefits(benefits.filter((b) => b !== benefit))
+                                } else {
+                                  setBenefits([...benefits, benefit])
+                                }
+                              }}
+                            />
+                          </label>
+                        )
+                      })}
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="block text-[12px] text-gray-500 mb-1">Custom Benefit <span className="text-gray-400">(optional)</span></label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={benefitInput}
+                          onChange={(e) => setBenefitInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomBenefit() } }}
+                          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="e.g. Complimentary sunset cocktail"
+                        />
+                        <button
+                          type="button"
+                          onClick={addCustomBenefit}
+                          disabled={!benefitInput.trim()}
+                          className="px-3 py-1.5 text-[13px] font-medium text-primary-600 border border-primary-300 rounded-lg hover:bg-primary-50 disabled:opacity-40 transition-colors"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+
+                    {benefits.filter((b) => !BENEFIT_OPTIONS.includes(b)).length > 0 && (
+                      <div className="mb-4 flex flex-wrap gap-2">
+                        {benefits.filter((b) => !BENEFIT_OPTIONS.includes(b)).map((b) => (
+                          <span key={b} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[12px] rounded-full">
+                            {b}
+                            <button type="button" onClick={() => setBenefits(benefits.filter((x) => x !== b))} className="text-primary-400 hover:text-primary-600">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={saveBenefits}
+                      disabled={savingBenefits}
+                      className="px-4 py-2 text-[13px] font-medium text-white bg-primary-500 rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                    >
+                      {savingBenefits ? 'Saving...' : 'Save Benefits'}
+                    </button>
                   </div>
 
                   {/* Save button */}

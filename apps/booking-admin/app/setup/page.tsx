@@ -347,11 +347,18 @@ export default function SetupPage() {
       }
 
       // 7. Save benefits
-      if (benefits.length > 0 && selectedPms === 'vayada') {
+      if (benefits.length > 0) {
         try {
-          await pmsClient.put('/admin/benefits', { benefits })
+          await settingsService.updateBenefits(benefits)
         } catch {
           // Non-fatal: benefits can be added later from Settings
+        }
+        if (selectedPms === 'vayada') {
+          try {
+            await pmsClient.put('/admin/benefits', { benefits })
+          } catch {
+            // Non-fatal: PMS sync may fail if not using vayada PMS
+          }
         }
       }
 
