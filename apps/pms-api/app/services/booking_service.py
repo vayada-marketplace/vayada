@@ -166,8 +166,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     blocked = await RoomTypeRepository.count_blocked(
         data.room_type_id, data.check_in, data.check_out
     )
-    if booked + blocked >= room["total_rooms"]:
-        raise ValueError("No rooms available for the selected dates")
+    available = room["total_rooms"] - booked - blocked
+    if available < data.number_of_rooms:
+        raise ValueError("Not enough rooms available for the selected dates")
 
     nights = _nights(data.check_in, data.check_out)
     if nights <= 0:
@@ -183,7 +184,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         nightly_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
     else:
         nightly_rate = resolved_base
-    room_total = nightly_rate * nights
+    room_total = nightly_rate * nights * data.number_of_rooms
 
     # Calculate addon total from booking engine
     addon_total = 0.0
@@ -253,6 +254,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "adults": data.adults,
         "children": data.children,
         "nightly_rate": nightly_rate,
+        "number_of_rooms": data.number_of_rooms,
         "total_amount": total_amount,
         "currency": room["currency"],
         "referral_code": data.referral_code,

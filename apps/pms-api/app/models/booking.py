@@ -27,6 +27,7 @@ class BookingCreate(BaseModel):
     referral_code: Optional[str] = None
     payment_method: str = "card"
     rate_type: str = "flexible"
+    number_of_rooms: int = 1
     addon_ids: List[str] = []
     addon_quantities: Dict[str, int] = {}
 
@@ -48,6 +49,7 @@ class BookingResponse(BaseModel):
     adults: int
     children: int
     nightly_rate: float
+    number_of_rooms: int = 1
     total_amount: float
     addon_total: float = 0
     currency: str
@@ -95,6 +97,7 @@ class BookingAdminResponse(BaseModel):
     adults: int
     children: int
     nightly_rate: float
+    number_of_rooms: int = 1
     total_amount: float
     currency: str
     status: str
