@@ -122,7 +122,7 @@ class BookingHotelRepository:
         set_clauses = []
         values = []
         idx = 1
-        json_columns = ("supported_languages", "supported_currencies", "booking_filters", "custom_filters", "pay_at_hotel_methods", "benefits")
+        json_columns = ("supported_languages", "supported_currencies", "booking_filters", "custom_filters", "filter_rooms", "pay_at_hotel_methods", "benefits")
         for col, val in updates.items():
             if col in json_columns:
                 set_clauses.append(f"{col} = ${idx}::jsonb")

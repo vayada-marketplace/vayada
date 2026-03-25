@@ -70,6 +70,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         supported_currencies=parse_json(row.get("supported_currencies")),
         booking_filters=parse_json(row.get("booking_filters")),
         custom_filters=parse_json(row.get("custom_filters"), default={}),
+        filter_rooms=parse_json(row.get("filter_rooms"), default={}),
         hero_image=row["hero_image"],
         images=parse_json(row["images"]),
         amenities=parse_json(raw_amenities),

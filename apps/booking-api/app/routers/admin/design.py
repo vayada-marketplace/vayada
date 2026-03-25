@@ -8,7 +8,7 @@ from app.models.utils import parse_json
 
 router = APIRouter()
 
-_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing, booking_filters, custom_filters"
+_DESIGN_COLUMNS = "name, description, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing, booking_filters, custom_filters, filter_rooms"
 
 _DESIGN_FIELD_MAP = {
     "hero_image": "hero_image",
@@ -19,12 +19,13 @@ _DESIGN_FIELD_MAP = {
     "font_pairing": "branding_font_pairing",
     "booking_filters": "booking_filters",
     "custom_filters": "custom_filters",
+    "filter_rooms": "filter_rooms",
 }
 
 _DESIGN_DEFAULTS = DesignSettingsResponse(
     hero_image='', hero_heading='', hero_subtext='',
     primary_color='', accent_color='', font_pairing='',
-    booking_filters=[], custom_filters={},
+    booking_filters=[], custom_filters={}, filter_rooms={},
 )
 
 
@@ -38,6 +39,7 @@ def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
         font_pairing=hotel.get('branding_font_pairing') or '',
         booking_filters=parse_json(hotel.get('booking_filters')),
         custom_filters=parse_json(hotel.get('custom_filters'), default={}),
+        filter_rooms=parse_json(hotel.get('filter_rooms'), default={}),
     )
 
 
