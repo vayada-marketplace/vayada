@@ -108,6 +108,7 @@
     "estimatedArrival": "Estimated Arrival Time",
     "selectArrival": "Select an arrival time",
     "iDontKnow": "I don't know yet",
+    "numberOfGuests": "Number of Guests",
     "specialRequests": "Special Requests",
     "specialRequestsPlaceholder": "Any special requests or preferences for your stay...",
     "backToAddons": "Back to Add-ons",

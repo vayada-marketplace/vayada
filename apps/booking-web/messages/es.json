@@ -107,6 +107,7 @@
     "estimatedArrival": "Hora Estimada de Llegada",
     "selectArrival": "Selecciona una hora de llegada",
     "iDontKnow": "Aún no lo sé",
+    "numberOfGuests": "Número de Huéspedes",
     "specialRequests": "Solicitudes Especiales",
     "specialRequestsPlaceholder": "Cualquier solicitud especial o preferencia para tu estancia...",
     "backToAddons": "Volver a Extras",
