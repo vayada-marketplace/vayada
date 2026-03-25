@@ -182,7 +182,6 @@ class DashboardRepository:
         counts = await EventRepository.count_all_types(hotel_slug, start, end)
 
         page_visits = counts.get("page_visit", 0)
-        searched = counts.get("searched_dates", 0)
         viewed_room = counts.get("viewed_room", 0)
         started = counts.get("started_booking", 0)
         completed = counts.get("completed_booking", 0)
@@ -190,7 +189,6 @@ class DashboardRepository:
         if page_visits == 0:
             return {"steps": [
                 {"label": "Page visits", "value": 0, "percentage": 0},
-                {"label": "Searched dates", "value": 0, "percentage": 0},
                 {"label": "Viewed a room", "value": 0, "percentage": 0},
                 {"label": "Started booking", "value": 0, "percentage": 0},
                 {"label": "Completed booking", "value": 0, "percentage": 0},
@@ -198,7 +196,6 @@ class DashboardRepository:
 
         return {"steps": [
             {"label": "Page visits", "value": page_visits, "percentage": 100},
-            {"label": "Searched dates", "value": searched, "percentage": round(searched / page_visits * 100, 1)},
             {"label": "Viewed a room", "value": viewed_room, "percentage": round(viewed_room / page_visits * 100, 1)},
             {"label": "Started booking", "value": started, "percentage": round(started / page_visits * 100, 1)},
             {"label": "Completed booking", "value": completed, "percentage": round(completed / page_visits * 100, 1)},
