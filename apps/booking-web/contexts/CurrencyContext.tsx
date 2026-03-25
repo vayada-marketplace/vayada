@@ -46,21 +46,35 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     }
   }, [hotel])
 
-  // Fetch exchange rates
+  // Fetch exchange rates with retry
   useEffect(() => {
     if (!baseCurrency) return
-    setLoading(true)
-    apiClient
-      .get<{ base: string; rates: Record<string, number> }>(
-        `/api/exchange-rates?base=${baseCurrency}`
-      )
-      .then((data) => {
-        setRates(data.rates)
-        setLoading(false)
-      })
-      .catch(() => {
-        setLoading(false)
-      })
+    let cancelled = false
+
+    const fetchRates = async () => {
+      setLoading(true)
+      const maxRetries = 3
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const data = await apiClient.get<{ base: string; rates: Record<string, number> }>(
+            `/api/exchange-rates?base=${baseCurrency}`
+          )
+          if (!cancelled) {
+            setRates(data.rates)
+            setLoading(false)
+          }
+          return
+        } catch {
+          if (attempt < maxRetries - 1) {
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+          }
+        }
+      }
+      if (!cancelled) setLoading(false)
+    }
+
+    fetchRates()
+    return () => { cancelled = true }
   }, [baseCurrency])
 
   const setSelectedCurrency = useCallback((currency: string) => {
@@ -77,29 +91,37 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       let amountInBase = amount
       if (fromCurrency !== baseCurrency) {
         const fromRate = rates[fromCurrency]
-        if (fromRate) {
-          amountInBase = amount / fromRate
-        }
+        if (!fromRate) return amount
+        amountInBase = amount / fromRate
       }
       if (selectedCurrency === baseCurrency) return amountInBase
       const toRate = rates[selectedCurrency]
-      if (toRate) return amountInBase * toRate
-      return amount
+      if (!toRate) return amount
+      return amountInBase * toRate
     },
     [selectedCurrency, baseCurrency, rates]
   )
 
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
-      const converted = convertPrice(amount, fromCurrency)
+      // Check if we can actually perform the conversion
+      let canConvert = true
+      if (fromCurrency !== selectedCurrency) {
+        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false
+        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false
+      }
+
+      const displayCurrency = canConvert ? selectedCurrency : fromCurrency
+      const displayAmount = canConvert ? convertPrice(amount, fromCurrency) : amount
+
       return new Intl.NumberFormat('en', {
         style: 'currency',
-        currency: selectedCurrency,
+        currency: displayCurrency,
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-      }).format(converted)
+      }).format(displayAmount)
     },
-    [convertPrice, selectedCurrency]
+    [convertPrice, selectedCurrency, baseCurrency, rates]
   )
 
   return (
