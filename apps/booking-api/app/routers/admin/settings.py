@@ -235,7 +235,7 @@ async def update_property_settings(
                     weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
                     social_instagram=data.instagram or '',
                     social_facebook=data.facebook or '',
-                    social_twitter=data.twitter or '',
+                    social_tiktok=data.tiktok or '',
                     social_youtube=data.youtube or '',
                 )
             except asyncpg.UniqueViolationError:

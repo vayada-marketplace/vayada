@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS booking_hotels (
     -- Social Links
     social_facebook TEXT,
     social_instagram TEXT,
-    social_twitter TEXT,
+    social_tiktok TEXT,
     social_youtube TEXT,
 
     -- Branding

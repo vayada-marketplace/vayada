@@ -101,11 +101,11 @@ class BookingHotelRepository:
         weekly_reports: bool = False,
         social_instagram: str = '',
         social_facebook: str = '',
-        social_twitter: str = '',
+        social_tiktok: str = '',
         social_youtube: str = '',
     ) -> dict:
         query = """
-            INSERT INTO booking_hotels (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports, social_instagram, social_facebook, social_twitter, social_youtube)
+            INSERT INTO booking_hotels (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports, social_instagram, social_facebook, social_tiktok, social_youtube)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING *
         """
@@ -115,7 +115,7 @@ class BookingHotelRepository:
             timezone, currency, json.dumps(supported_currencies or []),
             json.dumps(supported_languages), user_id,
             email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
-            social_instagram, social_facebook, social_twitter, social_youtube,
+            social_instagram, social_facebook, social_tiktok, social_youtube,
         )
         return dict(row)
 
