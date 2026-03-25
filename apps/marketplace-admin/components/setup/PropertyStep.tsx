@@ -43,6 +43,8 @@ interface PropertyStepProps {
   whatsapp: string; setWhatsapp: (v: string) => void
   instagram: string; setInstagram: (v: string) => void
   facebook: string; setFacebook: (v: string) => void
+  twitter: string; setTwitter: (v: string) => void
+  youtube: string; setYoutube: (v: string) => void
   currency: string; setCurrency: (v: string) => void
   defaultLanguage: string; setDefaultLanguage: (v: string) => void
   supportedCurrencies: string[]; setSupportedCurrencies: (v: string[]) => void
@@ -263,6 +265,8 @@ export default function PropertyStep({
   whatsapp, setWhatsapp,
   instagram, setInstagram,
   facebook, setFacebook,
+  twitter, setTwitter,
+  youtube, setYoutube,
   currency, setCurrency,
   defaultLanguage, setDefaultLanguage,
   supportedCurrencies, setSupportedCurrencies,
@@ -393,44 +397,81 @@ export default function PropertyStep({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="flex items-center gap-1 text-[12px] text-gray-800 mb-1">
-                <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-                </svg>
-                <span className="font-semibold">WhatsApp</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
-              </label>
-              <input
-                type="tel"
-                value={whatsapp}
-                onChange={(e) => setWhatsapp(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
-                placeholder="+62 812 ..."
-              />
-            </div>
+          <div>
+            <label className="flex items-center gap-1 text-[12px] text-gray-800 mb-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+              </svg>
+              <span className="font-semibold">WhatsApp</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+            </label>
+            <input
+              type="tel"
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+              placeholder="+62 812 ..."
+            />
+          </div>
+        </div>
+
+        {/* Social Media */}
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-5 space-y-4 mb-5">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+            </svg>
+            <h3 className="text-[13px] font-bold text-gray-900">Social Media</h3>
+            <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+          </div>
+          <p className="text-[11px] text-gray-400">Links shown in your booking site footer</p>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] text-gray-800 mb-1">
-                <span className="font-semibold">Instagram</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                <span className="font-semibold">Instagram</span>
               </label>
               <input
                 type="text"
                 value={instagram}
                 onChange={(e) => setInstagram(e.target.value)}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
-                placeholder="@yourproperty"
+                placeholder="https://instagram.com/yourhotel"
               />
             </div>
             <div>
               <label className="block text-[12px] text-gray-800 mb-1">
-                <span className="font-semibold">Facebook</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                <span className="font-semibold">Facebook</span>
               </label>
               <input
                 type="text"
                 value={facebook}
                 onChange={(e) => setFacebook(e.target.value)}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
-                placeholder="facebook.com/yourproperty"
+                placeholder="https://facebook.com/yourhotel"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-gray-800 mb-1">
+                <span className="font-semibold">Twitter / X</span>
+              </label>
+              <input
+                type="text"
+                value={twitter}
+                onChange={(e) => setTwitter(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="https://x.com/yourhotel"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-gray-800 mb-1">
+                <span className="font-semibold">YouTube</span>
+              </label>
+              <input
+                type="text"
+                value={youtube}
+                onChange={(e) => setYoutube(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
+                placeholder="https://youtube.com/@yourhotel"
               />
             </div>
           </div>
