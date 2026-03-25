@@ -1,8 +1,44 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { bookingsService, PaymentSettings, CancellationPolicy } from '@/services/bookings'
 import { customDomainService, CustomDomainStatus } from '@/services/custom-domain'
+import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
+
+const CURRENCY_OPTIONS = [
+  { code: 'AUD', name: 'Australian Dollar', flag: '🇦🇺' },
+  { code: 'BRL', name: 'Brazilian Real', flag: '🇧🇷' },
+  { code: 'GBP', name: 'British Pound', flag: '🇬🇧' },
+  { code: 'BGN', name: 'Bulgarian Lev', flag: '🇧🇬' },
+  { code: 'CAD', name: 'Canadian Dollar', flag: '🇨🇦' },
+  { code: 'CNY', name: 'Chinese Yuan', flag: '🇨🇳' },
+  { code: 'HRK', name: 'Croatian Kuna', flag: '🇭🇷' },
+  { code: 'CZK', name: 'Czech Koruna', flag: '🇨🇿' },
+  { code: 'DKK', name: 'Danish Krone', flag: '🇩🇰' },
+  { code: 'EUR', name: 'Euro', flag: '🇪🇺' },
+  { code: 'HKD', name: 'Hong Kong Dollar', flag: '🇭🇰' },
+  { code: 'HUF', name: 'Hungarian Forint', flag: '🇭🇺' },
+  { code: 'INR', name: 'Indian Rupee', flag: '🇮🇳' },
+  { code: 'IDR', name: 'Indonesian Rupiah', flag: '🇮🇩' },
+  { code: 'JPY', name: 'Japanese Yen', flag: '🇯🇵' },
+  { code: 'KRW', name: 'South Korean Won', flag: '🇰🇷' },
+  { code: 'MXN', name: 'Mexican Peso', flag: '🇲🇽' },
+  { code: 'MYR', name: 'Malaysian Ringgit', flag: '🇲🇾' },
+  { code: 'NZD', name: 'New Zealand Dollar', flag: '🇳🇿' },
+  { code: 'NOK', name: 'Norwegian Krone', flag: '🇳🇴' },
+  { code: 'PHP', name: 'Philippine Peso', flag: '🇵🇭' },
+  { code: 'PLN', name: 'Polish Zloty', flag: '🇵🇱' },
+  { code: 'RON', name: 'Romanian Leu', flag: '🇷🇴' },
+  { code: 'RUB', name: 'Russian Ruble', flag: '🇷🇺' },
+  { code: 'SGD', name: 'Singapore Dollar', flag: '🇸🇬' },
+  { code: 'SEK', name: 'Swedish Krona', flag: '🇸🇪' },
+  { code: 'CHF', name: 'Swiss Franc', flag: '🇨🇭' },
+  { code: 'THB', name: 'Thai Baht', flag: '🇹🇭' },
+  { code: 'TRY', name: 'Turkish Lira', flag: '🇹🇷' },
+  { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
+  { code: 'USD', name: 'US Dollar', flag: '🇺🇸' },
+  { code: 'VND', name: 'Vietnamese Dong', flag: '🇻🇳' },
+]
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
@@ -18,6 +54,21 @@ export default function SettingsPage() {
   // Currency
   const [currency, setCurrency] = useState('EUR')
   const [savingCurrency, setSavingCurrency] = useState(false)
+  const [currencyOpen, setCurrencyOpen] = useState(false)
+  const [currencySearch, setCurrencySearch] = useState('')
+  const currencyRef = useRef<HTMLDivElement>(null)
+  const currencySearchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (currencyRef.current && !currencyRef.current.contains(e.target as Node)) {
+        setCurrencyOpen(false)
+        setCurrencySearch('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   // Payment settings
   const [feeType, setFeeType] = useState('percentage')
@@ -228,27 +279,66 @@ export default function SettingsPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">Currency</h2>
           <p className="text-xs text-gray-500 mb-4">Choose the display currency for prices across your dashboard.</p>
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <option value="EUR">EUR — Euro (€)</option>
-            <option value="USD">USD — US Dollar ($)</option>
-            <option value="GBP">GBP — British Pound (£)</option>
-            <option value="CHF">CHF — Swiss Franc</option>
-            <option value="IDR">IDR — Indonesian Rupiah (Rp)</option>
-            <option value="THB">THB — Thai Baht (฿)</option>
-            <option value="AUD">AUD — Australian Dollar (A$)</option>
-            <option value="SGD">SGD — Singapore Dollar (S$)</option>
-            <option value="JPY">JPY — Japanese Yen (¥)</option>
-            <option value="MYR">MYR — Malaysian Ringgit</option>
-            <option value="PHP">PHP — Philippine Peso</option>
-            <option value="VND">VND — Vietnamese Dong</option>
-            <option value="INR">INR — Indian Rupee</option>
-            <option value="KRW">KRW — South Korean Won</option>
-            <option value="NZD">NZD — New Zealand Dollar</option>
-          </select>
+          <div ref={currencyRef} className="relative w-full max-w-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setCurrencyOpen(!currencyOpen)
+                setCurrencySearch('')
+                setTimeout(() => currencySearchRef.current?.focus(), 0)
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+            >
+              <span>
+                {(() => { const sel = CURRENCY_OPTIONS.find(c => c.code === currency); return sel ? `${sel.flag} ${sel.name} (${sel.code})` : currency })()}
+              </span>
+              <svg className={`w-4 h-4 text-gray-400 transition-transform ${currencyOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {currencyOpen && (
+              <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg">
+                <div className="p-2 border-b border-gray-100">
+                  <input
+                    ref={currencySearchRef}
+                    type="text"
+                    value={currencySearch}
+                    onChange={(e) => setCurrencySearch(e.target.value)}
+                    placeholder="Search currency..."
+                    className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {CURRENCY_OPTIONS
+                    .filter(c => {
+                      const q = currencySearch.toLowerCase()
+                      return !q || c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+                    })
+                    .map(opt => (
+                      <button
+                        key={opt.code}
+                        type="button"
+                        onClick={() => { setCurrency(opt.code); setCurrencyOpen(false); setCurrencySearch('') }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${opt.code === currency ? 'bg-gray-50 font-medium' : ''}`}
+                      >
+                        {opt.code === currency && (
+                          <CheckIcon className="w-4 h-4 text-gray-700 flex-shrink-0" />
+                        )}
+                        {opt.code !== currency && <span className="w-4 flex-shrink-0" />}
+                        <span>{opt.flag} {opt.name} ({opt.code})</span>
+                      </button>
+                    ))
+                  }
+                  {CURRENCY_OPTIONS.filter(c => {
+                    const q = currencySearch.toLowerCase()
+                    return !q || c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+                  }).length === 0 && (
+                    <p className="px-3 py-2 text-sm text-gray-400">No currencies found</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={saveCurrency}
             disabled={savingCurrency}
