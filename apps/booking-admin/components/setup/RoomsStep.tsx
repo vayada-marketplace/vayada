@@ -2,6 +2,7 @@
 
 import { RefObject, useState } from 'react'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { getCurrencySymbol } from '@/lib/utils'
 
 export interface RoomType {
   name: string
@@ -673,7 +674,7 @@ export default function RoomsStep({
                               </td>
                               <td className="py-2.5">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[11px] text-gray-400">$</span>
+                                  <span className="text-[11px] text-gray-400">{getCurrencySymbol(currency || 'USD')}</span>
                                   <input
                                     type="number"
                                     value={season.rate}
@@ -906,8 +907,8 @@ export default function RoomsStep({
                             {fromDate ? fromDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'} &ndash; {toDate ? toDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'}
                           </span>
                           <span className="text-gray-400">&middot;</span>
-                          <span className="font-bold text-gray-900">${flexRate}/night</span>
-                          {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="text-gray-400">NR: ${nrRate}</span>}
+                          <span className="font-bold text-gray-900">{getCurrencySymbol(currency || 'USD')}{flexRate}/night</span>
+                          {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="text-gray-400">NR: {getCurrencySymbol(currency || 'USD')}{nrRate}</span>}
                         </div>
                       )
                     })}

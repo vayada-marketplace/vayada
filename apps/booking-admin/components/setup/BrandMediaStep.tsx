@@ -3,6 +3,7 @@
 import { RefObject } from 'react'
 import { PhotoIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
+import { getCurrencySymbol } from '@/lib/utils'
 
 interface BrandMediaStepProps {
   heroImage: string; setHeroImage: (v: string) => void
@@ -374,7 +375,7 @@ export default function BrandMediaStep({
                         <div className="flex items-center justify-between">
                           <p className="text-[9px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Flexible Rate</p>
                           <p className="text-[11px] font-bold" style={{ color: primaryColor, fontFamily: currentFont.bodyFamily }}>
-                            {currency} 120
+                            {getCurrencySymbol(currency || 'USD')}120
                           </p>
                         </div>
                       </div>

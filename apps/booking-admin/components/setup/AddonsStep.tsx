@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { ToggleSwitch } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
+import { getCurrencySymbol } from '@/lib/utils'
 
 const CATEGORIES = [
   { value: 'transport', label: 'Transport' },
@@ -130,7 +131,7 @@ export default function AddonsStep({
     setShowModal(false)
   }
 
-  const currencySymbol = currency === 'EUR' ? '\u20AC' : currency === 'USD' ? '$' : currency === 'GBP' ? '\u00A3' : currency + ' '
+  const currencySymbol = getCurrencySymbol(currency || 'USD')
 
   return (
     <div className="flex-1 overflow-auto">
