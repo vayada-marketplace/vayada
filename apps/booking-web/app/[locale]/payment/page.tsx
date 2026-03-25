@@ -25,6 +25,7 @@ interface GuestDetails {
   specialRequests: string
   referralCode?: string
   addonIds?: string[]
+  addonQuantities?: Record<string, number>
 }
 
 function CardPaymentForm({
@@ -102,7 +103,8 @@ function PaymentPageContent() {
 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
-  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights)
+  const addonQuantities = guestDetails?.addonQuantities || {}
+  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights, addonQuantities)
   const grandTotal = roomTotal + addonTotal
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
@@ -154,6 +156,7 @@ function PaymentPageContent() {
         paymentMethod: isNonRefundable ? 'card' : paymentMethod,
         rateType,
         addonIds: selectedAddonIds,
+        addonQuantities,
       })
 
       const booking = result.booking
@@ -193,6 +196,7 @@ function PaymentPageContent() {
           roomTotal={roomTotal}
           addons={addons}
           selectedAddonIds={selectedAddonIds}
+          addonQuantities={addonQuantities}
           addonTotal={addonTotal}
           grandTotal={grandTotal}
           guestDetails={guestDetails}
@@ -433,7 +437,7 @@ function PaymentPageContent() {
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   let unitPrice = addon.price
                   if (addon.perPerson) unitPrice *= adultsParam
-                  if (addon.perNight) unitPrice *= nights
+                  if (addon.perNight) unitPrice *= (addonQuantities[addon.id] ?? nights)
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}</span>
@@ -475,6 +479,7 @@ function StripePaymentPage({
   roomTotal,
   addons,
   selectedAddonIds,
+  addonQuantities,
   addonTotal,
   grandTotal,
   guestDetails,
@@ -561,7 +566,7 @@ function StripePaymentPage({
             {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
               let unitPrice = addon.price
               if (addon.perPerson) unitPrice *= adults
-              if (addon.perNight) unitPrice *= nights
+              if (addon.perNight) unitPrice *= (addonQuantities?.[addon.id] ?? nights)
               return (
                 <div key={addon.id} className="flex justify-between text-sm">
                   <span className="text-gray-500">{addon.name}</span>

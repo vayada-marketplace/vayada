@@ -13,13 +13,14 @@ export function calculateAddonTotal(
   selectedIds: string[],
   adults: number,
   nights: number,
+  quantities?: Record<string, number>,
 ): number {
   let total = 0
   for (const addon of addons) {
     if (!selectedIds.includes(addon.id)) continue
     let price = addon.price
     if (addon.perPerson) price *= adults
-    if (addon.perNight) price *= nights
+    if (addon.perNight) price *= (quantities?.[addon.id] ?? nights)
     total += price
   }
   return Math.round(total * 100) / 100
