@@ -538,36 +538,42 @@ export default function RoomTypeForm({
 
                 <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
                   {operatingPeriods.map((period, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <input
-                        type="date"
-                        value={period.from}
-                        onChange={(e) => {
-                          const updated = [...operatingPeriods]
-                          updated[idx] = { ...updated[idx], from: e.target.value }
-                          setOperatingPeriods(updated)
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="text-[11px] text-gray-400">to</span>
-                      <input
-                        type="date"
-                        value={period.to}
-                        onChange={(e) => {
-                          const updated = [...operatingPeriods]
-                          updated[idx] = { ...updated[idx], to: e.target.value }
-                          setOperatingPeriods(updated)
-                        }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      {operatingPeriods.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
-                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                        >
-                          <XMarkIcon className="w-3.5 h-3.5" />
-                        </button>
+                    <div key={idx}>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="date"
+                          value={period.from}
+                          onChange={(e) => {
+                            const updated = [...operatingPeriods]
+                            updated[idx] = { ...updated[idx], from: e.target.value }
+                            setOperatingPeriods(updated)
+                          }}
+                          className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        <span className="text-[11px] text-gray-400">to</span>
+                        <input
+                          type="date"
+                          value={period.to}
+                          min={period.from || undefined}
+                          onChange={(e) => {
+                            const updated = [...operatingPeriods]
+                            updated[idx] = { ...updated[idx], to: e.target.value }
+                            setOperatingPeriods(updated)
+                          }}
+                          className={`flex-1 px-3 py-2 bg-white border rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${period.from && period.to && period.to < period.from ? 'border-red-400' : 'border-gray-200'}`}
+                        />
+                        {operatingPeriods.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setOperatingPeriods(operatingPeriods.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {period.from && period.to && period.to < period.from && (
+                        <p className="ml-0 mt-1 text-[10px] text-red-500">End date must be after start date</p>
                       )}
                     </div>
                   ))}
@@ -1228,7 +1234,7 @@ export default function RoomTypeForm({
         </Link>
         <button
           type="submit"
-          disabled={saving || overlappingSeasonIndices.size > 0}
+          disabled={saving || overlappingSeasonIndices.size > 0 || operatingPeriods.some(p => p.from && p.to && p.to < p.from)}
           className="px-6 py-2 bg-primary-600 text-white text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : submitLabel}
