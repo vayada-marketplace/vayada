@@ -26,6 +26,7 @@ export interface RoomType {
   isActive: boolean
   sortOrder: number
   monthlyRates: Record<string, MonthlyRate>
+  dailyRates: Record<string, number>
   operatingPeriods: { from: string; to: string }[]
   seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
   weekendSurcharge: string
@@ -56,6 +57,7 @@ export interface RoomTypeCreate {
   isActive?: boolean
   sortOrder?: number
   monthlyRates?: Record<string, MonthlyRate>
+  dailyRates?: Record<string, number>
   operatingPeriods?: { from: string; to: string }[]
   seasons?: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
   weekendSurcharge?: string

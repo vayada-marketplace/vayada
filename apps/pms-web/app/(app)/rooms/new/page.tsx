@@ -20,7 +20,7 @@ export default function NewRoomPage() {
     size: 0,
     baseRate: 0,
     nonRefundableRate: null,
-    currency: 'USD',
+    currency: 'EUR',
     bedType: '',
     totalRooms: 2,
     amenities: [],
@@ -29,6 +29,7 @@ export default function NewRoomPage() {
     isActive: true,
     sortOrder: 0,
     monthlyRates: {},
+    dailyRates: {},
   })
 
   // Inherit currency from payment settings (authoritative source)
