@@ -91,7 +91,6 @@ export default function SetupPage() {
   // Step 6: Policies & Operations
   const [checkInTime, setCheckInTime] = useState('14:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
-  const [minimumStay, setMinimumStay] = useState(1)
   const [payAtHotel, setPayAtHotel] = useState(true)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
@@ -244,7 +243,6 @@ export default function SetupPage() {
         supported_languages: supportedLanguages,
         check_in_time: checkInTime,
         check_out_time: checkOutTime,
-        minimum_stay: minimumStay,
         pay_at_property_enabled: payAtHotel,
         online_card_payment: onlineCardPayment,
         bank_transfer: bankTransfer,
@@ -517,7 +515,6 @@ export default function SetupPage() {
         const pol = data.policies
         if (pol.check_in_time) setCheckInTime(pol.check_in_time)
         if (pol.check_out_time) setCheckOutTime(pol.check_out_time)
-        if (pol.minimum_stay) setMinimumStay(pol.minimum_stay)
         if (pol.pay_at_property !== undefined) setPayAtHotel(pol.pay_at_property)
         if (pol.online_card_payment !== undefined) setOnlineCardPayment(pol.online_card_payment)
         if (pol.bank_transfer !== undefined) setBankTransfer(pol.bank_transfer)
@@ -749,7 +746,6 @@ export default function SetupPage() {
         <PoliciesStep
           checkInTime={checkInTime} setCheckInTime={setCheckInTime}
           checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
-          minimumStay={minimumStay} setMinimumStay={setMinimumStay}
           payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
           payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
