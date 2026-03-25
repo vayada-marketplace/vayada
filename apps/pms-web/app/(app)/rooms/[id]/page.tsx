@@ -46,6 +46,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           weekendSurcharge: r.weekendSurcharge || '+0%',
           cancellationPolicy: r.cancellationPolicy || 'Free until 7 days before',
           flexibleRateEnabled: r.flexibleRateEnabled ?? true,
+          nonRefundableEnabled: r.nonRefundableEnabled ?? false,
           nonRefundableDiscount: r.nonRefundableDiscount ?? 10,
         })
       })
