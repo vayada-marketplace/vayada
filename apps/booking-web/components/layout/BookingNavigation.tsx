@@ -513,6 +513,10 @@ export default function BookingNavigation() {
   const [langOpen, setLangOpen] = useState(false)
   const [currOpen, setCurrOpen] = useState(false)
 
+  const availableLanguages = useMemo(() =>
+    LANGUAGES.filter((l) => hotel?.supportedLanguages?.includes(l.code)),
+    [hotel?.supportedLanguages]
+  )
   const selectedLangLabel = LANGUAGES.find((l) => l.code === locale)?.label.slice(0, 2).toUpperCase() || 'EN'
 
   const currencyItems = useMemo(() => {
@@ -574,6 +578,7 @@ export default function BookingNavigation() {
               </button>
 
               {/* Language */}
+              {availableLanguages.length > 1 && (
               <div className="relative">
                 <button
                   onClick={() => { closeAll(); setLangOpen(!langOpen) }}
@@ -590,11 +595,12 @@ export default function BookingNavigation() {
                 <Dropdown
                   open={langOpen}
                   onClose={() => setLangOpen(false)}
-                  items={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
+                  items={availableLanguages.map((l) => ({ value: l.code, label: l.label }))}
                   selected={locale}
                   onSelect={handleLanguageChange}
                 />
               </div>
+              )}
 
               {/* Currency */}
               {currencyItems.length > 1 && (
