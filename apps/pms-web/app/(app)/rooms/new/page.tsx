@@ -48,6 +48,10 @@ export default function NewRoomPage() {
       setError('Name is required')
       return
     }
+    if (form.seasons?.some(s => !s.rate || Number(s.rate) <= 0)) {
+      setError('Every season must have a rate greater than 0')
+      return
+    }
     setSaving(true)
     setError('')
     try {
