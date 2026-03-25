@@ -24,6 +24,7 @@ class PropertySettingsResponse(BaseModel):
     new_booking_alerts: bool
     payment_alerts: bool
     weekly_reports: bool
+    refer_a_guest_enabled: bool
     instagram: str
     facebook: str
     twitter: str
@@ -61,6 +62,7 @@ class PropertySettingsUpdate(BaseModel):
     new_booking_alerts: Optional[bool] = None
     payment_alerts: Optional[bool] = None
     weekly_reports: Optional[bool] = None
+    refer_a_guest_enabled: Optional[bool] = None
     instagram: Optional[str] = None
     facebook: Optional[str] = None
     twitter: Optional[str] = None

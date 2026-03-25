@@ -55,6 +55,7 @@ class HotelResponse(BaseModel):
     custom_filters: Dict[str, str] = {}
     branding: Optional[HotelBranding] = None
     supported_languages: List[str] = ["en"]
+    refer_a_guest_enabled: bool = False
 
 
 class RoomTypeResponse(BaseModel):

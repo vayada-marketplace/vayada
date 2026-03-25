@@ -79,6 +79,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         social_links=social_links,
         branding=branding,
         supported_languages=parse_json(row.get("supported_languages"), default=["en"]),
+        refer_a_guest_enabled=row.get("refer_a_guest_enabled", False),
     )
 
 
