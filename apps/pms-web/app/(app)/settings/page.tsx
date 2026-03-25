@@ -40,6 +40,8 @@ const CURRENCY_OPTIONS = [
   { code: 'VND', name: 'Vietnamese Dong', flag: '🇻🇳' },
 ]
 
+const CURRENCIES = CURRENCY_OPTIONS.map(c => ({ value: c.code, label: `${c.flag} ${c.name} (${c.code})` }))
+
 function CurrencySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
