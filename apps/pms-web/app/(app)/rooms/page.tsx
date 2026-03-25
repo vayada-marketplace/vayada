@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
+import { formatCurrency } from '@/lib/utils'
 
 const CATEGORY_STYLES: Record<string, string> = {
   suite: 'bg-blue-50 text-blue-600 border border-blue-200',
@@ -29,11 +30,6 @@ function getCategoryLabel(name: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)
 }
 
-function formatCurrency(amount: number, currency: string): string {
-  if (currency === 'EUR') return `\u20AC${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-  if (currency === 'USD') return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-  return `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-}
 
 function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void }) {
   const [expanded, setExpanded] = useState(false)

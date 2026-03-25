@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
@@ -19,7 +19,7 @@ export default function NewRoomPage() {
     size: 0,
     baseRate: 0,
     nonRefundableRate: null,
-    currency: 'EUR',
+    currency: 'USD',
     bedType: '',
     totalRooms: 2,
     amenities: [],
@@ -29,6 +29,15 @@ export default function NewRoomPage() {
     sortOrder: 0,
     monthlyRates: {},
   })
+
+  // Inherit currency from existing rooms so new rooms match the property's currency
+  useEffect(() => {
+    roomsService.list().then((rooms) => {
+      if (rooms.length > 0 && rooms[0].currency) {
+        setForm((prev) => ({ ...prev, currency: rooms[0].currency }))
+      }
+    }).catch(() => {})
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
