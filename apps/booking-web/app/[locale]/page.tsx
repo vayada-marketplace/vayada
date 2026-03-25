@@ -114,18 +114,23 @@ export default function HomePage() {
 
   const nights = calculateNights(checkIn, checkOut)
 
-  const FILTERS = (hotel?.bookingFilters || []).map((key) => {
-    // Use custom filter label if it exists, otherwise use i18n translation
-    if (hotel?.customFilters?.[key]) {
-      return hotel.customFilters[key]
-    }
-    return t(key)
-  })
+  // Build filter key→label map for display
+  const FILTER_ENTRIES = (hotel?.bookingFilters || []).map((key) => ({
+    key,
+    label: hotel?.customFilters?.[key] || t(key),
+  }))
+  const FILTERS = FILTER_ENTRIES.map((f) => f.label)
 
+  // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
   const filteredRooms = activeFilters.length === 0
     ? rooms
     : rooms.filter((room) =>
         activeFilters.every((label) => {
+          const entry = FILTER_ENTRIES.find((f) => f.label === label)
+          if (entry && hotel?.filterRooms?.[entry.key]?.length) {
+            return hotel.filterRooms[entry.key].includes(room.id)
+          }
+          // Fallback: text match against features/amenities
           const lower = label.toLowerCase()
           return (
             room.features.some((f) => f.toLowerCase().includes(lower)) ||
