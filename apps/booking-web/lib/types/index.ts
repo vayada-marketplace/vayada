@@ -134,7 +134,12 @@ export interface Addon {
   currency: string
   category: string
   image: string
+  images?: string[]
   duration?: string
   perPerson?: boolean
   perNight?: boolean
+  location?: string
+  maxGuests?: string
+  highlights?: string[]
+  includedItems?: string[]
 }
