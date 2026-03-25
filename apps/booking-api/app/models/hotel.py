@@ -18,7 +18,7 @@ class HotelSocialLinks(BaseModel):
 
     facebook: Optional[str] = None
     instagram: Optional[str] = None
-    twitter: Optional[str] = None
+    tiktok: Optional[str] = None
     youtube: Optional[str] = None
 
 

@@ -25,7 +25,7 @@ class PropertySettingsResponse(BaseModel):
     weekly_reports: bool
     instagram: str
     facebook: str
-    twitter: str
+    tiktok: str
     youtube: str
     billing_active_plan: str
     billing_commission_rate: float
@@ -61,7 +61,7 @@ class PropertySettingsUpdate(BaseModel):
     weekly_reports: Optional[bool] = None
     instagram: Optional[str] = None
     facebook: Optional[str] = None
-    twitter: Optional[str] = None
+    tiktok: Optional[str] = None
     youtube: Optional[str] = None
     billing_active_plan: Optional[str] = None
     billing_commission_rate: Optional[float] = None

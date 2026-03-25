@@ -40,11 +40,11 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     )
 
     social_links = None
-    if any(row[k] for k in ["social_facebook", "social_instagram", "social_twitter", "social_youtube"]):
+    if any(row[k] for k in ["social_facebook", "social_instagram", "social_tiktok", "social_youtube"]):
         social_links = HotelSocialLinks(
             facebook=row["social_facebook"],
             instagram=row["social_instagram"],
-            twitter=row["social_twitter"],
+            tiktok=row["social_tiktok"],
             youtube=row["social_youtube"],
         )
 
