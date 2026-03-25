@@ -117,12 +117,14 @@ class TestPublicRooms:
     async def test_rooms_with_non_refundable_rate(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
+        # base_rate=150, default discount=10% → NR rate = 150 * 0.9 = 135
         await create_test_room_type(str(hotel["id"]), name="NR Room", non_refundable_rate=120.0, non_refundable_enabled=True)
 
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
         rooms = resp.json()
         assert len(rooms) == 1
-        assert rooms[0]["nonRefundableRate"] == 120.0
+        # When flexible is enabled, NR rate is calculated from discount (10% off base_rate=150)
+        assert rooms[0]["nonRefundableRate"] == 135.0
 
     async def test_rooms_without_non_refundable_rate(self, client, cleanup_database):
         user = await create_test_user()
