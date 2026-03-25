@@ -22,3 +22,6 @@
 [submodule "pms/vayada-pms-frontend"]
 	path = pms/vayada-pms-frontend
 	url = https://github.com/FlamurMaliqi/vayada-pms-frontend.git
+[submodule "affiliate/vayada-affiliate-dashboard"]
+	path = affiliate/vayada-affiliate-dashboard
+	url = https://github.com/FlamurMaliqi/vayada-affiliate-dashboard.git

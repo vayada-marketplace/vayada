@@ -15,6 +15,7 @@
 #   3002  Booking engine frontend
 #   3003  Booking engine admin frontend
 #   3004  PMS frontend
+#   3005  Affiliate dashboard frontend
 #   8000  Marketplace backend API
 #   8001  Booking engine backend API
 #   8002  PMS backend API
@@ -358,6 +359,25 @@ services:
       - /app/.next
     depends_on:
       - pms-backend
+    restart: unless-stopped
+    networks:
+      - vayada-network
+
+  # ─── Affiliate Dashboard Frontend ────────────────────────────────────
+
+  affiliate-frontend:
+    build:
+      context: ./affiliate/vayada-affiliate-dashboard
+      dockerfile: Dockerfile.dev
+    container_name: vayada-affiliate-frontend
+    ports:
+      - "3005:3005"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./affiliate/vayada-affiliate-dashboard:/app
+      - /app/node_modules
+      - /app/.next
     restart: unless-stopped
     networks:
       - vayada-network
