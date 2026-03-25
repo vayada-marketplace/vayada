@@ -4,6 +4,17 @@ from typing import Optional, List, Dict
 MAX_ROOM_SIZE = 1000
 
 
+def _validate_operating_periods(periods: list) -> list:
+    """Raise ValueError if any operating period has end date before start date."""
+    for p in periods:
+        if p.get("from") and p.get("to") and p["to"] < p["from"]:
+            raise ValueError(
+                f"Operating period end date must be on or after start date: "
+                f"{p['from']} – {p['to']}"
+            )
+    return periods
+
+
 def _validate_no_season_overlap(seasons: list) -> list:
     """Raise ValueError if any two seasons have overlapping date ranges."""
     for i, a in enumerate(seasons):
@@ -66,6 +77,11 @@ class RoomTypeCreate(BaseModel):
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
         return v
 
+    @field_validator("operating_periods")
+    @classmethod
+    def validate_operating_periods(cls, v: List[dict]) -> List[dict]:
+        return _validate_operating_periods(v)
+
     @field_validator("seasons")
     @classmethod
     def validate_seasons(cls, v: List[dict]) -> List[dict]:
@@ -106,6 +122,13 @@ class RoomTypeUpdate(BaseModel):
     def validate_size(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("operating_periods")
+    @classmethod
+    def validate_operating_periods(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+        if v is not None:
+            _validate_operating_periods(v)
         return v
 
     @field_validator("seasons")
