@@ -19,7 +19,6 @@ export interface PropertySettings {
   supported_languages: string[]
   check_in_time: string
   check_out_time: string
-  minimum_stay?: number
   pay_at_property_enabled: boolean
   online_card_payment?: boolean
   bank_transfer?: boolean
