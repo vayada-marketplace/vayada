@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
+import SearchModal from './SearchModal'
 
 interface DayStats {
   arrivals: number
@@ -11,6 +12,7 @@ interface DayStats {
 
 export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 })
@@ -24,6 +26,17 @@ export default function Header() {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen(prev => !prev)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   useEffect(() => {
@@ -63,14 +76,19 @@ export default function Header() {
 
       {/* Center: search */}
       <div className="flex-1 flex justify-center">
-        <div className="w-full max-w-md flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 h-8 cursor-text">
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="w-full max-w-md flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 h-8 cursor-text hover:border-gray-300 transition-colors"
+        >
           <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
-          <span className="flex-1 text-[13px] text-gray-400">Search reservations, guests, rooms...</span>
+          <span className="flex-1 text-left text-[13px] text-gray-400">Search reservations, guests, rooms...</span>
           <kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-400 leading-none">⌘K</kbd>
-        </div>
+        </button>
       </div>
+
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* Right: stats + bell + avatar */}
       <div className="flex items-center gap-3 shrink-0">
