@@ -211,7 +211,7 @@ export default function InviteCodesPage() {
     setBookingFilters(['includeBreakfast', 'freeCancellation', 'payAtHotel'])
     setRooms([createEmptyRoom()]); setActiveRoomIndex(0)
     setBenefits([])
-    setCheckInTime('15:00'); setCheckOutTime('11:00'); setMinimumStay(1)
+    setCheckInTime('15:00'); setCheckOutTime('11:00')
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
     setSpecialRequests(true); setEstimatedArrivalTime(false)
     setNumberOfGuests(false); setEnableReferAGuest(false)
