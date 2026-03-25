@@ -78,6 +78,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         contact=contact,
         social_links=social_links,
         branding=branding,
+        refer_a_guest_enabled=row.get("refer_a_guest_enabled", False),
     )
 
 

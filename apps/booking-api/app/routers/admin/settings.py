@@ -113,6 +113,7 @@ _PROPERTY_FIELD_MAP = {
     "payout_iban": "payout_iban",
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
+    "refer_a_guest_enabled": "refer_a_guest_enabled",
 }
 
 
@@ -138,6 +139,7 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         new_booking_alerts=hotel.get('new_booking_alerts', True),
         payment_alerts=hotel.get('payment_alerts', True),
         weekly_reports=hotel.get('weekly_reports', False),
+        refer_a_guest_enabled=hotel.get('refer_a_guest_enabled', False),
         instagram=hotel.get('social_instagram') or '',
         facebook=hotel.get('social_facebook') or '',
         twitter=hotel.get('social_twitter') or '',
@@ -162,7 +164,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     pay_at_property_enabled=False, pay_at_hotel_methods=['cash', 'card'],
     free_cancellation_days=7,
     email_notifications=True, new_booking_alerts=True,
-    payment_alerts=True, weekly_reports=False,
+    payment_alerts=True, weekly_reports=False, refer_a_guest_enabled=False,
     instagram='', facebook='', twitter='', youtube='',
     billing_active_plan='commission', billing_commission_rate=5,
     billing_fixed_fee=49, billing_pending_switch=None,

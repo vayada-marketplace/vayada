@@ -54,6 +54,7 @@ class HotelResponse(BaseModel):
     booking_filters: List[str] = []
     custom_filters: Dict[str, str] = {}
     branding: Optional[HotelBranding] = None
+    refer_a_guest_enabled: bool = False
 
 
 class RoomTypeResponse(BaseModel):
