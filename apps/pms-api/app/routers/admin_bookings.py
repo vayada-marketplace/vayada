@@ -143,7 +143,7 @@ async def create_admin_booking(
 @router.get("/bookings")
 async def list_bookings(
     status: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),
 ):
@@ -276,7 +276,7 @@ async def reject_booking(
 @router.get("/payouts")
 async def list_payouts(
     status: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),
 ):
