@@ -209,7 +209,7 @@ async def update_property_settings(
                     updates[db_col] = value
 
             if updates:
-                result = await BookingHotelRepository.partial_update(hotel["id"], updates)
+                result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
             else:
                 result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
         else:
