@@ -345,31 +345,3 @@ async def get_custom_domain_status(
         "ssl_status": status["ssl_status"],
         "verification_errors": status.get("verification_errors", []),
     }
-
-
-# ── Book Direct Benefits ──────────────────────────────────────────
-
-
-class BenefitsUpdate(BaseModel):
-    benefits: List[str]
-
-
-@router.get("/benefits")
-async def get_benefits(
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict | None = Depends(get_current_hotel),
-):
-    if not hotel:
-        return {"benefits": []}
-    row = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns="benefits")
-    return {"benefits": parse_json(row.get("benefits")) if row else []}
-
-
-@router.put("/benefits")
-async def update_benefits(
-    data: BenefitsUpdate,
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict = Depends(require_current_hotel),
-):
-    await BookingHotelRepository.partial_update(hotel["id"], {"benefits": data.benefits})
-    return {"benefits": data.benefits}
