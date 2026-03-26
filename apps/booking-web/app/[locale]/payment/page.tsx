@@ -14,7 +14,8 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
-import { getNonRefundableRate, calculateAddonTotal } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculateAddonTotal, calculatePromoDiscount } from '@/lib/constants/booking'
+import { hotelService } from '@/services/api/hotel'
 
 interface GuestDetails {
   roomTypeId: string
@@ -108,7 +109,23 @@ function PaymentPageContent() {
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
   const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights, addonQuantities)
-  const grandTotal = roomTotal + addonTotal
+  const promoCodeParam = searchParams.get('promoCode') || ''
+  const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
+
+  useEffect(() => {
+    if (promoCodeParam && slug) {
+      hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
+        if (res.valid) {
+          const subtotal = roomTotal + addonTotal
+          const amount = calculatePromoDiscount(subtotal, res.discountType!, res.discountValue!)
+          setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
+        }
+      }).catch(() => {})
+    }
+  }, [promoCodeParam, slug, roomTotal, addonTotal])
+
+  const discountAmount = promoDiscount?.amount ?? 0
+  const grandTotal = roomTotal + addonTotal - discountAmount
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
@@ -453,6 +470,16 @@ function PaymentPageContent() {
                   )
                 })}
               </div>
+
+              {/* Promo Discount */}
+              {promoDiscount && (
+                <div className="flex justify-between text-sm pt-2">
+                  <span className="text-primary-600 font-medium">
+                    Promo {promoCodeParam}{promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
+                  </span>
+                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</span>
+                </div>
+              )}
 
               {/* Total */}
               <div className="pt-5">
