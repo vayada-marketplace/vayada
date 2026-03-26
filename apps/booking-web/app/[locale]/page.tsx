@@ -121,11 +121,20 @@ export default function HomePage() {
 
   const nights = calculateNights(committedCheckIn, committedCheckOut)
 
-  // Build filter key→label map for display
+  // Build filter key→label map, only including filters that match at least one room
   const FILTER_ENTRIES = (hotel?.bookingFilters || []).map((key) => ({
     key,
     label: hotel?.customFilters?.[key] || t(key),
-  }))
+  })).filter(({ key, label }) => {
+    if (hotel?.filterRooms?.[key]?.length) {
+      return rooms.some((room) => hotel.filterRooms[key].includes(room.id))
+    }
+    const lower = label.toLowerCase()
+    return rooms.some((room) =>
+      room.features.some((f) => f.toLowerCase().includes(lower)) ||
+      room.amenities.some((a) => a.toLowerCase().includes(lower))
+    )
+  })
   const FILTERS = FILTER_ENTRIES.map((f) => f.label)
 
   // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
