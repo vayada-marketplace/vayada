@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Database (PMS own DB)
     DATABASE_URL: str = Field(..., description="PMS PostgreSQL connection string")
     AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
+    BOOKING_ENGINE_DATABASE_URL: str = Field("", description="Booking engine PostgreSQL connection string")
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import Database, AuthDatabase
+from app.database import Database, AuthDatabase, BookingEngineDatabase
 from app.routers.rooms import router as rooms_router
 from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
     await Database.close_pool()
     await AuthDatabase.close_pool()
+    await BookingEngineDatabase.close_pool()
 
 
 app = FastAPI(

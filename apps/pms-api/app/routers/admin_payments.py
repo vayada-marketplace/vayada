@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
+from app.database import BookingEngineDatabase
+from app.config import settings as app_settings
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 from app.models.payment import (
@@ -20,6 +22,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-payments"])
 
 
+async def _get_booking_engine_currency(user_id: str) -> str:
+    """Fetch the currency set during onboarding from the booking engine DB."""
+    if not app_settings.BOOKING_ENGINE_DATABASE_URL:
+        return "EUR"
+    try:
+        currency = await BookingEngineDatabase.fetchval(
+            "SELECT currency FROM booking_hotels WHERE user_id = $1",
+            user_id,
+        )
+        return currency or "EUR"
+    except Exception as e:
+        logger.warning("Failed to fetch currency from booking engine DB: %s", e)
+        return "EUR"
+
+
 # ── Payment Settings ──────────────────────────────────────────────
 
 
@@ -30,6 +47,12 @@ async def get_payment_settings(
     hotel_id = await get_hotel_id(user_id)
     settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+
+    # If no PMS payment settings exist yet, read currency from booking engine
+    if settings:
+        currency = settings.get("default_currency", "EUR")
+    else:
+        currency = await _get_booking_engine_currency(user_id)
 
     return {
         "paymentSettings": HotelPaymentSettings(
@@ -43,7 +66,7 @@ async def get_payment_settings(
             xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
             xendit_account_number=settings.get("xendit_account_number") if settings else None,
             xendit_account_holder_name=settings.get("xendit_account_holder_name") if settings else None,
-            default_currency=settings.get("default_currency", "EUR") if settings else "EUR",
+            default_currency=currency,
         ).model_dump(by_alias=True),
         "cancellationPolicy": CancellationPolicy(
             free_cancellation_days=policy["free_cancellation_days"] if policy else 7,
