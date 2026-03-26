@@ -126,8 +126,9 @@ function PaymentPageContent() {
 
   const discountAmount = promoDiscount?.amount ?? 0
   const grandTotal = roomTotal + addonTotal - discountAmount
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property'>('card')
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
+  const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -155,6 +156,7 @@ function PaymentPageContent() {
     if (slug) {
       bookingService.getPaymentSettings(slug).then((settings) => {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled)
+        setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false)
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
       })
     }
@@ -187,6 +189,10 @@ function PaymentPageContent() {
       if (paymentMethod === 'card' && result.clientSecret) {
         setClientSecret(result.clientSecret)
         // The Stripe form will be rendered, user confirms payment there
+      } else if (paymentMethod === 'xendit' && result.xenditInvoiceUrl) {
+        // Redirect to Xendit payment page (QRIS, e-wallets, VA)
+        sessionStorage.setItem('lastBooking', JSON.stringify(booking))
+        window.location.href = result.xenditInvoiceUrl
       } else {
         // Pay at property — redirect to confirmation
         sessionStorage.setItem('lastBooking', JSON.stringify(booking))
@@ -294,6 +300,24 @@ function PaymentPageContent() {
                   </div>
                   <p className="text-xs text-gray-500">{t('cardAuthNote') || 'An authorization hold will be placed on your card'}</p>
                 </button>
+                {xenditPaymentsEnabled && (
+                  <button
+                    onClick={() => setPaymentMethod('xendit')}
+                    className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                      paymentMethod === 'xendit'
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                      <span className="font-semibold text-sm text-gray-900">QRIS / E-Wallet / Bank Transfer</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Pay with OVO, DANA, ShopeePay, GoPay, or bank transfer</p>
+                  </button>
+                )}
                 {payAtPropertyEnabled && !isNonRefundable && (
                   <button
                     onClick={() => setPaymentMethod('pay_at_property')}
@@ -320,7 +344,7 @@ function PaymentPageContent() {
                 )}
               </div>
 
-              {/* Card info note or property info */}
+              {/* Payment method info */}
               {paymentMethod === 'card' ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
@@ -331,6 +355,12 @@ function PaymentPageContent() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
                     {t('cardNextStep') || 'You will enter your card details in the next step.'}
+                  </div>
+                </div>
+              ) : paymentMethod === 'xendit' ? (
+                <div className="space-y-3">
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+                    You will be redirected to a secure payment page where you can pay with QRIS, OVO, DANA, ShopeePay, GoPay, or bank transfer. The host will review your booking after payment is confirmed.
                   </div>
                 </div>
               ) : (
