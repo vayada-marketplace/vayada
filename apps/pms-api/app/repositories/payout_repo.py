@@ -116,6 +116,39 @@ class PayoutRepository:
         return dict(row)
 
     @staticmethod
+    async def increment_retry(payout_id: str, error: str) -> dict:
+        """Increment retry count and store the last error. Revert status to 'scheduled' for retry."""
+        row = await Database.fetchrow(
+            """
+            UPDATE payouts
+            SET retry_count = COALESCE(retry_count, 0) + 1,
+                last_error = $2,
+                status = 'scheduled',
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            payout_id,
+            error,
+        )
+        return dict(row)
+
+    @staticmethod
+    async def list_processing_xendit(older_than_minutes: int = 30) -> List[dict]:
+        """List Xendit payouts stuck in 'processing' for longer than the threshold."""
+        rows = await Database.fetch(
+            """
+            SELECT * FROM payouts
+            WHERE status = 'processing'
+              AND xendit_payout_id IS NOT NULL
+              AND updated_at < now() - make_interval(mins => $1)
+            ORDER BY updated_at
+            """,
+            older_than_minutes,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def cancel_by_booking(booking_id: str) -> None:
         await Database.execute(
             """

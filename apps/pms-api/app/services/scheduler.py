@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 
+MAX_PAYOUT_RETRIES = 3
+
 
 async def expire_pending_bookings():
     """Find and expire bookings where host hasn't responded in time."""
@@ -100,7 +102,13 @@ async def process_property_payouts():
 
         except Exception as e:
             logger.error("Failed to process payout %s: %s", payout_id, e)
-            await PayoutRepository.update_status(payout_id, "failed")
+            retry_count = payout.get("retry_count", 0) or 0
+            if retry_count < MAX_PAYOUT_RETRIES:
+                await PayoutRepository.increment_retry(payout_id, str(e))
+                logger.info("Payout %s scheduled for retry (%d/%d)", payout_id, retry_count + 1, MAX_PAYOUT_RETRIES)
+            else:
+                await PayoutRepository.update_status(payout_id, "failed")
+                logger.error("Payout %s permanently failed after %d retries", payout_id, MAX_PAYOUT_RETRIES)
 
 
 async def process_affiliate_payouts():
@@ -180,7 +188,39 @@ async def process_affiliate_payouts():
 
         except Exception as e:
             logger.error("Failed to process affiliate payout %s: %s", payout_id, e)
-            await PayoutRepository.update_status(payout_id, "failed")
+            retry_count = payout.get("retry_count", 0) or 0
+            if retry_count < MAX_PAYOUT_RETRIES:
+                await PayoutRepository.increment_retry(payout_id, str(e))
+                logger.info("Affiliate payout %s scheduled for retry (%d/%d)", payout_id, retry_count + 1, MAX_PAYOUT_RETRIES)
+            else:
+                await PayoutRepository.update_status(payout_id, "failed")
+                logger.error("Affiliate payout %s permanently failed after %d retries", payout_id, MAX_PAYOUT_RETRIES)
+
+
+async def poll_xendit_processing_payouts():
+    """Poll Xendit for payouts stuck in 'processing' in case webhooks failed."""
+    from app.services.xendit_service import XenditError
+
+    stale = await PayoutRepository.list_processing_xendit(older_than_minutes=30)
+    for payout in stale:
+        payout_id = str(payout["id"])
+        xendit_id = payout["xendit_payout_id"]
+        try:
+            result = await xendit_service.get_payout(xendit_id)
+            xendit_status = result["status"]
+
+            if xendit_status == "SUCCEEDED":
+                await PayoutRepository.update_status(payout_id, "completed", xendit_payout_id=xendit_id)
+                logger.info("Xendit poll: payout %s completed (xendit %s)", payout_id, xendit_id)
+            elif xendit_status in ("FAILED", "REVERSED"):
+                await PayoutRepository.update_status(payout_id, "failed")
+                logger.warning("Xendit poll: payout %s failed (xendit %s, status=%s)", payout_id, xendit_id, xendit_status)
+            else:
+                logger.debug("Xendit poll: payout %s still %s", payout_id, xendit_status)
+        except XenditError as e:
+            logger.error("Xendit poll error for payout %s: %s", payout_id, e)
+        except Exception as e:
+            logger.error("Unexpected error polling Xendit payout %s: %s", payout_id, e)
 
 
 async def cancel_stale_unpaid_bookings():
@@ -273,6 +313,13 @@ def setup_scheduler():
         process_affiliate_payouts,
         trigger=CronTrigger(day=1, hour=2, minute=0),
         id="process_affiliate_payouts",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        poll_xendit_processing_payouts,
+        trigger=IntervalTrigger(minutes=30),
+        id="poll_xendit_processing_payouts",
         replace_existing=True,
     )
 

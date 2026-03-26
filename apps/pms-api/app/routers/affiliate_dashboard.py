@@ -49,6 +49,9 @@ class PropertyStats(BaseModel):
     conversion_rate: float = 0.0
     payment_method: str = ""
     stripe_connect_onboarded: bool = False
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
 
 
 class DashboardStats(BaseModel):
@@ -78,6 +81,9 @@ class ProfileUpdate(BaseModel):
     payment_method: Optional[str] = None
     paypal_email: Optional[str] = None
     bank_iban: Optional[str] = None
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -105,6 +111,9 @@ def _build_property_stats(a: dict) -> PropertyStats:
         conversion_rate=conversion_rate,
         payment_method=a.get("payment_method", ""),
         stripe_connect_onboarded=a.get("stripe_connect_onboarded", False),
+        xendit_channel_code=a.get("xendit_channel_code"),
+        xendit_account_number=a.get("xendit_account_number"),
+        xendit_account_holder_name=a.get("xendit_account_holder_name"),
     )
 
 
@@ -180,13 +189,31 @@ async def update_profile(
 
     updates = {}
     if data.payment_method is not None:
-        if data.payment_method not in ("stripe", "paypal", "bank"):
+        if data.payment_method not in ("stripe", "paypal", "bank", "xendit"):
             raise HTTPException(status_code=400, detail="Invalid payment method")
         updates["payment_method"] = data.payment_method
     if data.paypal_email is not None:
         updates["paypal_email"] = data.paypal_email
     if data.bank_iban is not None:
         updates["bank_iban"] = data.bank_iban
+    if data.xendit_channel_code is not None:
+        from app.models.payment import VALID_XENDIT_CHANNEL_CODES
+        if data.xendit_channel_code not in VALID_XENDIT_CHANNEL_CODES:
+            raise HTTPException(status_code=400, detail="Invalid Xendit channel code")
+        updates["xendit_channel_code"] = data.xendit_channel_code
+    if data.xendit_account_number is not None:
+        updates["xendit_account_number"] = data.xendit_account_number
+    if data.xendit_account_holder_name is not None:
+        updates["xendit_account_holder_name"] = data.xendit_account_holder_name
+
+    # When switching to xendit, require all bank details
+    if updates.get("payment_method") == "xendit":
+        existing = affiliates[0]
+        final_code = updates.get("xendit_channel_code") or existing.get("xendit_channel_code")
+        final_number = updates.get("xendit_account_number") or existing.get("xendit_account_number")
+        final_name = updates.get("xendit_account_holder_name") or existing.get("xendit_account_holder_name")
+        if not final_code or not final_number or not final_name:
+            raise HTTPException(status_code=400, detail="All Xendit bank details are required")
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
