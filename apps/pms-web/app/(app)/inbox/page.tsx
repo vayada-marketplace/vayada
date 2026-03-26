@@ -194,7 +194,7 @@ export default function InboxPage() {
                 className={cn(
                   'px-2 py-1 text-[11px] rounded-md font-medium transition-colors',
                   statusFilter === tab.value
-                    ? 'bg-gray-900 text-white'
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:bg-gray-100'
                 )}
               >
