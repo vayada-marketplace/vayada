@@ -17,9 +17,13 @@ export default function Navbar({ userName, userInitials }: NavbarProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-4">
-            <span className="text-gray-900 font-semibold text-sm">
+            <a href="/dashboard" className="text-gray-900 font-semibold text-sm">
               Affiliate Portal
-            </span>
+            </a>
+            <div className="hidden sm:flex items-center gap-4 ml-6">
+              <a href="/dashboard" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Dashboard</a>
+              <a href="/settings" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Settings</a>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -50,6 +54,7 @@ export default function Navbar({ userName, userInitials }: NavbarProps) {
       {mobileMenuOpen && (
         <div className="sm:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-2">
           <a href="/dashboard" className="block text-sm text-gray-700 py-1.5">Dashboard</a>
+          <a href="/settings" className="block text-sm text-gray-700 py-1.5">Settings</a>
           <button
             onClick={() => authService.logout()}
             className="block text-sm text-error-600 py-1.5 w-full text-left"
