@@ -111,7 +111,7 @@ jobs:
             email text NOT NULL UNIQUE,
             password_hash text NOT NULL,
             name text NOT NULL,
-            type text NOT NULL CHECK (type = ANY (ARRAY['hotel','creator','admin'])),
+            type text NOT NULL CHECK (type = ANY (ARRAY['hotel','creator','admin','affiliate'])),
             status text NOT NULL DEFAULT 'pending' CHECK (status = ANY (ARRAY['pending','verified','rejected','suspended'])),
             avatar text,
             email_verified boolean NOT NULL DEFAULT false,
