@@ -14,18 +14,31 @@ import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate } from '@/lib/constants/booking'
 import { trackEvent } from '@/services/api/tracking'
+import { hotelService } from '@/services/api/hotel'
+
+interface AppliedPromo {
+  code: string
+  discountType: string
+  discountValue: number
+}
 
 function PromoPopover({
   open,
   onClose,
   value,
   onChange,
+  onApply,
+  loading,
+  error,
   t,
 }: {
   open: boolean
   onClose: () => void
   value: string
   onChange: (v: string) => void
+  onApply: () => void
+  loading: boolean
+  error: string
   t: (key: string) => string
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -55,12 +68,16 @@ function PromoPopover({
           className="flex-1 min-w-0 px-3 py-1.5 rounded-full border border-gray-300 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
         />
         <button
-          onClick={onClose}
-          className="px-4 py-1.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-xs"
+          onClick={onApply}
+          disabled={loading || !value.trim()}
+          className="px-4 py-1.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-xs disabled:opacity-50"
         >
-          {t('apply')}
+          {loading ? '...' : t('apply')}
         </button>
       </div>
+      {error && (
+        <p className="text-[11px] text-red-500 mt-1.5">{error}</p>
+      )}
     </div>
   )
 }
@@ -104,6 +121,9 @@ export default function HomePage() {
   const [guestsOpen, setGuestsOpen] = useState(false)
   const [promoOpen, setPromoOpen] = useState(false)
   const [promoCode, setPromoCode] = useState('')
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null)
+  const [promoLoading, setPromoLoading] = useState(false)
+  const [promoError, setPromoError] = useState('')
   const [imageIndices, setImageIndices] = useState<Record<string, number>>({})
   const [expandedRates, setExpandedRates] = useState<Record<string, string | null>>({})
   const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null)
@@ -274,23 +294,65 @@ export default function HomePage() {
 
           {/* Promo */}
           <div className="relative">
-            <button
-              onClick={() => { setPromoOpen(!promoOpen); setCalendarOpen(false); setGuestsOpen(false) }}
-              className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-              <span className="text-sm font-medium">{t('addPromo')}</span>
-            </button>
-            {promoOpen && (
-              <PromoPopover
-                open={promoOpen}
-                onClose={() => setPromoOpen(false)}
-                value={promoCode}
-                onChange={setPromoCode}
-                t={t}
-              />
+            {appliedPromo ? (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  {appliedPromo.code}
+                  {appliedPromo.discountType === 'percentage' ? ` (-${appliedPromo.discountValue}%)` : ` (-${appliedPromo.discountValue})`}
+                </span>
+                <button
+                  onClick={() => { setAppliedPromo(null); setPromoCode(''); setPromoError('') }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setPromoOpen(!promoOpen); setCalendarOpen(false); setGuestsOpen(false) }}
+                  className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                  <span className="text-sm font-medium">{t('addPromo')}</span>
+                </button>
+                {promoOpen && (
+                  <PromoPopover
+                    open={promoOpen}
+                    onClose={() => setPromoOpen(false)}
+                    value={promoCode}
+                    onChange={(v) => { setPromoCode(v); setPromoError('') }}
+                    onApply={async () => {
+                      if (!promoCode.trim() || !slug) return
+                      setPromoLoading(true)
+                      setPromoError('')
+                      try {
+                        const result = await hotelService.validatePromoCode(slug, promoCode)
+                        if (result.valid) {
+                          setAppliedPromo({ code: result.code, discountType: result.discountType!, discountValue: result.discountValue! })
+                          setPromoOpen(false)
+                        } else {
+                          setPromoError(result.message)
+                        }
+                      } catch {
+                        setPromoError('Failed to validate promo code')
+                      } finally {
+                        setPromoLoading(false)
+                      }
+                    }}
+                    loading={promoLoading}
+                    error={promoError}
+                    t={t}
+                  />
+                )}
+              </>
             )}
           </div>
 
@@ -616,7 +678,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=nonrefundable`
+                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=nonrefundable${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -675,7 +737,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=flexible`
+                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=flexible${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -711,7 +773,7 @@ export default function HomePage() {
           onSelectRate={(rateType) => {
             const room = filteredRooms[detailModalIndex]
             const modalRequiredRooms = Math.ceil((committedAdults + committedChildren) / room.maxOccupancy)
-            const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}`
+            const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
             router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
           }}
         />

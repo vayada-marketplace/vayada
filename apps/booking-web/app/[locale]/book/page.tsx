@@ -12,7 +12,8 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { bookingService } from '@/services/api/booking'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { getNonRefundableRate, calculateAddonTotal } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculateAddonTotal, calculatePromoDiscount } from '@/lib/constants/booking'
+import { hotelService } from '@/services/api/hotel'
 import { trackEvent } from '@/services/api/tracking'
 
 const COUNTRIES = [
@@ -78,7 +79,23 @@ function BookPageContent() {
     if (qtyStr) addonQuantities[id] = parseInt(qtyStr)
   }
   const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights, addonQuantities)
-  const grandTotal = roomTotal + addonTotal
+  const promoCodeParam = searchParams.get('promoCode') || ''
+  const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
+
+  useEffect(() => {
+    if (promoCodeParam && slug) {
+      hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
+        if (res.valid) {
+          const subtotal = roomTotal + addonTotal
+          const amount = calculatePromoDiscount(subtotal, res.discountType!, res.discountValue!)
+          setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
+        }
+      }).catch(() => {})
+    }
+  }, [promoCodeParam, slug, roomTotal, addonTotal])
+
+  const discountAmount = promoDiscount?.amount ?? 0
+  const grandTotal = roomTotal + addonTotal - discountAmount
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -150,6 +167,7 @@ function BookPageContent() {
         rooms: String(roomsParam),
         rateType,
       })
+      if (promoCodeParam) params.set('promoCode', promoCodeParam)
       router.push(`/payment?${params.toString()}`)
     } catch (err: any) {
       setError(err.message || 'Something went wrong')
@@ -224,6 +242,17 @@ function BookPageContent() {
                       </div>
                     )
                   })}
+                </div>
+              )}
+
+              {/* Promo Discount */}
+              {promoDiscount && (
+                <div className="flex items-center justify-between pt-3 pb-3 border-b border-gray-100">
+                  <p className="text-sm text-primary-600 font-medium">
+                    Promo {promoCodeParam}
+                    {promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
+                  </p>
+                  <p className="text-sm font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</p>
                 </div>
               )}
 
@@ -433,6 +462,16 @@ function BookPageContent() {
                   )
                 })}
               </div>
+
+              {/* Promo Discount */}
+              {promoDiscount && (
+                <div className="flex justify-between text-sm pt-2">
+                  <span className="text-primary-600 font-medium">
+                    Promo {promoCodeParam}{promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
+                  </span>
+                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</span>
+                </div>
+              )}
 
               {/* Total */}
               <div className="pt-5">

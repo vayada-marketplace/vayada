@@ -7,6 +7,18 @@ export function getNonRefundableRate(baseRate: number, nonRefundableRate?: numbe
   return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT)
 }
 
+/** Calculate the discount amount from a promo code. */
+export function calculatePromoDiscount(
+  subtotal: number,
+  discountType: string,
+  discountValue: number,
+): number {
+  if (discountType === 'percentage') {
+    return Math.round(subtotal * (discountValue / 100) * 100) / 100
+  }
+  return Math.min(discountValue, subtotal)
+}
+
 /** Calculate the total price for selected addons, accounting for perPerson, perNight, and quantity. */
 export function calculateAddonTotal(
   addons: Addon[],

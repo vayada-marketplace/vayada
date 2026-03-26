@@ -23,4 +23,14 @@ export const hotelService = {
   async getAddons(slug: string): Promise<Addon[]> {
     return apiClient.get<Addon[]>(`/api/hotels/${slug}/addons`)
   },
+
+  async validatePromoCode(slug: string, code: string): Promise<{
+    valid: boolean
+    code: string
+    discountType?: string
+    discountValue?: number
+    message: string
+  }> {
+    return apiClient.get(`/api/hotels/${slug}/validate-promo?code=${encodeURIComponent(code)}`)
+  },
 }
