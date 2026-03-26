@@ -139,6 +139,50 @@ class TestPropertySettings:
         # Other fields should remain unchanged
         assert body["reservation_email"] == "hotel@test.com"
 
+    async def test_patch_currency_persists(self, client, hotel_with_property):
+        """Currency change must survive a round-trip (PATCH then GET)."""
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        # Update currency
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={"default_currency": "CNY"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["default_currency"] == "CNY"
+
+        # Re-fetch and verify it persisted
+        resp = await client.get("/admin/settings/property", headers=headers)
+        assert resp.status_code == 200
+        assert resp.json()["default_currency"] == "CNY"
+
+    async def test_patch_full_payload_preserves_currency(self, client, hotel_with_property):
+        """Sending a full settings payload (as the frontend does) must persist currency."""
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        # First get the current settings
+        resp = await client.get("/admin/settings/property", headers=headers)
+        assert resp.status_code == 200
+        settings = resp.json()
+
+        # Change currency and send the full payload back (mimics frontend handleSave)
+        settings["default_currency"] = "JPY"
+        resp = await client.patch(
+            "/admin/settings/property",
+            json=settings,
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["default_currency"] == "JPY"
+
+        # Re-fetch and verify
+        resp = await client.get("/admin/settings/property", headers=headers)
+        assert resp.status_code == 200
+        assert resp.json()["default_currency"] == "JPY"
+
 
 class TestDesignSettings:
     async def test_get_defaults_no_hotel(self, client, hotel_user):
