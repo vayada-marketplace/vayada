@@ -116,6 +116,7 @@ export default function SettingsPage() {
   const [feeValue, setFeeValue] = useState(8)
   const [feeWithAffiliate, setFeeWithAffiliate] = useState(2)
   const [payAtProperty, setPayAtProperty] = useState(false)
+  const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
 
   // Stripe Connect
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null)
@@ -142,6 +143,7 @@ export default function SettingsPage() {
         setFeeValue(ps.platformFeeValue)
         setFeeWithAffiliate(ps.platformFeeWithAffiliate)
         setPayAtProperty(ps.payAtPropertyEnabled)
+        setXenditPaymentsEnabled(ps.xenditPaymentsEnabled || false)
         setStripeAccountId(ps.stripeConnectAccountId)
         setStripeOnboarded(ps.stripeConnectOnboarded)
         setCurrency(ps.defaultCurrency || 'EUR')
@@ -187,6 +189,7 @@ export default function SettingsPage() {
         platformFeeValue: feeValue,
         platformFeeWithAffiliate: feeWithAffiliate,
         payAtPropertyEnabled: payAtProperty,
+        xenditPaymentsEnabled,
         paymentProvider,
         ...(paymentProvider === 'xendit' ? {
           xenditChannelCode,
@@ -408,7 +411,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <div className="mt-4 pt-4 border-t border-gray-100">
+          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -417,6 +420,15 @@ export default function SettingsPage() {
                 className="rounded text-primary-600"
               />
               <label className="text-sm text-gray-700">Allow guests to pay at the property (cash/card on arrival)</label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={xenditPaymentsEnabled}
+                onChange={(e) => setXenditPaymentsEnabled(e.target.checked)}
+                className="rounded text-primary-600"
+              />
+              <label className="text-sm text-gray-700">Accept payments via QRIS, e-wallets &amp; bank transfer (Xendit)</label>
             </div>
             <button
               onClick={savePaymentSettings}
