@@ -78,15 +78,6 @@ export interface InviteData {
     perPerson: boolean
     perNight: boolean
   }>
-  promoCodes?: Array<{
-    code: string
-    discountType: 'percentage' | 'fixed'
-    discountValue: number
-    validFrom?: string | null
-    validUntil?: string | null
-    isActive: boolean
-    maxUses?: number | null
-  }>
   benefits?: string[]
   policies: {
     check_in_time: string
