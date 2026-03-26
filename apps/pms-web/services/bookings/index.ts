@@ -53,6 +53,7 @@ export interface PaymentSettings {
   platformFeeValue: number
   platformFeeWithAffiliate: number
   payAtPropertyEnabled: boolean
+  xenditPaymentsEnabled: boolean
   paymentProvider: 'stripe' | 'xendit'
   xenditChannelCode: string | null
   xenditAccountNumber: string | null
