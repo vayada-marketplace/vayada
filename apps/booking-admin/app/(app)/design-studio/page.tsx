@@ -28,7 +28,6 @@ export default function DesignStudioPage() {
 
   // Colors state
   const [primaryColor, setPrimaryColor] = useState('#4F46E5')
-  const [accentColor, setAccentColor] = useState('#F5F5F4')
 
   // Fonts state
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
@@ -41,7 +40,6 @@ export default function DesignStudioPage() {
         if (settings.hero_heading) setHeroHeading(settings.hero_heading)
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext)
         if (settings.primary_color) setPrimaryColor(settings.primary_color)
-        if (settings.accent_color) setAccentColor(settings.accent_color)
         if (settings.font_pairing) setSelectedFont(settings.font_pairing)
       })
       .catch(() => {
@@ -101,7 +99,6 @@ export default function DesignStudioPage() {
         hero_heading: heroHeading,
         hero_subtext: heroSubtext,
         primary_color: primaryColor,
-        accent_color: accentColor,
         font_pairing: selectedFont,
       })
       setFeedback({ type: 'success', message: 'Design settings saved successfully' })
@@ -114,7 +111,6 @@ export default function DesignStudioPage() {
 
   const applyPreset = (preset: typeof COLOR_PRESETS[number]) => {
     setPrimaryColor(preset.primary)
-    setAccentColor(preset.accent)
   }
 
   const tabs = [
@@ -188,7 +184,6 @@ export default function DesignStudioPage() {
             {activeTab === 'colors' && (
               <ColorsTab
                 primaryColor={primaryColor} setPrimaryColor={setPrimaryColor}
-                accentColor={accentColor} setAccentColor={setAccentColor}
                 applyPreset={applyPreset}
               />
             )}

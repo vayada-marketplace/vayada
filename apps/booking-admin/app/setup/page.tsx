@@ -17,6 +17,7 @@ import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/Ro
 import PoliciesStep from '@/components/setup/PoliciesStep'
 import AddonsStep, { type SetupAddon } from '@/components/setup/AddonsStep'
 import BenefitsStep from '@/components/setup/BenefitsStep'
+import PromoCodesStep, { type SetupPromoCode } from '@/components/setup/PromoCodesStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -26,8 +27,9 @@ const STEPS = [
   { number: 3, label: 'Choose PMS' },
   { number: 4, label: 'Rooms & Rates' },
   { number: 5, label: 'Add-ons' },
-  { number: 6, label: 'Benefits' },
-  { number: 7, label: 'Policies' },
+  { number: 6, label: 'Promo Codes' },
+  { number: 7, label: 'Benefits' },
+  { number: 8, label: 'Policies' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -65,7 +67,6 @@ export default function SetupPage() {
   // Step 2: Brand & Media
   const [heroImage, setHeroImage] = useState('')
   const [primaryColor, setPrimaryColor] = useState('#4F46E5')
-  const [accentColor, setAccentColor] = useState('#F5F3EF')
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
   const [propertyDescription, setPropertyDescription] = useState('')
   const [bookingFilters, setBookingFilters] = useState<string[]>(['includeBreakfast', 'freeCancellation', 'payAtHotel', 'bestRated', 'mountainView'])
@@ -87,7 +88,10 @@ export default function SetupPage() {
   // Step 5: Add-ons
   const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([])
 
-  // Step 6: Benefits
+  // Step 6: Promo Codes
+  const [setupPromoCodes, setSetupPromoCodes] = useState<SetupPromoCode[]>([])
+
+  // Step 7: Benefits
   const [benefits, setBenefits] = useState<string[]>([])
 
   // Step 6: Policies & Operations
@@ -202,7 +206,7 @@ export default function SetupPage() {
       return !!(propertyName.trim() && city.trim() && country && address.trim() && reservationEmail.trim() && phoneNumber.trim())
     }
     if (step === 2) {
-      return !!(primaryColor && accentColor && selectedFont && heroImage.trim())
+      return !!(primaryColor && selectedFont && heroImage.trim())
     }
     if (step === 3) {
       return !!selectedPms
@@ -214,6 +218,9 @@ export default function SetupPage() {
       return true // add-ons are optional
     }
     if (step === 6) {
+      return true // promo codes are optional
+    }
+    if (step === 7) {
       return true
     }
     return false
@@ -259,7 +266,6 @@ export default function SetupPage() {
       // 2. Save design settings
       await settingsService.updateDesignSettings({
         primary_color: primaryColor,
-        accent_color: accentColor,
         font_pairing: selectedFont,
         hero_image: heroImage,
         hero_subtext: propertyDescription,
@@ -347,7 +353,24 @@ export default function SetupPage() {
         }
       }
 
-      // 7. Save benefits
+      // 7. Create promo codes
+      for (const promo of setupPromoCodes) {
+        try {
+          await settingsService.createPromoCode({
+            code: promo.code,
+            discountType: promo.discountType,
+            discountValue: promo.discountValue,
+            validFrom: promo.validFrom,
+            validUntil: promo.validUntil,
+            isActive: promo.isActive,
+            maxUses: promo.maxUses,
+          })
+        } catch {
+          // Non-fatal: promo codes can be added later from Booking Flow settings
+        }
+      }
+
+      // 8. Save benefits
       if (benefits.length > 0) {
         try {
           await settingsService.updateBenefits(benefits)
@@ -493,7 +516,6 @@ export default function SetupPage() {
         const b = data.branding
         if (b.hero_image) setHeroImage(b.hero_image)
         if (b.primary_color) setPrimaryColor(b.primary_color)
-        if (b.accent_color) setAccentColor(b.accent_color)
         if (b.font_pairing) setSelectedFont(b.font_pairing)
         if (b.description) setPropertyDescription(b.description)
         if (b.booking_filters) setBookingFilters(b.booking_filters)
@@ -522,6 +544,25 @@ export default function SetupPage() {
           perPerson: a.perPerson || false,
           perNight: a.perNight || false,
         })))
+      }
+
+      // Prefill promo codes
+      if (data.promoCodes && data.promoCodes.length > 0) {
+        setSetupPromoCodes(data.promoCodes.map((p: any) => ({
+          _localId: crypto.randomUUID(),
+          code: p.code || '',
+          discountType: p.discountType || 'percentage',
+          discountValue: p.discountValue || 0,
+          validFrom: p.validFrom || null,
+          validUntil: p.validUntil || null,
+          isActive: p.isActive !== undefined ? p.isActive : true,
+          maxUses: p.maxUses ?? null,
+        })))
+      }
+
+      // Prefill benefits
+      if (data.benefits && data.benefits.length > 0) {
+        setBenefits(data.benefits)
       }
 
       // Prefill policies
@@ -641,7 +682,7 @@ export default function SetupPage() {
             </svg>
             <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
           </div>
-          <span className="text-[13px] text-gray-500">Step {step} of 7</span>
+          <span className="text-[13px] text-gray-500">Step {step} of {STEPS.length}</span>
         </div>
       </div>
 
@@ -649,7 +690,7 @@ export default function SetupPage() {
       <div className="h-[3px] bg-gray-100 shrink-0">
         <div
           className="h-full bg-primary-600 transition-all duration-300"
-          style={{ width: `${(step / 7) * 100}%` }}
+          style={{ width: `${(step / STEPS.length) * 100}%` }}
         />
       </div>
 
@@ -682,7 +723,6 @@ export default function SetupPage() {
         <BrandMediaStep
           heroImage={heroImage} setHeroImage={setHeroImage}
           primaryColor={primaryColor} setPrimaryColor={setPrimaryColor}
-          accentColor={accentColor} setAccentColor={setAccentColor}
           selectedFont={selectedFont} setSelectedFont={setSelectedFont}
           propertyDescription={propertyDescription} setPropertyDescription={setPropertyDescription}
           uploading={uploading}
@@ -747,9 +787,10 @@ export default function SetupPage() {
       )}
 
       {step === 6 && (
-        <BenefitsStep
-          benefits={benefits}
-          setBenefits={setBenefits}
+        <PromoCodesStep
+          promoCodes={setupPromoCodes}
+          setPromoCodes={setSetupPromoCodes}
+          currency={currency}
           error={error}
           canProceed={canProceed()}
           onBack={() => setStep(5)}
@@ -759,6 +800,18 @@ export default function SetupPage() {
       )}
 
       {step === 7 && (
+        <BenefitsStep
+          benefits={benefits}
+          setBenefits={setBenefits}
+          error={error}
+          canProceed={canProceed()}
+          onBack={() => setStep(6)}
+          onContinue={() => { setError(''); setStep(8) }}
+          stepIndicators={stepIndicators}
+        />
+      )}
+
+      {step === 8 && (
         <PoliciesStep
           checkInTime={checkInTime} setCheckInTime={setCheckInTime}
           checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -772,7 +825,7 @@ export default function SetupPage() {
           enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
           error={error}
           saving={saving}
-          onBack={() => setStep(6)}
+          onBack={() => setStep(7)}
           onComplete={handleComplete}
           stepIndicators={stepIndicators}
         />

@@ -47,7 +47,6 @@ export interface DesignSettings {
   hero_heading: string
   hero_subtext: string
   primary_color: string
-  accent_color: string
   font_pairing: string
   booking_filters: string[]
   custom_filters: Record<string, string>
@@ -157,7 +156,10 @@ export const settingsService = {
     apiClient.post('/auth/change-password', { current_password, new_password }),
 
   changeEmail: (new_email: string, password: string) =>
-    apiClient.post<{ message: string; email: string }>('/auth/change-email', { new_email, password }),
+    apiClient.post<{ message: string; email?: string }>('/auth/change-email', { new_email, password }),
+
+  verifyEmailChange: (token: string) =>
+    apiClient.post<{ message: string; email: string }>('/auth/verify-email-change', { token }),
 
   getDesignSettings: () =>
     apiClient.get<DesignSettings>('/admin/settings/design'),

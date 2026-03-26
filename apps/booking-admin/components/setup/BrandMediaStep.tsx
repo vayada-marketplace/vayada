@@ -8,7 +8,6 @@ import { getCurrencySymbol } from '@/lib/utils'
 interface BrandMediaStepProps {
   heroImage: string; setHeroImage: (v: string) => void
   primaryColor: string; setPrimaryColor: (v: string) => void
-  accentColor: string; setAccentColor: (v: string) => void
   selectedFont: string; setSelectedFont: (v: string) => void
   propertyDescription: string; setPropertyDescription: (v: string) => void
   uploading: boolean
@@ -27,7 +26,6 @@ interface BrandMediaStepProps {
 export default function BrandMediaStep({
   heroImage, setHeroImage,
   primaryColor, setPrimaryColor,
-  accentColor, setAccentColor,
   selectedFont, setSelectedFont,
   propertyDescription, setPropertyDescription,
   uploading,
@@ -120,25 +118,6 @@ export default function BrandMediaStep({
                   </div>
                 </div>
 
-                <div>
-                  <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Card and section backgrounds</p>
-                  <div className="flex items-center gap-2">
-                    <label
-                      className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
-                      style={{ backgroundColor: accentColor }}
-                    >
-                      <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="opacity-0 w-0 h-0" />
-                    </label>
-                    <input
-                      type="text"
-                      value={accentColor}
-                      onChange={(e) => setAccentColor(e.target.value)}
-                      className="w-24 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                    />
-                  </div>
-                </div>
-
                 {/* Quick Presets */}
                 <div>
                   <h3 className="text-[12px] font-semibold text-gray-900 mb-1.5">Quick Presets</h3>
@@ -146,7 +125,7 @@ export default function BrandMediaStep({
                     {COLOR_PRESETS.map((preset) => (
                       <button
                         key={preset.name}
-                        onClick={() => { setPrimaryColor(preset.primary); setAccentColor(preset.accent) }}
+                        onClick={() => { setPrimaryColor(preset.primary) }}
                         className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-lg text-[12px] text-gray-700 hover:bg-gray-50 transition-colors ${
                           primaryColor === preset.primary ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'
                         }`}

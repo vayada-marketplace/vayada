@@ -1,10 +1,10 @@
 export const COLOR_PRESETS = [
-  { name: 'Ocean Blue', primary: '#0077B6', accent: '#E8F4F8' },
-  { name: 'Tropical Gold', primary: '#D4A017', accent: '#FDF8E8' },
-  { name: 'Forest Green', primary: '#2D6A4F', accent: '#EBF5F0' },
-  { name: 'Sunset Coral', primary: '#E76F51', accent: '#FDF0ED' },
-  { name: 'Royal Purple', primary: '#7B2D8E', accent: '#F5EBF7' },
-  { name: 'Charcoal', primary: '#2D3436', accent: '#F0F0F0' },
+  { name: 'Ocean Blue', primary: '#0077B6' },
+  { name: 'Tropical Gold', primary: '#D4A017' },
+  { name: 'Forest Green', primary: '#2D6A4F' },
+  { name: 'Sunset Coral', primary: '#E76F51' },
+  { name: 'Royal Purple', primary: '#7B2D8E' },
+  { name: 'Charcoal', primary: '#2D3436' },
 ]
 
 export const FONT_PAIRINGS = [

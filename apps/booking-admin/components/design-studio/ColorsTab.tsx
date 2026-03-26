@@ -4,13 +4,11 @@ import { COLOR_PRESETS } from '@/lib/constants/branding'
 
 interface ColorsTabProps {
   primaryColor: string; setPrimaryColor: (v: string) => void
-  accentColor: string; setAccentColor: (v: string) => void
   applyPreset: (preset: typeof COLOR_PRESETS[number]) => void
 }
 
 export default function ColorsTab({
   primaryColor, setPrimaryColor,
-  accentColor, setAccentColor,
   applyPreset,
 }: ColorsTabProps) {
   return (
@@ -33,25 +31,6 @@ export default function ColorsTab({
               type="text"
               value={primaryColor}
               onChange={(e) => setPrimaryColor(e.target.value)}
-              className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Card and section backgrounds</p>
-          <div className="flex items-center gap-2">
-            <label
-              className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
-              style={{ backgroundColor: accentColor }}
-            >
-              <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="opacity-0 w-0 h-0" />
-            </label>
-            <input
-              type="text"
-              value={accentColor}
-              onChange={(e) => setAccentColor(e.target.value)}
               className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>
