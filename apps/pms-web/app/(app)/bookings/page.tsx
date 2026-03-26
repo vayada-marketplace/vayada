@@ -127,7 +127,7 @@ export default function ReservationsPage() {
     <div className="p-6 pb-0">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Reservations</h1>
+        <h1 className="text-xl font-bold text-gray-900">Reservations</h1>
         <p className="text-sm text-gray-500 mt-1">Master ledger of all bookings</p>
       </div>
 
