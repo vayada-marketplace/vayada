@@ -67,3 +67,17 @@ async def require_hotel_admin(
             detail="Hotel admin access required",
         )
     return user_id
+
+
+async def require_affiliate(
+    user_id: str = Depends(get_current_user_id),
+) -> str:
+    user = await AuthDatabase.fetchrow(
+        "SELECT type FROM users WHERE id = $1", user_id
+    )
+    if user["type"] != "affiliate":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Affiliate access required",
+        )
+    return user_id

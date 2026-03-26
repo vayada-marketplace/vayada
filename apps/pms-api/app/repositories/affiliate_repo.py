@@ -64,6 +64,40 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def list_by_user_id(user_id: str) -> List[dict]:
+        """List all affiliate records linked to a given auth user."""
+        rows = await Database.fetch(
+            """
+            SELECT a.*,
+                   h.name AS hotel_name,
+                   h.slug AS hotel_slug,
+                   COALESCE(s.booking_count, 0) AS booking_count,
+                   COALESCE(s.total_revenue, 0) AS total_revenue,
+                   COALESCE(c.click_count, 0) AS click_count
+            FROM affiliates a
+            JOIN hotels h ON h.id = a.hotel_id
+            LEFT JOIN (
+                SELECT affiliate_id,
+                       COUNT(*) AS booking_count,
+                       SUM(total_amount) AS total_revenue
+                FROM bookings
+                WHERE affiliate_id IS NOT NULL
+                GROUP BY affiliate_id
+            ) s ON s.affiliate_id = a.id
+            LEFT JOIN (
+                SELECT affiliate_id,
+                       COUNT(*) AS click_count
+                FROM affiliate_clicks
+                GROUP BY affiliate_id
+            ) c ON c.affiliate_id = a.id
+            WHERE a.user_id = $1 AND a.status = 'approved'
+            ORDER BY a.created_at DESC
+            """,
+            user_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def list_by_hotel_id(
         hotel_id: str,
         *,
