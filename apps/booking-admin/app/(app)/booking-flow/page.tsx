@@ -13,10 +13,9 @@ import { uploadSingleImage } from '@/lib/utils/uploadImage'
 import RoomsTab from '@/components/booking-flow/RoomsTab'
 import AddonsTab from '@/components/booking-flow/AddonsTab'
 import DetailsTab from '@/components/booking-flow/DetailsTab'
-import PaymentTab from '@/components/booking-flow/PaymentTab'
 import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 
-type Tab = 'rooms' | 'addons' | 'details' | 'payment' | 'benefits'
+type Tab = 'rooms' | 'addons' | 'details' | 'benefits'
 
 const CATEGORIES = [
   { value: 'dining', label: 'Dining' },
@@ -256,7 +255,6 @@ export default function BookingFlowPage() {
     { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
     { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
     { id: 'details' as const, label: 'Details', icon: DetailsIcon },
-    { id: 'payment' as const, label: 'Payment', icon: PaymentIcon },
   ]
 
   if (loading) {
@@ -341,7 +339,6 @@ export default function BookingFlowPage() {
 
         {activeTab === 'details' && <DetailsTab />}
 
-        {activeTab === 'payment' && <PaymentTab />}
       </div>
 
       {/* ADD/EDIT ADDON MODAL */}
@@ -588,16 +585,6 @@ function BenefitsIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 12l2 2 4-4" />
       <path d="M12 3a9 9 0 100 18 9 9 0 000-18z" />
-    </svg>
-  )
-}
-
-function PaymentIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="4" width="22" height="16" rx="2" />
-      <path d="M1 10h22" />
-      <path d="M6 16h4" />
     </svg>
   )
 }
