@@ -144,7 +144,7 @@ export default function Sidebar() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Direct bookings & revenue</p>
+                <p className="text-[10px] text-gray-500 leading-tight">Direct Bookings & Revenue</p>
               </div>
             </a>
             <button
