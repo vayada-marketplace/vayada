@@ -19,70 +19,70 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
-  const [bookings, setBookings] = useState<Booking[]>([])
   const [rooms, setRooms] = useState<RoomType[]>([])
-  const [loaded, setLoaded] = useState(false)
+  const [roomsLoaded, setRoomsLoaded] = useState(false)
 
-  // Load data when modal opens
+  // Load room types once (small dataset, OK to filter client-side)
+  useEffect(() => {
+    if (!open || roomsLoaded) return
+    roomsService.list().then(r => {
+      setRooms(r)
+      setRoomsLoaded(true)
+    }).catch(console.error)
+  }, [open, roomsLoaded])
+
+  // Reset state when modal opens
   useEffect(() => {
     if (!open) return
     setQuery('')
     setActiveIndex(0)
     setResults([])
-    if (!loaded) {
-      Promise.all([
-        bookingsService.list({ limit: 500 }).then(r => r.bookings),
-        roomsService.list(),
-      ]).then(([b, r]) => {
-        setBookings(b)
-        setRooms(r)
-        setLoaded(true)
-      }).catch(console.error)
-    }
-    // Focus input after render
     setTimeout(() => inputRef.current?.focus(), 0)
-  }, [open, loaded])
+  }, [open])
 
-  // Filter results as user types
+  // Search with debounce
   useEffect(() => {
     if (!query.trim()) {
       setResults([])
       setActiveIndex(0)
       return
     }
+
     const q = query.toLowerCase()
-    const bookingResults: SearchResult[] = bookings
-      .filter(b =>
-        b.guestFirstName?.toLowerCase().includes(q) ||
-        b.guestLastName?.toLowerCase().includes(q) ||
-        `${b.guestFirstName} ${b.guestLastName}`.toLowerCase().includes(q) ||
-        b.bookingReference?.toLowerCase().includes(q) ||
-        b.guestEmail?.toLowerCase().includes(q) ||
-        b.roomName?.toLowerCase().includes(q)
-      )
-      .slice(0, 5)
-      .map(b => ({
-        id: b.id,
-        label: `${b.guestFirstName} ${b.guestLastName}`,
-        sublabel: `${b.bookingReference} · ${b.roomName} · ${b.checkIn}`,
-        category: 'reservation',
-        href: `/bookings/${b.id}`,
-      }))
+    const timer = setTimeout(async () => {
+      // Server-side booking search
+      let bookingResults: SearchResult[] = []
+      try {
+        const res = await bookingsService.list({ search: query.trim(), limit: 5 })
+        bookingResults = res.bookings.map(b => ({
+          id: b.id,
+          label: `${b.guestFirstName} ${b.guestLastName}`,
+          sublabel: `${b.bookingReference} · ${b.roomName} · ${b.checkIn}`,
+          category: 'reservation',
+          href: `/bookings/${b.id}`,
+        }))
+      } catch {
+        // Silently handle — rooms will still show
+      }
 
-    const roomResults: SearchResult[] = rooms
-      .filter(r => r.name?.toLowerCase().includes(q) || r.category?.toLowerCase().includes(q))
-      .slice(0, 5)
-      .map(r => ({
-        id: r.id,
-        label: r.name,
-        sublabel: `${r.category} · ${r.totalRooms} rooms · €${r.baseRate}/night`,
-        category: 'room',
-        href: `/rooms`,
-      }))
+      // Client-side room filtering (small dataset)
+      const roomResults: SearchResult[] = rooms
+        .filter(r => r.name?.toLowerCase().includes(q) || r.category?.toLowerCase().includes(q))
+        .slice(0, 5)
+        .map(r => ({
+          id: r.id,
+          label: r.name,
+          sublabel: `${r.category} · ${r.totalRooms} rooms · €${r.baseRate}/night`,
+          category: 'room',
+          href: `/rooms`,
+        }))
 
-    setResults([...bookingResults, ...roomResults])
-    setActiveIndex(0)
-  }, [query, bookings, rooms])
+      setResults([...bookingResults, ...roomResults])
+      setActiveIndex(0)
+    }, 250)
+
+    return () => clearTimeout(timer)
+  }, [query, rooms])
 
   const navigate = useCallback((result: SearchResult) => {
     onClose()

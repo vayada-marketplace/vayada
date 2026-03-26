@@ -71,7 +71,7 @@ export interface PaymentSettingsResponse {
 }
 
 export const bookingsService = {
-  list: (params?: { status?: string; limit?: number; offset?: number }) => {
+  list: (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
     const qs = buildQueryString(params)
     return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`)
   },
