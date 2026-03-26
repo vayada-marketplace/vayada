@@ -5,7 +5,7 @@ import {
   XMarkIcon,
   PhotoIcon,
 } from '@heroicons/react/24/outline'
-import { settingsService, type AddonItem, type AddonSettings, type DesignSettings, type PropertySettings } from '@/services/settings'
+import { settingsService, type AddonItem, type AddonSettings, type PromoCodeItem, type DesignSettings, type PropertySettings } from '@/services/settings'
 import { pmsClient } from '@/services/api/pmsClient'
 import { ToggleSwitch, FeedbackAlert } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
@@ -14,8 +14,9 @@ import RoomsTab from '@/components/booking-flow/RoomsTab'
 import AddonsTab from '@/components/booking-flow/AddonsTab'
 import DetailsTab from '@/components/booking-flow/DetailsTab'
 import BenefitsTab from '@/components/booking-flow/BenefitsTab'
+import PromoCodesTab from '@/components/booking-flow/PromoCodesTab'
 
-type Tab = 'rooms' | 'addons' | 'details' | 'benefits'
+type Tab = 'rooms' | 'addons' | 'details' | 'benefits' | 'promo-codes'
 
 const CATEGORIES = [
   { value: 'dining', label: 'Dining' },
@@ -24,6 +25,16 @@ const CATEGORIES = [
   { value: 'wellness', label: 'Wellness' },
   { value: 'other', label: 'Other' },
 ]
+
+const emptyPromoCode = {
+  code: '',
+  discountType: 'percentage' as 'percentage' | 'fixed',
+  discountValue: 0,
+  validFrom: '' as string | null,
+  validUntil: '' as string | null,
+  isActive: true,
+  maxUses: null as number | null,
+}
 
 const emptyAddon = {
   name: '',
@@ -53,6 +64,14 @@ export default function BookingFlowPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const addonFileInputRef = useRef<HTMLInputElement>(null)
 
+  // Promo codes state
+  const [promoCodes, setPromoCodes] = useState<PromoCodeItem[]>([])
+  const [showPromoModal, setShowPromoModal] = useState(false)
+  const [editingPromo, setEditingPromo] = useState<PromoCodeItem | null>(null)
+  const [promoFormData, setPromoFormData] = useState(emptyPromoCode)
+  const [savingPromo, setSavingPromo] = useState(false)
+  const [deletingPromoId, setDeletingPromoId] = useState<string | null>(null)
+
   // Benefits state
   const [benefits, setBenefits] = useState<string[]>([])
   const [benefitInput, setBenefitInput] = useState('')
@@ -74,9 +93,11 @@ export default function BookingFlowPage() {
       settingsService.getDesignSettings().catch(() => ({ hero_image: '', hero_heading: '', hero_subtext: '', primary_color: '', accent_color: '', font_pairing: '', booking_filters: [], custom_filters: {}, filter_rooms: {} } as DesignSettings)),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
       settingsService.getPropertySettings().catch(() => null),
-    ]).then(([addonList, settings, design, benefitsRes, property]) => {
+      settingsService.listPromoCodes().catch(() => []),
+    ]).then(([addonList, settings, design, benefitsRes, property, promoList]) => {
       setAddons(addonList)
       setAddonSettings(settings)
+      setPromoCodes(promoList)
       setBenefits(benefitsRes.benefits || [])
       if (design.booking_filters) {
         setBookingFilters(design.booking_filters)
@@ -206,6 +227,72 @@ export default function BookingFlowPage() {
     }
   }
 
+  // ── Promo Code CRUD handlers ──
+
+  const openCreatePromoModal = () => {
+    setEditingPromo(null)
+    setPromoFormData({ ...emptyPromoCode })
+    setShowPromoModal(true)
+  }
+
+  const openEditPromoModal = (promo: PromoCodeItem) => {
+    setEditingPromo(promo)
+    setPromoFormData({
+      code: promo.code,
+      discountType: promo.discountType,
+      discountValue: promo.discountValue,
+      validFrom: promo.validFrom || '',
+      validUntil: promo.validUntil || '',
+      isActive: promo.isActive,
+      maxUses: promo.maxUses ?? null,
+    })
+    setShowPromoModal(true)
+  }
+
+  const handleSavePromoCode = async () => {
+    if (!promoFormData.code.trim()) return
+    try {
+      setSavingPromo(true)
+      const payload = {
+        code: promoFormData.code.toUpperCase(),
+        discountType: promoFormData.discountType,
+        discountValue: promoFormData.discountValue,
+        validFrom: promoFormData.validFrom || undefined,
+        validUntil: promoFormData.validUntil || undefined,
+        isActive: promoFormData.isActive,
+        maxUses: promoFormData.maxUses,
+      }
+      if (editingPromo) {
+        const updated = await settingsService.updatePromoCode(editingPromo.id, payload)
+        setPromoCodes((prev) => prev.map((p) => (p.id === editingPromo.id ? updated : p)))
+        showFeedback('success', 'Promo code updated successfully')
+      } else {
+        const created = await settingsService.createPromoCode(payload as any)
+        setPromoCodes((prev) => [created, ...prev])
+        showFeedback('success', 'Promo code created successfully')
+      }
+      setShowPromoModal(false)
+    } catch {
+      showFeedback('error', 'Failed to save promo code')
+    } finally {
+      setSavingPromo(false)
+    }
+  }
+
+  const handleDeletePromoCode = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this promo code?')) return
+    try {
+      setDeletingPromoId(id)
+      await settingsService.deletePromoCode(id)
+      setPromoCodes((prev) => prev.filter((p) => p.id !== id))
+      showFeedback('success', 'Promo code deleted')
+    } catch {
+      showFeedback('error', 'Failed to delete promo code')
+    } finally {
+      setDeletingPromoId(null)
+    }
+  }
+
   // ── Filter handlers (Rooms tab) ──
 
   const handleToggleFiltersEnabled = async () => {
@@ -253,6 +340,7 @@ export default function BookingFlowPage() {
   const tabs = [
     { id: 'rooms' as const, label: 'Rooms', icon: RoomsIcon },
     { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
+    { id: 'promo-codes' as const, label: 'Promos', icon: PromoIcon },
     { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
     { id: 'details' as const, label: 'Details', icon: DetailsIcon },
   ]
@@ -323,6 +411,16 @@ export default function BookingFlowPage() {
             openEditModal={openEditModal}
             handleDeleteAddon={handleDeleteAddon}
             handleToggleAddonSetting={handleToggleAddonSetting}
+          />
+        )}
+
+        {activeTab === 'promo-codes' && (
+          <PromoCodesTab
+            promoCodes={promoCodes}
+            deletingId={deletingPromoId}
+            openCreateModal={openCreatePromoModal}
+            openEditModal={openEditPromoModal}
+            handleDeletePromoCode={handleDeletePromoCode}
           />
         )}
 
@@ -544,6 +642,128 @@ export default function BookingFlowPage() {
           </div>
         </div>
       )}
+      {/* ADD/EDIT PROMO CODE MODAL */}
+      {showPromoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPromoModal(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-[15px] font-semibold text-gray-900">
+                {editingPromo ? 'Edit Promo Code' : 'Create Promo Code'}
+              </h3>
+              <button onClick={() => setShowPromoModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {/* Code */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Code *</label>
+                <input
+                  type="text"
+                  value={promoFormData.code}
+                  onChange={(e) => setPromoFormData({ ...promoFormData, code: e.target.value.toUpperCase() })}
+                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="e.g., SUMMER20"
+                />
+              </div>
+
+              {/* Discount Type + Value */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Discount Type</label>
+                  <select
+                    value={promoFormData.discountType}
+                    onChange={(e) => setPromoFormData({ ...promoFormData, discountType: e.target.value as 'percentage' | 'fixed' })}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                    {promoFormData.discountType === 'percentage' ? 'Discount (%)' : 'Discount Amount'} *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step={promoFormData.discountType === 'percentage' ? '1' : '0.01'}
+                    max={promoFormData.discountType === 'percentage' ? '100' : undefined}
+                    value={promoFormData.discountValue || ''}
+                    onChange={(e) => setPromoFormData({ ...promoFormData, discountValue: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                </div>
+              </div>
+
+              {/* Validity Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Valid From</label>
+                  <input
+                    type="date"
+                    value={promoFormData.validFrom || ''}
+                    onChange={(e) => setPromoFormData({ ...promoFormData, validFrom: e.target.value || null })}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Valid Until</label>
+                  <input
+                    type="date"
+                    value={promoFormData.validUntil || ''}
+                    onChange={(e) => setPromoFormData({ ...promoFormData, validUntil: e.target.value || null })}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              {/* Max Uses */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Max Uses (leave empty for unlimited)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={promoFormData.maxUses ?? ''}
+                  onChange={(e) => setPromoFormData({ ...promoFormData, maxUses: e.target.value ? parseInt(e.target.value) : null })}
+                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="Unlimited"
+                />
+              </div>
+
+              {/* Active toggle */}
+              <ToggleSwitch
+                size="sm"
+                enabled={promoFormData.isActive}
+                onChange={() => setPromoFormData({ ...promoFormData, isActive: !promoFormData.isActive })}
+                label="Active"
+                description="Only active promo codes can be used by guests"
+              />
+            </div>
+
+            <div className="p-4 border-t border-gray-200 flex gap-2">
+              <button
+                onClick={() => setShowPromoModal(false)}
+                className="flex-1 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSavePromoCode}
+                disabled={savingPromo || !promoFormData.code.trim() || !promoFormData.discountValue}
+                className="flex-1 py-2 text-[13px] font-medium text-white bg-primary-500 rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              >
+                {savingPromo && (
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {editingPromo ? 'Save Changes' : 'Create Promo Code'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -576,6 +796,14 @@ function DetailsIcon({ className }: { className?: string }) {
       <rect x="9" y="3" width="6" height="4" rx="1" />
       <path d="M9 12h6" />
       <path d="M9 16h6" />
+    </svg>
+  )
+}
+
+function PromoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
     </svg>
   )
 }
