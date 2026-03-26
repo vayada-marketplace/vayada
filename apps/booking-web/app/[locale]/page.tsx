@@ -90,6 +90,13 @@ export default function HomePage() {
   })
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
+
+  // "Committed" search params — only update when user clicks "Check Availability"
+  const [committedCheckIn, setCommittedCheckIn] = useState(checkIn)
+  const [committedCheckOut, setCommittedCheckOut] = useState(checkOut)
+  const [committedAdults, setCommittedAdults] = useState(2)
+  const [committedChildren, setCommittedChildren] = useState(0)
+
   // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [currentStep] = useState(1)
@@ -112,7 +119,7 @@ export default function HomePage() {
     }
   }, [rooms])
 
-  const nights = calculateNights(checkIn, checkOut)
+  const nights = calculateNights(committedCheckIn, committedCheckOut)
 
   // Build filter key→label map for display
   const FILTER_ENTRIES = (hotel?.bookingFilters || []).map((key) => ({
@@ -284,6 +291,10 @@ export default function HomePage() {
               setCalendarOpen(false)
               setGuestsOpen(false)
               setPromoOpen(false)
+              setCommittedCheckIn(checkIn)
+              setCommittedCheckOut(checkOut)
+              setCommittedAdults(adults)
+              setCommittedChildren(children)
               setSearching(true)
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
               setTimeout(() => setSearching(false), 800)
@@ -412,7 +423,7 @@ export default function HomePage() {
           ) : filteredRooms.map((room, roomIndex) => {
             const imgIdx = imageIndices[room.id] ?? 0
             const expandedRate = expandedRates[room.id] ?? null
-            const totalGuests = adults + children
+            const totalGuests = committedAdults + committedChildren
             const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy)
             const flexibleTotal = room.baseRate * nights * requiredRooms
             const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
@@ -596,7 +607,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${requiredRooms}&rateType=nonrefundable`
+                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=nonrefundable`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -655,7 +666,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
-                                  const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${requiredRooms}&rateType=flexible`
+                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=flexible`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
                                 disabled={soldOut}
@@ -690,8 +701,8 @@ export default function HomePage() {
           onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
           onSelectRate={(rateType) => {
             const room = filteredRooms[detailModalIndex]
-            const modalRequiredRooms = Math.ceil((adults + children) / room.maxOccupancy)
-            const params = `room=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}&rooms=${modalRequiredRooms}&rateType=${rateType}`
+            const modalRequiredRooms = Math.ceil((committedAdults + committedChildren) / room.maxOccupancy)
+            const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}`
             router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
           }}
         />
