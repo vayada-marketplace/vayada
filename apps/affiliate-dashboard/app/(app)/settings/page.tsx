@@ -27,6 +27,7 @@ const XENDIT_BANKS = [
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [validating, setValidating] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -54,6 +55,32 @@ export default function SettingsPage() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
+
+  const handleValidateBank = async () => {
+    setError('')
+    setSuccess('')
+    if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
+      setError('Enter a valid account number (5-20 digits) first')
+      return
+    }
+    setValidating(true)
+    try {
+      const res = await apiClient.post<{ account_holder: string }>('/affiliate/xendit/validate-bank-account', {
+        channelCode: xenditChannelCode,
+        accountNumber: xenditAccountNumber.trim(),
+      })
+      if (res.account_holder) {
+        setXenditAccountHolderName(res.account_holder)
+        setSuccess(`Account verified — holder: ${res.account_holder}`)
+      } else {
+        setSuccess('Account validated successfully')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Bank account validation failed')
+    } finally {
+      setValidating(false)
+    }
+  }
 
   const handleSave = async () => {
     setError('')
@@ -189,6 +216,14 @@ export default function SettingsPage() {
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={handleValidateBank}
+                  disabled={validating || !xenditAccountNumber.trim()}
+                  className="w-full px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 disabled:opacity-50 transition-colors"
+                >
+                  {validating ? 'Validating...' : 'Validate Bank Account'}
+                </button>
               </div>
             )}
 
