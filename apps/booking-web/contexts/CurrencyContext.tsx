@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import { useHotel } from '@/contexts/HotelContext'
+import { useHotel, useSlug } from '@/contexts/HotelContext'
 import { apiClient } from '@/services/api/client'
 
 interface CurrencyContextValue {
@@ -22,15 +22,20 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   formatPrice: (amount) => String(amount),
 })
 
-const STORAGE_KEY = 'vayada-selected-currency'
+const STORAGE_KEY_PREFIX = 'vayada-selected-currency'
+
+function getStorageKey(slug: string) {
+  return `${STORAGE_KEY_PREFIX}-${slug}`
+}
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { hotel } = useHotel()
+  const { slug } = useSlug()
   const baseCurrency = hotel?.currency || 'EUR'
 
   const [selectedCurrency, setSelectedCurrencyState] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem(STORAGE_KEY) || baseCurrency
+    if (typeof window !== 'undefined' && slug) {
+      return localStorage.getItem(getStorageKey(slug)) || baseCurrency
     }
     return baseCurrency
   })
@@ -39,12 +44,12 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
 
   // Sync default currency when hotel loads
   useEffect(() => {
-    if (!hotel) return
-    const stored = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+    if (!hotel || !slug) return
+    const stored = typeof window !== 'undefined' ? localStorage.getItem(getStorageKey(slug)) : null
     if (!stored) {
       setSelectedCurrencyState(hotel.currency)
     }
-  }, [hotel])
+  }, [hotel, slug])
 
   // Fetch exchange rates with retry
   useEffect(() => {
@@ -79,10 +84,10 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
 
   const setSelectedCurrency = useCallback((currency: string) => {
     setSelectedCurrencyState(currency)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, currency)
+    if (typeof window !== 'undefined' && slug) {
+      localStorage.setItem(getStorageKey(slug), currency)
     }
-  }, [])
+  }, [slug])
 
   const convertPrice = useCallback(
     (amount: number, fromCurrency: string): number => {
