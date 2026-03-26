@@ -143,13 +143,14 @@ async def create_admin_booking(
 @router.get("/bookings")
 async def list_bookings(
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
     bookings = await BookingRepository.list_by_hotel_id(
-        hotel_id, status=status, limit=limit, offset=offset
+        hotel_id, status=status, search=search, limit=limit, offset=offset
     )
     total = await BookingRepository.count_by_hotel_id(hotel_id, status=status)
     return {
