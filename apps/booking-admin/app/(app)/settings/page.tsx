@@ -267,7 +267,6 @@ export default function SettingsPage() {
   // Book Direct Benefits
   const [benefits, setBenefits] = useState<string[]>([])
   const [benefitInput, setBenefitInput] = useState('')
-  const [savingBenefits, setSavingBenefits] = useState(false)
 
   const handleChangeEmail = async () => {
     try {
@@ -331,6 +330,8 @@ export default function SettingsPage() {
       setFeedback(null)
       const data = await settingsService.updatePropertySettings(settings)
       setSettings(data)
+      // Save benefits
+      await settingsService.updateBenefits(benefits)
       // Sync slug and name to PMS
       try {
         await pmsClient.patch('/admin/hotel', {
@@ -338,6 +339,12 @@ export default function SettingsPage() {
           name: data.property_name,
           contactEmail: data.reservation_email,
         })
+      } catch {
+        // Non-fatal: PMS sync may fail if not using vayada PMS
+      }
+      // Sync benefits to PMS
+      try {
+        await pmsClient.put('/admin/benefits', { benefits })
       } catch {
         // Non-fatal: PMS sync may fail if not using vayada PMS
       }
@@ -389,24 +396,6 @@ export default function SettingsPage() {
     setBenefitInput('')
   }
 
-  const saveBenefits = async () => {
-    setSavingBenefits(true)
-    setFeedback(null)
-    try {
-      await settingsService.updateBenefits(benefits)
-      // Also sync to PMS backend for room display
-      try {
-        await pmsClient.put('/admin/benefits', { benefits })
-      } catch {
-        // Non-fatal: PMS sync may fail if not using vayada PMS
-      }
-      setFeedback({ type: 'success', message: 'Book Direct Benefits saved' })
-    } catch {
-      setFeedback({ type: 'error', message: 'Failed to save benefits' })
-    } finally {
-      setSavingBenefits(false)
-    }
-  }
 
   const tabs = [
     { id: 'property' as const, label: 'Property', icon: PropertyIcon },
@@ -764,13 +753,6 @@ export default function SettingsPage() {
                       </div>
                     )}
 
-                    <button
-                      onClick={saveBenefits}
-                      disabled={savingBenefits}
-                      className="px-4 py-2 text-[13px] font-medium text-white bg-primary-500 rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
-                    >
-                      {savingBenefits ? 'Saving...' : 'Save Benefits'}
-                    </button>
                   </div>
 
                   {/* Refer a Guest */}
