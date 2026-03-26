@@ -101,6 +101,19 @@ export interface AddonSettings {
   groupAddonsByCategory: boolean
 }
 
+export interface PromoCodeItem {
+  id: string
+  code: string
+  discountType: 'percentage' | 'fixed'
+  discountValue: number
+  validFrom?: string | null
+  validUntil?: string | null
+  isActive: boolean
+  maxUses?: number | null
+  useCount: number
+  createdAt?: string
+}
+
 export interface CustomDomainConnectResponse {
   domain: string
   status: string
@@ -178,4 +191,16 @@ export const settingsService = {
 
   updateBenefits: (benefits: string[]) =>
     apiClient.put<{ benefits: string[] }>('/admin/benefits', { benefits }),
+
+  listPromoCodes: () =>
+    apiClient.get<PromoCodeItem[]>('/admin/promo-codes'),
+
+  createPromoCode: (data: Omit<PromoCodeItem, 'id' | 'useCount' | 'createdAt'>) =>
+    apiClient.post<PromoCodeItem>('/admin/promo-codes', data),
+
+  updatePromoCode: (id: string, data: Partial<PromoCodeItem>) =>
+    apiClient.patch<PromoCodeItem>(`/admin/promo-codes/${id}`, data),
+
+  deletePromoCode: (id: string) =>
+    apiClient.delete(`/admin/promo-codes/${id}`),
 }
