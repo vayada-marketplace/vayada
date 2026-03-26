@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   payout_iban: '',
   payout_bank_name: '',
   payout_swift: '',
+  refer_a_guest_enabled: false,
 }
 
 // ── Custom Select Dropdown ───────────────────────────────────────────
@@ -770,6 +771,16 @@ export default function SettingsPage() {
                     >
                       {savingBenefits ? 'Saving...' : 'Save Benefits'}
                     </button>
+                  </div>
+
+                  {/* Refer a Guest */}
+                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                    <ToggleSwitch
+                      enabled={settings.refer_a_guest_enabled ?? false}
+                      onChange={() => updateSetting('refer_a_guest_enabled', !settings.refer_a_guest_enabled)}
+                      label={'"Refer a Guest" Feature'}
+                      description="Allow guests to refer friends and earn rewards through your booking page"
+                    />
                   </div>
 
                   {/* Save button */}
