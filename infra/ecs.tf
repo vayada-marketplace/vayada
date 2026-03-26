@@ -9,7 +9,7 @@ locals {
       log_group      = "/ecs/vayada-booking-backend"
       environment = [
         { name = "CORS_ORIGINS", value = "https://admin.booking.vayada.com,https://admin.vayada.com,https://pms.vayada.com" },
-        { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
+        { name = "CORS_ORIGIN_REGEX", value = ".*" },
         { name = "API_PORT", value = "8001" },
         { name = "CLOUDFLARE_ZONE_ID", value = var.cloudflare_zone_id },
         { name = "ENVIRONMENT", value = "production" },
