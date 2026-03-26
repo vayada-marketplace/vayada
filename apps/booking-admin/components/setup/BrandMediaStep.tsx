@@ -53,7 +53,7 @@ export default function BrandMediaStep({
 
             {/* Hero Image */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h2 className="text-[13px] font-semibold text-gray-900">Hero Image</h2>
+              <h2 className="text-[13px] font-semibold text-gray-900">Hero Image <span className="text-red-500">*</span></h2>
               <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">1920x800px recommended</p>
 
               {heroImage ? (
