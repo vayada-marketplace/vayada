@@ -663,6 +663,16 @@ export default function SetupPage() {
             </button>
           </div>
         </div>
+
+        {/* Sign out */}
+        <div className="fixed bottom-6 left-6">
+          <button
+            onClick={() => authService.logout()}
+            className="text-[13px] text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     )
   }
