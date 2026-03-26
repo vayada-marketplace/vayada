@@ -12,6 +12,14 @@ locals {
         { name = "CORS_ORIGIN_REGEX", value = ".*" },
         { name = "API_PORT", value = "8001" },
         { name = "CLOUDFLARE_ZONE_ID", value = var.cloudflare_zone_id },
+        { name = "FRONTEND_URL", value = "https://admin.booking.vayada.com" },
+        { name = "EMAIL_ENABLED", value = "true" },
+        { name = "EMAIL_SERVICE_PROVIDER", value = "smtp" },
+        { name = "EMAIL_FROM_ADDRESS", value = "noreply@vayada.com" },
+        { name = "EMAIL_FROM_NAME", value = "vayada" },
+        { name = "SMTP_HOST", value = "email-smtp.eu-west-1.amazonaws.com" },
+        { name = "SMTP_PORT", value = "587" },
+        { name = "SMTP_USE_TLS", value = "true" },
         { name = "ENVIRONMENT", value = "production" },
         { name = "DEBUG", value = "false" },
       ]
@@ -21,6 +29,8 @@ locals {
         { name = "PMS_DATABASE_URL", valueFrom = "/vayada/prod/db-pms-url" },
         { name = "JWT_SECRET_KEY", valueFrom = "/vayada/prod/jwt-secret-key" },
         { name = "CLOUDFLARE_API_TOKEN", valueFrom = "/vayada/prod/cloudflare-api-token" },
+        { name = "SMTP_USER", valueFrom = "/vayada/prod/smtp-username" },
+        { name = "SMTP_PASSWORD", valueFrom = "/vayada/prod/smtp-password" },
       ]
     }
     booking-frontend = {
@@ -58,7 +68,7 @@ locals {
       log_group      = "/ecs/vayada-pms-backend"
       environment = [
         { name = "CORS_ORIGINS", value = "https://pms.vayada.com,https://admin.booking.vayada.com,https://admin.vayada.com" },
-        { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
+        { name = "CORS_ORIGIN_REGEX", value = ".*" },
         { name = "API_PORT", value = "8002" },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "S3_BUCKET_NAME", value = "vayada-uploads-prod" },
