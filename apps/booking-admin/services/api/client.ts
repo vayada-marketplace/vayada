@@ -159,7 +159,7 @@ export class ApiClient {
   }
 
   async get<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    return this.request<T>(endpoint, { ...options, method: 'GET' })
+    return this.request<T>(endpoint, { ...options, method: 'GET', cache: 'no-store' })
   }
 
   async post<T>(endpoint: string, data?: unknown, options?: RequestInit): Promise<T> {
