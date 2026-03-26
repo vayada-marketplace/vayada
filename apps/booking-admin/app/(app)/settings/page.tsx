@@ -13,7 +13,7 @@ import {
   MapPinIcon,
   LockClosedIcon,
 } from '@heroicons/react/24/outline'
-import { settingsService, type PropertySettings } from '@/services/settings'
+import { settingsService, customDomainService, type PropertySettings, type CustomDomainStatus } from '@/services/settings'
 import { CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LANGUAGE_CODES } from '@/lib/constants/options'
 import type { CurrencyOption, LanguageOption } from '@/lib/constants/options'
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
@@ -264,6 +264,11 @@ export default function SettingsPage() {
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  // Custom domain
+  const [domainInput, setDomainInput] = useState('')
+  const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null)
+  const [domainLoading, setDomainLoading] = useState(false)
+
   // Book Direct Benefits
   const [benefits, setBenefits] = useState<string[]>([])
   const [benefitInput, setBenefitInput] = useState('')
@@ -323,6 +328,9 @@ export default function SettingsPage() {
     settingsService.getBenefits()
       .then((res) => setBenefits(res.benefits))
       .catch(() => {})
+    customDomainService.getStatus()
+      .then(setDomainStatus)
+      .catch(() => {})
   }, [fetchSettings])
 
   const handleSave = async () => {
@@ -369,6 +377,51 @@ export default function SettingsPage() {
 
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
     setSettings({ ...settings, [key]: value })
+  }
+
+  const handleConnectDomain = async () => {
+    if (!domainInput.trim()) return
+    setDomainLoading(true)
+    setFeedback(null)
+    try {
+      const connectedDomain = domainInput.trim().toLowerCase()
+      await customDomainService.connect(connectedDomain)
+      setDomainStatus({
+        configured: true,
+        domain: connectedDomain,
+        status: 'pending',
+        ssl_status: 'initializing',
+      })
+      setDomainInput('')
+      setFeedback({ type: 'success', message: 'Custom domain connected. Add the DNS record below to activate it.' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to connect domain'
+      setFeedback({ type: 'error', message })
+    } finally {
+      setDomainLoading(false)
+    }
+  }
+
+  const handleDisconnectDomain = async () => {
+    setDomainLoading(true)
+    setFeedback(null)
+    try {
+      await customDomainService.disconnect()
+      setDomainStatus({ configured: false })
+      setFeedback({ type: 'success', message: 'Custom domain removed' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to remove domain'
+      setFeedback({ type: 'error', message })
+    } finally {
+      setDomainLoading(false)
+    }
+  }
+
+  const handleRefreshDomainStatus = async () => {
+    try {
+      const status = await customDomainService.getStatus()
+      setDomainStatus(status)
+    } catch {}
   }
 
   const BENEFIT_OPTIONS = [
@@ -781,6 +834,81 @@ export default function SettingsPage() {
                       label={'"Refer a Guest" Feature'}
                       description="Allow guests to refer friends and earn rewards through your booking page"
                     />
+                  </div>
+
+                  {/* Custom Domain */}
+                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                    <h2 className="text-sm font-semibold text-gray-900">Custom Domain</h2>
+                    {domainStatus?.configured ? (
+                      <div className="space-y-4 mt-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[13px] font-medium text-gray-900">{domainStatus.domain}</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            domainStatus.ssl_status === 'active'
+                              ? 'bg-green-100 text-green-700'
+                              : domainStatus.status === 'pending'
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {domainStatus.ssl_status === 'active' ? 'Active' : domainStatus.status === 'pending' ? 'Pending DNS' : domainStatus.ssl_status || 'Checking...'}
+                          </span>
+                          <button
+                            onClick={handleRefreshDomainStatus}
+                            className="text-[11px] text-primary-600 hover:text-primary-700"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+
+                        {domainStatus.ssl_status !== 'active' && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <p className="text-[13px] font-medium text-blue-900 mb-2">DNS Setup Required</p>
+                            <p className="text-[13px] text-blue-700 mb-2">Add a CNAME record in your DNS provider:</p>
+                            <div className="bg-white rounded p-3 font-mono text-[11px] text-gray-800 space-y-1">
+                              <div><span className="text-gray-500">Type:</span> CNAME</div>
+                              <div><span className="text-gray-500">Name:</span> {domainStatus.domain}</div>
+                              <div><span className="text-gray-500">Target:</span> custom.booking.vayada.com</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {domainStatus.verification_errors && domainStatus.verification_errors.length > 0 && (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-[13px] text-red-700">{domainStatus.verification_errors.join(', ')}</p>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={handleDisconnectDomain}
+                          disabled={domainLoading}
+                          className="px-4 py-2 text-[13px] font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          {domainLoading ? 'Removing...' : 'Remove Domain'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 mt-1">
+                        <p className="text-[13px] text-gray-500">
+                          Use your own domain for your booking page instead of the default subdomain.
+                        </p>
+                        <div className="flex gap-3">
+                          <input
+                            type="text"
+                            value={domainInput}
+                            onChange={(e) => setDomainInput(e.target.value)}
+                            placeholder="booking.yourdomain.com"
+                            className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                          <button
+                            onClick={handleConnectDomain}
+                            disabled={domainLoading || !domainInput.trim()}
+                            className="px-4 py-2 text-[13px] font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                          >
+                            {domainLoading ? 'Connecting...' : 'Connect Domain'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Save button */}
