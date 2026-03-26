@@ -141,6 +141,7 @@ locals {
       log_group      = "/ecs/vayada-affiliate-dashboard"
       environment = [
         { name = "NEXT_PUBLIC_API_URL", value = "https://api.vayada.com" },
+        { name = "NEXT_PUBLIC_AUTH_API_URL", value = "https://booking-api.vayada.com" },
       ]
       secrets = []
     }
