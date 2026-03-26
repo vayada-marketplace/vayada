@@ -12,6 +12,7 @@ from app.routers.admin.addons import router as addons_router
 from app.routers.admin.superadmin import router as superadmin_router
 from app.routers.admin.dashboard import router as dashboard_router
 from app.routers.admin.benefits import router as benefits_router
+from app.routers.admin.promo_codes import router as promo_codes_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -23,3 +24,4 @@ router.include_router(addons_router)
 router.include_router(superadmin_router)
 router.include_router(dashboard_router)
 router.include_router(benefits_router)
+router.include_router(promo_codes_router)
