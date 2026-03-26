@@ -13,6 +13,11 @@ interface DayStats {
 export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [isMac, setIsMac] = useState(true)
+
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.userAgent))
+  }, [])
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 })
@@ -84,7 +89,7 @@ export default function Header() {
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <span className="flex-1 text-left text-[13px] text-gray-400">Search reservations, guests, rooms...</span>
-          <kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-400 leading-none">⌘K</kbd>
+          <kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-400 leading-none">{isMac ? '⌘K' : 'Ctrl+K'}</kbd>
         </button>
       </div>
 
