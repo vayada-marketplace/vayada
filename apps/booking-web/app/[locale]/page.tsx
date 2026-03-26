@@ -127,7 +127,7 @@ export default function HomePage() {
     label: hotel?.customFilters?.[key] || t(key),
   })).filter(({ key, label }) => {
     if (hotel?.filterRooms?.[key]?.length) {
-      return rooms.some((room) => hotel.filterRooms[key].includes(room.id))
+      return rooms.some((room) => hotel.filterRooms?.[key]?.includes(room.id))
     }
     const lower = label.toLowerCase()
     return rooms.some((room) =>
