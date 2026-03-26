@@ -162,6 +162,25 @@ export default function SettingsPage() {
     setSaving(true)
     setError('')
     setSuccess('')
+
+    if (paymentProvider === 'xendit') {
+      if (!xenditAccountNumber.trim()) {
+        setError('Account number is required for Xendit payouts')
+        setSaving(false)
+        return
+      }
+      if (!/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
+        setError('Account number must be 5–20 digits')
+        setSaving(false)
+        return
+      }
+      if (!xenditAccountHolderName.trim()) {
+        setError('Account holder name is required for Xendit payouts')
+        setSaving(false)
+        return
+      }
+    }
+
     try {
       await bookingsService.updatePaymentSettings({
         platformFeeType: feeType,
@@ -309,8 +328,11 @@ export default function SettingsPage() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
                   <input
                     type="text"
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={20}
                     value={xenditAccountNumber}
-                    onChange={(e) => setXenditAccountNumber(e.target.value)}
+                    onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))}
                     placeholder="1234567890"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
