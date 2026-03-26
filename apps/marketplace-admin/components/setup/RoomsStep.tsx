@@ -525,9 +525,9 @@ export default function RoomsStep({
                     })}
                   </div>
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
+                <div className="space-y-2">
                   {room.operatingPeriods.map((period, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
+                    <div key={idx} className="flex items-center gap-2">
                       <input
                         type="date"
                         value={period.from}
@@ -536,9 +536,9 @@ export default function RoomsStep({
                           updated[idx] = { ...updated[idx], from: e.target.value }
                           updateRoom({ operatingPeriods: updated })
                         }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-[130px] px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                       />
-                      <span className="text-[11px] text-gray-400">to</span>
+                      <span className="text-[10px] text-gray-400">to</span>
                       <input
                         type="date"
                         value={period.to}
@@ -547,12 +547,12 @@ export default function RoomsStep({
                           updated[idx] = { ...updated[idx], to: e.target.value }
                           updateRoom({ operatingPeriods: updated })
                         }}
-                        className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-[130px] px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                       />
                       {room.operatingPeriods.length > 1 && (
                         <button
                           onClick={() => updateRoom({ operatingPeriods: room.operatingPeriods.filter((_, i) => i !== idx) })}
-                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                          className="p-1 text-gray-300 hover:text-red-500 transition-colors"
                         >
                           <XMarkIcon className="w-3.5 h-3.5" />
                         </button>
@@ -561,9 +561,9 @@ export default function RoomsStep({
                   ))}
                   <button
                     onClick={() => updateRoom({ operatingPeriods: [...room.operatingPeriods, { from: '', to: '' }] })}
-                    className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] text-gray-500 font-medium px-2.5 py-1 rounded-md hover:bg-gray-100 transition-colors"
                   >
-                    <PlusIcon className="w-3.5 h-3.5" /> Add period
+                    <PlusIcon className="w-3 h-3" /> Add period
                   </button>
                 </div>
               </div>

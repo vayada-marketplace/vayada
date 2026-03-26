@@ -10,6 +10,8 @@ import { TrashIcon, ClipboardIcon, PlusIcon } from '@heroicons/react/24/outline'
 import PropertyStep from '@/components/setup/PropertyStep'
 import BrandMediaStep from '@/components/setup/BrandMediaStep'
 import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
+import AddonsStep, { type SetupAddon, createEmptyAddon } from '@/components/setup/AddonsStep'
+import PromoCodesStep, { type SetupPromoCode } from '@/components/setup/PromoCodesStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
 import BenefitsStep from '@/components/setup/BenefitsStep'
 
@@ -19,9 +21,11 @@ const STEPS = [
   { number: 1, label: 'Property' },
   { number: 2, label: 'Brand & Media' },
   { number: 3, label: 'Rooms & Rates' },
-  { number: 4, label: 'Benefits' },
-  { number: 5, label: 'Policies' },
-  { number: 6, label: 'Payment Terms' },
+  { number: 4, label: 'Add-ons' },
+  { number: 5, label: 'Promo Codes' },
+  { number: 6, label: 'Benefits' },
+  { number: 7, label: 'Policies' },
+  { number: 8, label: 'Payment Terms' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -74,10 +78,16 @@ export default function InviteCodesPage() {
   const roomFileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false)
 
-  // Step 4: Benefits
+  // Step 4: Add-ons
+  const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([])
+
+  // Step 5: Promo Codes
+  const [setupPromoCodes, setSetupPromoCodes] = useState<SetupPromoCode[]>([])
+
+  // Step 6: Benefits
   const [benefits, setBenefits] = useState<string[]>([])
 
-  // Step 5: Policies
+  // Step 7: Policies
   const [checkInTime, setCheckInTime] = useState('15:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
   const [payAtHotel, setPayAtHotel] = useState(true)
@@ -177,6 +187,26 @@ export default function InviteCodesPage() {
           baseRate: r.baseRate,
           nonRefundableRate: r.nonRefundableRate,
         })),
+        addons: setupAddons.map(a => ({
+          name: a.name,
+          description: a.description,
+          price: a.price,
+          currency: a.currency,
+          category: a.category,
+          image: a.image.startsWith('blob:') ? '' : a.image,
+          duration: a.duration || undefined,
+          perPerson: a.perPerson,
+          perNight: a.perNight,
+        })),
+        promoCodes: setupPromoCodes.map(p => ({
+          code: p.code,
+          discountType: p.discountType,
+          discountValue: p.discountValue,
+          validFrom: p.validFrom,
+          validUntil: p.validUntil,
+          isActive: p.isActive,
+          maxUses: p.maxUses,
+        })),
         internal: {
           active_plan: activePlan,
           commission_rate: parseFloat(commissionRate) || 0,
@@ -210,6 +240,7 @@ export default function InviteCodesPage() {
     setSelectedFont('high-end-serif'); setPropertyDescription('')
     setBookingFilters(['includeBreakfast', 'freeCancellation', 'payAtHotel'])
     setRooms([createEmptyRoom()]); setActiveRoomIndex(0)
+    setSetupAddons([]); setSetupPromoCodes([])
     setBenefits([])
     setCheckInTime('15:00'); setCheckOutTime('11:00')
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
@@ -361,11 +392,12 @@ export default function InviteCodesPage() {
         )}
 
         {step === 4 && (
-          <BenefitsStep
-            benefits={benefits}
-            setBenefits={setBenefits}
+          <AddonsStep
+            addons={setupAddons}
+            setAddons={setSetupAddons}
+            currency={currency}
             error=""
-            canProceed={canProceed()}
+            canProceed={true}
             onBack={() => setStep(3)}
             onContinue={() => setStep(5)}
             stepIndicators={stepIndicators}
@@ -373,6 +405,31 @@ export default function InviteCodesPage() {
         )}
 
         {step === 5 && (
+          <PromoCodesStep
+            promoCodes={setupPromoCodes}
+            setPromoCodes={setSetupPromoCodes}
+            currency={currency}
+            error=""
+            canProceed={true}
+            onBack={() => setStep(4)}
+            onContinue={() => setStep(6)}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {step === 6 && (
+          <BenefitsStep
+            benefits={benefits}
+            setBenefits={setBenefits}
+            error=""
+            canProceed={canProceed()}
+            onBack={() => setStep(5)}
+            onContinue={() => setStep(7)}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {step === 7 && (
           <PoliciesStep
             checkInTime={checkInTime} setCheckInTime={setCheckInTime}
             checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -387,13 +444,13 @@ export default function InviteCodesPage() {
             stepIndicators={stepIndicators}
             error=""
             saving={false}
-            onBack={() => setStep(4)}
-            onComplete={() => setStep(6)}
+            onBack={() => setStep(6)}
+            onComplete={() => setStep(8)}
           />
         )}
 
-        {/* Step 6: vayada Payment Terms */}
-        {step === 6 && (
+        {/* Step 8: vayada Payment Terms */}
+        {step === 8 && (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto px-8 py-8">
               {stepIndicators}
@@ -507,7 +564,7 @@ export default function InviteCodesPage() {
               {/* Navigation */}
               <div className="flex justify-between">
                 <button
-                  onClick={() => setStep(5)}
+                  onClick={() => setStep(7)}
                   className="px-8 py-2.5 text-[14px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   Back

@@ -67,6 +67,26 @@ export interface InviteData {
     fixed_monthly_fee: number
     payment_provider?: 'stripe' | 'xendit'
   }
+  addons?: Array<{
+    name: string
+    description: string
+    price: number
+    currency: string
+    category: string
+    image: string
+    duration?: string
+    perPerson: boolean
+    perNight: boolean
+  }>
+  promoCodes?: Array<{
+    code: string
+    discountType: 'percentage' | 'fixed'
+    discountValue: number
+    validFrom?: string | null
+    validUntil?: string | null
+    isActive: boolean
+    maxUses?: number | null
+  }>
   benefits?: string[]
   policies: {
     check_in_time: string
