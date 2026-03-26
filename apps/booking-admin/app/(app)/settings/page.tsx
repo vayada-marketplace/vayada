@@ -1005,7 +1005,7 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
                   <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
-                    <span className="text-3xl font-bold text-gray-900">{settings.default_currency} {settings.billing_fixed_fee || 49}</span>
+                    <span className="text-3xl font-bold text-gray-900">{settings.default_currency} {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.default_currency || 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(settings.billing_fixed_fee || 49)}</span>
                     <p className="text-[11px] text-gray-400 mt-1">per month</p>
                   </div>
                   {settings.billing_active_plan !== 'fixed' && !settings.billing_pending_switch && (
