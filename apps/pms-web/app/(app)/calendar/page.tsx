@@ -1,13 +1,11 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { format, addDays, startOfDay, differenceInDays, parseISO } from 'date-fns'
 import {
   calendarService,
   CalendarData,
   CalendarBooking,
-  CalendarBlock,
-  CalendarRoom,
   CreateAdminBookingPayload,
 } from '@/services/calendar'
 import BlockModal from '@/components/calendar/BlockModal'
@@ -81,11 +79,6 @@ export default function CalendarPage() {
     fetchData()
   }
 
-  const handleDeleteBlock = async (blockId: string) => {
-    await calendarService.deleteRoomBlock(blockId)
-    fetchData()
-  }
-
   // Calculate bar position and width relative to the visible date range
   const getBarStyle = (itemStart: string, itemEnd: string) => {
     const s = parseISO(itemStart)
@@ -100,13 +93,12 @@ export default function CalendarPage() {
     }
   }
 
-  // Group rooms by room type
-  const roomsByType = useMemo(() => {
+  // Build a lookup from room type ID to room type (for category, name)
+  const roomTypeMap = useMemo(() => {
     if (!data) return {}
-    const map: Record<string, CalendarRoom[]> = {}
-    for (const r of data.rooms) {
-      if (!map[r.roomTypeId]) map[r.roomTypeId] = []
-      map[r.roomTypeId].push(r)
+    const map: Record<string, { name: string; category: string }> = {}
+    for (const rt of data.roomTypes) {
+      map[rt.id] = { name: rt.name, category: rt.category }
     }
     return map
   }, [data])
@@ -124,27 +116,9 @@ export default function CalendarPage() {
     return map
   }, [data])
 
-  const unassignedByType = useMemo(() => {
-    if (!data) return {}
-    const map: Record<string, CalendarBooking[]> = {}
-    for (const b of data.bookings) {
-      if (!b.roomId) {
-        if (!map[b.roomTypeId]) map[b.roomTypeId] = []
-        map[b.roomTypeId].push(b)
-      }
-    }
-    return map
-  }, [data])
-
-  // Group blocks by room type
-  const blocksByRoom = useMemo(() => {
-    if (!data) return {}
-    const map: Record<string, CalendarBlock[]> = {}
-    for (const bl of data.blocks) {
-      if (!map[bl.roomTypeId]) map[bl.roomTypeId] = []
-      map[bl.roomTypeId].push(bl)
-    }
-    return map
+  const unassignedBookings = useMemo(() => {
+    if (!data) return []
+    return data.bookings.filter((b) => !b.roomId)
   }, [data])
 
   const getInitials = (first: string, last: string) => {
@@ -221,9 +195,9 @@ export default function CalendarPage() {
         <div className="animate-pulse">
           <div className="h-64 bg-gray-200 rounded" />
         </div>
-      ) : !data || data.roomTypes.length === 0 ? (
+      ) : !data || data.rooms.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-          <p className="text-gray-500">No room types found. Create room types first.</p>
+          <p className="text-gray-500">No rooms found. Create rooms under Rooms &amp; Rates first.</p>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-x-auto">
@@ -251,134 +225,87 @@ export default function CalendarPage() {
               </tr>
             </thead>
             <tbody>
-              {data.roomTypes.map((rt) => {
-                const typeRooms = roomsByType[rt.id] || []
-                const roomBlocks = blocksByRoom[rt.id] || []
-                const unassigned = unassignedByType[rt.id] || []
-
+              {data.rooms.map((room) => {
+                const roomBookings = bookingsByRoom[room.id] || []
+                const rt = roomTypeMap[room.roomTypeId]
                 return (
-                  <React.Fragment key={rt.id}>
-                    {/* Room type header row */}
-                    <tr className="bg-gray-100/80 border-b border-gray-200">
-                      <td className="px-3 py-2 sticky left-0 bg-gray-100/80 z-10 border-r border-gray-200">
-                        <div className="text-sm font-semibold text-gray-800">{rt.name}</div>
-                        <div className="text-[10px] text-gray-500">
-                          {typeRooms.length} room{typeRooms.length !== 1 ? 's' : ''}
-                        </div>
-                      </td>
-                      <td colSpan={VIEW_DAYS} className="relative h-10 p-0">
-                        {/* Day grid lines */}
-                        <div className="absolute inset-0 flex">
-                          {dates.map((d) => (
-                            <div key={d.toISOString()} className="flex-1 border-r border-gray-200/50" />
-                          ))}
-                        </div>
-                        {/* Block bars in header row */}
-                        {roomBlocks.map((bl) => {
-                          const style = getBarStyle(bl.startDate, bl.endDate)
-                          if (!style) return null
-                          return (
-                            <div
-                              key={bl.id}
-                              className="absolute top-1.5 h-6 rounded px-1.5 text-[10px] font-medium leading-6 truncate z-[1] bg-gray-300 text-gray-700 border border-gray-400 cursor-pointer"
-                              style={{
-                                ...style,
-                                backgroundImage:
-                                  'repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(0,0,0,0.08) 3px, rgba(0,0,0,0.08) 6px)',
-                              }}
-                              title={`Blocked: ${bl.reason || 'No reason'} (${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''})\n${bl.startDate} → ${bl.endDate}\nClick to delete`}
-                              onClick={() => {
-                                if (confirm(`Delete this block?\n${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}`)) {
-                                  handleDeleteBlock(bl.id)
-                                }
-                              }}
-                            >
-                              {bl.reason || 'Blocked'} ({bl.blockedCount})
-                            </div>
-                          )
-                        })}
-                      </td>
-                    </tr>
-
-                    {/* Individual room rows */}
-                    {typeRooms.map((room) => {
-                      const roomBookings = bookingsByRoom[room.id] || []
-                      return (
-                        <tr key={room.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                          <td className="px-3 py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
-                            <div className="text-sm font-medium text-gray-900">#{room.roomNumber}</div>
-                            <div className="text-[10px] text-gray-400">{room.roomTypeName}</div>
-                          </td>
-                          <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
-                            {/* Day grid lines */}
-                            <div className="absolute inset-0 flex">
-                              {dates.map((d) => (
-                                <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
-                              ))}
-                            </div>
-                            {/* Booking bars */}
-                            {roomBookings.map((b) => {
-                              const style = getBarStyle(b.checkIn, b.checkOut)
-                              if (!style) return null
-                              const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
-                              return (
-                                <div
-                                  key={b.id}
-                                  className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5`}
-                                  style={style}
-                                  title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`}
-                                  onClick={() => setSelectedBookingId(b.id)}
-                                >
-                                  <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
-                                    {getInitials(b.guestFirstName, b.guestLastName)}
-                                  </span>
-                                  <span className="truncate">{b.guestLastName}</span>
-                                </div>
-                              )
-                            })}
-                          </td>
-                        </tr>
-                      )
-                    })}
-
-                    {/* Unassigned bookings row (for pre-migration bookings) */}
-                    {unassigned.length > 0 && (
-                      <tr className="border-b border-gray-100 bg-amber-50/30">
-                        <td className="px-3 py-2 sticky left-0 bg-amber-50/30 z-10 border-r border-gray-200">
-                          <div className="text-sm font-medium text-amber-700">Unassigned</div>
-                          <div className="text-[10px] text-amber-500">{rt.name}</div>
-                        </td>
-                        <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
-                          <div className="absolute inset-0 flex">
-                            {dates.map((d) => (
-                              <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
-                            ))}
+                  <tr key={room.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="px-3 py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
+                      <div className="text-sm font-semibold text-gray-900">#{room.roomNumber}</div>
+                      <div className="text-[10px] text-gray-500 leading-tight">
+                        {room.roomTypeName}
+                        {rt?.category && (
+                          <span className="text-gray-400"> &middot; {rt.category}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
+                      {/* Day grid lines */}
+                      <div className="absolute inset-0 flex">
+                        {dates.map((d) => (
+                          <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
+                        ))}
+                      </div>
+                      {/* Booking bars */}
+                      {roomBookings.map((b) => {
+                        const style = getBarStyle(b.checkIn, b.checkOut)
+                        if (!style) return null
+                        const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
+                        return (
+                          <div
+                            key={b.id}
+                            className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5`}
+                            style={style}
+                            title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`}
+                            onClick={() => setSelectedBookingId(b.id)}
+                          >
+                            <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
+                              {getInitials(b.guestFirstName, b.guestLastName)}
+                            </span>
+                            <span className="truncate">{b.guestLastName}</span>
                           </div>
-                          {unassigned.map((b) => {
-                            const style = getBarStyle(b.checkIn, b.checkOut)
-                            if (!style) return null
-                            const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
-                            return (
-                              <div
-                                key={b.id}
-                                className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 opacity-75`}
-                                style={style}
-                                title={`${b.guestFirstName} ${b.guestLastName} (${b.status}) - Unassigned\n${b.checkIn} → ${b.checkOut}`}
-                                onClick={() => setSelectedBookingId(b.id)}
-                              >
-                                <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
-                                  {getInitials(b.guestFirstName, b.guestLastName)}
-                                </span>
-                                <span className="truncate">{b.guestLastName}</span>
-                              </div>
-                            )
-                          })}
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
+                        )
+                      })}
+                    </td>
+                  </tr>
                 )
               })}
+
+              {/* Unassigned bookings row */}
+              {unassignedBookings.length > 0 && (
+                <tr className="border-b border-gray-100 bg-amber-50/30">
+                  <td className="px-3 py-2 sticky left-0 bg-amber-50/30 z-10 border-r border-gray-200">
+                    <div className="text-sm font-medium text-amber-700">Unassigned</div>
+                    <div className="text-[10px] text-amber-500">{unassignedBookings.length} booking{unassignedBookings.length !== 1 ? 's' : ''}</div>
+                  </td>
+                  <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
+                    <div className="absolute inset-0 flex">
+                      {dates.map((d) => (
+                        <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
+                      ))}
+                    </div>
+                    {unassignedBookings.map((b) => {
+                      const style = getBarStyle(b.checkIn, b.checkOut)
+                      if (!style) return null
+                      const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
+                      return (
+                        <div
+                          key={b.id}
+                          className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 opacity-75`}
+                          style={style}
+                          title={`${b.guestFirstName} ${b.guestLastName} (${b.status}) - Unassigned\n${b.checkIn} → ${b.checkOut}`}
+                          onClick={() => setSelectedBookingId(b.id)}
+                        >
+                          <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
+                            {getInitials(b.guestFirstName, b.guestLastName)}
+                          </span>
+                          <span className="truncate">{b.guestLastName}</span>
+                        </div>
+                      )
+                    })}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
