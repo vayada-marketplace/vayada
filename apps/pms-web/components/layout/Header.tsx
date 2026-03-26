@@ -1,9 +1,26 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { ChevronDownIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
+import { pmsSettingsService, HotelSummary } from '@/services/settings'
 import SearchModal from './SearchModal'
+
+const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
+
+function buildHandoffUrl(baseUrl: string, path: string = ''): string {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+  const expiresAt = typeof window !== 'undefined' ? localStorage.getItem('token_expires_at') : null
+  const user = typeof window !== 'undefined' ? localStorage.getItem('user') : null
+  if (!token || !expiresAt) return `${baseUrl}${path}`
+  const params = new URLSearchParams({
+    token,
+    expires_at: expiresAt,
+    ...(user ? { user: encodeURIComponent(user) } : {}),
+  })
+  return `${baseUrl}/handoff${path ? `?redirect=${encodeURIComponent(path)}` : ''}#${params.toString()}`
+}
 
 interface DayStats {
   arrivals: number
@@ -14,6 +31,9 @@ export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [isMac, setIsMac] = useState(true)
+  const [propertyOpen, setPropertyOpen] = useState(false)
+  const [hotels, setHotels] = useState<HotelSummary[]>([])
+  const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
 
   useEffect(() => {
     setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.userAgent))
@@ -22,11 +42,15 @@ export default function Header() {
   const [userEmail, setUserEmail] = useState('')
   const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 })
   const profileRef = useRef<HTMLDivElement>(null)
+  const propertyRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false)
+      }
+      if (propertyRef.current && !propertyRef.current.contains(e.target as Node)) {
+        setPropertyOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -47,6 +71,17 @@ export default function Header() {
   useEffect(() => {
     setUserName(localStorage.getItem('userName') || '')
     setUserEmail(localStorage.getItem('userEmail') || '')
+
+    pmsSettingsService.listHotels().then((list) => {
+      setHotels(list)
+      if (list.length > 0) {
+        const savedId = localStorage.getItem('selectedHotelId')
+        const saved = list.find((h) => h.id === savedId)
+        const selected = saved || list[0]
+        setSelectedHotel(selected)
+        localStorage.setItem('selectedHotelId', selected.id)
+      }
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -71,12 +106,83 @@ export default function Header() {
 
   return (
     <header className="h-12 bg-white border-b border-gray-200 flex items-center px-4 shrink-0 gap-3">
-      {/* Left: date + daily summary */}
-      <div className="flex flex-col justify-center w-44 shrink-0">
-        <p className="text-[12px] font-semibold text-gray-900 leading-tight">{dateStr}</p>
-        <p className="text-[10px] text-gray-400 leading-tight">
-          {stats.arrivals} arrivals · {stats.departures} departures
-        </p>
+      {/* Left: property switcher + date */}
+      <div className="flex items-center gap-4 shrink-0">
+        {/* Property Selector */}
+        <div className="relative" ref={propertyRef}>
+          {hotels.length <= 1 ? (
+            <span className="text-[13px] font-medium text-gray-700">
+              {selectedHotel?.name || 'No properties'}
+            </span>
+          ) : (
+            <button
+              onClick={() => setPropertyOpen(!propertyOpen)}
+              className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+            >
+              <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
+              <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${propertyOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+
+          {propertyOpen && (
+            <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
+              <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
+              <div className="px-1.5 max-h-60 overflow-y-auto">
+                {hotels.map((hotel) => {
+                  const isSelected = selectedHotel?.id === hotel.id
+                  return (
+                    <button
+                      key={hotel.id}
+                      onClick={() => {
+                        if (!isSelected) {
+                          localStorage.setItem('selectedHotelId', hotel.id)
+                          window.location.reload()
+                        }
+                        setPropertyOpen(false)
+                      }}
+                      className={`w-full text-left px-2.5 py-2 rounded-md transition-colors ${
+                        isSelected
+                          ? 'bg-primary-500 text-white'
+                          : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <p className={`text-[13px] font-semibold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
+                        {hotel.name}
+                      </p>
+                      <p className={`text-[11px] ${isSelected ? 'text-primary-100' : 'text-gray-500'}`}>
+                        {hotel.location}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Add Property */}
+              <div className="border-t border-gray-100 mt-1 pt-1 px-1.5">
+                <button
+                  onClick={() => {
+                    setPropertyOpen(false)
+                    window.location.href = buildHandoffUrl(BOOKING_ADMIN_URL, '/setup')
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Add Property
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Separator */}
+        <div className="w-px h-5 bg-gray-200" />
+
+        {/* Date + stats */}
+        <div className="flex flex-col justify-center">
+          <p className="text-[12px] font-semibold text-gray-900 leading-tight">{dateStr}</p>
+          <p className="text-[10px] text-gray-400 leading-tight">
+            {stats.arrivals} arrivals · {stats.departures} departures
+          </p>
+        </div>
       </div>
 
       {/* Center: search */}
