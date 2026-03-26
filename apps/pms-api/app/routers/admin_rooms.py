@@ -281,6 +281,7 @@ async def get_calendar(
             {
                 "id": str(rt["id"]),
                 "name": rt["name"],
+                "category": rt.get("category", ""),
                 "totalRooms": rt["total_rooms"],
                 "baseRate": float(rt["base_rate"]),
                 "currency": rt["currency"],
