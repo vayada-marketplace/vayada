@@ -52,6 +52,40 @@ async def get_payment_settings(slug: str):
     }
 
 
+@router.get("/{slug}/validate-promo")
+async def validate_promo_code(slug: str, code: str = Query(...)):
+    from app.repositories.promo_code_repo import PromoCodeRepository
+    from datetime import date
+
+    hotel = await BookingHotelRepository.get_by_slug(slug)
+    if not hotel:
+        raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
+
+    promo = await PromoCodeRepository.get_by_code(code.upper(), str(hotel["id"]))
+    if not promo:
+        return {"valid": False, "code": code.upper(), "message": "Invalid promo code"}
+
+    if not promo["is_active"]:
+        return {"valid": False, "code": code.upper(), "message": "This promo code is no longer active"}
+
+    today = date.today()
+    if promo["valid_from"] and today < promo["valid_from"]:
+        return {"valid": False, "code": code.upper(), "message": "This promo code is not yet valid"}
+    if promo["valid_until"] and today > promo["valid_until"]:
+        return {"valid": False, "code": code.upper(), "message": "This promo code has expired"}
+
+    if promo["max_uses"] is not None and promo["use_count"] >= promo["max_uses"]:
+        return {"valid": False, "code": code.upper(), "message": "This promo code has reached its usage limit"}
+
+    return {
+        "valid": True,
+        "code": promo["code"],
+        "discountType": promo["discount_type"],
+        "discountValue": float(promo["discount_value"]),
+        "message": "Promo code applied successfully",
+    }
+
+
 @exchange_router.get("/exchange-rates")
 async def exchange_rates(base: str = Query(default="EUR")):
     rates = await get_rates(base)
