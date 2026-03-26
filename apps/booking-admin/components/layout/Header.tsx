@@ -6,6 +6,7 @@ import {
   BellIcon,
   ChevronDownIcon,
   ArrowTopRightOnSquareIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
@@ -75,15 +76,21 @@ export default function Header() {
       <div className="flex items-center gap-4">
         {/* Property Selector Dropdown */}
         <div className="relative" ref={dropdownRef}>
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
-          >
-            <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
-            <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
-          </button>
+          {hotels.length <= 1 && !isSuperAdmin ? (
+            <span className="text-[13px] font-medium text-gray-700">
+              {selectedHotel?.name || 'No properties'}
+            </span>
+          ) : (
+            <button
+              onClick={() => setDropdownOpen(!dropdownOpen)}
+              className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+            >
+              <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
+              <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )}
 
-          {dropdownOpen && hotels.length > 0 && (
+          {dropdownOpen && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
               <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
               {isSuperAdmin && (
@@ -125,6 +132,19 @@ export default function Header() {
                     </button>
                   )
                 })}
+              </div>
+              {/* Add Property */}
+              <div className="border-t border-gray-100 mt-1 pt-1 px-1.5">
+                <button
+                  onClick={() => {
+                    setDropdownOpen(false)
+                    router.push('/setup')
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Add Property
+                </button>
               </div>
             </div>
           )}
