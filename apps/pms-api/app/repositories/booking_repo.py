@@ -113,6 +113,7 @@ class BookingRepository:
         hotel_id: str,
         *,
         status: Optional[str] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[dict]:
@@ -123,6 +124,18 @@ class BookingRepository:
         if status:
             conditions.append(f"b.status = ${idx}")
             args.append(status)
+            idx += 1
+
+        if search:
+            conditions.append(
+                f"(b.guest_first_name ILIKE ${idx}"
+                f" OR b.guest_last_name ILIKE ${idx}"
+                f" OR CONCAT(b.guest_first_name, ' ', b.guest_last_name) ILIKE ${idx}"
+                f" OR b.booking_reference ILIKE ${idx}"
+                f" OR b.guest_email ILIKE ${idx}"
+                f" OR rt.name ILIKE ${idx})"
+            )
+            args.append(f"%{search}%")
             idx += 1
 
         where = " AND ".join(conditions)
