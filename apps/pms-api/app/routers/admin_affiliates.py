@@ -1,6 +1,8 @@
 import logging
+import secrets
 from typing import Optional
 
+import bcrypt
 from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
@@ -13,8 +15,8 @@ from app.models.affiliate import (
 )
 from app.models.payment import StripeConnectAccountRequest, XenditBankDetailsRequest
 from app.services import stripe_service
-from app.services.email_service import send_affiliate_approved
-from app.database import Database
+from app.services.email_service import send_affiliate_approved, send_affiliate_invite
+from app.database import Database, AuthDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -115,14 +117,69 @@ async def update_affiliate_status(
     await AffiliateRepository.update_status(affiliate_id, data.status)
 
     if data.status == "approved":
-        hotel = await Database.fetchrow("SELECT name FROM hotels WHERE id = $1", hotel_id)
+        hotel = await Database.fetchrow("SELECT name, slug FROM hotels WHERE id = $1", hotel_id)
         hotel_name = hotel["name"] if hotel else "the hotel"
+        hotel_slug = hotel["slug"] if hotel else ""
         await send_affiliate_approved(
             affiliate["email"],
             affiliate["full_name"],
             hotel_name,
             affiliate["referral_code"],
         )
+
+        # Create affiliate user account if one doesn't exist for this email
+        existing_user = await AuthDatabase.fetchrow(
+            "SELECT id FROM users WHERE email = $1", affiliate["email"]
+        )
+        if not existing_user:
+            # Create a password reset token so the affiliate can set their password
+            reset_token = secrets.token_urlsafe(32)
+            temp_password = secrets.token_urlsafe(24)
+            password_hash = bcrypt.hashpw(temp_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+            new_user = await AuthDatabase.fetchrow(
+                """
+                INSERT INTO users (email, password_hash, name, type, status, email_verified)
+                VALUES ($1, $2, $3, 'affiliate', 'verified', true)
+                RETURNING id
+                """,
+                affiliate["email"],
+                password_hash,
+                affiliate["full_name"],
+            )
+            user_id_val = str(new_user["id"])
+
+            # Store password reset token (expires in 24h)
+            await AuthDatabase.execute(
+                """
+                INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                VALUES ($1, $2, now() + interval '24 hours')
+                """,
+                user_id_val,
+                reset_token,
+            )
+
+            # Link affiliate record to the new user
+            await Database.execute(
+                "UPDATE affiliates SET user_id = $1 WHERE id = $2",
+                user_id_val,
+                affiliate_id,
+            )
+
+            set_password_url = f"https://affiliate.vayada.com/set-password?token={reset_token}"
+            await send_affiliate_invite(
+                affiliate["email"],
+                affiliate["full_name"],
+                hotel_name,
+                set_password_url,
+            )
+        else:
+            # Link existing user to this affiliate record
+            await Database.execute(
+                "UPDATE affiliates SET user_id = $1 WHERE id = $2",
+                str(existing_user["id"]),
+                affiliate_id,
+            )
 
     # Re-fetch with stats
     affiliates = await AffiliateRepository.list_by_hotel_id(hotel_id, limit=1000)

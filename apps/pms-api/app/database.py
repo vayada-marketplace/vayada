@@ -69,7 +69,19 @@ class AuthDatabase:
             cls._pool = None
 
     @classmethod
+    async def execute(cls, query: str, *args):
+        pool = await cls.get_pool()
+        async with pool.acquire() as conn:
+            return await conn.execute(query, *args)
+
+    @classmethod
     async def fetchrow(cls, query: str, *args):
         pool = await cls.get_pool()
         async with pool.acquire() as conn:
             return await conn.fetchrow(query, *args)
+
+    @classmethod
+    async def fetchval(cls, query: str, *args):
+        pool = await cls.get_pool()
+        async with pool.acquire() as conn:
+            return await conn.fetchval(query, *args)

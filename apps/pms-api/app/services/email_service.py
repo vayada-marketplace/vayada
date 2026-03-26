@@ -374,6 +374,21 @@ async def send_affiliate_approved(affiliate_email: str, affiliate_name: str, hot
     await _send_email(affiliate_email, subject, _wrap_html(content))
 
 
+async def send_affiliate_invite(affiliate_email: str, affiliate_name: str, hotel_name: str, set_password_url: str):
+    """Send affiliate an invite email with a link to set their password and access the dashboard."""
+    subject = f"Set Up Your Affiliate Dashboard — {hotel_name}"
+    content = f"""
+    <h2>Welcome, {affiliate_name}!</h2>
+    <p class="detail">An affiliate dashboard account has been created for you at <strong>{hotel_name}</strong>.</p>
+    <p class="detail">Click the button below to set your password and access your affiliate dashboard where you can track earnings, clicks, and payouts.</p>
+    <hr class="divider">
+    <a href="{set_password_url}" class="btn">Set Your Password</a>
+    <hr class="divider">
+    <p class="detail" style="font-size: 13px; color: #888;">This link expires in 24 hours. If it has expired, contact the hotel to resend it.</p>
+    """
+    await _send_email(affiliate_email, subject, _wrap_html(content))
+
+
 async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
     if not hotel_email:
