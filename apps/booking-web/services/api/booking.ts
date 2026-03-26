@@ -5,11 +5,13 @@ const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
 export interface BookingRequestResponse {
   booking: Booking
   clientSecret: string | null
+  xenditInvoiceUrl: string | null
   paymentMethod: string
 }
 
 export interface PaymentSettings {
   payAtPropertyEnabled: boolean
+  xenditPaymentsEnabled?: boolean
   payAtHotelMethods?: string[]
   freeCancellationDays: number
   specialRequestsEnabled?: boolean
