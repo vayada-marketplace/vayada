@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     XENDIT_SECRET_KEY: str = ""
     XENDIT_WEBHOOK_SECRET: str = ""
 
+    # Booking engine frontend URL (for Xendit redirect URLs)
+    BOOKING_ENGINE_URL: str = "https://booking.vayada.com"
+
     # Beds24
     BEDS24_API_BASE_URL: str = "https://api.beds24.com/v2"
     BEDS24_WEBHOOK_SECRET: str = ""

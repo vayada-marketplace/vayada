@@ -39,6 +39,7 @@ class HotelPaymentSettings(BaseModel):
     platform_fee_value: float = 8.00
     platform_fee_with_affiliate: float = 2.00
     pay_at_property_enabled: bool = False
+    xendit_payments_enabled: bool = False
     payment_provider: str = "stripe"
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
@@ -58,6 +59,7 @@ class HotelPaymentSettingsUpdate(BaseModel):
     platform_fee_value: Optional[float] = None
     platform_fee_with_affiliate: Optional[float] = None
     pay_at_property_enabled: Optional[bool] = None
+    xendit_payments_enabled: Optional[bool] = None
     payment_provider: Optional[Literal["stripe", "xendit"]] = None
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None

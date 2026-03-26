@@ -11,13 +11,16 @@ class PaymentRepository:
         currency: str,
         payment_method: str,
         stripe_pi_id: Optional[str] = None,
+        xendit_invoice_id: Optional[str] = None,
+        xendit_invoice_url: Optional[str] = None,
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO payments (
                 booking_id, amount, currency, payment_method,
-                stripe_payment_intent_id, status
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                stripe_payment_intent_id, xendit_invoice_id,
+                xendit_invoice_url, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
             booking_id,
@@ -25,6 +28,8 @@ class PaymentRepository:
             currency,
             payment_method,
             stripe_pi_id,
+            xendit_invoice_id,
+            xendit_invoice_url,
             "pending",
         )
         return dict(row)
@@ -34,6 +39,14 @@ class PaymentRepository:
         row = await Database.fetchrow(
             "SELECT * FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1",
             booking_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def get_by_xendit_invoice(xendit_invoice_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            "SELECT * FROM payments WHERE xendit_invoice_id = $1",
+            xendit_invoice_id,
         )
         return dict(row) if row else None
 

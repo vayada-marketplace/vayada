@@ -15,7 +15,7 @@ from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 from app.models.booking import BookingCreate, BookingResponse
-from app.services import stripe_service
+from app.services import stripe_service, xendit_service
 from app.services.payout_service import calculate_split, schedule_payouts
 from app.services.email_service import (
     send_hotel_notification,
@@ -233,9 +233,13 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # Validate payment method
     payment_method = data.payment_method
     if payment_method == "pay_at_property":
-        settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-        if not settings or not settings["pay_at_property_enabled"]:
+        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        if not hotel_settings or not hotel_settings["pay_at_property_enabled"]:
             raise ValueError("Pay at property is not enabled for this hotel")
+    elif payment_method == "xendit":
+        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        if not hotel_settings or not hotel_settings.get("xendit_payments_enabled"):
+            raise ValueError("Xendit payments are not enabled for this hotel")
 
     deadline = datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
 
@@ -271,6 +275,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     booking_id = str(booking_row["id"])
 
     client_secret = None
+    xendit_invoice_url = None
 
     if payment_method == "card":
         # Get hotel Stripe Connect account — required for card payments
@@ -305,6 +310,35 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             payment_method="card",
             stripe_pi_id=pi["id"],
         )
+
+    elif payment_method == "xendit":
+        # Create Xendit Invoice — supports QRIS, e-wallets, VA, cards
+        booking_ref = booking_row["booking_reference"]
+        try:
+            invoice = await xendit_service.create_invoice(
+                external_id=f"booking-{booking_id}",
+                amount=total_amount,
+                currency=room["currency"],
+                payer_email=data.guest_email,
+                description=f"Booking {booking_ref} at {hotel['name']}",
+                success_redirect_url=f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/booking/{booking_id}/confirmation",
+                failure_redirect_url=f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/payment?failed=true",
+                metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+            )
+        except Exception:
+            await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+            raise
+        xendit_invoice_url = invoice["invoice_url"]
+
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=room["currency"],
+            payment_method="xendit",
+            xendit_invoice_id=invoice["id"],
+            xendit_invoice_url=invoice["invoice_url"],
+        )
+
     else:
         # Pay at property
         await PaymentRepository.create(
@@ -333,6 +367,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     return {
         "booking": response.model_dump(by_alias=True),
         "clientSecret": client_secret,
+        "xenditInvoiceUrl": xendit_invoice_url,
         "paymentMethod": payment_method,
     }
 
@@ -385,6 +420,14 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
             await PaymentRepository.update_status(
                 str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
             )
+    elif payment_method == "xendit":
+        # Xendit Invoice payments are already captured when guest pays
+        # Just verify the payment is in the right state
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment["status"] != "captured":
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
+            )
 
     # Calculate split
     hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
@@ -410,7 +453,10 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
     )
 
     # Update booking
-    new_payment_status = "captured" if payment_method == "card" else "pay_at_property"
+    if payment_method in ("card", "xendit"):
+        new_payment_status = "captured"
+    else:
+        new_payment_status = "pay_at_property"
     await BookingRepository.update_booking_accepted(
         booking_id,
         platform_fee=split["platform_fee"],
@@ -420,7 +466,7 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
     )
 
     # Schedule payouts
-    if payment_method == "card":
+    if payment_method in ("card", "xendit"):
         await schedule_payouts(
             booking_id=booking_id,
             hotel_id=hotel_id,
@@ -453,7 +499,7 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
 
 
 async def host_reject_booking(booking_id: str, user_id: str) -> dict:
-    """Host rejects a pending booking — releases hold if card."""
+    """Host rejects a pending booking — releases hold if card, expires invoice if xendit."""
     hotel_id = await _get_hotel_id_for_user(user_id)
     booking = await BookingRepository.get_by_id(booking_id)
     if not booking or str(booking["hotel_id"]) != hotel_id:
@@ -461,9 +507,9 @@ async def host_reject_booking(booking_id: str, user_id: str) -> dict:
     if booking["status"] != "pending":
         raise ValueError("Booking is not in pending state")
 
-    # Release payment hold if card
+    # Release payment hold / expire invoice
+    payment = await PaymentRepository.get_by_booking_id(booking_id)
     if booking.get("payment_method") == "card":
-        payment = await PaymentRepository.get_by_booking_id(booking_id)
         if payment and payment.get("stripe_payment_intent_id"):
             try:
                 await stripe_service.cancel_payment_intent(
@@ -471,6 +517,13 @@ async def host_reject_booking(booking_id: str, user_id: str) -> dict:
                 )
             except Exception as e:
                 logger.warning("Failed to cancel PI for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "xendit":
+        if payment and payment.get("xendit_invoice_id"):
+            try:
+                await xendit_service.expire_invoice(payment["xendit_invoice_id"])
+            except Exception as e:
+                logger.warning("Failed to expire Xendit invoice for booking %s: %s", booking_id, e)
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     await BookingRepository.update_status(booking_id, "cancelled")
@@ -662,9 +715,9 @@ async def expire_booking(booking_id: str) -> None:
     if not booking or booking["status"] != "pending":
         return
 
-    # Release payment hold if card
+    # Release payment hold / expire invoice
+    payment = await PaymentRepository.get_by_booking_id(booking_id)
     if booking.get("payment_method") == "card":
-        payment = await PaymentRepository.get_by_booking_id(booking_id)
         if payment and payment.get("stripe_payment_intent_id"):
             try:
                 await stripe_service.cancel_payment_intent(
@@ -672,6 +725,13 @@ async def expire_booking(booking_id: str) -> None:
                 )
             except Exception as e:
                 logger.warning("Failed to cancel PI for expired booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "xendit":
+        if payment and payment.get("xendit_invoice_id"):
+            try:
+                await xendit_service.expire_invoice(payment["xendit_invoice_id"])
+            except Exception as e:
+                logger.warning("Failed to expire Xendit invoice for expired booking %s: %s", booking_id, e)
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     await BookingRepository.update_status(booking_id, "expired")

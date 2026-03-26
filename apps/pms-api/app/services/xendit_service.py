@@ -4,6 +4,8 @@ import httpx
 import xendit
 from xendit.apis import PayoutApi
 from xendit.exceptions import ApiException
+from xendit.invoice import InvoiceApi
+from xendit.invoice.model.create_invoice_request import CreateInvoiceRequest
 
 from app.config import settings
 
@@ -17,6 +19,7 @@ configuration = xendit.Configuration()
 configuration.api_key = {"ApiKeyAuth": settings.XENDIT_SECRET_KEY}
 xendit_client = xendit.ApiClient(configuration)
 payout_api = PayoutApi(xendit_client)
+invoice_api = InvoiceApi(xendit_client)
 
 
 class XenditError(Exception):
@@ -87,6 +90,118 @@ async def create_payout(
         "status": payout.status,
         "amount": payout.amount,
     }
+
+
+# ── Invoice API (payment acceptance) ──────────────────────────────
+
+
+async def create_invoice(
+    external_id: str,
+    amount: float,
+    currency: str,
+    payer_email: str,
+    description: str,
+    success_redirect_url: str,
+    failure_redirect_url: str,
+    invoice_duration: int = 86400,
+    metadata: dict | None = None,
+) -> dict:
+    """Create a Xendit Invoice for guest payment.
+
+    Supports QRIS, e-wallets (OVO, DANA, ShopeePay), virtual accounts,
+    cards, and retail outlets — Xendit handles the payment UI.
+    """
+    if amount <= 0:
+        raise XenditError(f"Amount must be positive, got {amount}")
+
+    logger.info(
+        "Creating Xendit invoice: ref=%s amount=%s %s email=%s",
+        external_id, amount, currency, payer_email,
+    )
+
+    try:
+        invoice = invoice_api.create_invoice(
+            create_invoice_request=CreateInvoiceRequest(
+                external_id=external_id,
+                amount=amount,
+                currency=currency,
+                payer_email=payer_email,
+                description=description,
+                invoice_duration=invoice_duration,
+                success_redirect_url=success_redirect_url,
+                failure_redirect_url=failure_redirect_url,
+                should_send_email=False,
+                metadata=metadata or {},
+            )
+        )
+    except ApiException as e:
+        logger.error(
+            "Xendit API error creating invoice ref=%s: status=%s body=%s",
+            external_id, e.status, e.body,
+        )
+        raise XenditError(
+            f"Xendit API error: {e.body}",
+            status_code=e.status,
+        ) from e
+
+    logger.info(
+        "Xendit invoice created: ref=%s id=%s url=%s",
+        external_id, invoice.id, invoice.invoice_url,
+    )
+    return {
+        "id": invoice.id,
+        "external_id": invoice.external_id,
+        "invoice_url": invoice.invoice_url,
+        "status": str(invoice.status),
+        "amount": invoice.amount,
+    }
+
+
+async def get_invoice(invoice_id: str) -> dict:
+    """Get invoice status from Xendit."""
+    try:
+        invoice = invoice_api.get_invoice_by_id(invoice_id=invoice_id)
+    except ApiException as e:
+        logger.error(
+            "Xendit API error fetching invoice %s: status=%s body=%s",
+            invoice_id, e.status, e.body,
+        )
+        raise XenditError(
+            f"Xendit API error: {e.body}",
+            status_code=e.status,
+        ) from e
+
+    return {
+        "id": invoice.id,
+        "external_id": invoice.external_id,
+        "status": str(invoice.status),
+        "amount": invoice.amount,
+        "payment_method": str(invoice.payment_method) if invoice.payment_method else None,
+    }
+
+
+async def expire_invoice(invoice_id: str) -> dict:
+    """Expire/cancel a pending Xendit Invoice."""
+    try:
+        invoice = invoice_api.expire_invoice(invoice_id=invoice_id)
+    except ApiException as e:
+        logger.error(
+            "Xendit API error expiring invoice %s: status=%s body=%s",
+            invoice_id, e.status, e.body,
+        )
+        raise XenditError(
+            f"Xendit API error: {e.body}",
+            status_code=e.status,
+        ) from e
+
+    logger.info("Xendit invoice expired: id=%s", invoice_id)
+    return {
+        "id": invoice.id,
+        "status": str(invoice.status),
+    }
+
+
+# ── Bank validation ──────────────────────────────────────────────
 
 
 async def validate_bank_account(

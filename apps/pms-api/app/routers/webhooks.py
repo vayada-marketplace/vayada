@@ -159,7 +159,7 @@ async def beds24_webhook(request: Request):
 
 @router.post("/webhooks/xendit")
 async def xendit_webhook(request: Request):
-    """Handle Xendit webhook events for payout status updates."""
+    """Handle Xendit webhook events for payouts and invoice payments."""
     payload = await request.body()
     callback_token = request.headers.get("x-callback-token")
 
@@ -173,6 +173,14 @@ async def xendit_webhook(request: Request):
     import json
     data = json.loads(payload)
     event_type = data.get("event")
+
+    # ── Invoice callbacks (payment acceptance) ────────────────────
+    # Xendit Invoice callbacks have top-level "id", "status", "external_id"
+    if data.get("external_id") and data.get("id") and not event_type:
+        await _handle_invoice_callback(data)
+        return {"status": "ok"}
+
+    # ── Payout callbacks ─────────────────────────────────────────
     payout_data = data.get("data", {})
     xendit_payout_id = payout_data.get("id")
     status = payout_data.get("status")
@@ -203,3 +211,54 @@ async def xendit_webhook(request: Request):
             logger.warning("Xendit payout failed: %s", xendit_payout_id)
 
     return {"status": "ok"}
+
+
+async def _handle_invoice_callback(data: dict):
+    """Handle Xendit Invoice payment callback (guest paid via QRIS/ewallet/VA)."""
+    import asyncio
+
+    xendit_invoice_id = data.get("id")
+    invoice_status = data.get("status")
+    external_id = data.get("external_id", "")
+    payment_method = data.get("payment_method")
+    payment_channel = data.get("payment_channel")
+
+    payment = await PaymentRepository.get_by_xendit_invoice(xendit_invoice_id)
+    if not payment:
+        logger.warning("No payment found for Xendit invoice %s", xendit_invoice_id)
+        return
+
+    payment_id = str(payment["id"])
+    booking_id = str(payment["booking_id"])
+
+    if invoice_status == "PAID":
+        # Guest has paid — mark payment as captured and notify host
+        await PaymentRepository.update_status(payment_id, "captured")
+        await BookingRepository.update_payment_status(booking_id, "authorized")
+
+        # Notify host to accept/reject
+        booking = await BookingRepository.get_by_id(booking_id)
+        if booking:
+            from app.database import Database
+            hotel = await Database.fetchrow(
+                "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+            )
+            if hotel:
+                from app.services.email_service import send_booking_request_notification
+                asyncio.create_task(
+                    send_booking_request_notification(hotel["contact_email"], booking)
+                )
+
+        logger.info(
+            "Xendit invoice paid: %s method=%s channel=%s booking=%s",
+            xendit_invoice_id, payment_method, payment_channel, booking_id,
+        )
+
+    elif invoice_status == "EXPIRED":
+        await PaymentRepository.update_status(payment_id, "cancelled")
+        await BookingRepository.update_payment_status(booking_id, "cancelled")
+        await BookingRepository.update_status(booking_id, "cancelled")
+        logger.info("Xendit invoice expired: %s booking=%s", xendit_invoice_id, booking_id)
+
+    else:
+        logger.debug("Xendit invoice status %s for %s", invoice_status, xendit_invoice_id)

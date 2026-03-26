@@ -64,6 +64,7 @@ async def get_payment_settings(
             platform_fee_value=float(settings["platform_fee_value"]) if settings else 8.00,
             platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"]) if settings else 2.00,
             pay_at_property_enabled=settings["pay_at_property_enabled"] if settings else False,
+            xendit_payments_enabled=settings.get("xendit_payments_enabled", False) if settings else False,
             payment_provider=settings["payment_provider"] if settings else "stripe",
             xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
             xendit_account_number=settings.get("xendit_account_number") if settings else None,
