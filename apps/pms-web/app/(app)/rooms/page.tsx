@@ -288,7 +288,7 @@ export default function RoomsPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Rooms & Rates</h1>
+          <h1 className="text-xl font-bold text-gray-900">Rooms & Rates</h1>
           <p className="text-sm text-gray-500 mt-1">Manage room inventory and daily pricing</p>
         </div>
         <div className="flex items-center gap-3">
