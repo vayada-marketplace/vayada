@@ -1307,7 +1307,14 @@ export default function RoomsStep({
 
         <div className="mt-6 flex items-center justify-between">
           <button
-            onClick={onBack}
+            onClick={() => {
+              const tabIndex = ROOM_TABS.findIndex(t => t.key === activeRoomTab)
+              if (tabIndex > 0) {
+                setActiveRoomTab(ROOM_TABS[tabIndex - 1].key)
+              } else {
+                onBack()
+              }
+            }}
             className="px-4 py-2 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Back
@@ -1320,7 +1327,14 @@ export default function RoomsStep({
               ) : null
             })()}
             <button
-              onClick={onContinue}
+              onClick={() => {
+                const tabIndex = ROOM_TABS.findIndex(t => t.key === activeRoomTab)
+                if (tabIndex < ROOM_TABS.length - 1) {
+                  setActiveRoomTab(ROOM_TABS[tabIndex + 1].key)
+                } else {
+                  onContinue()
+                }
+              }}
               disabled={!canProceed}
               className="px-6 py-2 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
