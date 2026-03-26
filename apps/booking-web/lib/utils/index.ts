@@ -18,7 +18,7 @@ function resolveLocale(locale?: string): string {
 }
 
 export function formatCurrency(amount: number, currency: string = 'EUR'): string {
-  return new Intl.NumberFormat('en', {
+  return new Intl.NumberFormat('en-GB', {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,

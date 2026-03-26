@@ -119,7 +119,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       const displayCurrency = canConvert ? selectedCurrency : fromCurrency
       const displayAmount = canConvert ? convertPrice(amount, fromCurrency) : amount
 
-      return new Intl.NumberFormat('en', {
+      return new Intl.NumberFormat('en-GB', {
         style: 'currency',
         currency: displayCurrency,
         minimumFractionDigits: 0,
