@@ -3,6 +3,7 @@ import { pmsClient } from '../api/pmsClient'
 export interface CalendarRoomType {
   id: string
   name: string
+  category: string
   totalRooms: number
   baseRate: number
   currency: string
