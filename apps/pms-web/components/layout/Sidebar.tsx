@@ -36,7 +36,7 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { label: 'Dashboard', href: '/dashboard', icon: DashboardIcon },
   { label: 'Calendar', href: '/calendar', icon: CalendarIcon },
   { label: 'Reservations', href: '/bookings', icon: ReservationsIcon },
-  { label: 'Inbox', href: '/inbox', icon: InboxIcon },
+  // { label: 'Inbox', href: '/inbox', icon: InboxIcon },
   { label: 'Rooms & Rates', href: '/rooms', icon: RoomsIcon },
   { label: 'Channel Manager', href: '/channel-manager', icon: ChannelsIcon },
   { label: 'Settings', href: '/settings', icon: SettingsIcon },
