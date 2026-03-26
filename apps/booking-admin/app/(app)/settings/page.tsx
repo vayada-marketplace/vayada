@@ -338,6 +338,8 @@ export default function SettingsPage() {
       setFeedback(null)
       const data = await settingsService.updatePropertySettings(settings)
       setSettings(data)
+      // Save benefits
+      await settingsService.updateBenefits(benefits)
       // Sync slug and name to PMS
       try {
         await pmsClient.patch('/admin/hotel', {
@@ -348,18 +350,13 @@ export default function SettingsPage() {
       } catch {
         // Non-fatal: PMS sync may fail if not using vayada PMS
       }
-      // Also save benefits alongside property settings
+      // Sync benefits to PMS
       try {
-        await settingsService.updateBenefits(benefits)
-        try {
-          await pmsClient.put('/admin/benefits', { benefits })
-        } catch {
-          // Non-fatal: PMS sync may fail if not using vayada PMS
-        }
+        await pmsClient.put('/admin/benefits', { benefits })
       } catch {
-        // Non-fatal: benefits save failure shouldn't block settings save
+        // Non-fatal: PMS sync may fail if not using vayada PMS
       }
-      setFeedback({ type: 'success', message: 'Settings saved' })
+      setFeedback({ type: 'success', message: 'Settings saved successfully' })
     } catch {
       setFeedback({ type: 'error', message: 'Failed to save settings' })
     } finally {
