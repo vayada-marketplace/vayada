@@ -230,3 +230,22 @@ async def update_profile(
         )
 
     return {"message": "Profile updated"}
+
+
+@router.post("/xendit/validate-bank-account")
+async def validate_affiliate_bank_account(
+    channel_code: str,
+    account_number: str,
+    user_id: str = Depends(require_affiliate_user),
+):
+    """Validate a bank account via Xendit before saving."""
+    from app.services import xendit_service
+    from app.services.xendit_service import XenditError
+    try:
+        result = await xendit_service.validate_bank_account(
+            channel_code=channel_code,
+            account_number=account_number,
+        )
+    except XenditError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result

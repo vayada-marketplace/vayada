@@ -1,5 +1,6 @@
 import logging
 
+import httpx
 import xendit
 from xendit.apis import PayoutApi
 from xendit.exceptions import ApiException
@@ -85,6 +86,63 @@ async def create_payout(
         "reference_id": payout.reference_id,
         "status": payout.status,
         "amount": payout.amount,
+    }
+
+
+async def validate_bank_account(
+    channel_code: str,
+    account_number: str,
+) -> dict:
+    """Validate a bank account via Xendit's bank account inquiry API.
+
+    Returns account holder name if valid, raises XenditError otherwise.
+    """
+    if channel_code not in VALID_CHANNEL_CODES:
+        raise XenditError(f"Invalid channel code: {channel_code}")
+    if not account_number or not account_number.strip():
+        raise XenditError("Account number is required")
+
+    logger.info(
+        "Validating bank account: channel=%s account=%s",
+        channel_code, account_number,
+    )
+
+    # Strip the "ID_" prefix for the inquiry API (e.g. ID_BCA -> BCA)
+    bank_code = channel_code.replace("ID_", "")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                "https://api.xendit.co/bank_account_data/inquiries",
+                json={
+                    "bank_code": bank_code,
+                    "account_number": account_number.strip(),
+                },
+                auth=(settings.XENDIT_SECRET_KEY, ""),
+                timeout=15.0,
+            )
+        except httpx.RequestError as e:
+            logger.error("Network error validating bank account: %s", e)
+            raise XenditError(f"Network error: {e}") from e
+
+    if resp.status_code != 200:
+        logger.warning(
+            "Xendit bank validation failed: status=%s body=%s",
+            resp.status_code, resp.text,
+        )
+        raise XenditError(
+            f"Bank account validation failed: {resp.text}",
+            status_code=resp.status_code,
+        )
+
+    data = resp.json()
+    logger.info(
+        "Bank account validated: channel=%s holder=%s",
+        channel_code, data.get("account_holder"),
+    )
+    return {
+        "account_holder": data.get("account_holder", ""),
+        "status": data.get("status", ""),
     }
 
 
