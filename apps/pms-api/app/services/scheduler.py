@@ -71,10 +71,11 @@ async def process_property_payouts():
                     description=f"Hotel payout for booking {payout.get('booking_reference', '')}",
                 )
 
+                # Xendit payouts are async — stay in 'processing' until webhook confirms
                 await PayoutRepository.update_status(
-                    payout_id, "completed", xendit_payout_id=result["id"]
+                    payout_id, "processing", xendit_payout_id=result["id"]
                 )
-                logger.info("Completed hotel payout %s via Xendit, payout %s", payout_id, result["id"])
+                logger.info("Submitted hotel payout %s to Xendit, xendit_id=%s", payout_id, result["id"])
             else:
                 if not settings.get("stripe_connect_account_id"):
                     logger.warning("No Stripe Connect account for hotel %s, skipping payout %s", hotel_id, payout_id)
@@ -142,10 +143,11 @@ async def process_affiliate_payouts():
                     description=f"Affiliate payout for booking {payout.get('booking_reference', '')}",
                 )
 
+                # Xendit payouts are async — stay in 'processing' until webhook confirms
                 await PayoutRepository.update_status(
-                    payout_id, "completed", xendit_payout_id=result["id"]
+                    payout_id, "processing", xendit_payout_id=result["id"]
                 )
-                logger.info("Completed affiliate payout %s via Xendit, payout %s", payout_id, result["id"])
+                logger.info("Submitted affiliate payout %s to Xendit, xendit_id=%s", payout_id, result["id"])
 
             elif payment_method == "stripe":
                 if not affiliate.get("stripe_connect_account_id") or not affiliate.get("stripe_connect_onboarded"):

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, field_validator
+from typing import Literal, Optional
 
 
 def to_camel(string: str) -> str:
@@ -46,18 +46,30 @@ class HotelPaymentSettings(BaseModel):
     default_currency: str = "EUR"
 
 
+VALID_XENDIT_CHANNEL_CODES = {
+    "ID_BCA", "ID_MANDIRI", "ID_BNI", "ID_BRI", "ID_PERMATA", "ID_CIMB",
+}
+
+
 class HotelPaymentSettingsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    platform_fee_type: Optional[str] = None
+    platform_fee_type: Optional[Literal["percentage", "flat"]] = None
     platform_fee_value: Optional[float] = None
     platform_fee_with_affiliate: Optional[float] = None
     pay_at_property_enabled: Optional[bool] = None
-    payment_provider: Optional[str] = None
+    payment_provider: Optional[Literal["stripe", "xendit"]] = None
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
     default_currency: Optional[str] = None
+
+    @field_validator("xendit_channel_code")
+    @classmethod
+    def validate_channel_code(cls, v: str | None) -> str | None:
+        if v is not None and v not in VALID_XENDIT_CHANNEL_CODES:
+            raise ValueError(f"Invalid channel code. Must be one of: {', '.join(sorted(VALID_XENDIT_CHANNEL_CODES))}")
+        return v
 
 
 class CancellationPolicy(BaseModel):
@@ -101,3 +113,32 @@ class XenditBankDetailsRequest(BaseModel):
     channel_code: str
     account_number: str
     account_holder_name: str
+
+    @field_validator("channel_code")
+    @classmethod
+    def validate_channel_code(cls, v: str) -> str:
+        if v not in VALID_XENDIT_CHANNEL_CODES:
+            raise ValueError(f"Invalid channel code. Must be one of: {', '.join(sorted(VALID_XENDIT_CHANNEL_CODES))}")
+        return v
+
+    @field_validator("account_number")
+    @classmethod
+    def validate_account_number(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Account number is required")
+        if not v.isdigit():
+            raise ValueError("Account number must contain only digits")
+        if len(v) < 5 or len(v) > 20:
+            raise ValueError("Account number must be between 5 and 20 digits")
+        return v
+
+    @field_validator("account_holder_name")
+    @classmethod
+    def validate_account_holder_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Account holder name is required")
+        if len(v) > 100:
+            raise ValueError("Account holder name must be 100 characters or fewer")
+        return v

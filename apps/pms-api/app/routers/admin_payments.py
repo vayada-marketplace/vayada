@@ -84,6 +84,26 @@ async def update_payment_settings(
     updates = data.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # When switching to xendit, require all bank details
+    if updates.get("payment_provider") == "xendit":
+        existing = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        final_code = updates.get("xendit_channel_code") or (existing or {}).get("xendit_channel_code")
+        final_number = updates.get("xendit_account_number") or (existing or {}).get("xendit_account_number")
+        final_name = updates.get("xendit_account_holder_name") or (existing or {}).get("xendit_account_holder_name")
+        missing = []
+        if not final_code:
+            missing.append("xenditChannelCode")
+        if not final_number:
+            missing.append("xenditAccountNumber")
+        if not final_name:
+            missing.append("xenditAccountHolderName")
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Xendit bank details required: {', '.join(missing)}",
+            )
+
     await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
     return {"status": "updated"}
 
