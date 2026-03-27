@@ -328,7 +328,15 @@ export default function BookingFlowPage() {
   const handleSaveBenefits = async () => {
     try {
       setSavingBenefits(true)
-      await settingsService.updateBenefits(benefits)
+      // Auto-add pending custom benefit input before saving
+      const trimmed = benefitInput.trim()
+      let finalBenefits = benefits
+      if (trimmed && !benefits.includes(trimmed)) {
+        finalBenefits = [...benefits, trimmed]
+        setBenefits(finalBenefits)
+        setBenefitInput('')
+      }
+      await settingsService.updateBenefits(finalBenefits)
       showFeedback('success', 'Benefits saved successfully')
     } catch {
       showFeedback('error', 'Failed to save benefits')

@@ -1,6 +1,6 @@
 'use client'
 
-import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
 
 const BENEFIT_OPTIONS = [
   'Welcome Drink on Arrival',
@@ -80,28 +80,19 @@ export default function BenefitsTab({
       {/* Custom benefit input */}
       <div className="mb-4">
         <label className="block text-[11px] text-gray-500 mb-1.5">Custom Benefit <span className="text-gray-400">(optional)</span></label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={benefitInput}
-            onChange={(e) => setBenefitInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                addCustomBenefit()
-              }
-            }}
-            className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-            placeholder="e.g. Complimentary sunset cocktail"
-          />
-          <button
-            type="button"
-            onClick={addCustomBenefit}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <PlusIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <input
+          type="text"
+          value={benefitInput}
+          onChange={(e) => setBenefitInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addCustomBenefit()
+            }
+          }}
+          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+          placeholder="e.g. Complimentary sunset cocktail"
+        />
       </div>
 
       {/* Selected custom benefits */}
