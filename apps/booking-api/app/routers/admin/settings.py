@@ -176,6 +176,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     check_in_time='15:00', check_out_time='11:00',
     custom_domain=None,
     pay_at_property_enabled=False, pay_at_hotel_methods=['cash', 'card'],
+    online_card_payment=False, bank_transfer=False,
     free_cancellation_days=7,
     email_notifications=True, new_booking_alerts=True,
     payment_alerts=True, weekly_reports=False, refer_a_guest_enabled=False,
