@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
+import { bookingsService } from '@/services/bookings'
 import RoomTypeForm from '@/components/rooms/RoomTypeForm'
 
 export default function EditRoomPage({ params }: { params: { id: string } }) {
@@ -53,6 +54,14 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
+
+    // Override currency from payment settings (authoritative source)
+    bookingsService.getPaymentSettings()
+      .then((res) => {
+        const c = res.paymentSettings.defaultCurrency
+        if (c) setForm((prev) => ({ ...prev, currency: c }))
+      })
+      .catch(console.error)
   }, [params.id])
 
   const handleSubmit = async (e: React.FormEvent) => {

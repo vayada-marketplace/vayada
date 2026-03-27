@@ -5,7 +5,6 @@ import { ChevronDownIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
 import { pmsSettingsService, HotelSummary } from '@/services/settings'
-import SearchModal from './SearchModal'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
@@ -29,15 +28,10 @@ interface DayStats {
 
 export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [isMac, setIsMac] = useState(true)
   const [propertyOpen, setPropertyOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
 
-  useEffect(() => {
-    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.userAgent))
-  }, [])
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 })
@@ -55,17 +49,6 @@ export default function Header() {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        setSearchOpen(prev => !prev)
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   useEffect(() => {
@@ -185,23 +168,10 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Center: search */}
-      <div className="flex-1 flex justify-center">
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="w-full max-w-md flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 h-8 cursor-text hover:border-gray-300 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
-          <span className="flex-1 text-left text-[13px] text-gray-400">Search reservations, guests, rooms...</span>
-          <kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-400 leading-none">{isMac ? '⌘K' : 'Ctrl+K'}</kbd>
-        </button>
-      </div>
+      {/* Spacer */}
+      <div className="flex-1" />
 
-      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-
-      {/* Right: stats + bell + avatar */}
+      {/* Right: avatar */}
       <div className="flex items-center gap-3 shrink-0">
         {/* Profile avatar */}
         <div className="relative" ref={profileRef}>

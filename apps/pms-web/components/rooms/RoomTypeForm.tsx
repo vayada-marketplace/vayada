@@ -447,14 +447,14 @@ export default function RoomTypeForm({
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1.5">
-                <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;)</label>
+                <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;) <span className="text-red-500">*</span></label>
               </div>
               <input
                 type="number"
-                min={0}
+                min={1}
                 max={1000}
-                value={form.size ?? 0}
-                onChange={(e) => updateForm({ size: Math.min(parseInt(e.target.value) || 0, 1000) })}
+                value={form.size ?? 1}
+                onChange={(e) => updateForm({ size: Math.max(1, Math.min(parseInt(e.target.value) || 1, 1000)) })}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                 placeholder="50"
               />
