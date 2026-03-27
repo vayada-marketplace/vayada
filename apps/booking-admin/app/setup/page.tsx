@@ -464,7 +464,7 @@ export default function SetupPage() {
               {step > s.number ? (
                 <CheckIcon className="w-3.5 h-3.5" />
               ) : (
-                s.number
+                idx + 1
               )}
             </div>
             <span className={`text-[12px] font-medium whitespace-nowrap ${
@@ -702,7 +702,7 @@ export default function SetupPage() {
             </svg>
             <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
           </div>
-          <span className="text-[13px] text-gray-500">Step {step} of {STEPS.length}</span>
+          <span className="text-[13px] text-gray-500">Step {STEPS.findIndex(s => s.number === step) + 1} of {STEPS.length}</span>
         </div>
       </div>
 
@@ -710,7 +710,7 @@ export default function SetupPage() {
       <div className="h-[3px] bg-gray-100 shrink-0">
         <div
           className="h-full bg-primary-600 transition-all duration-300"
-          style={{ width: `${(step / STEPS.length) * 100}%` }}
+          style={{ width: `${((STEPS.findIndex(s => s.number === step) + 1) / STEPS.length) * 100}%` }}
         />
       </div>
 
