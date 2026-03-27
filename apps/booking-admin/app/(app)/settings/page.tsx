@@ -271,6 +271,20 @@ export default function SettingsPage() {
   const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null)
   const [domainLoading, setDomainLoading] = useState(false)
 
+  // Stripe Connect / Payments
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null)
+  const [stripeOnboarded, setStripeOnboarded] = useState(false)
+  const [connectEmail, setConnectEmail] = useState('')
+  const [connectCountry, setConnectCountry] = useState('AT')
+  const [creatingAccount, setCreatingAccount] = useState(false)
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
+  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
+  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
+  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentSuccess, setPaymentSuccess] = useState('')
+  const [savingPayment, setSavingPayment] = useState(false)
+
   const handleChangeEmail = async () => {
     try {
       setChangingEmail(true)
@@ -325,7 +339,73 @@ export default function SettingsPage() {
     customDomainService.getStatus()
       .then(setDomainStatus)
       .catch(() => {})
+    // Load payment settings from PMS
+    pmsClient.get<{ paymentSettings: any }>('/admin/payment-settings')
+      .then((res) => {
+        const ps = res.paymentSettings
+        setStripeAccountId(ps.stripeConnectAccountId)
+        setStripeOnboarded(ps.stripeConnectOnboarded)
+        setPaymentProvider(ps.paymentProvider || 'stripe')
+        setXenditChannelCode(ps.xenditChannelCode || 'ID_BCA')
+        setXenditAccountNumber(ps.xenditAccountNumber || '')
+        setXenditAccountHolderName(ps.xenditAccountHolderName || '')
+      })
+      .catch(() => {})
   }, [fetchSettings])
+
+  const handleCreateStripeAccount = async () => {
+    if (!connectEmail) return
+    setCreatingAccount(true)
+    setPaymentError('')
+    try {
+      const result = await pmsClient.post<{ accountId: string }>('/admin/stripe/connect-account', { email: connectEmail, country: connectCountry })
+      setStripeAccountId(result.accountId)
+      const link = await pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link')
+      window.open(link.url, '_blank')
+    } catch (err: any) {
+      setPaymentError(err.message || 'Failed to create account')
+    } finally {
+      setCreatingAccount(false)
+    }
+  }
+
+  const handleOnboarding = async () => {
+    try {
+      const link = await pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link')
+      window.open(link.url, '_blank')
+    } catch (err: any) {
+      setPaymentError(err.message || 'Failed to get onboarding link')
+    }
+  }
+
+  const savePaymentProviderSettings = async () => {
+    setSavingPayment(true)
+    setPaymentError('')
+    setPaymentSuccess('')
+    if (paymentProvider === 'xendit') {
+      if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
+        setPaymentError('Account number must be 5-20 digits')
+        setSavingPayment(false)
+        return
+      }
+      if (!xenditAccountHolderName.trim()) {
+        setPaymentError('Account holder name is required')
+        setSavingPayment(false)
+        return
+      }
+    }
+    try {
+      await pmsClient.patch('/admin/payment-settings', {
+        paymentProvider,
+        ...(paymentProvider === 'xendit' ? { xenditChannelCode, xenditAccountNumber, xenditAccountHolderName } : {}),
+      })
+      setPaymentSuccess('Payment settings saved')
+    } catch (err: any) {
+      setPaymentError(err.message || 'Failed to save')
+    } finally {
+      setSavingPayment(false)
+    }
+  }
 
   const handleSave = async () => {
     try {
@@ -1115,6 +1195,84 @@ export default function SettingsPage() {
                   </p>
                 </div>
               )}
+
+              {/* Payments — Stripe Connect / Xendit */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Connect your payment account to receive payouts from guest bookings.</p>
+
+                {paymentError && (
+                  <FeedbackAlert type="error" message={paymentError} className="mb-3" />
+                )}
+                {paymentSuccess && (
+                  <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
+                )}
+
+                {paymentProvider === 'xendit' ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
+                        <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
+                          <option value="ID_BCA">BCA</option>
+                          <option value="ID_MANDIRI">Mandiri</option>
+                          <option value="ID_BNI">BNI</option>
+                          <option value="ID_BRI">BRI</option>
+                          <option value="ID_PERMATA">Permata</option>
+                          <option value="ID_CIMB">CIMB Niaga</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                        <input type="text" inputMode="numeric" maxLength={20} value={xenditAccountNumber} onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))} placeholder="1234567890" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                      <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder="Full name as on bank account" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                    </div>
+                  </div>
+                ) : stripeAccountId ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
+                      </span>
+                    </div>
+                    {!stripeOnboarded && (
+                      <div>
+                        <p className="text-[13px] text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
+                        <button onClick={handleOnboarding} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
+                          Complete Onboarding
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Email</label>
+                        <input type="email" value={connectEmail} onChange={(e) => setConnectEmail(e.target.value)} placeholder="your@email.com" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
+                        <select value={connectCountry} onChange={(e) => setConnectCountry(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
+                          {[{c:'AT',n:'Austria'},{c:'DE',n:'Germany'},{c:'CH',n:'Switzerland'},{c:'GB',n:'United Kingdom'},{c:'US',n:'United States'},{c:'FR',n:'France'},{c:'ES',n:'Spain'},{c:'IT',n:'Italy'},{c:'NL',n:'Netherlands'},{c:'PT',n:'Portugal'},{c:'BE',n:'Belgium'},{c:'SE',n:'Sweden'},{c:'NO',n:'Norway'},{c:'DK',n:'Denmark'},{c:'FI',n:'Finland'},{c:'IE',n:'Ireland'},{c:'AU',n:'Australia'},{c:'NZ',n:'New Zealand'},{c:'CA',n:'Canada'},{c:'SG',n:'Singapore'},{c:'HK',n:'Hong Kong'},{c:'JP',n:'Japan'},{c:'MY',n:'Malaysia'},{c:'TH',n:'Thailand'},{c:'ID',n:'Indonesia'},{c:'PH',n:'Philippines'},{c:'MX',n:'Mexico'},{c:'BR',n:'Brazil'},{c:'IN',n:'India'}].map(({c,n}) => (
+                            <option key={c} value={c}>{n}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
+                      {creatingAccount ? 'Creating...' : 'Connect Payment Account'}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Payout Details */}
               <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
