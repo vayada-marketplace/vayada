@@ -2,6 +2,7 @@
 
 import { RefObject, useState } from 'react'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 
 export interface RoomType {
   name: string
@@ -427,13 +428,13 @@ export default function RoomsStep({
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
-                  <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;)</label>
+                  <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;) <span className="text-red-500">*</span></label>
                 </div>
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   value={room.roomSize}
-                  onChange={(e) => updateRoom({ roomSize: e.target.value })}
+                  onChange={(e) => updateRoom({ roomSize: String(Math.max(1, parseInt(e.target.value) || 1)) })}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                   placeholder="150"
                 />
@@ -755,7 +756,7 @@ export default function RoomsStep({
                               </td>
                               <td className="py-2.5">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[11px] text-gray-400">$</span>
+                                  <span className="text-[11px] text-gray-400">{getCurrencySymbol(currency || 'USD')}</span>
                                   <input
                                     type="number"
                                     value={season.rate}
@@ -988,8 +989,8 @@ export default function RoomsStep({
                             {fromDate ? fromDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'} &ndash; {toDate ? toDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '?'}
                           </span>
                           <span className="text-gray-400">&middot;</span>
-                          <span className="font-bold text-gray-900">${flexRate}/night</span>
-                          {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="text-gray-400">NR: ${nrRate}</span>}
+                          <span className="font-bold text-gray-900">{getCurrencySymbol(currency || 'USD')}{flexRate}/night</span>
+                          {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="text-gray-400">NR: {getCurrencySymbol(currency || 'USD')}{nrRate}</span>}
                         </div>
                       )
                     })}
@@ -1069,11 +1070,11 @@ export default function RoomsStep({
                                 {open && season && (
                                   <>
                                     <div className={`text-[9px] font-bold ${wknd ? 'text-orange-600' : 'text-emerald-600'}`}>
-                                      ${effectiveRate}
+                                      {getCurrencySymbol(currency || 'USD')}{effectiveRate}
                                     </div>
                                     {room.nonRefundableEnabled && room.flexibleRateEnabled && (
                                       <div className="text-[9px] font-bold text-amber-600">
-                                        ${nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
+                                        {getCurrencySymbol(currency || 'USD')}{nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
                                       </div>
                                     )}
                                   </>
