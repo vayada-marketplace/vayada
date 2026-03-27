@@ -86,8 +86,9 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
 
-    // Get token for authenticated requests (skip for auth endpoints)
-    const token = !endpoint.startsWith('/auth/') ? this.getToken() : null
+    // Get token for authenticated requests (skip for public auth endpoints)
+    const publicAuthEndpoints = ['/auth/register', '/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/validate-token', '/auth/verify-email-change']
+    const token = publicAuthEndpoints.includes(endpoint) ? null : this.getToken()
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
