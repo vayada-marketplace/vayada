@@ -1,9 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { bookingsService, PaymentSettings, CancellationPolicy } from '@/services/bookings'
-import { PlusIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
-import { COUNTRIES } from '@/lib/constants/countries'
+import { bookingsService } from '@/services/bookings'
 
 const CURRENCY_OPTIONS = [
   { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
@@ -104,129 +102,21 @@ function CurrencySelect({ value, onChange }: { value: string; onChange: (v: stri
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
 
   // Currency
   const [currency, setCurrency] = useState('EUR')
   const [savingCurrency, setSavingCurrency] = useState(false)
-  // Payment settings
-  const [feeType, setFeeType] = useState('percentage')
-  const [feeValue, setFeeValue] = useState(8)
-  const [feeWithAffiliate, setFeeWithAffiliate] = useState(2)
-  const [payAtProperty, setPayAtProperty] = useState(false)
-  const [onlineCardPayment, setOnlineCardPayment] = useState(false)
-  const [bankTransfer, setBankTransfer] = useState(false)
-  const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
-
-  // Stripe Connect
-  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null)
-  const [stripeOnboarded, setStripeOnboarded] = useState(false)
-  const [connectEmail, setConnectEmail] = useState('')
-  const [connectCountry, setConnectCountry] = useState('AT')
-  const [creatingAccount, setCreatingAccount] = useState(false)
-
-  // Payment provider
-  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
-  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
-  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
-  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
-
-  // Cancellation policy
-  const [freeDays, setFreeDays] = useState(7)
-  const [partialRefundPct, setPartialRefundPct] = useState(0)
 
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {
-        const ps = res.paymentSettings
-        setFeeType(ps.platformFeeType)
-        setFeeValue(ps.platformFeeValue)
-        setFeeWithAffiliate(ps.platformFeeWithAffiliate)
-        setPayAtProperty(ps.payAtPropertyEnabled)
-        setOnlineCardPayment(ps.onlineCardPayment || false)
-        setBankTransfer(ps.bankTransfer || false)
-        setXenditPaymentsEnabled(ps.xenditPaymentsEnabled || false)
-        setStripeAccountId(ps.stripeConnectAccountId)
-        setStripeOnboarded(ps.stripeConnectOnboarded)
-        setCurrency(ps.defaultCurrency || 'EUR')
-        setPaymentProvider(ps.paymentProvider || 'stripe')
-        setXenditChannelCode(ps.xenditChannelCode || 'ID_BCA')
-        setXenditAccountNumber(ps.xenditAccountNumber || '')
-        setXenditAccountHolderName(ps.xenditAccountHolderName || '')
-
-        const cp = res.cancellationPolicy
-        setFreeDays(cp.freeCancellationDays)
-        setPartialRefundPct(cp.partialRefundPct)
+        setCurrency(res.paymentSettings.defaultCurrency || 'EUR')
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
-
-  const savePaymentSettings = async () => {
-    setSaving(true)
-    setError('')
-    setSuccess('')
-
-    if (paymentProvider === 'xendit') {
-      if (!xenditAccountNumber.trim()) {
-        setError('Account number is required for Xendit payouts')
-        setSaving(false)
-        return
-      }
-      if (!/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-        setError('Account number must be 5–20 digits')
-        setSaving(false)
-        return
-      }
-      if (!xenditAccountHolderName.trim()) {
-        setError('Account holder name is required for Xendit payouts')
-        setSaving(false)
-        return
-      }
-    }
-
-    try {
-      await bookingsService.updatePaymentSettings({
-        platformFeeType: feeType,
-        platformFeeValue: feeValue,
-        platformFeeWithAffiliate: feeWithAffiliate,
-        payAtPropertyEnabled: payAtProperty,
-        onlineCardPayment,
-        bankTransfer,
-        xenditPaymentsEnabled,
-        paymentProvider,
-        ...(paymentProvider === 'xendit' ? {
-          xenditChannelCode,
-          xenditAccountNumber,
-          xenditAccountHolderName,
-        } : {}),
-      })
-      setSuccess('Payment settings saved')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const saveCancellationPolicy = async () => {
-    setSaving(true)
-    setError('')
-    setSuccess('')
-    try {
-      await bookingsService.updateCancellationPolicy({
-        freeCancellationDays: freeDays,
-        partialRefundPct,
-      })
-      setSuccess('Cancellation policy saved')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const saveCurrency = async () => {
     setSavingCurrency(true)
@@ -239,32 +129,6 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to save currency')
     } finally {
       setSavingCurrency(false)
-    }
-  }
-
-  const handleCreateStripeAccount = async () => {
-    if (!connectEmail) return
-    setCreatingAccount(true)
-    setError('')
-    try {
-      const result = await bookingsService.createStripeAccount(connectEmail, connectCountry)
-      setStripeAccountId(result.accountId)
-      // Open onboarding
-      const link = await bookingsService.getStripeOnboardingLink()
-      window.open(link.url, '_blank')
-    } catch (err: any) {
-      setError(err.message || 'Failed to create account')
-    } finally {
-      setCreatingAccount(false)
-    }
-  }
-
-  const handleOnboarding = async () => {
-    try {
-      const link = await bookingsService.getStripeOnboardingLink()
-      window.open(link.url, '_blank')
-    } catch (err: any) {
-      setError(err.message || 'Failed to get onboarding link')
     }
   }
 
@@ -306,196 +170,6 @@ export default function SettingsPage() {
             className="mt-3 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {savingCurrency ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-
-        {/* Payments */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Payments</h2>
-          <p className="text-xs text-gray-500 mb-4">Connect your bank account to receive payouts from guest bookings.</p>
-
-          {paymentProvider === 'xendit' ? (
-            /* Xendit — Indonesian bank account */
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Bank</label>
-                  <select
-                    value={xenditChannelCode}
-                    onChange={(e) => setXenditChannelCode(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="ID_BCA">BCA</option>
-                    <option value="ID_MANDIRI">Mandiri</option>
-                    <option value="ID_BNI">BNI</option>
-                    <option value="ID_BRI">BRI</option>
-                    <option value="ID_PERMATA">Permata</option>
-                    <option value="ID_CIMB">CIMB Niaga</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="\d*"
-                    maxLength={20}
-                    value={xenditAccountNumber}
-                    onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1234567890"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
-                <input
-                  type="text"
-                  value={xenditAccountHolderName}
-                  onChange={(e) => setXenditAccountHolderName(e.target.value)}
-                  placeholder="Full name as on bank account"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-            </div>
-          ) : stripeAccountId ? (
-            /* Stripe Connect — already connected */
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                  {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
-                </span>
-              </div>
-              {!stripeOnboarded && (
-                <div>
-                  <p className="text-sm text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
-                  <button
-                    onClick={handleOnboarding}
-                    className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                  >
-                    Complete Onboarding
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Stripe Connect — not yet connected */
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={connectEmail}
-                    onChange={(e) => setConnectEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Country</label>
-                  <select
-                    value={connectCountry}
-                    onChange={(e) => setConnectCountry(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  >
-                    {COUNTRIES.map((country) => (
-                      <option key={country.code} value={country.code}>
-                        {country.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <button
-                onClick={handleCreateStripeAccount}
-                disabled={creatingAccount || !connectEmail}
-                className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-              >
-                {creatingAccount ? 'Creating...' : 'Connect Payment Account'}
-              </button>
-            </div>
-          )}
-
-          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={xenditPaymentsEnabled}
-                onChange={(e) => setXenditPaymentsEnabled(e.target.checked)}
-                className="rounded text-primary-600"
-              />
-              <label className="text-sm text-gray-700">Accept payments via QRIS, e-wallets &amp; bank transfer (Xendit)</label>
-            </div>
-          </div>
-        </div>
-
-        {/* Payment Methods */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Payment Methods</h2>
-          <p className="text-xs text-gray-500 mb-4">Choose which payment options are available to guests</p>
-          <div className="space-y-3">
-            {/* Pay at Hotel */}
-            <button
-              onClick={() => setPayAtProperty(!payAtProperty)}
-              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                payAtProperty
-                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div>
-                <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
-                <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
-              </div>
-              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${payAtProperty ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${payAtProperty ? 'left-4' : 'left-0.5'}`} />
-              </div>
-            </button>
-
-            {/* Online Card Payment */}
-            <button
-              onClick={() => setOnlineCardPayment(!onlineCardPayment)}
-              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                onlineCardPayment
-                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div>
-                <span className="text-[13px] font-medium text-gray-900">Online Card Payment</span>
-                <p className="text-[11px] text-gray-500 mt-0.5">Accept credit/debit card payments online</p>
-              </div>
-              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${onlineCardPayment ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${onlineCardPayment ? 'left-4' : 'left-0.5'}`} />
-              </div>
-            </button>
-
-            {/* Bank Transfer */}
-            <button
-              onClick={() => setBankTransfer(!bankTransfer)}
-              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                bankTransfer
-                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                  : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div>
-                <span className="text-[13px] font-medium text-gray-900">Bank Transfer</span>
-                <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay via bank transfer</p>
-              </div>
-              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${bankTransfer ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${bankTransfer ? 'left-4' : 'left-0.5'}`} />
-              </div>
-            </button>
-          </div>
-
-          <button
-            onClick={savePaymentSettings}
-            disabled={saving}
-            className="mt-4 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
 
