@@ -211,6 +211,7 @@ async def change_email(
 
     if not email_sent:
         logger.warning(f"Email change verification email failed for user {user_id}")
+        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again later.")
 
     return ChangeEmailResponse(
         message="A verification link has been sent to your new email address. Please check your inbox to confirm the change.",
