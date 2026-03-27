@@ -796,69 +796,6 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {/* Payment Methods */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
-                    <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
-                    <p className="text-[13px] text-gray-500 mb-3">Choose which payment options are available to guests</p>
-                    <div className="space-y-3">
-                      {/* Pay at Hotel */}
-                      <div>
-                        <button
-                          onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}
-                          className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                            settings.pay_at_property_enabled
-                              ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                        >
-                          <div>
-                            <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
-                            <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
-                          </div>
-                          <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.pay_at_property_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.pay_at_property_enabled ? 'left-4' : 'left-0.5'}`} />
-                          </div>
-                        </button>
-                      </div>
-
-                      {/* Online Card Payment */}
-                      <button
-                        onClick={() => updateSetting('online_card_payment', !settings.online_card_payment)}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                          settings.online_card_payment
-                            ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div>
-                          <span className="text-[13px] font-medium text-gray-900">Online Card Payment</span>
-                          <p className="text-[11px] text-gray-500 mt-0.5">Accept credit/debit card payments online</p>
-                        </div>
-                        <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.online_card_payment ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.online_card_payment ? 'left-4' : 'left-0.5'}`} />
-                        </div>
-                      </button>
-
-                      {/* Bank Transfer */}
-                      <button
-                        onClick={() => updateSetting('bank_transfer', !settings.bank_transfer)}
-                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                          settings.bank_transfer
-                            ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div>
-                          <span className="text-[13px] font-medium text-gray-900">Bank Transfer</span>
-                          <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay via bank transfer</p>
-                        </div>
-                        <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.bank_transfer ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.bank_transfer ? 'left-4' : 'left-0.5'}`} />
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Custom Domain */}
                   <div className="bg-white rounded-lg border border-gray-200 p-5">
                     <h2 className="text-sm font-semibold text-gray-900">Custom Domain</h2>
@@ -1272,6 +1209,65 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Payment Methods */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which payment options are available to guests</p>
+                <div className="space-y-3">
+                  <button
+                    onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                      settings.pay_at_property_enabled
+                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
+                      <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
+                    </div>
+                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.pay_at_property_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.pay_at_property_enabled ? 'left-4' : 'left-0.5'}`} />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => updateSetting('online_card_payment', !settings.online_card_payment)}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                      settings.online_card_payment
+                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-[13px] font-medium text-gray-900">Online Card Payment</span>
+                      <p className="text-[11px] text-gray-500 mt-0.5">Accept credit/debit card payments online</p>
+                    </div>
+                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.online_card_payment ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.online_card_payment ? 'left-4' : 'left-0.5'}`} />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => updateSetting('bank_transfer', !settings.bank_transfer)}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                      settings.bank_transfer
+                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-[13px] font-medium text-gray-900">Bank Transfer</span>
+                      <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay via bank transfer</p>
+                    </div>
+                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.bank_transfer ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.bank_transfer ? 'left-4' : 'left-0.5'}`} />
+                    </div>
+                  </button>
+                </div>
+                <div className="flex justify-end pt-3">
+                  <SaveButton onClick={handleSave} saving={saving} />
+                </div>
               </div>
 
               {/* Payout Details */}
