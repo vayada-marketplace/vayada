@@ -428,14 +428,14 @@ export default function RoomsStep({
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
-                  <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;)</label>
+                  <label className="text-[12px] font-semibold text-gray-900">Room Size (m&sup2;) <span className="text-red-500">*</span></label>
                 </div>
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   max={1000}
                   value={room.roomSize}
-                  onChange={(e) => updateRoom({ roomSize: String(Math.min(parseInt(e.target.value) || 0, 1000)) })}
+                  onChange={(e) => updateRoom({ roomSize: String(Math.max(1, Math.min(parseInt(e.target.value) || 1, 1000))) })}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                   placeholder="50"
                 />
@@ -1071,11 +1071,11 @@ export default function RoomsStep({
                                 {open && season && (
                                   <>
                                     <div className={`text-[9px] font-bold ${wknd ? 'text-orange-600' : 'text-emerald-600'}`}>
-                                      ${effectiveRate}
+                                      {getCurrencySymbol(currency || 'USD')}{effectiveRate}
                                     </div>
                                     {room.nonRefundableEnabled && room.flexibleRateEnabled && (
                                       <div className="text-[9px] font-bold text-amber-600">
-                                        ${nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
+                                        {getCurrencySymbol(currency || 'USD')}{nrRate} <span className="text-[7px] font-normal text-amber-500">NR</span>
                                       </div>
                                     )}
                                   </>
