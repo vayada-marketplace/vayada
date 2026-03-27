@@ -171,8 +171,8 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Channel Legend */}
-      <div className="flex items-center gap-2 md:gap-4 mb-3 md:mb-4 flex-wrap">
+      {/* Channel Legend — hidden on small mobile */}
+      <div className="hidden sm:flex items-center gap-2 md:gap-4 mb-3 md:mb-4 flex-wrap">
         {CHANNEL_LEGEND.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
             <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
@@ -195,7 +195,7 @@ export default function CalendarPage() {
             {/* Date header */}
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="w-48 px-3 py-2 text-left text-xs font-medium text-gray-600 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
+                <th className="w-20 md:w-48 px-1.5 md:px-3 py-2 text-left text-[10px] md:text-xs font-medium text-gray-600 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
                   Room
                 </th>
                 {dates.map((d) => {
@@ -220,9 +220,9 @@ export default function CalendarPage() {
                 const rt = roomTypeMap[room.roomTypeId]
                 return (
                   <tr key={room.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                    <td className="px-3 py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
-                      <div className="text-sm font-semibold text-gray-900">#{room.roomNumber}</div>
-                      <div className="text-[10px] text-gray-500 leading-tight">
+                    <td className="px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
+                      <div className="text-[11px] md:text-sm font-semibold text-gray-900 truncate">#{room.roomNumber}</div>
+                      <div className="hidden md:block text-[10px] text-gray-500 leading-tight truncate">
                         {room.roomTypeName}
                         {rt?.category && (
                           <span className="text-gray-400"> &middot; {rt.category}</span>
@@ -264,9 +264,9 @@ export default function CalendarPage() {
               {/* Unassigned bookings row */}
               {unassignedBookings.length > 0 && (
                 <tr className="border-b border-gray-100 bg-amber-50/30">
-                  <td className="px-3 py-2 sticky left-0 bg-amber-50/30 z-10 border-r border-gray-200">
-                    <div className="text-sm font-medium text-amber-700">Unassigned</div>
-                    <div className="text-[10px] text-amber-500">{unassignedBookings.length} booking{unassignedBookings.length !== 1 ? 's' : ''}</div>
+                  <td className="px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 bg-amber-50/30 z-10 border-r border-gray-200">
+                    <div className="text-[11px] md:text-sm font-medium text-amber-700 truncate">Unassigned</div>
+                    <div className="hidden md:block text-[10px] text-amber-500">{unassignedBookings.length} booking{unassignedBookings.length !== 1 ? 's' : ''}</div>
                   </td>
                   <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
                     <div className="absolute inset-0 flex">
