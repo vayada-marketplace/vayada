@@ -283,63 +283,88 @@ function PaymentPageContent() {
               </div>
 
               {/* Payment method tabs */}
-              <div className="flex gap-3 mb-6">
+              <div className="space-y-3 mb-6">
                 <button
                   onClick={() => setPaymentMethod('card')}
-                  className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                  className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
                     paymentMethod === 'card'
                       ? 'border-primary-600 bg-primary-50'
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                    </svg>
-                    <span className="font-semibold text-sm text-gray-900">{t('payWithCard') || 'Pay with Card'}</span>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === 'card' ? 'border-primary-600' : 'border-gray-300'}`}>
+                      {paymentMethod === 'card' && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                        </svg>
+                        <span className="font-semibold text-sm text-gray-900">{t('payWithCard') || 'Credit / Debit Card'}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 ml-7">{t('cardAuthNote') || 'Secure payment via Stripe. Your card will be authorized when the host confirms.'}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-[10px] font-medium text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Visa</span>
+                      <span className="text-[10px] font-medium text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">Mastercard</span>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500">{t('cardAuthNote') || 'An authorization hold will be placed on your card'}</p>
                 </button>
                 {xenditPaymentsEnabled && (
                   <button
                     onClick={() => setPaymentMethod('xendit')}
-                    className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
                       paymentMethod === 'xendit'
                         ? 'border-primary-600 bg-primary-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                      </svg>
-                      <span className="font-semibold text-sm text-gray-900">QRIS / E-Wallet / Bank Transfer</span>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === 'xendit' ? 'border-primary-600' : 'border-gray-300'}`}>
+                        {paymentMethod === 'xendit' && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="font-semibold text-sm text-gray-900">QRIS / E-Wallet / Bank Transfer</span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">OVO, DANA, ShopeePay, GoPay, or Indonesian bank transfer via Xendit</p>
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-500">Pay with OVO, DANA, ShopeePay, GoPay, or bank transfer</p>
                   </button>
                 )}
                 {payAtPropertyEnabled && !isNonRefundable && (
                   <button
                     onClick={() => setPaymentMethod('pay_at_property')}
-                    className={`flex-1 p-4 rounded-xl border-2 transition-colors text-left ${
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
                       paymentMethod === 'pay_at_property'
                         ? 'border-primary-600 bg-primary-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                      </svg>
-                      <span className="font-semibold text-sm text-gray-900">{t('payAtProperty') || 'Pay at Property'}</span>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === 'pay_at_property' ? 'border-primary-600' : 'border-gray-300'}`}>
+                        {paymentMethod === 'pay_at_property' && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                          </svg>
+                          <span className="font-semibold text-sm text-gray-900">{t('payAtProperty') || 'Pay at Property'}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">
+                          {payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'cash'
+                            ? (t('payAtPropertyCashOnly') || 'Pay with cash at check-in — no online payment needed')
+                            : payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'card'
+                              ? (t('payAtPropertyCardOnly') || 'Pay with card at check-in — no online payment needed')
+                              : (t('payAtPropertyNote') || 'Pay at check-in — cash & card accepted, no online payment needed')}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-500">
-                      {payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'cash'
-                        ? (t('payAtPropertyCashOnly') || 'Pay with cash when you arrive (cash only)')
-                        : payAtHotelMethods.length === 1 && payAtHotelMethods[0] === 'card'
-                          ? (t('payAtPropertyCardOnly') || 'Pay with card when you arrive')
-                          : (t('payAtPropertyNote') || 'Pay when you arrive at the hotel (cash & card accepted)')}
-                    </p>
                   </button>
                 )}
               </div>
