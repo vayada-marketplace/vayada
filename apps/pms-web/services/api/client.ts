@@ -17,7 +17,12 @@ export class ApiErrorResponse extends Error {
   data: ApiError
 
   constructor(status: number, data: ApiError) {
-    super(data.detail as string || `API Error: ${status}`)
+    const message = typeof data.detail === 'string'
+      ? data.detail
+      : Array.isArray(data.detail)
+        ? data.detail.map(e => e.msg).join(', ')
+        : `API Error: ${status}`
+    super(message)
     this.name = 'ApiErrorResponse'
     this.status = status
     this.data = data
