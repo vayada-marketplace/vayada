@@ -64,6 +64,8 @@ async def get_payment_settings(
             platform_fee_value=float(settings["platform_fee_value"]) if settings else 8.00,
             platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"]) if settings else 2.00,
             pay_at_property_enabled=settings["pay_at_property_enabled"] if settings else False,
+            online_card_payment=settings.get("online_card_payment", False) if settings else False,
+            bank_transfer=settings.get("bank_transfer", False) if settings else False,
             xendit_payments_enabled=settings.get("xendit_payments_enabled", False) if settings else False,
             payment_provider=settings["payment_provider"] if settings else "stripe",
             xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
@@ -108,6 +110,23 @@ async def update_payment_settings(
             )
 
     await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
+
+    # Sync payment method toggles to booking engine
+    sync_fields = {
+        "pay_at_property_enabled", "online_card_payment", "bank_transfer",
+    }
+    booking_updates = {k: v for k, v in updates.items() if k in sync_fields}
+    if booking_updates and app_settings.BOOKING_ENGINE_DATABASE_URL:
+        try:
+            sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(booking_updates))
+            vals = list(booking_updates.values())
+            await BookingEngineDatabase.execute(
+                f"UPDATE booking_hotels SET {sets} WHERE user_id = $1",
+                user_id, *vals,
+            )
+        except Exception as e:
+            logger.warning("Failed to sync payment methods to booking engine: %s", e)
+
     return {"status": "updated"}
 
 
