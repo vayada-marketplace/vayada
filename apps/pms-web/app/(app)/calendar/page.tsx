@@ -11,6 +11,7 @@ import {
 import BlockModal from '@/components/calendar/BlockModal'
 import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
+import MobileCalendar from '@/components/calendar/MobileCalendar'
 
 const VIEW_DAYS = 21
 
@@ -125,54 +126,69 @@ export default function CalendarPage() {
     return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase()
   }
 
+  const allBookings = useMemo(() => data?.bookings || [], [data])
+
   return (
-    <div className="p-3 md:p-6 h-full flex flex-col">
+    <div className="h-full flex flex-col">
+      {/* Mobile Calendar */}
+      <div className="md:hidden flex-1 flex flex-col">
+        {loading && !data ? (
+          <div className="p-6 animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>
+        ) : (
+          <MobileCalendar
+            bookings={allBookings}
+            onSelectBooking={(id) => setSelectedBookingId(id)}
+            onNewBooking={() => setShowNewBookingModal(true)}
+          />
+        )}
+      </div>
+
+      {/* Desktop Calendar */}
+      <div className="hidden md:flex flex-col flex-1 p-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 md:mb-4">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-lg md:text-xl font-bold text-gray-900">Calendar</h1>
-            <p className="text-xs md:text-sm text-gray-500">
-              {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
-            </p>
-          </div>
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
+          <p className="text-sm text-gray-500">
+            {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
+          </p>
         </div>
-        <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           <button
             onClick={goToday}
-            className="px-2.5 md:px-3 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Today
           </button>
           <button
             onClick={goPrev}
-            className="px-2 md:px-2.5 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             &larr;
           </button>
           <button
             onClick={goNext}
-            className="px-2 md:px-2.5 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             &rarr;
           </button>
           <button
             onClick={() => setShowBlockModal(true)}
-            className="hidden sm:block px-3 md:px-4 py-1.5 text-xs md:text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
           >
             Block Room
           </button>
           <button
             onClick={() => setShowNewBookingModal(true)}
-            className="px-3 md:px-4 py-1.5 text-xs md:text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+            className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
           >
-            + New
+            + New Booking
           </button>
         </div>
       </div>
 
-      {/* Channel Legend — hidden on small mobile */}
-      <div className="hidden sm:flex items-center gap-2 md:gap-4 mb-3 md:mb-4 flex-wrap">
+      {/* Channel Legend */}
+      <div className="flex items-center gap-4 mb-4">
         {CHANNEL_LEGEND.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
             <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
@@ -300,6 +316,7 @@ export default function CalendarPage() {
           </table>
         </div>
       )}
+      </div>
 
       {/* Block Modal */}
       {showBlockModal && data && (
