@@ -345,7 +345,7 @@ export default function BookingFlowPage() {
   }
 
   const tabs = [
-    { id: 'rooms' as const, label: 'Rooms', icon: RoomsIcon },
+    { id: 'rooms' as const, label: 'Filters', icon: RoomsIcon },
     { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
     { id: 'promo-codes' as const, label: 'Promos', icon: PromoIcon },
     { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
@@ -372,7 +372,7 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5 shrink-0 max-w-xl">
+      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-4 shrink-0 max-w-xl">
         {tabs.map((tab) => (
           <button
             key={tab.id}
