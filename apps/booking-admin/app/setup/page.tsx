@@ -753,8 +753,6 @@ export default function SetupPage() {
         <PmsStep
           selectedPms={selectedPms}
           setSelectedPms={setSelectedPms}
-          checkInTime={checkInTime} setCheckInTime={setCheckInTime}
-          checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
           error={error}
           canProceed={canProceed()}
           onBack={() => setStep(2)}
@@ -825,6 +823,8 @@ export default function SetupPage() {
 
       {step === 8 && (
         <PoliciesStep
+          checkInTime={checkInTime} setCheckInTime={setCheckInTime}
+          checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
           payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
           payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}

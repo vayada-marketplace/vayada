@@ -1,6 +1,13 @@
 'use client'
 
+const TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
+  const h = i.toString().padStart(2, '0')
+  return { value: `${h}:00`, label: `${h}:00` }
+})
+
 interface PoliciesStepProps {
+  checkInTime: string; setCheckInTime: (v: string) => void
+  checkOutTime: string; setCheckOutTime: (v: string) => void
   payAtHotel: boolean; setPayAtHotel: (v: boolean) => void
   payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
   onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
@@ -17,6 +24,8 @@ interface PoliciesStepProps {
 }
 
 export default function PoliciesStep({
+  checkInTime, setCheckInTime,
+  checkOutTime, setCheckOutTime,
   payAtHotel, setPayAtHotel,
   payAtHotelMethods, setPayAtHotelMethods,
   onlineCardPayment, setOnlineCardPayment,
@@ -38,6 +47,37 @@ export default function PoliciesStep({
         <div className="text-center mb-6">
           <h2 className="text-lg font-bold text-gray-900">Policies & Operations</h2>
           <p className="text-[13px] text-gray-500 mt-1">Configure payment methods and guest options</p>
+        </div>
+
+        {/* Check-in & Check-out */}
+        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3 mb-4">
+          <h3 className="text-[13px] font-semibold text-gray-900">Check-in & Check-out</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-in Time</label>
+              <select
+                value={checkInTime}
+                onChange={(e) => setCheckInTime(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
+              >
+                {TIME_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-out Time</label>
+              <select
+                value={checkOutTime}
+                onChange={(e) => setCheckOutTime(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
+              >
+                {TIME_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Payment Methods */}
