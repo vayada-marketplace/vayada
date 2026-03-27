@@ -367,13 +367,15 @@ class TestChangePassword:
 
 class TestChangeEmail:
     async def test_change_email_success(self, client, cleanup_database):
+        from unittest.mock import AsyncMock, patch
         user = await create_test_user(password="MyPass123!")
         new_email = generate_test_email()
-        resp = await client.post(
-            "/auth/change-email",
-            json={"new_email": new_email, "password": "MyPass123!"},
-            headers=get_auth_headers(user["token"]),
-        )
+        with patch("app.routers.auth.send_email", new_callable=AsyncMock, return_value=True):
+            resp = await client.post(
+                "/auth/change-email",
+                json={"new_email": new_email, "password": "MyPass123!"},
+                headers=get_auth_headers(user["token"]),
+            )
         assert resp.status_code == 200
         body = resp.json()
         assert "verification" in body["message"].lower()
