@@ -1,6 +1,6 @@
 const SYMBOLS: Record<string, string> = {
   EUR: '€',
-  USD: '$',
+  USD: 'US$',
   GBP: '£',
   JPY: '¥',
   THB: '฿',
