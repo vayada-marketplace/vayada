@@ -15,6 +15,23 @@ def _validate_operating_periods(periods: list) -> list:
     return periods
 
 
+def _normalize_season_date(d: str) -> str:
+    """Normalize MM-DD to YYYY-MM-DD using a reference year."""
+    if d and len(d) == 5 and d[2] == '-':
+        return f"2026-{d}"
+    return d
+
+
+def _normalize_season_dates(seasons: list) -> list:
+    """Ensure all season from/to dates are full YYYY-MM-DD."""
+    for s in seasons:
+        if s.get("from"):
+            s["from"] = _normalize_season_date(s["from"])
+        if s.get("to"):
+            s["to"] = _normalize_season_date(s["to"])
+    return seasons
+
+
 def _validate_no_season_overlap(seasons: list) -> list:
     """Raise ValueError if any two seasons have overlapping date ranges."""
     for i, a in enumerate(seasons):
@@ -174,6 +191,7 @@ class RoomTypeUpdate(BaseModel):
     @classmethod
     def validate_seasons(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
         if v is not None:
+            _normalize_season_dates(v)
             _validate_season_rates(v)
             _validate_no_season_overlap(v)
             _validate_no_season_gaps(v)
