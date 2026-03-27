@@ -42,7 +42,7 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { label: 'Settings', href: '/settings', icon: SettingsIcon },
 ]
 
-export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
+export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)

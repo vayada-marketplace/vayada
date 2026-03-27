@@ -26,7 +26,7 @@ interface DayStats {
   departures: number
 }
 
-export default function Header({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
+export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const [propertyOpen, setPropertyOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
