@@ -116,6 +116,8 @@ export default function SettingsPage() {
   const [feeValue, setFeeValue] = useState(8)
   const [feeWithAffiliate, setFeeWithAffiliate] = useState(2)
   const [payAtProperty, setPayAtProperty] = useState(false)
+  const [onlineCardPayment, setOnlineCardPayment] = useState(false)
+  const [bankTransfer, setBankTransfer] = useState(false)
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
 
   // Stripe Connect
@@ -143,6 +145,8 @@ export default function SettingsPage() {
         setFeeValue(ps.platformFeeValue)
         setFeeWithAffiliate(ps.platformFeeWithAffiliate)
         setPayAtProperty(ps.payAtPropertyEnabled)
+        setOnlineCardPayment(ps.onlineCardPayment || false)
+        setBankTransfer(ps.bankTransfer || false)
         setXenditPaymentsEnabled(ps.xenditPaymentsEnabled || false)
         setStripeAccountId(ps.stripeConnectAccountId)
         setStripeOnboarded(ps.stripeConnectOnboarded)
@@ -189,6 +193,8 @@ export default function SettingsPage() {
         platformFeeValue: feeValue,
         platformFeeWithAffiliate: feeWithAffiliate,
         payAtPropertyEnabled: payAtProperty,
+        onlineCardPayment,
+        bankTransfer,
         xenditPaymentsEnabled,
         paymentProvider,
         ...(paymentProvider === 'xendit' ? {
@@ -415,29 +421,82 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={payAtProperty}
-                onChange={(e) => setPayAtProperty(e.target.checked)}
-                className="rounded text-primary-600"
-              />
-              <label className="text-sm text-gray-700">Allow guests to pay at the property (cash/card on arrival)</label>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
                 checked={xenditPaymentsEnabled}
                 onChange={(e) => setXenditPaymentsEnabled(e.target.checked)}
                 className="rounded text-primary-600"
               />
               <label className="text-sm text-gray-700">Accept payments via QRIS, e-wallets &amp; bank transfer (Xendit)</label>
             </div>
+          </div>
+        </div>
+
+        {/* Payment Methods */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Payment Methods</h2>
+          <p className="text-xs text-gray-500 mb-4">Choose which payment options are available to guests</p>
+          <div className="space-y-3">
+            {/* Pay at Hotel */}
             <button
-              onClick={savePaymentSettings}
-              disabled={saving}
-              className="mt-3 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              onClick={() => setPayAtProperty(!payAtProperty)}
+              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                payAtProperty
+                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
             >
-              {saving ? 'Saving...' : 'Save'}
+              <div>
+                <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
+                <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
+              </div>
+              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${payAtProperty ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${payAtProperty ? 'left-4' : 'left-0.5'}`} />
+              </div>
+            </button>
+
+            {/* Online Card Payment */}
+            <button
+              onClick={() => setOnlineCardPayment(!onlineCardPayment)}
+              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                onlineCardPayment
+                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div>
+                <span className="text-[13px] font-medium text-gray-900">Online Card Payment</span>
+                <p className="text-[11px] text-gray-500 mt-0.5">Accept credit/debit card payments online</p>
+              </div>
+              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${onlineCardPayment ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${onlineCardPayment ? 'left-4' : 'left-0.5'}`} />
+              </div>
+            </button>
+
+            {/* Bank Transfer */}
+            <button
+              onClick={() => setBankTransfer(!bankTransfer)}
+              className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                bankTransfer
+                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div>
+                <span className="text-[13px] font-medium text-gray-900">Bank Transfer</span>
+                <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay via bank transfer</p>
+              </div>
+              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${bankTransfer ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${bankTransfer ? 'left-4' : 'left-0.5'}`} />
+              </div>
             </button>
           </div>
+
+          <button
+            onClick={savePaymentSettings}
+            disabled={saving}
+            className="mt-4 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
         </div>
 
       </div>
