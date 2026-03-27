@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { bookingsService } from '@/services/bookings'
+import { apiClient } from '@/services/api/client'
 
 const CURRENCY_OPTIONS = [
   { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
@@ -109,6 +110,13 @@ export default function SettingsPage() {
   const [currency, setCurrency] = useState('EUR')
   const [savingCurrency, setSavingCurrency] = useState(false)
 
+  // Check-in / Check-out times
+  const [checkInFrom, setCheckInFrom] = useState('14:00')
+  const [checkInUntil, setCheckInUntil] = useState('22:00')
+  const [checkOutFrom, setCheckOutFrom] = useState('07:00')
+  const [checkOutUntil, setCheckOutUntil] = useState('11:00')
+  const [savingTimes, setSavingTimes] = useState(false)
+
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {
@@ -116,7 +124,39 @@ export default function SettingsPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
+
+    apiClient.get<{ check_in_from?: string; check_in_until?: string; check_out_from?: string; check_out_until?: string; check_in_time?: string; check_out_time?: string }>('/admin/settings/property')
+      .then((s) => {
+        if (s.check_in_from) setCheckInFrom(s.check_in_from)
+        else if (s.check_in_time) setCheckInFrom(s.check_in_time)
+        if (s.check_in_until) setCheckInUntil(s.check_in_until)
+        if (s.check_out_from) setCheckOutFrom(s.check_out_from)
+        if (s.check_out_until) setCheckOutUntil(s.check_out_until)
+        else if (s.check_out_time) setCheckOutUntil(s.check_out_time)
+      })
+      .catch(() => {})
   }, [])
+
+  const saveTimes = async () => {
+    setSavingTimes(true)
+    setError('')
+    setSuccess('')
+    try {
+      await apiClient.patch('/admin/settings/property', {
+        check_in_from: checkInFrom,
+        check_in_until: checkInUntil,
+        check_in_time: checkInFrom,
+        check_out_from: checkOutFrom,
+        check_out_until: checkOutUntil,
+        check_out_time: checkOutUntil,
+      })
+      setSuccess('Check-in/out times saved')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save times')
+    } finally {
+      setSavingTimes(false)
+    }
+  }
 
   const saveCurrency = async () => {
     setSavingCurrency(true)
@@ -170,6 +210,71 @@ export default function SettingsPage() {
             className="mt-3 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {savingCurrency ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+
+        {/* Check-in / Check-out */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Check-in & Check-out</h2>
+          <p className="text-xs text-gray-500 mb-4">Set the time windows for guest arrivals and departures.</p>
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-in Period</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <input
+                    type="time"
+                    value={checkInFrom}
+                    onChange={(e) => setCheckInFrom(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <span className="text-gray-400 mt-4">—</span>
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <input
+                    type="time"
+                    value={checkInUntil}
+                    onChange={(e) => setCheckInUntil(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">e.g. 14:00 — 22:00</p>
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-out Period</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <input
+                    type="time"
+                    value={checkOutFrom}
+                    onChange={(e) => setCheckOutFrom(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <span className="text-gray-400 mt-4">—</span>
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <input
+                    type="time"
+                    value={checkOutUntil}
+                    onChange={(e) => setCheckOutUntil(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">e.g. 07:00 — 11:00</p>
+            </div>
+          </div>
+          <button
+            onClick={saveTimes}
+            disabled={savingTimes}
+            className="mt-4 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {savingTimes ? 'Saving...' : 'Save'}
           </button>
         </div>
 
