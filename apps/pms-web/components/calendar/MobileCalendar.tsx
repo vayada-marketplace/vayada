@@ -120,7 +120,7 @@ export default function MobileCalendar({ bookings, onSelectBooking, onNewBooking
             const hasBookings = dayBookings.length > 0
 
             // Get unique channel colors for dots
-            const channels = [...new Set(dayBookings.map(b => b.channel))]
+            const channels = Array.from(new Set(dayBookings.map(b => b.channel)))
 
             return (
               <button
