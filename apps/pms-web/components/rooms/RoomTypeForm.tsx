@@ -145,10 +145,17 @@ export default function RoomTypeForm({
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
-    form.operatingPeriods?.length ? form.operatingPeriods : [{ from: '01-01', to: '12-31' }]
+    form.operatingPeriods?.length ? form.operatingPeriods.map((p: { from: string; to: string }) => ({
+      from: p.from && p.from.length > 5 ? p.from.slice(5) : p.from,
+      to: p.to && p.to.length > 5 ? p.to.slice(5) : p.to,
+    })) : [{ from: '01-01', to: '12-31' }]
   )
   const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]>(
-    form.seasons || []
+    (form.seasons || []).map(s => ({
+      ...s,
+      from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
+      to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
+    }))
   )
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
   const [weekendSurcharge, setWeekendSurcharge] = useState(form.weekendSurcharge || '+0%')
