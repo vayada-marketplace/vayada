@@ -1109,95 +1109,6 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Payments — Stripe Connect / Xendit */}
-              {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-5">
-                <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
-                  {paymentProvider === 'xendit'
-                    ? 'Receive payouts from guest bookings directly to your Indonesian bank account via Xendit.'
-                    : 'Accept credit card payments from guests via Stripe. Payouts are sent automatically to your connected bank account.'}
-                </p>
-
-                {paymentError && (
-                  <FeedbackAlert type="error" message={paymentError} className="mb-3" />
-                )}
-                {paymentSuccess && (
-                  <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
-                )}
-
-                {paymentProvider === 'xendit' ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
-                        <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
-                          <option value="ID_BCA">BCA</option>
-                          <option value="ID_MANDIRI">Mandiri</option>
-                          <option value="ID_BNI">BNI</option>
-                          <option value="ID_BRI">BRI</option>
-                          <option value="ID_PERMATA">Permata</option>
-                          <option value="ID_CIMB">CIMB Niaga</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
-                        <input type="text" inputMode="numeric" maxLength={20} value={xenditAccountNumber} onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))} placeholder="1234567890" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
-                      <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder="Full name as on bank account" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                    </div>
-                    <div className="flex justify-end pt-2">
-                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
-                    </div>
-                  </div>
-                ) : stripeAccountId ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-semibold text-gray-700">Stripe</span>
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                        {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
-                      </span>
-                    </div>
-                    {!stripeOnboarded && (
-                      <div>
-                        <p className="text-[13px] text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
-                        <button onClick={handleOnboarding} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
-                          Complete Onboarding
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
-                      <div className="flex items-center gap-2">
-                        <svg className="h-5" viewBox="0 0 60 25" fill="none"><path fillRule="evenodd" clipRule="evenodd" d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z" fill="#635BFF"/></svg>
-                        <p className="text-[11px] text-gray-500">Secure payments processed by Stripe. Payouts go directly to your bank account.</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Email</label>
-                        <input type="email" value={connectEmail} onChange={(e) => setConnectEmail(e.target.value)} placeholder="your@email.com" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
-                        <select value={connectCountry} onChange={(e) => setConnectCountry(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
-                          {[{c:'AT',n:'Austria'},{c:'DE',n:'Germany'},{c:'CH',n:'Switzerland'},{c:'GB',n:'United Kingdom'},{c:'US',n:'United States'},{c:'FR',n:'France'},{c:'ES',n:'Spain'},{c:'IT',n:'Italy'},{c:'NL',n:'Netherlands'},{c:'PT',n:'Portugal'},{c:'BE',n:'Belgium'},{c:'SE',n:'Sweden'},{c:'NO',n:'Norway'},{c:'DK',n:'Denmark'},{c:'FI',n:'Finland'},{c:'IE',n:'Ireland'},{c:'AU',n:'Australia'},{c:'NZ',n:'New Zealand'},{c:'CA',n:'Canada'},{c:'SG',n:'Singapore'},{c:'HK',n:'Hong Kong'},{c:'JP',n:'Japan'},{c:'MY',n:'Malaysia'},{c:'TH',n:'Thailand'},{c:'ID',n:'Indonesia'},{c:'PH',n:'Philippines'},{c:'MX',n:'Mexico'},{c:'BR',n:'Brazil'},{c:'IN',n:'India'}].map(({c,n}) => (
-                            <option key={c} value={c}>{n}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
-                      {creatingAccount ? 'Connecting...' : 'Connect with Stripe'}
-                    </button>
-                  </div>
-                )}
-              </div>}
-
               {/* Payment Methods */}
               <div className="bg-white rounded-lg border border-gray-200 p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
@@ -1312,6 +1223,95 @@ export default function SettingsPage() {
                   <SaveButton onClick={handleSave} saving={saving} />
                 </div>
               </div>
+
+              {/* Payments — Stripe Connect / Xendit */}
+              {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+                  {paymentProvider === 'xendit'
+                    ? 'Receive payouts from guest bookings directly to your Indonesian bank account via Xendit.'
+                    : 'Accept credit card payments from guests via Stripe. Payouts are sent automatically to your connected bank account.'}
+                </p>
+
+                {paymentError && (
+                  <FeedbackAlert type="error" message={paymentError} className="mb-3" />
+                )}
+                {paymentSuccess && (
+                  <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
+                )}
+
+                {paymentProvider === 'xendit' ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
+                        <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
+                          <option value="ID_BCA">BCA</option>
+                          <option value="ID_MANDIRI">Mandiri</option>
+                          <option value="ID_BNI">BNI</option>
+                          <option value="ID_BRI">BRI</option>
+                          <option value="ID_PERMATA">Permata</option>
+                          <option value="ID_CIMB">CIMB Niaga</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                        <input type="text" inputMode="numeric" maxLength={20} value={xenditAccountNumber} onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))} placeholder="1234567890" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                      <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder="Full name as on bank account" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                    </div>
+                  </div>
+                ) : stripeAccountId ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-semibold text-gray-700">Stripe</span>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
+                      </span>
+                    </div>
+                    {!stripeOnboarded && (
+                      <div>
+                        <p className="text-[13px] text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
+                        <button onClick={handleOnboarding} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
+                          Complete Onboarding
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <svg className="h-5" viewBox="0 0 60 25" fill="none"><path fillRule="evenodd" clipRule="evenodd" d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z" fill="#635BFF"/></svg>
+                        <p className="text-[11px] text-gray-500">Secure payments processed by Stripe. Payouts go directly to your bank account.</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Email</label>
+                        <input type="email" value={connectEmail} onChange={(e) => setConnectEmail(e.target.value)} placeholder="your@email.com" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
+                        <select value={connectCountry} onChange={(e) => setConnectCountry(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
+                          {[{c:'AT',n:'Austria'},{c:'DE',n:'Germany'},{c:'CH',n:'Switzerland'},{c:'GB',n:'United Kingdom'},{c:'US',n:'United States'},{c:'FR',n:'France'},{c:'ES',n:'Spain'},{c:'IT',n:'Italy'},{c:'NL',n:'Netherlands'},{c:'PT',n:'Portugal'},{c:'BE',n:'Belgium'},{c:'SE',n:'Sweden'},{c:'NO',n:'Norway'},{c:'DK',n:'Denmark'},{c:'FI',n:'Finland'},{c:'IE',n:'Ireland'},{c:'AU',n:'Australia'},{c:'NZ',n:'New Zealand'},{c:'CA',n:'Canada'},{c:'SG',n:'Singapore'},{c:'HK',n:'Hong Kong'},{c:'JP',n:'Japan'},{c:'MY',n:'Malaysia'},{c:'TH',n:'Thailand'},{c:'ID',n:'Indonesia'},{c:'PH',n:'Philippines'},{c:'MX',n:'Mexico'},{c:'BR',n:'Brazil'},{c:'IN',n:'India'}].map(({c,n}) => (
+                            <option key={c} value={c}>{n}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
+                      {creatingAccount ? 'Connecting...' : 'Connect with Stripe'}
+                    </button>
+                  </div>
+                )}
+              </div>}
 
               {/* Payout Details */}
               {(settings.pay_at_property_enabled || settings.bank_transfer) && <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
