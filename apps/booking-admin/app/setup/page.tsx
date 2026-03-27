@@ -24,7 +24,7 @@ const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Disp
 const STEPS = [
   { number: 1, label: 'Your Property' },
   { number: 2, label: 'Brand & Media' },
-  { number: 3, label: 'Choose PMS' },
+  // { number: 3, label: 'Choose PMS' },  // Hidden — only vayada PMS for now
   { number: 4, label: 'Rooms & Rates' },
   { number: 5, label: 'Add-ons' },
   { number: 6, label: 'Promo Codes' },
@@ -744,22 +744,12 @@ export default function SetupPage() {
           error={error}
           canProceed={canProceed()}
           onBack={() => setStep(1)}
-          onContinue={() => { setError(''); setStep(3) }}
-          stepIndicators={stepIndicators}
-        />
-      )}
-
-      {step === 3 && (
-        <PmsStep
-          selectedPms={selectedPms}
-          setSelectedPms={setSelectedPms}
-          error={error}
-          canProceed={canProceed()}
-          onBack={() => setStep(2)}
           onContinue={() => { setError(''); setStep(4) }}
           stepIndicators={stepIndicators}
         />
       )}
+
+      {/* Step 3 (PMS selection) hidden — only vayada PMS for now. Re-enable when more PMS options are available. */}
 
       {step === 4 && (
         <RoomsStep
@@ -777,7 +767,7 @@ export default function SetupPage() {
           currency={currency}
           error={error}
           canProceed={canProceed()}
-          onBack={() => setStep(3)}
+          onBack={() => setStep(2)}
           onContinue={() => { setError(''); setStep(5) }}
           stepIndicators={stepIndicators}
         />
