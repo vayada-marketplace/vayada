@@ -221,26 +221,21 @@ export default function RoomTypeForm({
     return indices
   })()
 
-  // Detect gaps between seasons
+  // Detect gaps between seasons (MM-DD format)
   const seasonGaps = (() => {
     const valid = seasons.filter(s => s.from && s.to)
     if (valid.length < 2) return []
     const sorted = [...valid].sort((a, b) => a.from.localeCompare(b.from))
     const gaps: { from: string; to: string }[] = []
+    const mmddToDoy = (mmdd: string) => { const [m, d] = mmdd.split('-').map(Number); return DAYS_IN_MONTH.slice(0, m - 1).reduce((a, b) => a + b, 0) + d }
+    const doyToMmdd = (doy: number) => { let m = 0; let rem = doy; while (m < 12 && rem > DAYS_IN_MONTH[m]) { rem -= DAYS_IN_MONTH[m]; m++ } return `${String(m + 1).padStart(2, '0')}-${String(rem).padStart(2, '0')}` }
     for (let i = 0; i < sorted.length - 1; i++) {
-      const endDate = new Date(sorted[i].to)
-      const nextStart = new Date(sorted[i + 1].from)
-      // Add one day to end date to check adjacency
-      const dayAfterEnd = new Date(endDate)
-      dayAfterEnd.setDate(dayAfterEnd.getDate() + 1)
-      if (dayAfterEnd < nextStart) {
-        // There's a gap
-        const gapFrom = new Date(dayAfterEnd)
-        const gapTo = new Date(nextStart)
-        gapTo.setDate(gapTo.getDate() - 1)
+      const endDoy = mmddToDoy(sorted[i].to)
+      const nextStartDoy = mmddToDoy(sorted[i + 1].from)
+      if (endDoy + 1 < nextStartDoy) {
         gaps.push({
-          from: gapFrom.toISOString().split('T')[0],
-          to: gapTo.toISOString().split('T')[0],
+          from: doyToMmdd(endDoy + 1),
+          to: doyToMmdd(nextStartDoy - 1),
         })
       }
     }
@@ -248,16 +243,15 @@ export default function RoomTypeForm({
   })()
 
   const isInSeasonGap = (dateStr: string) => {
-    return seasonGaps.some(g => dateStr >= g.from && dateStr <= g.to)
+    const mmdd = dateStr.slice(5) // extract MM-DD from YYYY-MM-DD
+    return seasonGaps.some(g => mmdd >= g.from && mmdd <= g.to)
   }
 
   const getSeasonForDate = (day: number) => {
-    const year = previewMonth.getFullYear()
     const month = previewMonth.getMonth()
-    const date = new Date(year, month, day)
-    const dateStr = date.toISOString().split('T')[0]
+    const mmdd = `${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     for (const s of seasons) {
-      if (s.from && s.to && dateStr >= s.from && dateStr <= s.to) return s
+      if (s.from && s.to && mmdd >= s.from && mmdd <= s.to) return s
     }
     return null
   }
@@ -699,7 +693,7 @@ export default function RoomTypeForm({
                   <div className="space-y-2">
                     {seasons.map((season, idx) => {
                       const dayCount = season.from && season.to
-                        ? Math.max(1, Math.round((new Date(season.to).getTime() - new Date(season.from).getTime()) / (1000 * 60 * 60 * 24)) + 1)
+                        ? (() => { const [fm, fd] = season.from.split('-').map(Number); const [tm, td] = season.to.split('-').map(Number); const fromDoy = DAYS_IN_MONTH.slice(0, fm - 1).reduce((a, b) => a + b, 0) + fd; const toDoy = DAYS_IN_MONTH.slice(0, tm - 1).reduce((a, b) => a + b, 0) + td; return Math.max(0, toDoy - fromDoy); })()
                         : 0
                       return (
                         <div key={idx} className={`rounded-xl border px-4 py-3 ${overlappingSeasonIndices.has(idx) ? 'border-red-300 bg-red-50/50' : 'border-gray-200 bg-gray-50/50'}`}>
@@ -729,9 +723,31 @@ export default function RoomTypeForm({
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <input type="date" value={season.from} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], from: e.target.value, ...(u[idx].to && e.target.value > u[idx].to ? { to: '' } : {}) }; setSeasons(u) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <div className="flex items-center gap-1">
+                              <select value={season.from ? parseInt(season.from.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.from ? parseInt(season.from.split('-')[1]) : 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], from: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value={0}>—</option>
+                                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                              </select>
+                              <select value={season.from ? parseInt(season.from.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.from ? parseInt(season.from.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], from: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value={0}>—</option>
+                                {Array.from({ length: (season.from ? parseInt(season.from.split('-')[0]) : 0) ? DAYS_IN_MONTH[(season.from ? parseInt(season.from.split('-')[0]) : 1) - 1] : 31 }, (_, i) => (
+                                  <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
+                                ))}
+                              </select>
+                            </div>
                             <span className="text-[10px] text-gray-400">-</span>
-                            <input type="date" value={season.to} min={season.from || undefined} onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], to: e.target.value }; setSeasons(u) }} className="flex-1 px-2 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                            <div className="flex items-center gap-1">
+                              <select value={season.to ? parseInt(season.to.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.to ? parseInt(season.to.split('-')[1]) : 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], to: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value={0}>—</option>
+                                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                              </select>
+                              <select value={season.to ? parseInt(season.to.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.to ? parseInt(season.to.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], to: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value={0}>—</option>
+                                {Array.from({ length: (season.to ? parseInt(season.to.split('-')[0]) : 0) ? DAYS_IN_MONTH[(season.to ? parseInt(season.to.split('-')[0]) : 1) - 1] : 31 }, (_, i) => (
+                                  <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
+                                ))}
+                              </select>
+                            </div>
                             {dayCount > 0 && <span className="text-[10px] text-gray-400 shrink-0">{dayCount}d</span>}
                           </div>
                         </div>
@@ -747,13 +763,13 @@ export default function RoomTypeForm({
                     <p className="text-[11px] text-amber-700 font-medium mb-1">Gaps detected — the following dates have no season and therefore no price:</p>
                     <ul className="list-disc list-inside text-[11px] text-amber-600">
                       {seasonGaps.map((gap, i) => {
-                        const from = new Date(gap.from)
-                        const to = new Date(gap.to)
-                        const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-                        const days = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                        const fmt = (mmdd: string) => { const [m, d] = mmdd.split('-').map(Number); return `${d} ${MONTHS[m - 1]}` }
+                        const fromDoy = (() => { const [m, d] = gap.from.split('-').map(Number); return DAYS_IN_MONTH.slice(0, m - 1).reduce((a, b) => a + b, 0) + d })()
+                        const toDoy = (() => { const [m, d] = gap.to.split('-').map(Number); return DAYS_IN_MONTH.slice(0, m - 1).reduce((a, b) => a + b, 0) + d })()
+                        const days = toDoy - fromDoy + 1
                         return (
                           <li key={i}>
-                            {fmt(from)}{gap.from !== gap.to ? ` – ${fmt(to)}` : ''} ({days} day{days > 1 ? 's' : ''} uncovered)
+                            {fmt(gap.from)}{gap.from !== gap.to ? ` – ${fmt(gap.to)}` : ''} ({days} day{days > 1 ? 's' : ''} uncovered)
                           </li>
                         )
                       })}
