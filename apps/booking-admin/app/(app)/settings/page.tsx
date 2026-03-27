@@ -18,7 +18,7 @@ import { CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LAN
 import type { CurrencyOption, LanguageOption } from '@/lib/constants/options'
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
 
-type Tab = 'property' | 'notifications' | 'security' | 'billing'
+type Tab = 'property' | 'booking' | 'notifications' | 'security' | 'billing'
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: '',
@@ -500,6 +500,7 @@ export default function SettingsPage() {
 
   const tabs = [
     { id: 'property' as const, label: 'Property', icon: PropertyIcon },
+    { id: 'booking' as const, label: 'Booking', icon: BookingIcon },
     { id: 'notifications' as const, label: 'Notifications', icon: NotificationsIcon },
     { id: 'security' as const, label: 'Security', icon: SecurityIcon },
     { id: 'billing' as const, label: 'Billing', icon: BillingIcon },
@@ -511,7 +512,7 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-500 mt-0.5">Manage your property and account preferences</p>
 
           {/* Tab bar */}
-          <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-4">
+          <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -684,9 +685,21 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Currency & Languages card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-                    <div className="flex items-center gap-1.5">
+                  {/* Save button */}
+                  <div className="flex justify-end">
+                    <SaveButton onClick={handleSave} saving={saving} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Booking tab */}
+          {activeTab === 'booking' && (
+            <div className="mt-5 space-y-4">
+              {/* Currency & Languages card */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+                <div className="flex items-center gap-1.5">
                       <GlobeAltIcon className="w-4 h-4 text-gray-700" />
                       <h2 className="text-sm font-semibold text-gray-900">Currency & Languages</h2>
                     </div>
@@ -847,12 +860,10 @@ export default function SettingsPage() {
                     )}
                   </div>
 
-                  {/* Save button */}
-                  <div className="flex justify-end">
-                    <SaveButton onClick={handleSave} saving={saving} />
-                  </div>
-                </>
-              )}
+              {/* Save button */}
+              <div className="flex justify-end">
+                <SaveButton onClick={handleSave} saving={saving} />
+              </div>
             </div>
           )}
 
@@ -1382,6 +1393,14 @@ function PropertyIcon({ className }: { className?: string }) {
       <path d="M10 10h4" />
       <path d="M10 14h4" />
       <path d="M10 18h4" />
+    </svg>
+  )
+}
+
+function BookingIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
     </svg>
   )
 }
