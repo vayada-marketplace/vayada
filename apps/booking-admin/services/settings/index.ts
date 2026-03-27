@@ -19,6 +19,10 @@ export interface PropertySettings {
   supported_languages: string[]
   check_in_time: string
   check_out_time: string
+  check_in_from?: string
+  check_in_until?: string
+  check_out_from?: string
+  check_out_until?: string
   pay_at_property_enabled: boolean
   online_card_payment?: boolean
   bank_transfer?: boolean
