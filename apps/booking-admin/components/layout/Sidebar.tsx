@@ -108,7 +108,7 @@ export default function Sidebar() {
             <>
               <div className="min-w-0 text-left flex-1">
                 <p className="text-xs font-semibold text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight truncate">Direct Bookings & Revenue</p>
+                <p className="text-[10px] text-gray-500 leading-tight truncate">Direct bookings & revenue</p>
               </div>
               <ChevronDownIcon className={cn('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform', showSwitcher && 'rotate-180')} />
             </>
@@ -137,7 +137,7 @@ export default function Sidebar() {
               </div>
               <div className="min-w-0 flex-1 text-left">
                 <p className="text-xs font-medium text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Direct Bookings & Revenue</p>
+                <p className="text-[10px] text-gray-500 leading-tight">Direct bookings & revenue</p>
               </div>
               <CheckIcon className="w-4 h-4 text-primary-500 shrink-0" />
             </button>
@@ -156,7 +156,7 @@ export default function Sidebar() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-gray-900 leading-tight">Property Manager</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Operations & inventory</p>
+                <p className="text-[10px] text-gray-500 leading-tight">Operations & Inventory</p>
               </div>
             </a>
           </div>
