@@ -1,13 +1,10 @@
 'use client'
 
-const TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
-  const h = i.toString().padStart(2, '0')
-  return { value: `${h}:00`, label: `${h}:00` }
-})
-
 interface PoliciesStepProps {
-  checkInTime: string; setCheckInTime: (v: string) => void
-  checkOutTime: string; setCheckOutTime: (v: string) => void
+  checkInFrom: string; setCheckInFrom: (v: string) => void
+  checkInUntil: string; setCheckInUntil: (v: string) => void
+  checkOutFrom: string; setCheckOutFrom: (v: string) => void
+  checkOutUntil: string; setCheckOutUntil: (v: string) => void
   payAtHotel: boolean; setPayAtHotel: (v: boolean) => void
   payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
   onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
@@ -24,8 +21,10 @@ interface PoliciesStepProps {
 }
 
 export default function PoliciesStep({
-  checkInTime, setCheckInTime,
-  checkOutTime, setCheckOutTime,
+  checkInFrom, setCheckInFrom,
+  checkInUntil, setCheckInUntil,
+  checkOutFrom, setCheckOutFrom,
+  checkOutUntil, setCheckOutUntil,
   payAtHotel, setPayAtHotel,
   payAtHotelMethods, setPayAtHotelMethods,
   onlineCardPayment, setOnlineCardPayment,
@@ -50,32 +49,39 @@ export default function PoliciesStep({
         </div>
 
         {/* Check-in & Check-out */}
-        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3 mb-4">
-          <h3 className="text-[13px] font-semibold text-gray-900">Check-in & Check-out</h3>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-5 mb-4">
+          <h3 className="text-[13px] font-semibold text-gray-900 mb-1">Check-in & Check-out</h3>
+          <p className="text-[11px] text-gray-500 mb-3">Set the time windows for guest arrivals and departures.</p>
+          <div className="grid grid-cols-2 gap-6">
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-in Time</label>
-              <select
-                value={checkInTime}
-                onChange={(e) => setCheckInTime(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
-              >
-                {TIME_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-in Period</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <input type="time" value={checkInFrom} onChange={(e) => setCheckInFrom(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                </div>
+                <span className="text-gray-400 mt-4">—</span>
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <input type="time" value={checkInUntil} onChange={(e) => setCheckInUntil(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">e.g. 14:00 — 22:00</p>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-out Time</label>
-              <select
-                value={checkOutTime}
-                onChange={(e) => setCheckOutTime(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
-              >
-                {TIME_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-out Period</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <input type="time" value={checkOutFrom} onChange={(e) => setCheckOutFrom(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                </div>
+                <span className="text-gray-400 mt-4">—</span>
+                <div className="flex-1">
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <input type="time" value={checkOutUntil} onChange={(e) => setCheckOutUntil(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">e.g. 07:00 — 11:00</p>
             </div>
           </div>
         </div>

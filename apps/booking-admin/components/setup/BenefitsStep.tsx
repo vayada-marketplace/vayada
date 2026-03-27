@@ -152,7 +152,7 @@ export default function BenefitsStep({
         </button>
         <button
           onClick={onContinue}
-          className="px-5 py-2 text-[12px] font-semibold bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+          className="px-5 py-2 text-[12px] font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
           Continue
         </button>

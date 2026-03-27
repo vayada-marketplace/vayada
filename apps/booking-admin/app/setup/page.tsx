@@ -27,7 +27,7 @@ const STEPS = [
   // { number: 3, label: 'Choose PMS' },  // Hidden — only vayada PMS for now
   { number: 4, label: 'Rooms & Rates' },
   { number: 5, label: 'Add-ons' },
-  { number: 6, label: 'Promo Codes' },
+  // { number: 6, label: 'Promo Codes' },  // Hidden — can be re-enabled later
   { number: 7, label: 'Benefits' },
   { number: 8, label: 'Policies' },
 ]
@@ -95,8 +95,10 @@ export default function SetupPage() {
   const [benefits, setBenefits] = useState<string[]>([])
 
   // Step 6: Policies & Operations
-  const [checkInTime, setCheckInTime] = useState('14:00')
-  const [checkOutTime, setCheckOutTime] = useState('11:00')
+  const [checkInFrom, setCheckInFrom] = useState('14:00')
+  const [checkInUntil, setCheckInUntil] = useState('22:00')
+  const [checkOutFrom, setCheckOutFrom] = useState('07:00')
+  const [checkOutUntil, setCheckOutUntil] = useState('11:00')
   const [payAtHotel, setPayAtHotel] = useState(true)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
@@ -252,8 +254,12 @@ export default function SetupPage() {
         default_language: defaultLanguage,
         supported_currencies: supportedCurrencies,
         supported_languages: supportedLanguages,
-        check_in_time: checkInTime,
-        check_out_time: checkOutTime,
+        check_in_time: checkInFrom,
+        check_out_time: checkOutUntil,
+        check_in_from: checkInFrom,
+        check_in_until: checkInUntil,
+        check_out_from: checkOutFrom,
+        check_out_until: checkOutUntil,
         pay_at_property_enabled: payAtHotel,
         online_card_payment: onlineCardPayment,
         bank_transfer: bankTransfer,
@@ -568,8 +574,12 @@ export default function SetupPage() {
       // Prefill policies
       if (data.policies) {
         const pol = data.policies
-        if (pol.check_in_time) setCheckInTime(pol.check_in_time)
-        if (pol.check_out_time) setCheckOutTime(pol.check_out_time)
+        if (pol.check_in_from) setCheckInFrom(pol.check_in_from)
+        else if (pol.check_in_time) setCheckInFrom(pol.check_in_time)
+        if (pol.check_in_until) setCheckInUntil(pol.check_in_until)
+        if (pol.check_out_from) setCheckOutFrom(pol.check_out_from)
+        if (pol.check_out_until) setCheckOutUntil(pol.check_out_until)
+        else if (pol.check_out_time) setCheckOutUntil(pol.check_out_time)
         if (pol.pay_at_property !== undefined) setPayAtHotel(pol.pay_at_property)
         if (pol.online_card_payment !== undefined) setOnlineCardPayment(pol.online_card_payment)
         if (pol.bank_transfer !== undefined) setBankTransfer(pol.bank_transfer)
@@ -781,23 +791,12 @@ export default function SetupPage() {
           error={error}
           canProceed={canProceed()}
           onBack={() => setStep(4)}
-          onContinue={() => { setError(''); setStep(6) }}
-          stepIndicators={stepIndicators}
-        />
-      )}
-
-      {step === 6 && (
-        <PromoCodesStep
-          promoCodes={setupPromoCodes}
-          setPromoCodes={setSetupPromoCodes}
-          currency={currency}
-          error={error}
-          canProceed={canProceed()}
-          onBack={() => setStep(5)}
           onContinue={() => { setError(''); setStep(7) }}
           stepIndicators={stepIndicators}
         />
       )}
+
+      {/* Step 6 (Promo Codes) hidden — can be re-enabled later */}
 
       {step === 7 && (
         <BenefitsStep
@@ -805,7 +804,7 @@ export default function SetupPage() {
           setBenefits={setBenefits}
           error={error}
           canProceed={canProceed()}
-          onBack={() => setStep(6)}
+          onBack={() => setStep(5)}
           onContinue={() => { setError(''); setStep(8) }}
           stepIndicators={stepIndicators}
         />
@@ -813,8 +812,10 @@ export default function SetupPage() {
 
       {step === 8 && (
         <PoliciesStep
-          checkInTime={checkInTime} setCheckInTime={setCheckInTime}
-          checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
+          checkInFrom={checkInFrom} setCheckInFrom={setCheckInFrom}
+          checkInUntil={checkInUntil} setCheckInUntil={setCheckInUntil}
+          checkOutFrom={checkOutFrom} setCheckOutFrom={setCheckOutFrom}
+          checkOutUntil={checkOutUntil} setCheckOutUntil={setCheckOutUntil}
           payAtHotel={payAtHotel} setPayAtHotel={setPayAtHotel}
           payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
