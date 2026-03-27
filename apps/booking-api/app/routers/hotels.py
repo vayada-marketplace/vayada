@@ -45,6 +45,8 @@ async def get_payment_settings(slug: str):
     return {
         "payAtPropertyEnabled": hotel.get("pay_at_property_enabled", False),
         "payAtHotelMethods": parse_json(hotel.get("pay_at_hotel_methods"), default=["cash", "card"]),
+        "onlineCardPayment": hotel.get("online_card_payment", False),
+        "bankTransfer": hotel.get("bank_transfer", False),
         "freeCancellationDays": hotel.get("free_cancellation_days", 7),
         "specialRequestsEnabled": hotel.get("special_requests_enabled", True),
         "arrivalTimeEnabled": hotel.get("arrival_time_enabled", False),

@@ -1,0 +1,3 @@
+ALTER TABLE booking_hotels
+  ADD COLUMN IF NOT EXISTS online_card_payment BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS bank_transfer BOOLEAN NOT NULL DEFAULT false;

@@ -19,6 +19,8 @@ class PropertySettingsResponse(BaseModel):
     custom_domain: str | None
     pay_at_property_enabled: bool
     pay_at_hotel_methods: list[str]
+    online_card_payment: bool
+    bank_transfer: bool
     free_cancellation_days: int
     email_notifications: bool
     new_booking_alerts: bool
@@ -60,6 +62,8 @@ class PropertySettingsUpdate(BaseModel):
     custom_domain: Optional[str] = None
     pay_at_property_enabled: Optional[bool] = None
     pay_at_hotel_methods: Optional[list[str]] = None
+    online_card_payment: Optional[bool] = None
+    bank_transfer: Optional[bool] = None
     free_cancellation_days: Optional[int] = None
     email_notifications: Optional[bool] = None
     new_booking_alerts: Optional[bool] = None
