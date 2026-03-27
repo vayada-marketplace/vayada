@@ -126,63 +126,53 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-3 md:p-6 h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
-          <p className="text-sm text-gray-500">
-            {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 md:mb-4">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-lg md:text-xl font-bold text-gray-900">Calendar</h1>
+            <p className="text-xs md:text-sm text-gray-500">
+              {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
           <button
             onClick={goToday}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-2.5 md:px-3 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Today
           </button>
           <button
             onClick={goPrev}
-            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-2 md:px-2.5 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             &larr;
           </button>
           <button
             onClick={goNext}
-            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-2 md:px-2.5 py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             &rarr;
           </button>
           <button
-            disabled
-            className="ml-2 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-400 cursor-not-allowed"
-          >
-            Filter
-          </button>
-          <button
-            disabled
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-400 cursor-not-allowed"
-          >
-            Export
-          </button>
-          <button
             onClick={() => setShowBlockModal(true)}
-            className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+            className="hidden sm:block px-3 md:px-4 py-1.5 text-xs md:text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
           >
             Block Room
           </button>
           <button
             onClick={() => setShowNewBookingModal(true)}
-            className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+            className="px-3 md:px-4 py-1.5 text-xs md:text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
           >
-            + New Booking
+            + New
           </button>
         </div>
       </div>
 
       {/* Channel Legend */}
-      <div className="flex items-center gap-4 mb-4">
+      <div className="flex items-center gap-2 md:gap-4 mb-3 md:mb-4 flex-wrap">
         {CHANNEL_LEGEND.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
             <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
@@ -201,7 +191,7 @@ export default function CalendarPage() {
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-x-auto">
-          <table className="w-full min-w-[900px] table-fixed">
+          <table className="w-full min-w-[600px] md:min-w-[900px] table-fixed">
             {/* Date header */}
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">

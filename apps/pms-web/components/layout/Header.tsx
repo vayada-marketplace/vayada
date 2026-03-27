@@ -26,7 +26,7 @@ interface DayStats {
   departures: number
 }
 
-export default function Header() {
+export default function Header({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
   const [profileOpen, setProfileOpen] = useState(false)
   const [propertyOpen, setPropertyOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
@@ -89,6 +89,10 @@ export default function Header() {
 
   return (
     <header className="h-12 bg-white border-b border-gray-200 flex items-center px-4 shrink-0 gap-3">
+      {/* Mobile menu button */}
+      <button onClick={onMenuToggle} className="lg:hidden p-1 -ml-1 text-gray-600 hover:text-gray-900">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+      </button>
       {/* Left: property switcher + date */}
       <div className="flex items-center gap-4 shrink-0">
         {/* Property Selector */}
@@ -157,10 +161,10 @@ export default function Header() {
         </div>
 
         {/* Separator */}
-        <div className="w-px h-5 bg-gray-200" />
+        <div className="w-px h-5 bg-gray-200 hidden md:block" />
 
         {/* Date + stats */}
-        <div className="flex flex-col justify-center">
+        <div className="hidden md:flex flex-col justify-center">
           <p className="text-[12px] font-semibold text-gray-900 leading-tight">{dateStr}</p>
           <p className="text-[10px] text-gray-400 leading-tight">
             {stats.arrivals} arrivals · {stats.departures} departures
