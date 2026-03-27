@@ -1099,7 +1099,7 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
                   <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
-                    <span className="text-3xl font-bold text-gray-900">{settings.default_currency} {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.default_currency || 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(settings.billing_fixed_fee || 49)}</span>
+                    <span className="text-3xl font-bold text-gray-900">{new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.default_currency || 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(settings.billing_fixed_fee || 49)}</span>
                     <p className="text-[11px] text-gray-400 mt-1">per month</p>
                   </div>
                   {settings.billing_active_plan !== 'fixed' && !settings.billing_pending_switch && (
@@ -1231,58 +1231,114 @@ export default function SettingsPage() {
               {/* Payment Methods */}
               <div className="bg-white rounded-lg border border-gray-200 p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Choose which payment options are available to guests</p>
-                <div className="space-y-3">
-                  <button
-                    onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}
-                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                      settings.pay_at_property_enabled
-                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div>
-                      <span className="text-[13px] font-medium text-gray-900">Pay at Hotel</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">Guests pay upon arrival at the property</p>
-                    </div>
-                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.pay_at_property_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.pay_at_property_enabled ? 'left-4' : 'left-0.5'}`} />
-                    </div>
-                  </button>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which payment options are available to guests. Enable multiple to give guests flexibility.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Online Card Payment */}
                   <button
                     onClick={() => updateSetting('online_card_payment', !settings.online_card_payment)}
-                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                    className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
                       settings.online_card_payment
-                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                        ? 'border-primary-500 bg-primary-50/30'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div>
-                      <span className="text-[13px] font-medium text-gray-900">Online Card Payment</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">Accept credit/debit card payments online</p>
+                    <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.online_card_payment ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {settings.online_card_payment && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                     </div>
-                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.online_card_payment ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.online_card_payment ? 'left-4' : 'left-0.5'}`} />
+                    <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                    <span className="text-[13px] font-semibold text-gray-900">Online Card</span>
+                    <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays online with credit or debit card via Stripe</p>
+                    <div className="mt-auto space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Instant confirmation</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Visa, Mastercard, Amex</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Auto payout to your bank</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Stripe fees apply (~2.9%)</span>
+                      </div>
                     </div>
                   </button>
+
+                  {/* Pay at Hotel */}
                   <button
-                    onClick={() => updateSetting('bank_transfer', !settings.bank_transfer)}
-                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                      settings.bank_transfer
-                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
+                    onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}
+                    className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                      settings.pay_at_property_enabled
+                        ? 'border-primary-500 bg-primary-50/30'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div>
-                      <span className="text-[13px] font-medium text-gray-900">Bank Transfer</span>
-                      <p className="text-[11px] text-gray-500 mt-0.5">Allow guests to pay via bank transfer</p>
+                    <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {settings.pay_at_property_enabled && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                     </div>
-                    <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.bank_transfer ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.bank_transfer ? 'left-4' : 'left-0.5'}`} />
+                    <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                    <span className="text-[13px] font-semibold text-gray-900">Pay at Hotel</span>
+                    <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays cash or card at check-in — no online payment</p>
+                    <div className="mt-auto space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">No processing fees</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Cash & card accepted</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">No Stripe account needed</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Higher no-show risk</span>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Bank Transfer */}
+                  <button
+                    onClick={() => updateSetting('bank_transfer', !settings.bank_transfer)}
+                    className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                      settings.bank_transfer
+                        ? 'border-primary-500 bg-primary-50/30'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.bank_transfer ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {settings.bank_transfer && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                    <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" /></svg>
+                    <span className="text-[13px] font-semibold text-gray-900">Bank Transfer</span>
+                    <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest transfers money directly to your bank account</p>
+                    <div className="mt-auto space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">No processing fees</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Direct to your account</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Good for large bookings</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                        <span className="text-[10px] text-gray-500">Manual verification needed</span>
+                      </div>
                     </div>
                   </button>
                 </div>
-                <div className="flex justify-end pt-3">
+                <div className="flex justify-end pt-4">
                   <SaveButton onClick={handleSave} saving={saving} />
                 </div>
               </div>
