@@ -182,16 +182,10 @@ export default function RoomTypeForm({
 
   // Sync pricing fields -> form
   useEffect(() => {
-    const year = new Date().getFullYear()
-    const seasonsWithYear = seasons.map(s => ({
-      ...s,
-      from: s.from && s.from.length === 5 ? `${year}-${s.from}` : s.from,
-      to: s.to && s.to.length === 5 ? `${year}-${s.to}` : s.to,
-    }))
     onChange({
       ...form,
       operatingPeriods,
-      seasons: seasonsWithYear,
+      seasons,
       weekendSurcharge,
       cancellationPolicy,
       flexibleRateEnabled,
