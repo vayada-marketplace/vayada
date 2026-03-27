@@ -674,28 +674,28 @@ export default function RoomsStep({
                               return (
                                 <>
                                   <div className="flex items-center gap-1">
-                                    <select value={sFromDay} onChange={(e) => updateSeason('from', sFromMonth, parseInt(e.target.value) || 0)} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                    <select value={sFromDay} onChange={(e) => updateSeason('from', sFromMonth, parseInt(e.target.value) || 0)} className="w-[52px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
                                       <option value={0}>—</option>
                                       {Array.from({ length: sFromMonth ? DAYS_IN_MONTH[sFromMonth - 1] : 31 }, (_, i) => (
                                         <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
                                       ))}
                                     </select>
-                                    <select value={sFromMonth} onChange={(e) => updateSeason('from', parseInt(e.target.value) || 0, sFromDay)} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                    <select value={sFromMonth} onChange={(e) => updateSeason('from', parseInt(e.target.value) || 0, sFromDay)} className="w-[68px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
                                       <option value={0}>—</option>
                                       {MONTHS.map((m, i) => (
                                         <option key={m} value={i + 1}>{m}</option>
                                       ))}
                                     </select>
                                   </div>
-                                  <span className="text-[10px] text-gray-400">-</span>
+                                  <span className="text-[11px] text-gray-400">to</span>
                                   <div className="flex items-center gap-1">
-                                    <select value={sToDay} onChange={(e) => updateSeason('to', sToMonth, parseInt(e.target.value) || 0)} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                    <select value={sToDay} onChange={(e) => updateSeason('to', sToMonth, parseInt(e.target.value) || 0)} className="w-[52px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
                                       <option value={0}>—</option>
                                       {Array.from({ length: sToMonth ? DAYS_IN_MONTH[sToMonth - 1] : 31 }, (_, i) => (
                                         <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
                                       ))}
                                     </select>
-                                    <select value={sToMonth} onChange={(e) => updateSeason('to', parseInt(e.target.value) || 0, sToDay)} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                    <select value={sToMonth} onChange={(e) => updateSeason('to', parseInt(e.target.value) || 0, sToDay)} className="w-[68px] px-1.5 py-2 bg-white border border-gray-200 rounded-lg text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
                                       <option value={0}>—</option>
                                       {MONTHS.map((m, i) => (
                                         <option key={m} value={i + 1}>{m}</option>
