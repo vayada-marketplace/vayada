@@ -236,7 +236,7 @@ async def update_profile(
 async def validate_affiliate_bank_account(
     channel_code: str,
     account_number: str,
-    user_id: str = Depends(require_affiliate_user),
+    user_id: str = Depends(require_affiliate),
 ):
     """Validate a bank account via Xendit before saving."""
     from app.services import xendit_service
