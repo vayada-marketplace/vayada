@@ -13,6 +13,7 @@ export default function AppLayout({
 }) {
   const router = useRouter()
   const [isAuthorized, setIsAuthorized] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
@@ -25,8 +26,6 @@ export default function AppLayout({
   if (!isAuthorized) {
     return null
   }
-
-  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
     <div className="h-screen flex">
