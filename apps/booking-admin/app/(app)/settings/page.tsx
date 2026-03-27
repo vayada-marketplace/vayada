@@ -577,36 +577,6 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* PMS Operations card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
-                    <h2 className="text-sm font-semibold text-gray-900">PMS Operations</h2>
-                    <p className="text-[13px] text-gray-500 mb-3">Check-in and check-out times managed by your PMS</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Check-in Time
-                        </label>
-                        <input
-                          type="time"
-                          value={settings.check_in_time}
-                          onChange={(e) => updateSetting('check_in_time', e.target.value)}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                          Check-out Time
-                        </label>
-                        <input
-                          type="time"
-                          value={settings.check_out_time}
-                          onChange={(e) => updateSetting('check_out_time', e.target.value)}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Contact Information card */}
                   <div className="bg-white rounded-lg border border-gray-200 p-5">
                     <div className="flex items-center gap-1.5 mb-0.5">
@@ -1140,7 +1110,7 @@ export default function SettingsPage() {
               )}
 
               {/* Payments — Stripe Connect / Xendit */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
+              {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
                 <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
                   {paymentProvider === 'xendit'
@@ -1226,7 +1196,7 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Payment Methods */}
               <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -1344,7 +1314,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Payout Details */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
+              {(settings.pay_at_property_enabled || settings.bank_transfer) && <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">Payout Details</h2>
                   <p className="text-[12px] text-gray-500 mt-0.5">Bank account where vayada sends your earnings</p>
@@ -1395,7 +1365,7 @@ export default function SettingsPage() {
                 <div className="flex justify-end pt-2">
                   <SaveButton onClick={handleSave} saving={saving} />
                 </div>
-              </div>
+              </div>}
             </div>
           )}
     </div>
