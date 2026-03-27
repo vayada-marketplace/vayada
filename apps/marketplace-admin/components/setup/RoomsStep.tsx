@@ -538,9 +538,11 @@ export default function RoomsStep({
                     const toDay = period.to ? parseInt(period.to.split('-')[1]) : 0
                     const updatePeriod = (field: 'from' | 'to', month: number, day: number) => {
                       const updated = [...room.operatingPeriods]
-                      const maxDay = month ? DAYS_IN_MONTH[month - 1] : 31
-                      const clampedDay = Math.min(day, maxDay)
-                      updated[idx] = { ...updated[idx], [field]: month && clampedDay ? `${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}` : '' }
+                      const m = month || (day ? 1 : 0)
+                      const maxDay = m ? DAYS_IN_MONTH[m - 1] : 31
+                      const d = day || (month ? 1 : 0)
+                      const clampedDay = Math.min(d, maxDay)
+                      updated[idx] = { ...updated[idx], [field]: (m || d) ? `${String(m || 1).padStart(2, '0')}-${String(clampedDay || 1).padStart(2, '0')}` : '' }
                       updateRoom({ operatingPeriods: updated })
                     }
                     return (
@@ -662,9 +664,11 @@ export default function RoomsStep({
                               const sToDay = season.to ? parseInt(season.to.split('-')[1]) : 0
                               const updateSeason = (field: 'from' | 'to', month: number, day: number) => {
                                 const u = [...room.seasons]
-                                const maxDay = month ? DAYS_IN_MONTH[month - 1] : 31
-                                const clampedDay = Math.min(day, maxDay)
-                                u[idx] = { ...u[idx], [field]: month && clampedDay ? `${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}` : '' }
+                                const m = month || (day ? 1 : 0)
+                                const maxDay = m ? DAYS_IN_MONTH[m - 1] : 31
+                                const d = day || (month ? 1 : 0)
+                                const clampedDay = Math.min(d, maxDay)
+                                u[idx] = { ...u[idx], [field]: (m || d) ? `${String(m || 1).padStart(2, '0')}-${String(clampedDay || 1).padStart(2, '0')}` : '' }
                                 updateRoom({ seasons: u })
                               }
                               return (
