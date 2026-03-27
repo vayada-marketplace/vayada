@@ -20,7 +20,7 @@ router = APIRouter()
 
 # ── Setup status ───────────────────────────────────────────────────
 
-_SETUP_COLUMNS = "name, contact_email, contact_phone, contact_address, timezone, currency, hero_image, branding_primary_color, branding_accent_color, branding_font_pairing"
+_SETUP_COLUMNS = "name, contact_email, contact_phone, contact_address, timezone, currency"
 
 _SETUP_FIELD_MAP = {
     "name": "property_name",
@@ -29,10 +29,6 @@ _SETUP_FIELD_MAP = {
     "contact_address": "address",
     "timezone": "timezone",
     "currency": "currency",
-    "hero_image": "hero_image",
-    "branding_primary_color": "primary_color",
-    "branding_accent_color": "accent_color",
-    "branding_font_pairing": "font_pairing",
 }
 
 _ALL_SETUP_FIELDS = list(_SETUP_FIELD_MAP.values())
