@@ -89,4 +89,13 @@ class ChangeEmailRequest(BaseModel):
 
 class ChangeEmailResponse(BaseModel):
     message: str
+    email: Optional[str] = None
+
+
+class VerifyEmailChangeRequest(BaseModel):
+    token: str
+
+
+class VerifyEmailChangeResponse(BaseModel):
+    message: str
     email: str

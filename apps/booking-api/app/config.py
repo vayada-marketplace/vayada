@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     CLOUDFLARE_API_TOKEN: str = Field(default="", description="Cloudflare API token for custom hostname management")
     CLOUDFLARE_ZONE_ID: str = Field(default="", description="Cloudflare zone ID for vayada.com")
 
+    # Email Configuration
+    EMAIL_ENABLED: bool = False
+    EMAIL_FROM_ADDRESS: str = "noreply@vayada.com"
+    EMAIL_FROM_NAME: str = "vayada"
+    EMAIL_SERVICE_PROVIDER: str = "smtp"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

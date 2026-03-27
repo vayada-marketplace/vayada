@@ -4,6 +4,8 @@ Authentication routes for the booking engine
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
+from datetime import datetime, timezone
+import secrets
 import logging
 
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
@@ -27,7 +29,11 @@ from app.models.auth import (
     ChangePasswordResponse,
     ChangeEmailRequest,
     ChangeEmailResponse,
+    VerifyEmailChangeRequest,
+    VerifyEmailChangeResponse,
 )
+from app.repositories.email_change_repo import EmailChangeRepository
+from app.email_service import send_email, create_email_change_verification_html
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +192,7 @@ async def change_email(
     request: ChangeEmailRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    user = await UserRepository.get_by_id(user_id, columns="id, email, password_hash")
+    user = await UserRepository.get_by_id(user_id, columns="id, email, name, password_hash")
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if not verify_password(request.password, user['password_hash']):
@@ -196,5 +202,44 @@ async def change_email(
     if await UserRepository.exists_by_email(request.new_email):
         raise HTTPException(status_code=409, detail="Email is already in use")
 
-    updated = await UserRepository.update_email(user_id, request.new_email)
-    return ChangeEmailResponse(message="Email updated successfully", email=updated['email'])
+    token = secrets.token_urlsafe(32)
+    await EmailChangeRepository.create(user_id, request.new_email, token, expires_in_hours=1)
+
+    verification_link = f"{settings.FRONTEND_URL}/verify-email-change?token={token}"
+    html = create_email_change_verification_html(verification_link, request.new_email, user.get('name'))
+    email_sent = await send_email(request.new_email, "Confirm your email change", html)
+
+    if not email_sent:
+        logger.warning(f"Email change verification email failed for user {user_id}")
+
+    return ChangeEmailResponse(
+        message="A verification link has been sent to your new email address. Please check your inbox to confirm the change.",
+    )
+
+
+@router.post("/verify-email-change", response_model=VerifyEmailChangeResponse)
+async def verify_email_change(request: VerifyEmailChangeRequest):
+    token_record = await EmailChangeRepository.get_valid_token(request.token)
+
+    if not token_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    if token_record['used']:
+        raise HTTPException(status_code=400, detail="This verification link has already been used")
+    if datetime.now(timezone.utc) > token_record['expires_at']:
+        raise HTTPException(status_code=400, detail="This verification link has expired")
+    if token_record['status'] == 'suspended':
+        raise HTTPException(status_code=403, detail="Account is suspended")
+
+    new_email = token_record['new_email']
+
+    # Check the new email is still available
+    if await UserRepository.exists_by_email(new_email):
+        raise HTTPException(status_code=409, detail="Email is already in use")
+
+    await UserRepository.update_email(str(token_record['user_id']), new_email)
+    await EmailChangeRepository.mark_used(request.token)
+
+    return VerifyEmailChangeResponse(
+        message="Email updated successfully",
+        email=new_email,
+    )
