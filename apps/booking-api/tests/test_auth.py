@@ -376,8 +376,21 @@ class TestChangeEmail:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["email"] == new_email
-        assert body["message"] == "Email updated successfully"
+        assert "verification" in body["message"].lower()
+
+        # Retrieve the token from the database and verify the email change
+        from app.database import AuthDatabase
+        row = await AuthDatabase.fetchrow(
+            "SELECT token FROM email_change_tokens WHERE user_id = $1 AND used = false ORDER BY created_at DESC LIMIT 1",
+            user["id"],
+        )
+        assert row is not None
+        verify_resp = await client.post(
+            "/auth/verify-email-change",
+            json={"token": row["token"]},
+        )
+        assert verify_resp.status_code == 200
+        assert verify_resp.json()["email"] == new_email
 
         # Can login with new email
         login_resp = await client.post(

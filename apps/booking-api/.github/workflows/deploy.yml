@@ -107,6 +107,15 @@ jobs:
             used boolean NOT NULL DEFAULT false,
             created_at timestamp with time zone NOT NULL DEFAULT now()
           );
+          CREATE TABLE IF NOT EXISTS public.email_change_tokens (
+            id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+            user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            new_email text NOT NULL,
+            token text NOT NULL UNIQUE,
+            expires_at timestamp with time zone NOT NULL,
+            used boolean NOT NULL DEFAULT false,
+            created_at timestamp with time zone NOT NULL DEFAULT now()
+          );
           CREATE TABLE IF NOT EXISTS public.consent_history (
             id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
             user_id uuid REFERENCES users(id) ON DELETE CASCADE,
