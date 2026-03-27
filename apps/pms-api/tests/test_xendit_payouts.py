@@ -96,7 +96,7 @@ class TestXenditModels:
         from app.models.payment import XenditBankDetailsRequest
 
         req = XenditBankDetailsRequest.model_validate(
-            {"channelCode": "ID_BNI", "accountNumber": "999", "accountHolderName": "Alias Test"}
+            {"channelCode": "ID_BNI", "accountNumber": "12345678", "accountHolderName": "Alias Test"}
         )
         assert req.channel_code == "ID_BNI"
 
@@ -378,7 +378,7 @@ class TestAdminAffiliateXendit:
             headers=get_auth_headers(user["token"]),
             json={
                 "channelCode": "ID_BCA",
-                "accountNumber": "123",
+                "accountNumber": "12345678",
                 "accountHolderName": "Nobody",
             },
         )
@@ -401,7 +401,7 @@ class TestAdminAffiliateXendit:
             headers=get_auth_headers(user_b["token"]),
             json={
                 "channelCode": "ID_BCA",
-                "accountNumber": "123",
+                "accountNumber": "12345678",
                 "accountHolderName": "Intruder",
             },
         )
@@ -412,7 +412,7 @@ class TestAdminAffiliateXendit:
             "/admin/affiliates/00000000-0000-0000-0000-000000000000/xendit/bank-details",
             json={
                 "channelCode": "ID_BCA",
-                "accountNumber": "123",
+                "accountNumber": "12345678",
                 "accountHolderName": "No Auth",
             },
         )
@@ -743,7 +743,7 @@ class TestSchedulerPropertyPayoutsXendit:
         updated = await Database.fetchrow(
             "SELECT status, xendit_payout_id FROM payouts WHERE id = $1", payout["id"]
         )
-        assert updated["status"] == "completed"
+        assert updated["status"] == "processing"
         assert updated["xendit_payout_id"] == "disb_sched_hotel"
 
     async def test_property_payout_via_stripe_unchanged(self, cleanup_database):
@@ -889,7 +889,7 @@ class TestSchedulerAffiliatePayoutsXendit:
         updated = await Database.fetchrow(
             "SELECT status, xendit_payout_id FROM payouts WHERE id = $1", payout["id"]
         )
-        assert updated["status"] == "completed"
+        assert updated["status"] == "processing"
         assert updated["xendit_payout_id"] == "disb_aff_xen"
 
     async def test_affiliate_payout_via_stripe_unchanged(self, cleanup_database):
