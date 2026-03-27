@@ -109,7 +109,7 @@ export default function AddonsTab({
                 {/* Price */}
                 <div className="text-right shrink-0">
                   <p className="text-[13px] font-semibold text-gray-900">
-                    {addon.currency === 'EUR' ? '\u20AC' : addon.currency === 'USD' ? '$' : addon.currency}{addon.price.toFixed(2)}
+                    {addon.currency === 'EUR' ? '\u20AC' : addon.currency === 'USD' ? 'US$' : addon.currency}{addon.price.toFixed(2)}
                   </p>
                   {addon.perPerson && (
                     <p className="text-[10px] text-gray-400">per person</p>
