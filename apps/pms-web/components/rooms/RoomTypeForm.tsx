@@ -595,9 +595,11 @@ export default function RoomTypeForm({
                     const isInvalid = period.from && period.to && period.to < period.from
                     const updatePeriod = (field: 'from' | 'to', month: number, day: number) => {
                       const updated = [...operatingPeriods]
-                      const maxDay = month ? DAYS_IN_MONTH[month - 1] : 31
-                      const clampedDay = Math.min(day, maxDay)
-                      updated[idx] = { ...updated[idx], [field]: month && clampedDay ? `${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}` : '' }
+                      const m = month || (day ? 1 : 0)
+                      const maxDay = m ? DAYS_IN_MONTH[m - 1] : 31
+                      const d = day || (month ? 1 : 0)
+                      const clampedDay = Math.min(d, maxDay)
+                      updated[idx] = { ...updated[idx], [field]: (m || d) ? `${String(m || 1).padStart(2, '0')}-${String(clampedDay || 1).padStart(2, '0')}` : '' }
                       setOperatingPeriods(updated)
                     }
                     return (
@@ -724,28 +726,28 @@ export default function RoomTypeForm({
                           </div>
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-1">
-                              <select value={season.from ? parseInt(season.from.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.from ? parseInt(season.from.split('-')[1]) : 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], from: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
-                                <option value={0}>—</option>
-                                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-                              </select>
-                              <select value={season.from ? parseInt(season.from.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.from ? parseInt(season.from.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], from: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                              <select value={season.from ? parseInt(season.from.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.from ? parseInt(season.from.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const mFinal = m || (d ? 1 : 0); const maxD = mFinal ? DAYS_IN_MONTH[mFinal - 1] : 31; u[idx] = { ...u[idx], from: (mFinal || d) ? `${String(mFinal || 1).padStart(2, '0')}-${String(Math.min(d || 1, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
                                 <option value={0}>—</option>
                                 {Array.from({ length: (season.from ? parseInt(season.from.split('-')[0]) : 0) ? DAYS_IN_MONTH[(season.from ? parseInt(season.from.split('-')[0]) : 1) - 1] : 31 }, (_, i) => (
                                   <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
                                 ))}
                               </select>
-                            </div>
-                            <span className="text-[10px] text-gray-400">-</span>
-                            <div className="flex items-center gap-1">
-                              <select value={season.to ? parseInt(season.to.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.to ? parseInt(season.to.split('-')[1]) : 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], to: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                              <select value={season.from ? parseInt(season.from.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.from ? parseInt(season.from.split('-')[1]) : 0; const dFinal = d || (m ? 1 : 0); const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], from: (m || dFinal) ? `${String(m || 1).padStart(2, '0')}-${String(Math.min(dFinal || 1, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
                                 <option value={0}>—</option>
                                 {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
                               </select>
-                              <select value={season.to ? parseInt(season.to.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.to ? parseInt(season.to.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], to: m && d ? `${String(m).padStart(2, '0')}-${String(Math.min(d, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                            </div>
+                            <span className="text-[10px] text-gray-400">-</span>
+                            <div className="flex items-center gap-1">
+                              <select value={season.to ? parseInt(season.to.split('-')[1]) : 0} onChange={(e) => { const u = [...seasons]; const m = season.to ? parseInt(season.to.split('-')[0]) : 0; const d = parseInt(e.target.value) || 0; const mFinal = m || (d ? 1 : 0); const maxD = mFinal ? DAYS_IN_MONTH[mFinal - 1] : 31; u[idx] = { ...u[idx], to: (mFinal || d) ? `${String(mFinal || 1).padStart(2, '0')}-${String(Math.min(d || 1, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[52px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
                                 <option value={0}>—</option>
                                 {Array.from({ length: (season.to ? parseInt(season.to.split('-')[0]) : 0) ? DAYS_IN_MONTH[(season.to ? parseInt(season.to.split('-')[0]) : 1) - 1] : 31 }, (_, i) => (
                                   <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, '0')}</option>
                                 ))}
+                              </select>
+                              <select value={season.to ? parseInt(season.to.split('-')[0]) : 0} onChange={(e) => { const u = [...seasons]; const m = parseInt(e.target.value) || 0; const d = season.to ? parseInt(season.to.split('-')[1]) : 0; const dFinal = d || (m ? 1 : 0); const maxD = m ? DAYS_IN_MONTH[m - 1] : 31; u[idx] = { ...u[idx], to: (m || dFinal) ? `${String(m || 1).padStart(2, '0')}-${String(Math.min(dFinal || 1, maxD)).padStart(2, '0')}` : '' }; setSeasons(u) }} className="w-[68px] px-1.5 py-1.5 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value={0}>—</option>
+                                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
                               </select>
                             </div>
                             {dayCount > 0 && <span className="text-[10px] text-gray-400 shrink-0">{dayCount}d</span>}
