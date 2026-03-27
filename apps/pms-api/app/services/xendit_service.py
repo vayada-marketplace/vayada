@@ -3,7 +3,10 @@ import logging
 import httpx
 import xendit
 from xendit.apis import PayoutApi
-from xendit.exceptions import ApiException
+try:
+    from xendit.exceptions import ApiException
+except ImportError:
+    from xendit.exceptions import OpenApiException as ApiException
 from xendit.invoice import InvoiceApi
 from xendit.invoice.model.create_invoice_request import CreateInvoiceRequest
 
