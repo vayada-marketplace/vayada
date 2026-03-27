@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { ToggleSwitch } from '@/components/ui'
 import type { AddonItem, AddonSettings } from '@/services/settings'
+import { getCurrencySymbol } from '@/lib/utils'
 
 const CATEGORY_COLORS: Record<string, string> = {
   transport: 'bg-blue-100 text-blue-700',
@@ -109,7 +110,7 @@ export default function AddonsTab({
                 {/* Price */}
                 <div className="text-right shrink-0">
                   <p className="text-[13px] font-semibold text-gray-900">
-                    {addon.currency === 'EUR' ? '\u20AC' : addon.currency === 'USD' ? 'US$' : addon.currency}{addon.price.toFixed(2)}
+                    {getCurrencySymbol(addon.currency)}{addon.price.toFixed(2)}
                   </p>
                   {addon.perPerson && (
                     <p className="text-[10px] text-gray-400">per person</p>

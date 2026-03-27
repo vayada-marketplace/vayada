@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { affiliatesService, Affiliate, AffiliateListResponse } from '@/services/affiliates'
+import { settingsService } from '@/services/settings'
+import { getCurrencySymbol } from '@/lib/utils'
 
 const TIME_RANGES = ['Today', '7 days', '30 days', 'This month'] as const
 const MAIN_TABS = ['Applications', 'All Affiliates', 'Payouts', 'Performance'] as const
@@ -29,8 +31,8 @@ function getInitials(name: string) {
     .slice(0, 2)
 }
 
-function formatCurrency(amount: number) {
-  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+function formatCurrencyAmount(amount: number, symbol: string) {
+  return `${symbol}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function formatDate(dateStr: string) {
@@ -57,7 +59,16 @@ export default function AffiliatesPage() {
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>('All')
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
+  const [currencySymbol, setCurrencySymbol] = useState('US$')
   const limit = 20
+
+  useEffect(() => {
+    settingsService.getPropertySettings()
+      .then((s) => { if (s.default_currency) setCurrencySymbol(getCurrencySymbol(s.default_currency)) })
+      .catch(() => {})
+  }, [])
+
+  const formatCurrency = (amount: number) => formatCurrencyAmount(amount, currencySymbol)
 
   const fetchAffiliates = () => {
     setLoading(true)

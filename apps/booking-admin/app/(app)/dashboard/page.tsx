@@ -27,15 +27,15 @@ const SOURCE_LABELS: Record<string, string> = {
   google: 'Google Hotels',
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
+function formatCurrencyWithCode(value: number, currencyCode: string): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDiff(current: number, previous: number, isCurrency = false): { text: string; positive: boolean | null } {
+function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR'): { text: string; positive: boolean | null } {
   const diff = current - previous
   if (diff === 0 && current === 0) return { text: 'No data yet', positive: null }
   if (diff === 0) return { text: 'Same as previous period', positive: null }
-  const formatted = isCurrency ? formatCurrency(Math.abs(diff)) : Math.abs(diff).toString()
+  const formatted = isCurrency ? formatCurrencyWithCode(Math.abs(diff), currencyCode) : Math.abs(diff).toString()
   if (diff > 0) return { text: `\u2191 +${formatted} vs previous`, positive: true }
   return { text: `\u2193 -${formatted} vs previous`, positive: false }
 }
@@ -48,12 +48,14 @@ export default function DashboardPage() {
   const [sources, setSources] = useState<BookingsBySource | null>(null)
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null)
   const [sparklines, setSparklines] = useState<Sparklines | null>(null)
+  const [currency, setCurrency] = useState('EUR')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     settingsService.getPropertySettings().then((settings: PropertySettings) => {
       setPropertyName(settings.property_name)
       setSlug(settings.slug)
+      if (settings.default_currency) setCurrency(settings.default_currency)
     }).catch(() => {
       setPropertyName('My Property')
       setSlug('my-property')
@@ -116,9 +118,9 @@ export default function DashboardPage() {
     )
   }
 
-  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true) : null
+  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency) : null
   const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous) : null
-  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true) : null
+  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency) : null
   const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous) : null
 
   return (
@@ -161,7 +163,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrency(stats.revenue) : '--'}</p>
+          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrencyWithCode(stats.revenue, currency) : '--'}</p>
           {revenueDiff && (
             <p className={`text-[13px] mt-1 ${revenueDiff.positive === true ? 'text-green-600' : revenueDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {revenueDiff.text}
@@ -201,7 +203,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrency(stats.avg_nightly_rate) : '--'}</p>
+          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrencyWithCode(stats.avg_nightly_rate, currency) : '--'}</p>
           {rateDiff && (
             <p className={`text-[13px] mt-1 ${rateDiff.positive === true ? 'text-green-600' : rateDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {rateDiff.text}
@@ -250,7 +252,7 @@ export default function DashboardPage() {
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="w-28 h-28 rounded-full bg-white flex flex-col items-center justify-center">
                   <span className="text-2xl font-bold text-gray-900">
-                    {sources ? formatCurrency(sources.total_revenue) : '--'}
+                    {sources ? formatCurrencyWithCode(sources.total_revenue, currency) : '--'}
                   </span>
                   <span className="text-[11px] text-gray-500">Total Revenue</span>
                 </div>
@@ -274,7 +276,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-[13px] font-medium text-gray-900">{s.percentage}%</span>
-                    <span className="text-[13px] text-gray-500">{formatCurrency(s.revenue)}</span>
+                    <span className="text-[13px] text-gray-500">{formatCurrencyWithCode(s.revenue, currency)}</span>
                   </div>
                 </div>
               ))
