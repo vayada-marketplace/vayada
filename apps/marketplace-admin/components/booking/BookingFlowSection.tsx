@@ -92,7 +92,7 @@ export default function BookingFlowSection({ hotelId }: { hotelId: string }) {
     Promise.all([
       bookingSettingsService.listAddons(hotelId).catch(() => []),
       bookingSettingsService.getAddonSettings(hotelId).catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
-      bookingSettingsService.getDesignSettings(hotelId).catch(() => ({ booking_filters: [] } as DesignSettings)),
+      bookingSettingsService.getDesignSettings(hotelId).catch(() => ({ booking_filters: [] } as unknown as DesignSettings)),
       bookingSettingsService.getBenefits(hotelId).catch(() => ({ benefits: [] })),
       bookingSettingsService.listPromoCodes(hotelId).catch(() => []),
     ]).then(([addonList, settings, design, benefitsData, promoList]) => {
