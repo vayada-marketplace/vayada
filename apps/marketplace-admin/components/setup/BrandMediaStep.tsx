@@ -360,7 +360,7 @@ export default function BrandMediaStep({
                       <span>Up to 2 guests</span>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2 mb-2">
-                      {['Mountain View', 'Balcony', 'Mini Bar'].map((feat) => (
+                      {['Mountain View', 'Balcony', 'Minibar'].map((feat) => (
                         <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full">
                           <svg className="w-2 h-2 flex-shrink-0" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
