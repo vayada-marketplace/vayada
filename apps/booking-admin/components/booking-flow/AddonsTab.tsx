@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   PlusIcon,
   PencilSquareIcon,
@@ -43,6 +44,10 @@ export default function AddonsTab({
   handleDeleteAddon,
   handleToggleAddonSetting,
 }: AddonsTabProps) {
+  const [filterCategory, setFilterCategory] = useState('all')
+  const categories = Array.from(new Set(addons.map(a => a.category).filter(Boolean)))
+  const filteredAddons = filterCategory === 'all' ? addons : addons.filter(a => a.category === filterCategory)
+
   return (
     <div className="max-w-2xl space-y-4">
       {/* Guest Experiences */}
@@ -61,6 +66,27 @@ export default function AddonsTab({
           </button>
         </div>
 
+        {/* Category filter pills */}
+        {categories.length > 1 && (
+          <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+            <button
+              onClick={() => setFilterCategory('all')}
+              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterCategory === 'all' ? 'border-gray-900 text-gray-900 bg-gray-50' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+            >
+              All ({addons.length})
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setFilterCategory(cat)}
+                className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterCategory === cat ? 'border-gray-900 text-gray-900 bg-gray-50' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+              >
+                {cat.charAt(0).toUpperCase() + cat.slice(1)} ({addons.filter(a => a.category === cat).length})
+              </button>
+            ))}
+          </div>
+        )}
+
         {addons.length === 0 ? (
           <div className="bg-gray-50 rounded-lg border border-dashed border-gray-300 p-6 text-center">
             <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
@@ -71,7 +97,7 @@ export default function AddonsTab({
           </div>
         ) : (
           <div className="space-y-2">
-            {addons.map((addon) => (
+            {filteredAddons.map((addon) => (
               <div
                 key={addon.id}
                 className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
