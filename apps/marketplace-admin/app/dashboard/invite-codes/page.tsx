@@ -156,7 +156,7 @@ export default function InviteCodesPage() {
   const canProceed = (): boolean => {
     if (step === 1) return !!(propertyName.trim() && city.trim() && country)
     if (step === 2) return !!(primaryColor && accentColor && selectedFont)
-    if (step === 3) return rooms.every(r => !!(r.name.trim()))
+    if (step === 3) return rooms.every(r => !!(r.name.trim()) && r.seasons.some(s => s.rate && Number(s.rate) > 0))
     return true
   }
 
