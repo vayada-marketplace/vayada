@@ -9,6 +9,10 @@ interface PoliciesStepProps {
   payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
   onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
   bankTransfer: boolean; setBankTransfer: (v: boolean) => void
+  payoutAccountHolder: string; setPayoutAccountHolder: (v: string) => void
+  payoutIban: string; setPayoutIban: (v: string) => void
+  payoutBankName: string; setPayoutBankName: (v: string) => void
+  payoutSwift: string; setPayoutSwift: (v: string) => void
   specialRequests: boolean; setSpecialRequests: (v: boolean) => void
   estimatedArrivalTime: boolean; setEstimatedArrivalTime: (v: boolean) => void
   numberOfGuests: boolean; setNumberOfGuests: (v: boolean) => void
@@ -29,6 +33,10 @@ export default function PoliciesStep({
   payAtHotelMethods, setPayAtHotelMethods,
   onlineCardPayment, setOnlineCardPayment,
   bankTransfer, setBankTransfer,
+  payoutAccountHolder, setPayoutAccountHolder,
+  payoutIban, setPayoutIban,
+  payoutBankName, setPayoutBankName,
+  payoutSwift, setPayoutSwift,
   specialRequests, setSpecialRequests,
   estimatedArrivalTime, setEstimatedArrivalTime,
   numberOfGuests, setNumberOfGuests,
@@ -167,6 +175,34 @@ export default function PoliciesStep({
               </div>
             </button>
           ))}
+
+          {/* Payout Details — shown when bank transfer is enabled */}
+          {bankTransfer && (
+            <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+              <div>
+                <h4 className="text-[13px] font-semibold text-gray-900">Payout Details</h4>
+                <p className="text-[11px] text-gray-500">Bank account where guests and vayada pay you.</p>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                <input type="text" value={payoutAccountHolder} onChange={(e) => setPayoutAccountHolder(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. Sunrise Beach Resort Ltd" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
+                <input type="text" value={payoutIban} onChange={(e) => setPayoutIban(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. GB29 NWBK 6016 1331 9268 19" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>
+                  <input type="text" value={payoutBankName} onChange={(e) => setPayoutBankName(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. HSBC Bank" />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">SWIFT / BIC</label>
+                  <input type="text" value={payoutSwift} onChange={(e) => setPayoutSwift(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. HBUKGB4B" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Guest Information Form */}

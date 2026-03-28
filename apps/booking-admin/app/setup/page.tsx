@@ -103,6 +103,10 @@ export default function SetupPage() {
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [bankTransfer, setBankTransfer] = useState(false)
+  const [payoutAccountHolder, setPayoutAccountHolder] = useState('')
+  const [payoutIban, setPayoutIban] = useState('')
+  const [payoutBankName, setPayoutBankName] = useState('')
+  const [payoutSwift, setPayoutSwift] = useState('')
   const [specialRequests, setSpecialRequests] = useState(true)
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false)
   const [numberOfGuests, setNumberOfGuests] = useState(false)
@@ -266,6 +270,10 @@ export default function SetupPage() {
         pay_at_property_enabled: payAtHotel,
         online_card_payment: onlineCardPayment,
         bank_transfer: bankTransfer,
+        payout_account_holder: payoutAccountHolder,
+        payout_iban: payoutIban,
+        payout_bank_name: payoutBankName,
+        payout_swift: payoutSwift,
         special_requests_enabled: specialRequests,
         arrival_time_enabled: estimatedArrivalTime,
         guest_count_enabled: numberOfGuests,
@@ -823,6 +831,10 @@ export default function SetupPage() {
           payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
           bankTransfer={bankTransfer} setBankTransfer={setBankTransfer}
+          payoutAccountHolder={payoutAccountHolder} setPayoutAccountHolder={setPayoutAccountHolder}
+          payoutIban={payoutIban} setPayoutIban={setPayoutIban}
+          payoutBankName={payoutBankName} setPayoutBankName={setPayoutBankName}
+          payoutSwift={payoutSwift} setPayoutSwift={setPayoutSwift}
           specialRequests={specialRequests} setSpecialRequests={setSpecialRequests}
           estimatedArrivalTime={estimatedArrivalTime} setEstimatedArrivalTime={setEstimatedArrivalTime}
           numberOfGuests={numberOfGuests} setNumberOfGuests={setNumberOfGuests}
