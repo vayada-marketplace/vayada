@@ -494,20 +494,7 @@ export default function BookingFlowSection({ hotelId }: { hotelId: string }) {
 
         {/* ═══ PAYMENT TAB ═══ */}
         {activeTab === 'payment' && (
-          <div className="max-w-2xl">
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h2 className="text-[14px] font-semibold text-gray-900">Payment Configuration</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Configure payment methods and processing</p>
-
-              <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 text-center">
-                <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-                  <PaymentIcon className="w-5 h-5 text-gray-400" />
-                </div>
-                <p className="text-[13px] font-medium text-gray-600">Payment configuration coming soon</p>
-                <p className="text-[12px] text-gray-400 mt-0.5">Stripe and other payment providers will be configurable here</p>
-              </div>
-            </div>
-          </div>
+          <PaymentTab hotelId={hotelId} showFeedback={showFeedback} />
         )}
       </div>
 
@@ -683,6 +670,109 @@ function DetailsIcon({ className }: { className?: string }) {
       <path d="M9 12h6" />
       <path d="M9 16h6" />
     </svg>
+  )
+}
+
+function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: (type: 'success' | 'error', message: string) => void }) {
+  const [commissionRate, setCommissionRate] = useState(5)
+  const [fixedFee, setFixedFee] = useState(30)
+  const [activePlan, setActivePlan] = useState('commission')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    bookingSettingsService.listAllHotels()
+      .then((hotels) => {
+        const hotel = hotels.find((h) => h.id === hotelId)
+        if (hotel) {
+          setCommissionRate(hotel.billing_commission_rate || 5)
+          setFixedFee(hotel.billing_fixed_fee || 30)
+          setActivePlan(hotel.billing_active_plan || 'commission')
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [hotelId])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await bookingSettingsService.updateHotelBilling(hotelId, {
+        billing_commission_rate: commissionRate,
+        billing_fixed_fee: fixedFee,
+      })
+      showFeedback('success', 'Billing settings saved')
+    } catch {
+      showFeedback('error', 'Failed to save billing settings')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="max-w-2xl"><div className="animate-pulse h-48 bg-gray-200 rounded-lg" /></div>
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      {/* Current Plan */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-[14px] font-semibold text-gray-900">Current Plan</h2>
+        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">This hotel is on the <strong>{activePlan === 'fixed' ? 'Fixed Fee' : 'Commission'}</strong> plan.</p>
+        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
+          activePlan === 'fixed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+        }`}>
+          {activePlan === 'fixed' ? 'Fixed Fee' : 'Commission'}
+        </span>
+      </div>
+
+      {/* Commission Rate */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-[14px] font-semibold text-gray-900">Commission Rate</h2>
+        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Percentage charged on each booking when on the commission plan.</p>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.5}
+            value={commissionRate}
+            onChange={(e) => setCommissionRate(Number(e.target.value))}
+            className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <span className="text-[14px] font-medium text-gray-600">% per booking</span>
+        </div>
+      </div>
+
+      {/* Fixed Fee */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-[14px] font-semibold text-gray-900">Fixed Monthly Fee</h2>
+        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Monthly subscription fee when on the fixed fee plan. Base $30 + $5 per additional room.</p>
+        <div className="flex items-center gap-2">
+          <span className="text-[14px] font-medium text-gray-600">$</span>
+          <input
+            type="number"
+            min={0}
+            step={5}
+            value={fixedFee}
+            onChange={(e) => setFixedFee(Number(e.target.value))}
+            className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <span className="text-[14px] font-medium text-gray-600">per month</span>
+        </div>
+      </div>
+
+      {/* Save */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2 text-[13px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving...' : 'Save Billing Settings'}
+        </button>
+      </div>
+    </div>
   )
 }
 
