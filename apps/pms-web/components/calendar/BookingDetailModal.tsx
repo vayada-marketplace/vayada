@@ -34,11 +34,39 @@ export default function BookingDetailModal({
   const [assigningRoom, setAssigningRoom] = useState(false)
   const [selectedRoomId, setSelectedRoomId] = useState<string>('')
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [editForm, setEditForm] = useState({
+    checkIn: '',
+    checkOut: '',
+    guestFirstName: '',
+    guestLastName: '',
+    guestEmail: '',
+    guestPhone: '',
+    adults: 1,
+    children: 0,
+    nightlyRate: 0,
+    specialRequests: '',
+  })
 
   useEffect(() => {
     bookingsService
       .get(bookingId)
-      .then(setBooking)
+      .then((b) => {
+        setBooking(b)
+        setEditForm({
+          checkIn: b.checkIn,
+          checkOut: b.checkOut,
+          guestFirstName: b.guestFirstName,
+          guestLastName: b.guestLastName,
+          guestEmail: b.guestEmail,
+          guestPhone: b.guestPhone || '',
+          adults: b.adults,
+          children: b.children,
+          nightlyRate: b.nightlyRate,
+          specialRequests: b.specialRequests || '',
+        })
+      })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [bookingId])
@@ -70,7 +98,20 @@ export default function BookingDetailModal({
     }
   }
 
-  // Filter rooms matching the booking's room type
+  const handleSaveEdit = async () => {
+    setSaving(true)
+    try {
+      const updated = await bookingsService.update(bookingId, editForm)
+      setBooking(updated)
+      setEditing(false)
+      onStatusChange()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const availableRooms = booking
     ? rooms.filter((r) => r.roomTypeId === booking.roomTypeId && r.status === 'available')
     : []
@@ -79,7 +120,6 @@ export default function BookingDetailModal({
 
   return (
     <Modal onClose={onClose} maxWidth="lg">
-        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"
@@ -99,7 +139,95 @@ export default function BookingDetailModal({
           </div>
         ) : !booking ? (
           <div className="p-8 text-center text-gray-500">Booking not found</div>
+        ) : editing ? (
+          /* ── EDIT MODE ── */
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-gray-900">Edit Booking</h2>
+              <span className="text-sm text-gray-500">{booking.bookingReference}</span>
+            </div>
+
+            <div className="space-y-4">
+              {/* Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Check-in</label>
+                  <input type="date" value={editForm.checkIn} onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Check-out</label>
+                  <input type="date" value={editForm.checkOut} onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+
+              {/* Guest Name */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">First Name</label>
+                  <input type="text" value={editForm.guestFirstName} onChange={(e) => setEditForm({ ...editForm, guestFirstName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Last Name</label>
+                  <input type="text" value={editForm.guestLastName} onChange={(e) => setEditForm({ ...editForm, guestLastName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+
+              {/* Contact */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                  <input type="email" value={editForm.guestEmail} onChange={(e) => setEditForm({ ...editForm, guestEmail: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Phone</label>
+                  <input type="tel" value={editForm.guestPhone} onChange={(e) => setEditForm({ ...editForm, guestPhone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+
+              {/* Occupancy */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Adults</label>
+                  <input type="number" min={1} max={10} value={editForm.adults} onChange={(e) => setEditForm({ ...editForm, adults: Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Children</label>
+                  <input type="number" min={0} max={10} value={editForm.children} onChange={(e) => setEditForm({ ...editForm, children: Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+
+              {/* Rate */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nightly Rate ({booking.currency})</label>
+                <input type="number" min={0} step="0.01" value={editForm.nightlyRate} onChange={(e) => setEditForm({ ...editForm, nightlyRate: Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+
+              {/* Special Requests */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Special Requests</label>
+                <textarea value={editForm.specialRequests} onChange={(e) => setEditForm({ ...editForm, specialRequests: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+            </div>
+
+            {/* Edit Actions */}
+            <div className="flex gap-2 mt-5 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => setEditing(false)}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
         ) : (
+          /* ── VIEW MODE ── */
           <div className="p-6">
             {/* Header */}
             <div className="mb-6">
@@ -163,7 +291,6 @@ export default function BookingDetailModal({
                 </div>
               </div>
 
-              {/* Room Assignment */}
               {!booking.roomId && availableRooms.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
                   <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
@@ -252,7 +379,6 @@ export default function BookingDetailModal({
               </div>
             )}
 
-            {/* Estimated Arrival Time */}
             {booking.estimatedArrivalTime && (
               <div className="mb-6">
                 <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
@@ -264,7 +390,6 @@ export default function BookingDetailModal({
               </div>
             )}
 
-            {/* Number of Guests */}
             {booking.numberOfGuests != null && (
               <div className="mb-6">
                 <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
@@ -305,9 +430,18 @@ export default function BookingDetailModal({
                 </div>
               </div>
             ) : (
-              <>
+              <div className="pt-2 border-t border-gray-200 space-y-2">
+                {/* Edit button — always shown for non-cancelled bookings */}
+                {booking.status !== 'cancelled' && (
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="w-full px-4 py-2 text-sm font-medium text-primary-700 border border-primary-300 hover:bg-primary-50 rounded-lg transition-colors"
+                  >
+                    Edit Booking
+                  </button>
+                )}
                 {booking.status === 'pending' && (
-                  <div className="flex gap-2 pt-2 border-t border-gray-200">
+                  <div className="flex gap-2">
                     <button
                       onClick={() => handleStatusUpdate('confirmed')}
                       disabled={actionLoading}
@@ -325,17 +459,15 @@ export default function BookingDetailModal({
                   </div>
                 )}
                 {booking.status === 'confirmed' && (
-                  <div className="pt-2 border-t border-gray-200">
-                    <button
-                      onClick={() => setShowCancelConfirm(true)}
-                      disabled={actionLoading}
-                      className="w-full px-4 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      Cancel Booking
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setShowCancelConfirm(true)}
+                    disabled={actionLoading}
+                    className="w-full px-4 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel Booking
+                  </button>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}

@@ -82,6 +82,14 @@ export const bookingsService = {
   get: (id: string) =>
     pmsClient.get<Booking>(`/admin/bookings/${id}`),
 
+  update: (id: string, data: Partial<{
+    checkIn: string; checkOut: string;
+    guestFirstName: string; guestLastName: string;
+    guestEmail: string; guestPhone: string;
+    adults: number; children: number;
+    nightlyRate: number; specialRequests: string;
+  }>) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),
+
   updateStatus: (id: string, status: 'confirmed' | 'cancelled') =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
 
