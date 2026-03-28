@@ -143,6 +143,7 @@ export default function RoomTypeForm({
   const [featureInput, setFeatureInput] = useState('')
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
+  const [customAmenitiesByCategory, setCustomAmenitiesByCategory] = useState<Record<string, string[]>>({})
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
     form.operatingPeriods?.length ? form.operatingPeriods.map((p: { from: string; to: string }) => ({
@@ -1339,7 +1340,8 @@ export default function RoomTypeForm({
             <div className="space-y-1">
               {AMENITY_CATEGORIES.map((cat) => {
                 const amenities = form.amenities || []
-                const selectedCount = cat.items.filter((item) => amenities.includes(item)).length
+                const customInCat = (customAmenitiesByCategory[cat.name] || []).filter(a => amenities.includes(a))
+                const selectedCount = cat.items.filter((item) => amenities.includes(item)).length + customInCat.length
                 const isExpanded = expandedAmenityCategories.includes(cat.name)
                 const allSelected = selectedCount === cat.items.length
 
@@ -1406,6 +1408,23 @@ export default function RoomTypeForm({
                           })}
                         </div>
 
+                        {/* Custom amenities in this category */}
+                        {(customAmenitiesByCategory[cat.name] || []).filter(a => amenities.includes(a)).length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {(customAmenitiesByCategory[cat.name] || []).filter(a => amenities.includes(a)).map(a => (
+                              <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
+                                {a}
+                                <button type="button" onClick={() => {
+                                  updateForm({ amenities: amenities.filter(x => x !== a) })
+                                  setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: (prev[cat.name] || []).filter(x => x !== a) }))
+                                }} className="text-primary-400 hover:text-primary-600">
+                                  <XMarkIcon className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         {/* Custom amenity input */}
                         <div className="flex gap-2 mt-2">
                           <input
@@ -1418,6 +1437,7 @@ export default function RoomTypeForm({
                                 const trimmed = (customAmenityInputs[cat.name] || '').trim()
                                 if (trimmed && !amenities.some(a => a.toLowerCase() === trimmed.toLowerCase())) {
                                   updateForm({ amenities: [...amenities, trimmed] })
+                                  setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: [...(prev[cat.name] || []), trimmed] }))
                                   setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                                 }
                               }
@@ -1431,6 +1451,7 @@ export default function RoomTypeForm({
                               const trimmed = (customAmenityInputs[cat.name] || '').trim()
                               if (trimmed && !amenities.some(a => a.toLowerCase() === trimmed.toLowerCase())) {
                                 updateForm({ amenities: [...amenities, trimmed] })
+                                setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: [...(prev[cat.name] || []), trimmed] }))
                                 setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                               }
                             }}
@@ -1446,14 +1467,15 @@ export default function RoomTypeForm({
               })}
             </div>
 
-            {/* Custom amenities (not in predefined categories) */}
+            {/* Custom amenities not assigned to any category */}
             {(() => {
               const allPredefined = AMENITY_CATEGORIES.flatMap(c => c.items)
-              const customAmenities = (form.amenities || []).filter(a => !allPredefined.includes(a))
-              if (customAmenities.length === 0) return null
+              const allCustomTracked = Object.values(customAmenitiesByCategory).flat()
+              const untracked = (form.amenities || []).filter(a => !allPredefined.includes(a) && !allCustomTracked.includes(a))
+              if (untracked.length === 0) return null
               return (
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {customAmenities.map(a => (
+                  {untracked.map(a => (
                     <span key={a} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
                       {a}
                       <button type="button" onClick={() => updateForm({ amenities: (form.amenities || []).filter(x => x !== a) })} className="text-primary-400 hover:text-primary-600">
