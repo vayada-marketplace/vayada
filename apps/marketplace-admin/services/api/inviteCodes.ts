@@ -85,6 +85,10 @@ export interface InviteData {
     pay_at_property: boolean
     online_card_payment: boolean
     bank_transfer: boolean
+    payout_account_holder?: string
+    payout_iban?: string
+    payout_bank_name?: string
+    payout_swift?: string
     special_requests: boolean
     arrival_time: boolean
     guest_count: boolean
