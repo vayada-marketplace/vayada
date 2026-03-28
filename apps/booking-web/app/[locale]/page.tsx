@@ -116,6 +116,7 @@ export default function HomePage() {
 
   // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([])
+  const [sortOption, setSortOption] = useState('recommended')
   const [currentStep] = useState(1)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [guestsOpen, setGuestsOpen] = useState(false)
@@ -158,22 +159,27 @@ export default function HomePage() {
   const FILTERS = FILTER_ENTRIES.map((f) => f.label)
 
   // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
-  const filteredRooms = activeFilters.length === 0
-    ? rooms
-    : rooms.filter((room) =>
-        activeFilters.every((label) => {
-          const entry = FILTER_ENTRIES.find((f) => f.label === label)
-          if (entry && hotel?.filterRooms?.[entry.key]?.length) {
-            return hotel.filterRooms[entry.key].includes(room.id)
-          }
-          // Fallback: text match against features/amenities
-          const lower = label.toLowerCase()
-          return (
-            room.features.some((f) => f.toLowerCase().includes(lower)) ||
-            room.amenities.some((a) => a.toLowerCase().includes(lower))
-          )
-        })
-      )
+  const filteredRooms = (() => {
+    let result = activeFilters.length === 0
+      ? [...rooms]
+      : rooms.filter((room) =>
+          activeFilters.every((label) => {
+            const entry = FILTER_ENTRIES.find((f) => f.label === label)
+            if (entry && hotel?.filterRooms?.[entry.key]?.length) {
+              return hotel.filterRooms[entry.key].includes(room.id)
+            }
+            const lower = label.toLowerCase()
+            return (
+              room.features.some((f) => f.toLowerCase().includes(lower)) ||
+              room.amenities.some((a) => a.toLowerCase().includes(lower))
+            )
+          })
+        )
+    if (sortOption === 'priceLow') result.sort((a, b) => a.baseRate - b.baseRate)
+    else if (sortOption === 'priceHigh') result.sort((a, b) => b.baseRate - a.baseRate)
+    else if (sortOption === 'roomSize') result.sort((a, b) => (b.size || 0) - (a.size || 0))
+    return result
+  })()
 
   const hasAddons = addons.length > 0
   const STEPS = hasAddons
@@ -459,11 +465,15 @@ export default function HomePage() {
               <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
               </svg>
-              <select className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500">
-                <option>{t('recommended')}</option>
-                <option>{t('roomSize')}</option>
-                <option>{t('priceLowHigh')}</option>
-                <option>{t('priceHighLow')}</option>
+              <select
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value)}
+                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="recommended">{t('recommended')}</option>
+                <option value="roomSize">{t('roomSize')}</option>
+                <option value="priceLow">{t('priceLowHigh')}</option>
+                <option value="priceHigh">{t('priceHighLow')}</option>
               </select>
             </div>
           </div>
