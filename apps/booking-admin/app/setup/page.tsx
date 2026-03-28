@@ -214,7 +214,10 @@ export default function SetupPage() {
       return !!selectedPms
     }
     if (step === 4) {
-      return rooms.every(r => !!(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1))
+      return rooms.every(r =>
+        !!(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1) &&
+        r.seasons.some(s => s.rate && Number(s.rate) > 0)
+      )
     }
     if (step === 5) {
       return true // add-ons are optional
