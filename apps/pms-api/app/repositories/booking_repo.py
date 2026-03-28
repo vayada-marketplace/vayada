@@ -226,6 +226,8 @@ class BookingRepository:
     @staticmethod
     async def update_details(booking_id: str, updates: dict) -> Optional[dict]:
         """Update booking fields dynamically."""
+        from datetime import date
+
         ALLOWED = {
             "check_in", "check_out", "guest_first_name", "guest_last_name",
             "guest_email", "guest_phone", "adults", "children",
@@ -234,6 +236,11 @@ class BookingRepository:
         filtered = {k: v for k, v in updates.items() if k in ALLOWED and v is not None}
         if not filtered:
             return await BookingRepository.get_by_id(booking_id)
+
+        # Convert date strings to date objects for asyncpg
+        for date_field in ("check_in", "check_out"):
+            if date_field in filtered and isinstance(filtered[date_field], str):
+                filtered[date_field] = date.fromisoformat(filtered[date_field])
 
         # Recalculate total if rate or dates changed
         set_clauses = []
@@ -251,7 +258,6 @@ class BookingRepository:
         # Recalculate total_amount and nights if dates or rate changed
         booking = dict(row)
         if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
-            from datetime import date
             ci = date.fromisoformat(str(booking["check_in"]))
             co = date.fromisoformat(str(booking["check_out"]))
             nights = max(1, (co - ci).days)
