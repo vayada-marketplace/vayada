@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { MagnifyingGlassIcon, ArrowLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon, PencilIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
 import { usersService } from '@/services/api'
 
@@ -18,6 +18,9 @@ interface HotelRow {
   marketplace_user_id?: string
   /** true when a booking_hotels row already exists */
   initialized: boolean
+  billing_commission_rate: number
+  billing_fixed_fee: number
+  billing_active_plan: string
 }
 
 export default function HotelsPage() {
@@ -27,6 +30,10 @@ export default function HotelsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [settingUp, setSettingUp] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editRate, setEditRate] = useState(5)
+  const [editFee, setEditFee] = useState(30)
+  const [savingBilling, setSavingBilling] = useState(false)
 
   useEffect(() => {
     loadHotels()
@@ -52,6 +59,9 @@ export default function HotelsPage() {
       const rows: HotelRow[] = bookingHotels.map((h) => ({
         ...h,
         initialized: true,
+        billing_commission_rate: h.billing_commission_rate || 5,
+        billing_fixed_fee: h.billing_fixed_fee || 30,
+        billing_active_plan: h.billing_active_plan || 'commission',
       }))
 
       // Add marketplace hotel users that are NOT yet in booking_hotels
@@ -67,6 +77,9 @@ export default function HotelsPage() {
             owner_email: user.email,
             marketplace_user_id: user.id,
             initialized: false,
+            billing_commission_rate: 5,
+            billing_fixed_fee: 30,
+            billing_active_plan: 'commission',
           })
         }
       }
@@ -94,6 +107,28 @@ export default function HotelsPage() {
       setError('Failed to initialize hotel. Please try again.')
     } finally {
       setSettingUp(null)
+    }
+  }
+
+  function startEdit(hotel: HotelRow) {
+    setEditingId(hotel.id)
+    setEditRate(hotel.billing_commission_rate)
+    setEditFee(hotel.billing_fixed_fee)
+  }
+
+  async function saveEdit(hotelId: string) {
+    setSavingBilling(true)
+    try {
+      await bookingSettingsService.updateHotelBilling(hotelId, {
+        billing_commission_rate: editRate,
+        billing_fixed_fee: editFee,
+      })
+      setHotels(prev => prev.map(h => h.id === hotelId ? { ...h, billing_commission_rate: editRate, billing_fixed_fee: editFee } : h))
+      setEditingId(null)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSavingBilling(false)
     }
   }
 
@@ -164,7 +199,13 @@ export default function HotelsPage() {
                       Owner
                     </th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
+                      Plan
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Commission
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Fixed Fee
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
@@ -174,7 +215,7 @@ export default function HotelsPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                      <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
                         {search ? 'No hotels match your search.' : 'No hotels found.'}
                       </td>
                     </tr>
@@ -196,8 +237,10 @@ export default function HotelsPage() {
                         </td>
                         <td className="px-6 py-4 text-center">
                           {hotel.initialized ? (
-                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                              Active
+                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              hotel.billing_active_plan === 'fixed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                            }`}>
+                              {hotel.billing_active_plan === 'fixed' ? 'Fixed' : 'Commission'}
                             </span>
                           ) : (
                             <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-600">
@@ -205,27 +248,56 @@ export default function HotelsPage() {
                             </span>
                           )}
                         </td>
+                        <td className="px-6 py-4 text-center">
+                          {hotel.initialized ? (
+                            editingId === hotel.id ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input type="number" min={0} max={100} step={0.5} value={editRate} onChange={(e) => setEditRate(Number(e.target.value))} className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                                <span className="text-xs text-gray-500">%</span>
+                              </div>
+                            ) : (
+                              <span className="text-sm font-medium text-gray-900">{hotel.billing_commission_rate}%</span>
+                            )
+                          ) : <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {hotel.initialized ? (
+                            editingId === hotel.id ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="text-xs text-gray-500">$</span>
+                                <input type="number" min={0} step={1} value={editFee} onChange={(e) => setEditFee(Number(e.target.value))} className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                              </div>
+                            ) : (
+                              <span className="text-sm font-medium text-gray-900">${hotel.billing_fixed_fee}</span>
+                            )
+                          ) : <span className="text-gray-400">-</span>}
+                        </td>
                         <td className="px-6 py-4 text-right whitespace-nowrap space-x-2">
                           {hotel.initialized ? (
-                            <>
-                              {hotel.slug && (
-                                <a
-                                  href={`https://${hotel.slug}.booking.vayada.com`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
-                                >
-                                  Preview
-                                  <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-                                </a>
+                            <div className="flex items-center justify-end gap-1.5">
+                              {editingId === hotel.id ? (
+                                <>
+                                  <button onClick={() => saveEdit(hotel.id)} disabled={savingBilling} className="p-1.5 text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50" title="Save">
+                                    <CheckIcon className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => setEditingId(null)} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-md transition-colors" title="Cancel">
+                                    <XMarkIcon className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => startEdit(hotel)} className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-md transition-colors" title="Edit billing">
+                                    <PencilIcon className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
+                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
+                                  >
+                                    Configure
+                                  </button>
+                                </>
                               )}
-                              <button
-                                onClick={() => router.push(`/dashboard/hotels/${hotel.id}`)}
-                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
-                              >
-                                Configure
-                              </button>
-                            </>
+                            </div>
                           ) : (
                             <button
                               onClick={() => handleSetup(hotel)}

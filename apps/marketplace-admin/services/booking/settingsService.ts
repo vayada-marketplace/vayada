@@ -53,6 +53,9 @@ export interface AddonItem {
 export interface SuperAdminHotel extends HotelSummary {
   owner_name: string
   owner_email: string
+  billing_commission_rate: number
+  billing_fixed_fee: number
+  billing_active_plan: string
 }
 
 export interface AddonSettings {
@@ -63,6 +66,9 @@ export interface AddonSettings {
 export const bookingSettingsService = {
   listAllHotels: () =>
     bookingApiClient.get<SuperAdminHotel[]>('/admin/superadmin/hotels'),
+
+  updateHotelBilling: (hotelId: string, data: { billing_commission_rate?: number; billing_fixed_fee?: number }) =>
+    bookingApiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
 
   createHotelForUser: (userId: string, name: string) =>
     bookingApiClient.post<{ id: string; name: string; slug: string }>(
