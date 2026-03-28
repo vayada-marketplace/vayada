@@ -1,7 +1,8 @@
 """
 Email service for the booking engine backend.
 """
-import aiosmtplib
+import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -38,18 +39,27 @@ async def send_email(
         msg.attach(MIMEText(text_body, 'plain'))
         msg.attach(MIMEText(html_body, 'html'))
 
-        use_implicit_tls = settings.SMTP_PORT == 465
-        await aiosmtplib.send(
-            msg,
-            hostname=settings.SMTP_HOST,
-            port=settings.SMTP_PORT,
-            username=settings.SMTP_USER or None,
-            password=settings.SMTP_PASSWORD or None,
-            use_tls=use_implicit_tls,
-            start_tls=not use_implicit_tls and settings.SMTP_USE_TLS,
-        )
+        if settings.SMTP_PORT == 465:
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, context=context) as server:
+                if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                if settings.SMTP_USE_TLS:
+                    server.starttls()
+                if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.send_message(msg)
+
         logger.info(f"Email sent successfully to {to_email}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"SMTP authentication failed: {e}")
+        logger.error(f"  Host: {settings.SMTP_HOST}, Port: {settings.SMTP_PORT}, User: {settings.SMTP_USER}")
+        return False
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {e}")
         return False
