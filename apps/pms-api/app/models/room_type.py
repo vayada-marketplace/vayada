@@ -16,9 +16,9 @@ def _validate_operating_periods(periods: list) -> list:
 
 
 def _normalize_season_date(d: str) -> str:
-    """Normalize MM-DD to YYYY-MM-DD using a reference year."""
+    """Normalize MM-DD to YYYY-MM-DD using a leap year as reference."""
     if d and len(d) == 5 and d[2] == '-':
-        return f"2026-{d}"
+        return f"2024-{d}"  # Use leap year so Feb 29 is valid
     return d
 
 
