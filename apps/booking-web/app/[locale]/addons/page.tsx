@@ -23,7 +23,7 @@ export default function AddonsPage() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { addons } = useAddons()
-  const { formatPrice } = useCurrency()
+  const { formatPrice, convertPrice, selectedCurrency } = useCurrency()
   const [activeCategory, setActiveCategory] = useState('all')
   const [selections, setSelections] = useState<Record<string, number>>({})
   const [detailIndex, setDetailIndex] = useState<number | null>(null)
@@ -220,10 +220,19 @@ export default function AddonsPage() {
             <div className="flex items-center justify-between pt-4 border-t border-primary-100">
               <p className="text-sm text-gray-500">{t('addonsTotal')}</p>
               <p className="text-xl font-bold text-gray-900">
-                {formatPrice(
-                  calculateAddonTotal(addons, selectedIds, adultsParam, nights, selections),
-                  hotel.currency
-                )}
+                {(() => {
+                  let total = 0
+                  for (const addon of addons) {
+                    if (!selectedIds.includes(addon.id)) continue
+                    const qty = selections[addon.id] ?? 1
+                    let price = addon.price
+                    if (addon.perPerson) price *= adultsParam
+                    if (addon.perNight) price *= nights
+                    price *= qty
+                    total += convertPrice(price, addon.currency)
+                  }
+                  return formatPrice(total, selectedCurrency)
+                })()}
               </p>
             </div>
           </div>
