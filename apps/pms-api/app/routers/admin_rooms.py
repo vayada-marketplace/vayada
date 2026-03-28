@@ -284,6 +284,7 @@ async def get_calendar(
                 "category": rt.get("category", ""),
                 "totalRooms": rt["total_rooms"],
                 "baseRate": float(rt["base_rate"]),
+                "maxOccupancy": rt.get("max_occupancy", 2),
                 "currency": rt["currency"],
             }
             for rt in room_types
