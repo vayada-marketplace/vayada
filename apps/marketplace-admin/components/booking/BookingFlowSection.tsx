@@ -83,7 +83,7 @@ export default function BookingFlowSection({ hotelId }: { hotelId: string }) {
   const [showPromoModal, setShowPromoModal] = useState(false)
   const [editingPromo, setEditingPromo] = useState<PromoCodeItem | null>(null)
   const [promoFormData, setPromoFormData] = useState({
-    code: '', discountType: 'percentage' as const, discountValue: 0,
+    code: '', discountType: 'percentage' as 'percentage' | 'fixed', discountValue: 0,
     validFrom: '', validUntil: '', isActive: true, maxUses: null as number | null,
   })
   const [savingPromo, setSavingPromo] = useState(false)
