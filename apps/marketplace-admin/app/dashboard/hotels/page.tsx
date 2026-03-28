@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
-import { bookingSettingsService } from '@/services/booking'
+import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
 import { usersService } from '@/services/api'
 
 interface HotelRow {
