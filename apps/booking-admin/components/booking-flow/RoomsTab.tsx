@@ -56,6 +56,8 @@ export default function RoomsTab({
   const [selectedFilterKey, setSelectedFilterKey] = useState('')
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([])
   const [editingFilterKey, setEditingFilterKey] = useState<string | null>(null)
+  const [customFilterName, setCustomFilterName] = useState('')
+  const [showCustomInput, setShowCustomInput] = useState(false)
 
   // All filter options: built-in + custom
   const allFilterOptions = [
@@ -82,22 +84,34 @@ export default function RoomsTab({
   }
 
   const handleAddFilter = () => {
-    if (!selectedFilterKey || selectedRoomIds.length === 0) return
+    const filterKey = showCustomInput ? customFilterName.trim().replace(/\s+/g, '_').toLowerCase() : selectedFilterKey
+    const filterLabel = showCustomInput ? customFilterName.trim() : ''
+    if (!filterKey || selectedRoomIds.length === 0) return
+
+    // Register custom filter label
+    if (showCustomInput && filterLabel) {
+      setCustomFilters((prev: Record<string, string>) => ({
+        ...prev,
+        [filterKey]: filterLabel,
+      }))
+    }
 
     // Add to bookingFilters if not already present
     setBookingFilters((prev: string[]) =>
-      prev.includes(selectedFilterKey) ? prev : [...prev, selectedFilterKey]
+      prev.includes(filterKey) ? prev : [...prev, filterKey]
     )
 
     // Set room assignments
     setFilterRooms((prev: Record<string, string[]>) => ({
       ...prev,
-      [selectedFilterKey]: selectedRoomIds,
+      [filterKey]: selectedRoomIds,
     }))
 
     // Reset form
     setSelectedFilterKey('')
     setSelectedRoomIds([])
+    setCustomFilterName('')
+    setShowCustomInput(false)
     setShowAddFilter(false)
   }
 
@@ -144,6 +158,8 @@ export default function RoomsTab({
     setSelectedFilterKey('')
     setSelectedRoomIds([])
     setEditingFilterKey(null)
+    setCustomFilterName('')
+    setShowCustomInput(false)
   }
 
   const toggleRoomSelection = (roomId: string) => {
@@ -227,16 +243,35 @@ export default function RoomsTab({
                 {!editingFilterKey && (
                   <div className="mb-4">
                     <label className="block text-[12px] font-medium text-gray-600 mb-1.5">Filter name</label>
-                    <select
-                      value={selectedFilterKey}
-                      onChange={(e) => setSelectedFilterKey(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                    >
-                      <option value="">Select a filter...</option>
-                      {availableToAdd.map((f) => (
-                        <option key={f.key} value={f.key}>{f.label}</option>
-                      ))}
-                    </select>
+                    {showCustomInput ? (
+                      <input
+                        type="text"
+                        value={customFilterName}
+                        onChange={(e) => setCustomFilterName(e.target.value)}
+                        placeholder="Enter custom filter name..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        autoFocus
+                      />
+                    ) : (
+                      <select
+                        value={selectedFilterKey}
+                        onChange={(e) => {
+                          if (e.target.value === '__custom__') {
+                            setShowCustomInput(true)
+                            setSelectedFilterKey('')
+                          } else {
+                            setSelectedFilterKey(e.target.value)
+                          }
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">Select a filter...</option>
+                        {availableToAdd.map((f) => (
+                          <option key={f.key} value={f.key}>{f.label}</option>
+                        ))}
+                        <option value="__custom__">Custom filter...</option>
+                      </select>
+                    )}
                   </div>
                 )}
 
@@ -250,7 +285,7 @@ export default function RoomsTab({
                 )}
 
                 {/* Room checkboxes */}
-                {(selectedFilterKey || editingFilterKey) && (
+                {(selectedFilterKey || editingFilterKey || (showCustomInput && customFilterName.trim())) && (
                   <div>
                     <label className="block text-[12px] font-medium text-gray-600 mb-2">Which rooms does this apply to?</label>
                     {roomsLoading ? (
@@ -307,7 +342,7 @@ export default function RoomsTab({
                   </button>
                   <button
                     onClick={editingFilterKey ? handleSaveEdit : handleAddFilter}
-                    disabled={(!selectedFilterKey && !editingFilterKey) || selectedRoomIds.length === 0}
+                    disabled={(!selectedFilterKey && !editingFilterKey && !(showCustomInput && customFilterName.trim())) || selectedRoomIds.length === 0}
                     className="px-4 py-1.5 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
                   >
                     {editingFilterKey ? 'Save Changes' : 'Add Filter'}
