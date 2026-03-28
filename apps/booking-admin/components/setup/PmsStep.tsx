@@ -71,13 +71,12 @@ export default function PmsStep({
               key={pms.id}
               onClick={() => pms.available && setSelectedPms(pms.id)}
               disabled={!pms.available}
-              className={`w-full text-left px-4 py-4 rounded-xl border transition-all ${
-                selectedPms === pms.id
+              className={`w-full text-left px-4 py-4 rounded-xl border transition-all ${selectedPms === pms.id
                   ? 'border-primary-500 ring-2 ring-primary-500/20 bg-primary-50/20'
                   : pms.available
                     ? 'border-gray-200 hover:border-gray-300 bg-white'
                     : 'border-gray-100 bg-gray-50/50 opacity-50 cursor-not-allowed'
-              }`}
+                }`}
             >
               <div className="flex items-start gap-3.5">
                 {/* PMS Icon */}
@@ -116,11 +115,10 @@ export default function PmsStep({
                   <p className="text-[12px] text-gray-500 mb-2">{pms.description}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {pms.features.map((feat) => (
-                      <span key={feat} className={`text-[10px] px-2 py-0.5 rounded-full ${
-                        pms.available
+                      <span key={feat} className={`text-[10px] px-2 py-0.5 rounded-full ${pms.available
                           ? 'bg-gray-100 text-gray-600'
                           : 'bg-gray-50 text-gray-400'
-                      }`}>
+                        }`}>
                         {feat}
                       </span>
                     ))}
@@ -156,7 +154,7 @@ export default function PmsStep({
             disabled={!canProceed}
             className="px-6 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Next
+            Continue
           </button>
         </div>
       </div>
