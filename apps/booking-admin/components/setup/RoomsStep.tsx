@@ -195,6 +195,7 @@ export default function RoomsStep({
   }
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
+  const [customAmenitiesByCategory, setCustomAmenitiesByCategory] = useState<Record<string, string[]>>({})
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1328,6 +1329,23 @@ export default function RoomsStep({
                           </div>
 
                           {/* Custom amenity input */}
+                          {/* Custom amenities in this category */}
+                          {(customAmenitiesByCategory[cat.name] || []).filter(a => room.amenities.includes(a)).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {(customAmenitiesByCategory[cat.name] || []).filter(a => room.amenities.includes(a)).map(a => (
+                                <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
+                                  {a}
+                                  <button type="button" onClick={() => {
+                                    updateRoom({ amenities: room.amenities.filter(x => x !== a) })
+                                    setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: (prev[cat.name] || []).filter(x => x !== a) }))
+                                  }} className="text-primary-400 hover:text-primary-600">
+                                    <XMarkIcon className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
                           <div className="flex gap-2 mt-2">
                             <input
                               type="text"
@@ -1339,6 +1357,7 @@ export default function RoomsStep({
                                   const trimmed = (customAmenityInputs[cat.name] || '').trim()
                                   if (trimmed && !room.amenities.includes(trimmed)) {
                                     updateRoom({ amenities: [...room.amenities, trimmed] })
+                                    setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: [...(prev[cat.name] || []), trimmed] }))
                                   }
                                   setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                                 }
@@ -1352,6 +1371,7 @@ export default function RoomsStep({
                                 const trimmed = (customAmenityInputs[cat.name] || '').trim()
                                 if (trimmed && !room.amenities.includes(trimmed)) {
                                   updateRoom({ amenities: [...room.amenities, trimmed] })
+                                  setCustomAmenitiesByCategory(prev => ({ ...prev, [cat.name]: [...(prev[cat.name] || []), trimmed] }))
                                 }
                                 setCustomAmenityInputs(prev => ({ ...prev, [cat.name]: '' }))
                               }}
