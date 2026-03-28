@@ -197,7 +197,8 @@ export default function RoomTypeForm({
   }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
-    onChange({ ...form, ...updates })
+    const updated = { ...form, ...updates }
+    onChange(updated)
   }
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1444,6 +1445,25 @@ export default function RoomTypeForm({
                 )
               })}
             </div>
+
+            {/* Custom amenities (not in predefined categories) */}
+            {(() => {
+              const allPredefined = AMENITY_CATEGORIES.flatMap(c => c.items)
+              const customAmenities = (form.amenities || []).filter(a => !allPredefined.includes(a))
+              if (customAmenities.length === 0) return null
+              return (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {customAmenities.map(a => (
+                    <span key={a} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
+                      {a}
+                      <button type="button" onClick={() => updateForm({ amenities: (form.amenities || []).filter(x => x !== a) })} className="text-primary-400 hover:text-primary-600">
+                        <XMarkIcon className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )
+            })()}
 
             <p className="text-[10px] text-gray-400">{(form.amenities || []).length} amenities selected &middot; Shown as &quot;View Full Amenities ({(form.amenities || []).length})&quot; in the room detail modal</p>
           </div>
