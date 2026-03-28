@@ -58,7 +58,7 @@ export const getRoomCompleteness = (room: RoomType): { done: number; total: numb
   let done = 0
   const total = 3
   if (room.name.trim() && room.maxOccupancy >= 1 && room.totalRooms >= 1) done++
-  if (room.flexibleRateEnabled || room.nonRefundableEnabled) done++
+  if (room.seasons.some(s => s.rate && Number(s.rate) > 0)) done++
   if (room.images.length > 0) done++
   return { done, total }
 }
