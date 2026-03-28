@@ -1347,6 +1347,7 @@ export default function RoomsStep({
                               placeholder="+ Add custom amenity..."
                             />
                             <button
+                              type="button"
                               onClick={() => {
                                 const trimmed = (customAmenityInputs[cat.name] || '').trim()
                                 if (trimmed && !room.amenities.includes(trimmed)) {
