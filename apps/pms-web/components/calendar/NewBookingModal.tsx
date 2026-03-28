@@ -109,7 +109,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Room */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Room</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Room <span className="text-red-500">*</span></label>
             <select
               value={roomId}
               onChange={(e) => handleRoomChange(e.target.value)}
@@ -135,7 +135,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
           {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Check-in</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Check-in <span className="text-red-500">*</span></label>
               <input
                 type="date"
                 value={checkIn}
@@ -145,7 +145,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Check-out</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Check-out <span className="text-red-500">*</span></label>
               <input
                 type="date"
                 value={checkOut}
@@ -159,7 +159,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
           {/* Guest Name */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">First Name <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={guestFirstName}
@@ -169,7 +169,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Last Name <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={guestLastName}
@@ -183,7 +183,7 @@ export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }:
           {/* Guest Contact */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
               <input
                 type="email"
                 value={guestEmail}
