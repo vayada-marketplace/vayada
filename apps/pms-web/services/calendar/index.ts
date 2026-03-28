@@ -6,6 +6,7 @@ export interface CalendarRoomType {
   category: string
   totalRooms: number
   baseRate: number
+  maxOccupancy: number
   currency: string
 }
 
