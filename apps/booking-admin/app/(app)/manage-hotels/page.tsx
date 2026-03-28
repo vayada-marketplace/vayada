@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon, PencilIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { settingsService, SuperAdminHotel } from '@/services/settings'
 
@@ -11,6 +11,10 @@ export default function ManageHotelsPage() {
   const [hotels, setHotels] = useState<SuperAdminHotel[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editRate, setEditRate] = useState(5)
+  const [editFee, setEditFee] = useState(30)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!authService.isSuperAdmin()) {
@@ -38,6 +42,28 @@ export default function ManageHotelsPage() {
     router.push('/design-studio')
   }
 
+  function startEdit(hotel: SuperAdminHotel) {
+    setEditingId(hotel.id)
+    setEditRate(hotel.billing_commission_rate)
+    setEditFee(hotel.billing_fixed_fee)
+  }
+
+  async function saveEdit(hotelId: string) {
+    setSaving(true)
+    try {
+      await settingsService.updateHotelBilling(hotelId, {
+        billing_commission_rate: editRate,
+        billing_fixed_fee: editFee,
+      })
+      setHotels(prev => prev.map(h => h.id === hotelId ? { ...h, billing_commission_rate: editRate, billing_fixed_fee: editFee } : h))
+      setEditingId(null)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -47,11 +73,11 @@ export default function ManageHotelsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">Manage Hotels</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Browse and configure any hotel on the platform.
+          Browse, configure, and set billing rates for each hotel.
         </p>
       </div>
 
@@ -73,16 +99,17 @@ export default function ManageHotelsPage() {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hotel</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Location</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Owner</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Plan</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Commission</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fixed Fee</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
                   {search ? 'No hotels match your search.' : 'No hotels found.'}
                 </td>
               </tr>
@@ -91,20 +118,94 @@ export default function ManageHotelsPage() {
                 <tr key={hotel.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
                     <p className="text-sm font-medium text-gray-900">{hotel.name}</p>
-                    <p className="text-xs text-gray-500">{hotel.slug}</p>
+                    <p className="text-xs text-gray-500">{hotel.location}{hotel.country ? `, ${hotel.country}` : ''}</p>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
-                    {hotel.location}{hotel.country ? `, ${hotel.country}` : ''}
+                  <td className="px-4 py-3">
+                    <p className="text-sm text-gray-700">{hotel.owner_name}</p>
+                    <p className="text-xs text-gray-500">{hotel.owner_email}</p>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{hotel.owner_name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{hotel.owner_email}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      hotel.billing_active_plan === 'fixed'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                    }`}>
+                      {hotel.billing_active_plan === 'fixed' ? 'Fixed' : 'Commission'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {editingId === hotel.id ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.5}
+                          value={editRate}
+                          onChange={(e) => setEditRate(Number(e.target.value))}
+                          className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                        <span className="text-xs text-gray-500">%</span>
+                      </div>
+                    ) : (
+                      <span className="text-sm font-medium text-gray-900">{hotel.billing_commission_rate}%</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {editingId === hotel.id ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="text-xs text-gray-500">$</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={editFee}
+                          onChange={(e) => setEditFee(Number(e.target.value))}
+                          className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-sm font-medium text-gray-900">${hotel.billing_fixed_fee}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleConfigure(hotel)}
-                      className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
-                    >
-                      Configure
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {editingId === hotel.id ? (
+                        <>
+                          <button
+                            onClick={() => saveEdit(hotel.id)}
+                            disabled={saving}
+                            className="p-1.5 text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50"
+                            title="Save"
+                          >
+                            <CheckIcon className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-md transition-colors"
+                            title="Cancel"
+                          >
+                            <XMarkIcon className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startEdit(hotel)}
+                            className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-md transition-colors"
+                            title="Edit billing"
+                          >
+                            <PencilIcon className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleConfigure(hotel)}
+                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
+                          >
+                            Configure
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
