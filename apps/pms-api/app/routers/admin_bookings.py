@@ -10,7 +10,7 @@ from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.payout_repo import PayoutRepository
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate, AdminBookingCreate, BookingRoomAssign
+from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
@@ -171,6 +171,24 @@ async def get_booking(
     if not booking or str(booking["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Booking not found")
     return _booking_to_admin(booking)
+
+
+@router.patch("/bookings/{booking_id}", response_model=BookingAdminResponse)
+async def update_booking_details(
+    booking_id: str,
+    data: BookingDetailsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    updates = data.model_dump(exclude_none=True)
+    updated = await BookingRepository.update_details(booking_id, updates)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return _booking_to_admin(updated)
 
 
 @router.patch("/bookings/{booking_id}/status", response_model=BookingAdminResponse)

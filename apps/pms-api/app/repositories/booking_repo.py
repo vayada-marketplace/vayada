@@ -224,6 +224,47 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def update_details(booking_id: str, updates: dict) -> Optional[dict]:
+        """Update booking fields dynamically."""
+        ALLOWED = {
+            "check_in", "check_out", "guest_first_name", "guest_last_name",
+            "guest_email", "guest_phone", "adults", "children",
+            "nightly_rate", "special_requests",
+        }
+        filtered = {k: v for k, v in updates.items() if k in ALLOWED and v is not None}
+        if not filtered:
+            return await BookingRepository.get_by_id(booking_id)
+
+        # Recalculate total if rate or dates changed
+        set_clauses = []
+        params = [booking_id]
+        for i, (col, val) in enumerate(filtered.items(), start=2):
+            set_clauses.append(f"{col} = ${i}")
+            params.append(val)
+
+        set_clauses.append("updated_at = now()")
+        sql = f"UPDATE bookings SET {', '.join(set_clauses)} WHERE id = $1 RETURNING *"
+        row = await Database.fetchrow(sql, *params)
+        if not row:
+            return None
+
+        # Recalculate total_amount and nights if dates or rate changed
+        booking = dict(row)
+        if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
+            from datetime import date
+            ci = date.fromisoformat(str(booking["check_in"]))
+            co = date.fromisoformat(str(booking["check_out"]))
+            nights = max(1, (co - ci).days)
+            rate = float(booking["nightly_rate"])
+            total = round(rate * nights, 2)
+            row = await Database.fetchrow(
+                "UPDATE bookings SET nights = $2, total_amount = $3, updated_at = now() WHERE id = $1 RETURNING *",
+                booking_id, nights, total,
+            )
+            booking = dict(row) if row else booking
+        return booking
+
+    @staticmethod
     async def update_payment_status(booking_id: str, payment_status: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """

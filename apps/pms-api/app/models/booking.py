@@ -138,6 +138,21 @@ class BookingStatusUpdate(BaseModel):
     status: str  # 'confirmed' or 'cancelled'
 
 
+class BookingDetailsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    check_in: Optional[str] = None
+    check_out: Optional[str] = None
+    guest_first_name: Optional[str] = None
+    guest_last_name: Optional[str] = None
+    guest_email: Optional[str] = None
+    guest_phone: Optional[str] = None
+    adults: Optional[int] = None
+    children: Optional[int] = None
+    nightly_rate: Optional[float] = None
+    special_requests: Optional[str] = None
+
+
 class BookingRoomAssign(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
