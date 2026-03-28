@@ -1,8 +1,7 @@
 """
 Email service for the booking engine backend.
 """
-import smtplib
-import ssl
+import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -24,50 +23,34 @@ async def send_email(
         logger.warning(f"Email sending is disabled. Would send to {to_email}: {subject}")
         return False
 
-    try:
-        return await _send_email_smtp(to_email, subject, html_body, text_body)
-    except Exception as e:
-        logger.error(f"Failed to send email to {to_email}: {e}")
-        return False
-
-
-async def _send_email_smtp(
-    to_email: str,
-    subject: str,
-    html_body: str,
-    text_body: Optional[str] = None,
-) -> bool:
     if not settings.SMTP_HOST:
         logger.error("SMTP_HOST not configured")
         return False
 
-    if not text_body:
-        text_body = re.sub(r'<[^>]+>', '', html_body).replace('&nbsp;', ' ').strip()
+    try:
+        if not text_body:
+            text_body = re.sub(r'<[^>]+>', '', html_body).replace('&nbsp;', ' ').strip()
 
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
-    msg['To'] = to_email
-    msg.attach(MIMEText(text_body, 'plain'))
-    msg.attach(MIMEText(html_body, 'html'))
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
+        msg['To'] = to_email
+        msg.attach(MIMEText(text_body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html'))
 
-    if settings.SMTP_PORT == 465:
-        context = ssl.create_default_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, context=context) as server:
-            if settings.SMTP_USER and settings.SMTP_PASSWORD:
-                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            if settings.SMTP_USE_TLS:
-                server.starttls()
-            if settings.SMTP_USER and settings.SMTP_PASSWORD:
-                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg)
-
-    logger.info(f"Email sent successfully to {to_email}")
-    return True
+        await aiosmtplib.send(
+            msg,
+            hostname=settings.SMTP_HOST,
+            port=settings.SMTP_PORT,
+            username=settings.SMTP_USER or None,
+            password=settings.SMTP_PASSWORD or None,
+            use_tls=settings.SMTP_USE_TLS,
+        )
+        logger.info(f"Email sent successfully to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {e}")
+        return False
 
 
 def create_email_change_verification_html(verification_link: str, new_email: str, user_name: Optional[str] = None) -> str:
