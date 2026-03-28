@@ -284,7 +284,7 @@ export default function DatePickerCalendar({
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-6 z-50 w-[640px]"
+      className="absolute left-0 right-0 md:right-auto top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 md:p-6 z-50 md:w-[640px]"
     >
       {/* Header */}
       <div className="mb-4">
@@ -305,7 +305,7 @@ export default function DatePickerCalendar({
         </button>
 
         {/* Two month grids */}
-        <div className="flex-1 grid grid-cols-2 gap-6">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           <MonthGrid
             year={baseYear}
             month={baseMonth}

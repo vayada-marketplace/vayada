@@ -202,7 +202,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white overflow-x-hidden">
       {/* Hero Section */}
       <div className="relative h-[520px] w-full">
         <Image
@@ -419,7 +419,7 @@ export default function HomePage() {
                     {step.number}
                   </div>
                   <span
-                    className={`text-sm font-medium ${
+                    className={`hidden md:inline text-sm font-medium ${
                       step.number === currentStep ? 'text-gray-900' : 'text-gray-400'
                     }`}
                   >
