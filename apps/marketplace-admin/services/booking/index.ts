@@ -8,4 +8,5 @@ export type {
   AddonItem,
   SuperAdminHotel,
   AddonSettings,
+  PromoCodeItem,
 } from './settingsService'

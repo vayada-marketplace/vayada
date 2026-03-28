@@ -63,6 +63,19 @@ export interface AddonSettings {
   groupAddonsByCategory: boolean
 }
 
+export interface PromoCodeItem {
+  id: string
+  code: string
+  discountType: 'percentage' | 'fixed'
+  discountValue: number
+  validFrom?: string | null
+  validUntil?: string | null
+  isActive: boolean
+  maxUses?: number | null
+  useCount: number
+  createdAt?: string
+}
+
 export const bookingSettingsService = {
   listAllHotels: () =>
     bookingApiClient.get<SuperAdminHotel[]>('/admin/superadmin/hotels'),
@@ -105,4 +118,24 @@ export const bookingSettingsService = {
 
   updateAddonSettings: (hotelId: string, data: Partial<AddonSettings>) =>
     bookingApiClient.patch<AddonSettings>('/admin/settings/addons', data, hotelHeaders(hotelId)),
+
+  // Benefits
+  getBenefits: (hotelId: string) =>
+    bookingApiClient.get<{ benefits: string[] }>('/admin/benefits', hotelHeaders(hotelId)),
+
+  updateBenefits: (hotelId: string, benefits: string[]) =>
+    bookingApiClient.put<{ benefits: string[] }>('/admin/benefits', { benefits }, hotelHeaders(hotelId)),
+
+  // Promo Codes
+  listPromoCodes: (hotelId: string) =>
+    bookingApiClient.get<PromoCodeItem[]>('/admin/promo-codes', hotelHeaders(hotelId)),
+
+  createPromoCode: (hotelId: string, data: Omit<PromoCodeItem, 'id' | 'useCount' | 'createdAt'>) =>
+    bookingApiClient.post<PromoCodeItem>('/admin/promo-codes', data, hotelHeaders(hotelId)),
+
+  updatePromoCode: (hotelId: string, id: string, data: Partial<PromoCodeItem>) =>
+    bookingApiClient.patch<PromoCodeItem>(`/admin/promo-codes/${id}`, data, hotelHeaders(hotelId)),
+
+  deletePromoCode: (hotelId: string, id: string) =>
+    bookingApiClient.delete(`/admin/promo-codes/${id}`, hotelHeaders(hotelId)),
 }
