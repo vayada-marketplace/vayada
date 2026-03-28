@@ -8,6 +8,7 @@ from app.dependencies import require_superadmin
 from app.auth import hash_password
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.database import Database
 from app.models.utils import slugify
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ async def superadmin_check(user_id: str = Depends(require_superadmin)):
 @router.get("/superadmin/hotels")
 async def superadmin_list_hotels(user_id: str = Depends(require_superadmin)):
     hotels = await BookingHotelRepository.list_all(
-        columns="id, name, slug, location, country, user_id"
+        columns="id, name, slug, location, country, user_id, billing_commission_rate, billing_fixed_fee, billing_active_plan"
     )
 
     result = []
@@ -47,9 +48,37 @@ async def superadmin_list_hotels(user_id: str = Depends(require_superadmin)):
             "country": hotel.get("country") or "",
             "owner_name": owner["name"] if owner else "",
             "owner_email": owner["email"] if owner else "",
+            "billing_commission_rate": hotel.get("billing_commission_rate") or 5,
+            "billing_fixed_fee": hotel.get("billing_fixed_fee") or 30,
+            "billing_active_plan": hotel.get("billing_active_plan") or "commission",
         })
 
     return result
+
+
+@router.patch("/superadmin/hotels/{hotel_id}/billing")
+async def superadmin_update_billing(
+    hotel_id: str,
+    data: dict,
+    user_id: str = Depends(require_superadmin),
+):
+    """Update billing settings for a specific hotel (super admin only)."""
+    allowed = {"billing_commission_rate", "billing_fixed_fee"}
+    updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    set_clauses = []
+    params = [hotel_id]
+    for i, (col, val) in enumerate(updates.items(), start=2):
+        set_clauses.append(f"{col} = ${i}")
+        params.append(val)
+
+    sql = f"UPDATE booking_hotels SET {', '.join(set_clauses)} WHERE id = $1 RETURNING id"
+    row = await Database.fetchrow(sql, *params)
+    if not row:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    return {"ok": True}
 
 
 @router.post("/superadmin/hotels", status_code=status.HTTP_201_CREATED)
