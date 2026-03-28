@@ -400,7 +400,7 @@ export default function DesignStudioPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-1 mb-2">
-                      {['Mountain View', 'Balcony', 'Mini Bar', 'Safe'].map((feat) => (
+                      {['Mountain View', 'Balcony', 'Minibar', 'Safe'].map((feat) => (
                         <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
                           <svg className="w-2 h-2 flex-shrink-0" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

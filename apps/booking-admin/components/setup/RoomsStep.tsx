@@ -117,7 +117,7 @@ export const AMENITY_CATEGORIES = [
   },
   {
     name: 'Kitchen',
-    items: ['Mini Bar', 'Refrigerator', 'Microwave', 'Kitchenware', 'Electric kettle', 'Stovetop', 'Dining table'],
+    items: ['Minibar', 'Refrigerator', 'Microwave', 'Kitchenware', 'Electric kettle', 'Stovetop', 'Dining table'],
   },
   {
     name: 'Bathroom',
