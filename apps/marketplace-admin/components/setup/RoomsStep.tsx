@@ -1286,6 +1286,7 @@ export default function RoomsStep({
                       {isExpanded && (
                         <div className="px-4 pb-4 space-y-2">
                           <button
+                            type="button"
                             onClick={() => {
                               if (allSelected) {
                                 updateRoom({ amenities: room.amenities.filter(a => !cat.items.includes(a)) })
@@ -1303,6 +1304,7 @@ export default function RoomsStep({
                               const isSelected = room.amenities.includes(item)
                               return (
                                 <button
+                                  type="button"
                                   key={item}
                                   onClick={() => {
                                     if (isSelected) {
