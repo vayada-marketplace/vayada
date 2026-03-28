@@ -20,6 +20,89 @@ import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/compon
 
 type Tab = 'property' | 'booking' | 'notifications' | 'security' | 'billing'
 
+const STRIPE_COUNTRIES = [
+  {c:'AE',n:'United Arab Emirates',f:'🇦🇪'},{c:'AR',n:'Argentina',f:'🇦🇷'},{c:'AT',n:'Austria',f:'🇦🇹'},{c:'AU',n:'Australia',f:'🇦🇺'},
+  {c:'BE',n:'Belgium',f:'🇧🇪'},{c:'BG',n:'Bulgaria',f:'🇧🇬'},{c:'BO',n:'Bolivia',f:'🇧🇴'},{c:'BR',n:'Brazil',f:'🇧🇷'},
+  {c:'CA',n:'Canada',f:'🇨🇦'},{c:'CH',n:'Switzerland',f:'🇨🇭'},{c:'CL',n:'Chile',f:'🇨🇱'},{c:'CO',n:'Colombia',f:'🇨🇴'},
+  {c:'CR',n:'Costa Rica',f:'🇨🇷'},{c:'CY',n:'Cyprus',f:'🇨🇾'},{c:'CZ',n:'Czech Republic',f:'🇨🇿'},{c:'DE',n:'Germany',f:'🇩🇪'},
+  {c:'DK',n:'Denmark',f:'🇩🇰'},{c:'DO',n:'Dominican Republic',f:'🇩🇴'},{c:'EE',n:'Estonia',f:'🇪🇪'},{c:'EG',n:'Egypt',f:'🇪🇬'},
+  {c:'ES',n:'Spain',f:'🇪🇸'},{c:'FI',n:'Finland',f:'🇫🇮'},{c:'FR',n:'France',f:'🇫🇷'},{c:'GB',n:'United Kingdom',f:'🇬🇧'},
+  {c:'GH',n:'Ghana',f:'🇬🇭'},{c:'GR',n:'Greece',f:'🇬🇷'},{c:'GT',n:'Guatemala',f:'🇬🇹'},{c:'HK',n:'Hong Kong',f:'🇭🇰'},
+  {c:'HR',n:'Croatia',f:'🇭🇷'},{c:'HU',n:'Hungary',f:'🇭🇺'},{c:'ID',n:'Indonesia',f:'🇮🇩'},{c:'IE',n:'Ireland',f:'🇮🇪'},
+  {c:'IL',n:'Israel',f:'🇮🇱'},{c:'IN',n:'India',f:'🇮🇳'},{c:'IS',n:'Iceland',f:'🇮🇸'},{c:'IT',n:'Italy',f:'🇮🇹'},
+  {c:'JM',n:'Jamaica',f:'🇯🇲'},{c:'JP',n:'Japan',f:'🇯🇵'},{c:'KE',n:'Kenya',f:'🇰🇪'},{c:'KR',n:'South Korea',f:'🇰🇷'},
+  {c:'LI',n:'Liechtenstein',f:'🇱🇮'},{c:'LT',n:'Lithuania',f:'🇱🇹'},{c:'LU',n:'Luxembourg',f:'🇱🇺'},{c:'LV',n:'Latvia',f:'🇱🇻'},
+  {c:'MA',n:'Morocco',f:'🇲🇦'},{c:'MT',n:'Malta',f:'🇲🇹'},{c:'MX',n:'Mexico',f:'🇲🇽'},{c:'MY',n:'Malaysia',f:'🇲🇾'},
+  {c:'NG',n:'Nigeria',f:'🇳🇬'},{c:'NL',n:'Netherlands',f:'🇳🇱'},{c:'NO',n:'Norway',f:'🇳🇴'},{c:'NZ',n:'New Zealand',f:'🇳🇿'},
+  {c:'PA',n:'Panama',f:'🇵🇦'},{c:'PE',n:'Peru',f:'🇵🇪'},{c:'PH',n:'Philippines',f:'🇵🇭'},{c:'PL',n:'Poland',f:'🇵🇱'},
+  {c:'PT',n:'Portugal',f:'🇵🇹'},{c:'PY',n:'Paraguay',f:'🇵🇾'},{c:'RO',n:'Romania',f:'🇷🇴'},{c:'RS',n:'Serbia',f:'🇷🇸'},
+  {c:'SA',n:'Saudi Arabia',f:'🇸🇦'},{c:'SE',n:'Sweden',f:'🇸🇪'},{c:'SG',n:'Singapore',f:'🇸🇬'},{c:'SI',n:'Slovenia',f:'🇸🇮'},
+  {c:'SK',n:'Slovakia',f:'🇸🇰'},{c:'TH',n:'Thailand',f:'🇹🇭'},{c:'TN',n:'Tunisia',f:'🇹🇳'},{c:'TR',n:'Turkey',f:'🇹🇷'},
+  {c:'TT',n:'Trinidad & Tobago',f:'🇹🇹'},{c:'TW',n:'Taiwan',f:'🇹🇼'},{c:'US',n:'United States',f:'🇺🇸'},{c:'UY',n:'Uruguay',f:'🇺🇾'},
+  {c:'VN',n:'Vietnam',f:'🇻🇳'},{c:'ZA',n:'South Africa',f:'🇿🇦'},
+].sort((a, b) => a.n.localeCompare(b.n))
+
+function CountrySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const filtered = STRIPE_COUNTRIES.filter(
+    c => c.n.toLowerCase().includes(search.toLowerCase()) || c.c.toLowerCase().includes(search.toLowerCase())
+  )
+  const selected = STRIPE_COUNTRIES.find(c => c.c === value)
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setSearch('') }}
+        className="w-full px-2.5 py-1.5 text-left border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white flex items-center justify-between"
+      >
+        <span>{selected ? `${selected.f} ${selected.n}` : 'Select country'}</span>
+        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
+          <div className="p-1.5">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search country..."
+              autoFocus
+              className="w-full px-2.5 py-1.5 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+          <ul className="max-h-52 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-[13px] text-gray-400">No results</li>
+            ) : filtered.map(c => (
+              <li
+                key={c.c}
+                onClick={() => { onChange(c.c); setOpen(false) }}
+                className={`px-3 py-1.5 text-[13px] cursor-pointer hover:bg-primary-50 flex items-center gap-2 ${c.c === value ? 'bg-primary-50 font-medium text-primary-700' : 'text-gray-700'}`}
+              >
+                <span>{c.f}</span>
+                <span>{c.n}</span>
+                <span className="text-gray-400 text-[11px] ml-auto">{c.c}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: '',
   property_name: '',
@@ -1310,11 +1393,7 @@ export default function SettingsPage() {
                       </div>
                       <div>
                         <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
-                        <select value={connectCountry} onChange={(e) => setConnectCountry(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
-                          {[{c:'AT',n:'Austria'},{c:'DE',n:'Germany'},{c:'CH',n:'Switzerland'},{c:'GB',n:'United Kingdom'},{c:'US',n:'United States'},{c:'FR',n:'France'},{c:'ES',n:'Spain'},{c:'IT',n:'Italy'},{c:'NL',n:'Netherlands'},{c:'PT',n:'Portugal'},{c:'BE',n:'Belgium'},{c:'SE',n:'Sweden'},{c:'NO',n:'Norway'},{c:'DK',n:'Denmark'},{c:'FI',n:'Finland'},{c:'IE',n:'Ireland'},{c:'AU',n:'Australia'},{c:'NZ',n:'New Zealand'},{c:'CA',n:'Canada'},{c:'SG',n:'Singapore'},{c:'HK',n:'Hong Kong'},{c:'JP',n:'Japan'},{c:'MY',n:'Malaysia'},{c:'TH',n:'Thailand'},{c:'ID',n:'Indonesia'},{c:'PH',n:'Philippines'},{c:'MX',n:'Mexico'},{c:'BR',n:'Brazil'},{c:'IN',n:'India'}].map(({c,n}) => (
-                            <option key={c} value={c}>{n}</option>
-                          ))}
-                        </select>
+                        <CountrySelect value={connectCountry} onChange={setConnectCountry} />
                       </div>
                     </div>
                     <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
