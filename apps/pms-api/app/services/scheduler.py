@@ -12,6 +12,7 @@ from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRep
 from app.repositories.affiliate_repo import AffiliateRepository
 from app.services import stripe_service
 from app.services import xendit_service
+from app.services.email_service import send_affiliate_payout_notification
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,14 @@ async def process_affiliate_payouts():
                 )
                 logger.info("Completed affiliate payout %s via Stripe, transfer %s", payout_id, result["id"])
 
+                await send_affiliate_payout_notification(
+                    affiliate_email=affiliate["email"],
+                    affiliate_name=affiliate["full_name"],
+                    payout_amount=float(payout["amount"]),
+                    currency=payout["currency"],
+                    payout_method="stripe",
+                )
+
             else:
                 # paypal / bank — skip for manual handling
                 logger.info("Affiliate %s uses %s, skipping payout %s for manual handling", affiliate_id, payment_method, payout_id)
@@ -212,6 +221,17 @@ async def poll_xendit_processing_payouts():
             if xendit_status == "SUCCEEDED":
                 await PayoutRepository.update_status(payout_id, "completed", xendit_payout_id=xendit_id)
                 logger.info("Xendit poll: payout %s completed (xendit %s)", payout_id, xendit_id)
+
+                if payout.get("recipient_type") == "affiliate":
+                    affiliate = await AffiliateRepository.get_by_id(str(payout["recipient_id"]))
+                    if affiliate:
+                        await send_affiliate_payout_notification(
+                            affiliate_email=affiliate["email"],
+                            affiliate_name=affiliate["full_name"],
+                            payout_amount=float(payout["amount"]),
+                            currency=payout["currency"],
+                            payout_method="xendit",
+                        )
             elif xendit_status in ("FAILED", "REVERSED"):
                 await PayoutRepository.update_status(payout_id, "failed")
                 logger.warning("Xendit poll: payout %s failed (xendit %s, status=%s)", payout_id, xendit_id, xendit_status)

@@ -389,6 +389,64 @@ async def send_affiliate_invite(affiliate_email: str, affiliate_name: str, hotel
     await _send_email(affiliate_email, subject, _wrap_html(content))
 
 
+async def send_guest_payment_confirmed(
+    guest_email: str, booking: dict, payment_amount: float, payment_method: str
+):
+    """Notify guest that their payment has been successfully received."""
+    method_labels = {
+        "card": "Credit/Debit Card",
+        "xendit": "Online Payment",
+        "bank_transfer": "Bank Transfer",
+    }
+    method_label = method_labels.get(payment_method, payment_method.replace("_", " ").title())
+
+    currency = booking.get("currency", "USD")
+
+    subject = f"Payment Received — {booking['booking_reference']}"
+    content = f"""
+    <h2>Payment Received</h2>
+    <p class="detail">Your payment of <strong>{currency} {payment_amount:.2f}</strong> for your booking at <strong>{booking['hotel_name']}</strong> has been successfully processed.</p>
+    <p class="detail"><strong>Payment Method:</strong> {method_label}</p>
+    <hr class="divider">
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <p class="detail">Thank you for your payment. You will receive a separate confirmation once the host reviews your booking.</p>
+    {_my_booking_button_html(booking)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_affiliate_payout_notification(
+    affiliate_email: str,
+    affiliate_name: str,
+    payout_amount: float,
+    currency: str,
+    payout_method: str,
+):
+    """Notify affiliate that a payout has been processed."""
+    method_labels = {
+        "stripe": "Stripe Connect",
+        "paypal": "PayPal",
+        "bank_transfer": "Bank Transfer",
+        "xendit": "Xendit",
+    }
+    method_label = method_labels.get(payout_method, payout_method or "N/A")
+
+    subject = f"Payout Processed — {currency} {payout_amount:.2f}"
+    content = f"""
+    <h2>Payout Processed</h2>
+    <p class="detail">Hi <strong>{affiliate_name}</strong>,</p>
+    <p class="detail">Your affiliate payout has been successfully processed. Here are the details:</p>
+    <hr class="divider">
+    <p class="detail"><strong>Amount:</strong> {currency} {payout_amount:.2f}</p>
+    <p class="detail"><strong>Method:</strong> {method_label}</p>
+    <hr class="divider">
+    <p class="detail">Funds will arrive in your account according to the processing times of your payout method.</p>
+    <p class="detail">If you have any questions, please don't hesitate to reach out.</p>
+    """
+    await _send_email(affiliate_email, subject, _wrap_html(content))
+
+
 async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
     if not hotel_email:

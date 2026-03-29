@@ -60,6 +60,20 @@ async def stripe_webhook(request: Request):
             )
             logger.info("Payment captured via webhook: %s", pi_id)
 
+            # Send payment confirmation email to guest
+            booking = await BookingRepository.get_by_id(str(payment["booking_id"]))
+            if booking and booking.get("guest_email"):
+                import asyncio
+                from app.services.email_service import send_guest_payment_confirmed
+                asyncio.create_task(
+                    send_guest_payment_confirmed(
+                        booking["guest_email"],
+                        booking,
+                        float(payment["amount"]),
+                        "card",
+                    )
+                )
+
     elif event_type == "payment_intent.canceled":
         pi_id = data["id"]
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
@@ -190,8 +204,11 @@ async def xendit_webhook(request: Request):
 
     if event_type == "payout.succeeded" or status == "SUCCEEDED":
         from app.database import Database
+        from app.repositories.affiliate_repo import AffiliateRepository
+        from app.services.email_service import send_affiliate_payout_notification
+
         row = await Database.fetchrow(
-            "SELECT id FROM payouts WHERE xendit_payout_id = $1",
+            "SELECT id, recipient_type, recipient_id, amount, currency FROM payouts WHERE xendit_payout_id = $1",
             xendit_payout_id,
         )
         if row:
@@ -199,6 +216,17 @@ async def xendit_webhook(request: Request):
                 str(row["id"]), "completed", xendit_payout_id=xendit_payout_id
             )
             logger.info("Xendit payout completed: %s", xendit_payout_id)
+
+            if row["recipient_type"] == "affiliate":
+                affiliate = await AffiliateRepository.get_by_id(str(row["recipient_id"]))
+                if affiliate:
+                    await send_affiliate_payout_notification(
+                        affiliate_email=affiliate["email"],
+                        affiliate_name=affiliate["full_name"],
+                        payout_amount=float(row["amount"]),
+                        currency=row["currency"],
+                        payout_method="xendit",
+                    )
 
     elif event_type == "payout.failed" or status == "FAILED":
         from app.database import Database
@@ -248,6 +276,19 @@ async def _handle_invoice_callback(data: dict):
                 asyncio.create_task(
                     send_booking_request_notification(hotel["contact_email"], booking)
                 )
+
+        # Send payment confirmation email to guest
+        if booking and booking.get("guest_email"):
+            from app.services.email_service import send_guest_payment_confirmed
+            xendit_label = f"{payment_method}/{payment_channel}" if payment_channel else (payment_method or "xendit")
+            asyncio.create_task(
+                send_guest_payment_confirmed(
+                    booking["guest_email"],
+                    booking,
+                    float(payment["amount"]),
+                    xendit_label,
+                )
+            )
 
         logger.info(
             "Xendit invoice paid: %s method=%s channel=%s booking=%s",
