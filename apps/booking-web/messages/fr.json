@@ -96,7 +96,8 @@
     "yourSelections": "Vos sélections ({count})",
     "addonsTotal": "Total des suppléments",
     "backToRooms": "Retour aux chambres",
-    "proceedToGuest": "Passer aux informations client"
+    "proceedToGuest": "Passer aux informations client",
+    "selectDays": "Sélectionnez les jours :"
   },
   "book": {
     "guestInformation": "Informations client",

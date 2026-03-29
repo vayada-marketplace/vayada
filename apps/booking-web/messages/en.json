@@ -97,7 +97,8 @@
     "yourSelections": "Your Selections ({count})",
     "addonsTotal": "Add-ons total",
     "backToRooms": "Back to Rooms",
-    "proceedToGuest": "Proceed to Guest Information"
+    "proceedToGuest": "Proceed to Guest Information",
+    "selectDays": "Select which days:"
   },
   "book": {
     "guestInformation": "Guest Information",

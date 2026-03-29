@@ -96,7 +96,8 @@
     "yourSelections": "Pilihan Anda ({count})",
     "addonsTotal": "Total tambahan",
     "backToRooms": "Kembali ke Kamar",
-    "proceedToGuest": "Lanjut ke Informasi Tamu"
+    "proceedToGuest": "Lanjut ke Informasi Tamu",
+    "selectDays": "Pilih hari:"
   },
   "book": {
     "guestInformation": "Informasi Tamu",

@@ -26,6 +26,7 @@ export default function AddonsPage() {
   const { formatPrice, convertPrice, selectedCurrency } = useCurrency()
   const [activeCategory, setActiveCategory] = useState('all')
   const [selections, setSelections] = useState<Record<string, number>>({})
+  const [selectedDates, setSelectedDates] = useState<Record<string, string[]>>({})
   const [detailIndex, setDetailIndex] = useState<number | null>(null)
   const currentStep = 2
 
@@ -33,6 +34,18 @@ export default function AddonsPage() {
   const checkOut = searchParams.get('checkOut') || ''
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const nights = calculateNights(checkIn, checkOut)
+
+  // Generate array of stay dates (each night of the stay)
+  const stayDates = (() => {
+    if (!checkIn || !checkOut) return []
+    const dates: string[] = []
+    const start = new Date(checkIn)
+    const end = new Date(checkOut)
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().split('T')[0])
+    }
+    return dates
+  })()
 
   const STEPS = [
     { number: 1, label: ts('rooms') },
@@ -59,19 +72,51 @@ export default function AddonsPage() {
       if (prev[id] !== undefined) {
         const next = { ...prev }
         delete next[id]
+        setSelectedDates((pd) => { const nd = { ...pd }; delete nd[id]; return nd })
         return next
       }
       const addon = addons.find(a => a.id === id)
+      if (addon?.perNight) {
+        setSelectedDates((pd) => ({ ...pd, [id]: [...stayDates] }))
+      }
       return { ...prev, [id]: addon?.perNight ? nights : 1 }
+    })
+  }
+
+  const toggleDate = (addonId: string, date: string) => {
+    setSelectedDates((prev) => {
+      const current = prev[addonId] || []
+      const updated = current.includes(date)
+        ? current.filter((d) => d !== date)
+        : [...current, date].sort()
+      if (updated.length === 0) return prev // must keep at least 1 day
+      setSelections((ps) => ({ ...ps, [addonId]: updated.length }))
+      return { ...prev, [addonId]: updated }
     })
   }
 
   const setQuantity = (id: string, qty: number, addon: { perNight?: boolean }) => {
     const max = getMaxQuantity(addon)
-    setSelections((prev) => ({
-      ...prev,
-      [id]: Math.max(1, Math.min(qty, max)),
-    }))
+    const clamped = Math.max(1, Math.min(qty, max))
+    setSelections((prev) => ({ ...prev, [id]: clamped }))
+    // For perNight addons, adjust selected dates to match new quantity
+    if (addon.perNight) {
+      setSelectedDates((prev) => {
+        const current = prev[id] || [...stayDates]
+        if (clamped >= current.length) {
+          // Adding dates: fill from stayDates in order
+          const result = [...current]
+          for (const d of stayDates) {
+            if (result.length >= clamped) break
+            if (!result.includes(d)) result.push(d)
+          }
+          return { ...prev, [id]: result.sort() }
+        } else {
+          // Removing dates: keep the first N
+          return { ...prev, [id]: current.slice(0, clamped) }
+        }
+      })
+    }
   }
 
   return (
@@ -165,6 +210,35 @@ export default function AddonsPage() {
                       </button>
                     )}
                   </div>
+                  {/* Date toggles for perNight addons */}
+                  {isAdded && addon.perNight && stayDates.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-xs text-gray-500 mb-2">{t('selectDays')}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {stayDates.map((date) => {
+                          const isSelected = (selectedDates[addon.id] || []).includes(date)
+                          const d = new Date(date)
+                          const dayLabel = d.toLocaleDateString(undefined, { weekday: 'short' })
+                          const dateLabel = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+                          return (
+                            <button
+                              key={date}
+                              onClick={() => toggleDate(addon.id, date)}
+                              disabled={isSelected && (selectedDates[addon.id] || []).length <= 1}
+                              className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                                isSelected
+                                  ? 'bg-primary-50 text-primary-700 border-primary-300'
+                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300'
+                              } disabled:cursor-not-allowed`}
+                            >
+                              <span className="block leading-tight">{dayLabel}</span>
+                              <span className="block leading-tight text-[10px]">{dateLabel}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )
@@ -198,7 +272,7 @@ export default function AddonsPage() {
                       <p className="text-sm font-semibold text-gray-900">{addon.name}</p>
                       <p className="text-xs text-gray-500">
                         {addon.perNight
-                          ? `${qty}/${nights} ${tc('nights', { count: nights })}`
+                          ? `${qty} / ${tc('nights', { count: nights })}`
                           : qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
                         {addon.perPerson ? ` · ${tc('perPerson')}` : ''}
                       </p>
@@ -258,6 +332,10 @@ export default function AddonsPage() {
                   const qty = selections[id]
                   return qty > 1 ? `${id}:${qty}` : id
                 }).join(','))
+                // Store selected dates for perNight addons
+                if (Object.keys(selectedDates).length > 0) {
+                  sessionStorage.setItem('addonDates', JSON.stringify(selectedDates))
+                }
               }
               router.push(`/book?${params.toString()}`)
             }}
