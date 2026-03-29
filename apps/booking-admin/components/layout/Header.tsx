@@ -224,8 +224,11 @@ export default function Header() {
               <div className="border-t border-gray-100" />
               {/* Menu items */}
               <div className="py-1">
-                <button className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
-                  {t('layout.header.accountSettings')}
+                <button
+                  onClick={() => { setProfileOpen(false); router.push('/settings') }}
+                  className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  {t('layout.sidebar.settings')}
                 </button>
                 {/* Language selector */}
                 <div className="relative">
