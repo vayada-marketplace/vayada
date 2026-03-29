@@ -9,6 +9,7 @@ import {
   CheckIcon,
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
+import { useTranslation } from '@/lib/i18n'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
@@ -26,20 +27,20 @@ function buildHandoffUrl(baseUrl: string): string {
 }
 
 interface NavItem {
-  label: string
+  labelKey: string
   href: string
   icon: React.ComponentType<{ className?: string }>
   badge?: number
 }
 
 const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: DashboardIcon },
-  { label: 'Calendar', href: '/calendar', icon: CalendarIcon },
-  { label: 'Reservations', href: '/bookings', icon: ReservationsIcon },
-  // { label: 'Inbox', href: '/inbox', icon: InboxIcon },
-  { label: 'Rooms & Rates', href: '/rooms', icon: RoomsIcon },
-  { label: 'Channel Manager', href: '/channel-manager', icon: ChannelsIcon },
-  { label: 'Settings', href: '/settings', icon: SettingsIcon },
+  { labelKey: 'layout.sidebar.dashboard', href: '/dashboard', icon: DashboardIcon },
+  { labelKey: 'layout.sidebar.calendar', href: '/calendar', icon: CalendarIcon },
+  { labelKey: 'layout.sidebar.reservations', href: '/bookings', icon: ReservationsIcon },
+  // { labelKey: 'layout.sidebar.inbox', href: '/inbox', icon: InboxIcon },
+  { labelKey: 'layout.sidebar.roomsRates', href: '/rooms', icon: RoomsIcon },
+  { labelKey: 'layout.sidebar.channelManager', href: '/channel-manager', icon: ChannelsIcon },
+  { labelKey: 'layout.sidebar.settings', href: '/settings', icon: SettingsIcon },
 ]
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -47,6 +48,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const { t } = useTranslation()
   const switcherRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -81,7 +83,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   }, [])
 
   const navItems: NavItem[] = BASE_NAV_ITEMS.map(item =>
-    item.label === 'Inbox' && unreadCount > 0
+    item.labelKey === 'layout.sidebar.inbox' && unreadCount > 0
       ? { ...item, badge: unreadCount }
       : item
   )
@@ -113,8 +115,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           {!collapsed && (
             <>
               <div className="min-w-0 text-left flex-1">
-                <p className="text-xs font-semibold text-gray-900 leading-tight">Property Manager</p>
-                <p className="text-[10px] text-gray-500 leading-tight truncate">Operations & Inventory</p>
+                <p className="text-xs font-semibold text-gray-900 leading-tight">{t('layout.sidebar.propertyManager')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight truncate">{t('layout.sidebar.propertyManagerDescription')}</p>
               </div>
               <ChevronDownIcon className={cn('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform', showSwitcher && 'rotate-180')} />
             </>
@@ -127,7 +129,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
               </svg>
-              Switch App
+              {t('layout.sidebar.switchApp')}
             </p>
             <a
               href="#"
@@ -143,8 +145,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </svg>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Direct Bookings & Revenue</p>
+                <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.bookingEngine')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.bookingEngineDescription')}</p>
               </div>
             </a>
             <button
@@ -160,8 +162,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </svg>
               </div>
               <div className="min-w-0 flex-1 text-left">
-                <p className="text-xs font-medium text-gray-900 leading-tight">Property Manager</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Operations & Inventory</p>
+                <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.propertyManager')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.propertyManagerDescription')}</p>
               </div>
               <CheckIcon className="w-4 h-4 text-primary-500 shrink-0" />
             </button>
@@ -185,7 +187,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50',
                 collapsed && 'justify-center px-0'
               )}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? t(item.labelKey) : undefined}
             >
               <item.icon
                 className={cn(
@@ -195,7 +197,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               />
               {!collapsed && (
                 <>
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.labelKey)}</span>
                   {item.badge != null && (
                     <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-blue-600 text-white rounded-full shrink-0">
                       {item.badge}
@@ -226,7 +228,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               collapsed && 'rotate-180'
             )}
           />
-          {!collapsed && <span>Collapse</span>}
+          {!collapsed && <span>{t('layout.sidebar.collapse')}</span>}
         </button>
       </div>
     </aside>

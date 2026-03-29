@@ -2,9 +2,11 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDownIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
 import { pmsSettingsService, HotelSummary } from '@/services/settings'
+import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
@@ -27,8 +29,11 @@ interface DayStats {
 }
 
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
+  const router = useRouter()
+  const { t, locale, setLocale } = useTranslation()
   const [profileOpen, setProfileOpen] = useState(false)
   const [propertyOpen, setPropertyOpen] = useState(false)
+  const [langOpen, setLangOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
 
@@ -99,21 +104,21 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         <div className="relative" ref={propertyRef}>
           {hotels.length <= 1 ? (
             <span className="text-[13px] font-medium text-gray-700">
-              {selectedHotel?.name || 'No properties'}
+              {selectedHotel?.name || t('layout.header.noProperties')}
             </span>
           ) : (
             <button
               onClick={() => setPropertyOpen(!propertyOpen)}
               className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
             >
-              <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
+              <span className="font-medium">{selectedHotel?.name || t('layout.header.noProperties')}</span>
               <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${propertyOpen ? 'rotate-180' : ''}`} />
             </button>
           )}
 
           {propertyOpen && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
-              <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
+              <p className="px-3 py-1.5 text-xs text-gray-500">{t('layout.header.switchProperty')}</p>
               <div className="px-1.5 max-h-60 overflow-y-auto">
                 {hotels.map((hotel) => {
                   const isSelected = selectedHotel?.id === hotel.id
@@ -153,7 +158,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
                 >
                   <PlusIcon className="w-4 h-4" />
-                  Add Property
+                  {t('layout.header.addProperty')}
                 </button>
               </div>
             </div>
@@ -167,7 +172,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         <div className="hidden md:flex flex-col justify-center">
           <p className="text-[12px] font-semibold text-gray-900 leading-tight">{dateStr}</p>
           <p className="text-[10px] text-gray-400 leading-tight">
-            {stats.arrivals} arrivals · {stats.departures} departures
+            {stats.arrivals} {t('layout.header.arrivals')} · {stats.departures} {t('layout.header.departures')}
           </p>
         </div>
       </div>
@@ -189,8 +194,43 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           {profileOpen && (
             <div className="absolute top-full right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
               <div className="px-3.5 py-2.5">
-                <p className="text-[13px] font-semibold text-gray-900">{userName || 'User'}</p>
+                <p className="text-[13px] font-semibold text-gray-900">{userName || t('layout.header.user')}</p>
                 <p className="text-xs text-gray-500">{userEmail}</p>
+              </div>
+              <div className="border-t border-gray-100" />
+              <div className="py-1">
+                <button
+                  onClick={() => { setProfileOpen(false); router.push('/settings') }}
+                  className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  {t('layout.sidebar.settings')}
+                </button>
+                {/* Language selector */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setLangOpen(!langOpen) }}
+                    className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <span>{t('layout.header.language')}</span>
+                    <span className="text-gray-400">{SUPPORTED_LANGUAGES.find(l => l.code === locale)?.flag} {SUPPORTED_LANGUAGES.find(l => l.code === locale)?.nativeName}</span>
+                  </button>
+                  {langOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 max-h-72 overflow-y-auto">
+                      {SUPPORTED_LANGUAGES.map((lang) => (
+                        <button
+                          key={lang.code}
+                          onClick={() => { setLocale(lang.code); setLangOpen(false); setProfileOpen(false) }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
+                            locale === lang.code ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span>{lang.flag}</span>
+                          <span>{lang.nativeName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="border-t border-gray-100" />
               <div className="py-1">
@@ -198,7 +238,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                   onClick={() => authService.logout()}
                   className="w-full text-left px-3.5 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
                 >
-                  Sign Out
+                  {t('layout.header.signOut')}
                 </button>
               </div>
             </div>
