@@ -48,7 +48,6 @@
   "common.coverLabel": "Omslagfoto",
   "common.uploading": "Uploaden...",
   "common.uploadFailed": "Upload mislukt",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "Log in om uw accommodatie te beheren",
   "auth.login.emailLabel": "E-mailadres",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.login.sessionExpiredBanner": "Uw sessie is verlopen. Log opnieuw in.",
   "auth.login.signOut": "Uitloggen",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Maak uw accommodatiebeheeraccount aan",
   "auth.register.fullNameLabel": "Volledige naam",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "Wachtwoorden komen niet overeen",
   "auth.register.emailExists": "Er bestaat al een account met dit e-mailadres.",
   "auth.register.unexpectedError": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
-
   "layout.header.switchProperty": "Wissel van accommodatie",
   "layout.header.addProperty": "Accommodatie toevoegen",
   "layout.header.arrivals": "aankomsten",
   "layout.header.departures": "vertrekken",
-
   "layout.sidebar.propertyManager": "Accommodatiebeheer",
   "layout.sidebar.operationsAndInventory": "Operaties & Inventaris",
   "layout.sidebar.switchApp": "Wissel van app",
@@ -111,13 +107,11 @@
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Instellingen",
   "layout.sidebar.collapse": "Inklappen",
-
   "search.placeholder": "Zoek reserveringen, gasten, kamers...",
   "search.noResults": "Geen resultaten voor '{query}'",
   "search.startTyping": "Begin met typen om te zoeken...",
   "search.categoryReservations": "Reserveringen",
   "search.categoryRoomTypes": "Kamertypes",
-
   "dashboard.title": "Dashboard",
   "dashboard.occupancyTonight": "Bezetting vanavond",
   "dashboard.occupancySub": "{occupied} van {total} kamers bezet",
@@ -134,7 +128,6 @@
   "dashboard.settled": "Afgehandeld",
   "dashboard.occupancyForecast": "Bezettingsprognose",
   "dashboard.next14Days": "Komende 14 dagen",
-
   "bookings.title": "Reserveringen",
   "bookings.subtitle": "Hoofdboek van alle boekingen",
   "bookings.searchPlaceholder": "Zoek op gast, reserverings-ID of kamer...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "Gedeeltelijk",
   "bookings.balanceRefunded": "Terugbetaald",
   "bookings.balanceDue": "Openstaand",
-
   "bookings.detail.title": "Boeking {reference}",
   "bookings.detail.notFound": "Boeking niet gevonden.",
   "bookings.detail.actionRequired": "Actie vereist",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "Boeking accepteren mislukt",
   "bookings.detail.failedToReject": "Boeking afwijzen mislukt",
   "bookings.detail.failedToUpdate": "Status bijwerken mislukt",
-
   "bookings.modal.notFound": "Boeking niet gevonden",
   "bookings.modal.editBooking": "Boeking bewerken",
   "bookings.modal.checkInLabel": "Check-in",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "Bevestigen",
   "bookings.modal.cancelButton": "Annuleren",
   "bookings.modal.cancelBookingButton": "Boeking annuleren",
-
   "calendar.title": "Kalender",
   "calendar.today": "Vandaag",
   "calendar.blockRoom": "Kamer blokkeren",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "Geen boekingen op deze dag",
   "calendar.selectDay": "Selecteer een dag",
   "calendar.newShort": "+ Nieuw",
-
   "calendar.newBookingModal.title": "Nieuwe boeking",
   "calendar.newBookingModal.roomLabel": "Kamer",
   "calendar.newBookingModal.checkInLabel": "Check-in",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "E-mail van de gast is verplicht",
   "calendar.newBookingModal.errorRoomRequired": "Selecteer een kamer",
   "calendar.newBookingModal.maxOccupancyWarning": "Dit kamertype heeft een maximale bezetting van {max} gasten. U heeft {selected} geselecteerd.",
-
   "calendar.blockModal.title": "Kamers blokkeren",
   "calendar.blockModal.roomTypeLabel": "Kamertype",
   "calendar.blockModal.startDateLabel": "Startdatum",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "Selecteer zowel start- als einddatum",
   "calendar.blockModal.errorEndAfterStart": "Einddatum moet na de startdatum zijn",
   "calendar.blockModal.failedToCreate": "Blokkering aanmaken mislukt",
-
   "rooms.title": "Kamers & Tarieven",
   "rooms.subtitle": "Beheer kamerinventaris en dagelijkse prijzen",
   "rooms.addRoomType": "Kamertype toevoegen",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "Afgeleide tarieven:",
   "rooms.nonRefundable": "Niet-restitueerbaar:",
   "rooms.occ": "bez.",
-
   "rooms.new.title": "Nieuw kamertype",
   "rooms.new.submitLabel": "Kamertype aanmaken",
   "rooms.new.nameRequired": "Naam is verplicht",
   "rooms.new.seasonRateRequired": "Minimaal een seizoen met een tarief hoger dan 0 is vereist",
   "rooms.new.everySeasonRateRequired": "Elk seizoen moet een tarief hoger dan 0 hebben",
   "rooms.new.failedToCreate": "Kamertype aanmaken mislukt",
-
   "rooms.edit.title": "Bewerken: {name}",
   "rooms.edit.submitLabel": "Wijzigingen opslaan",
   "rooms.edit.success": "Kamertype succesvol bijgewerkt",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "Weet u zeker dat u dit kamertype wilt verwijderen?",
   "rooms.edit.cannotDelete": "Kan niet verwijderen - kamertype heeft mogelijk boekingen",
   "rooms.edit.notFound": "Kamertype niet gevonden.",
-
   "rooms.form.tabDetails": "Kamerdetails",
   "rooms.form.tabPricing": "Prijzen & Tarieven",
   "rooms.form.tabMedia": "Afbeeldingen & Voorzieningen",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "Wordt getoond als 'Tot X gasten' op de kamerkaart",
   "rooms.form.bedrooms": "Slaapkamers",
   "rooms.form.bathrooms": "Badkamers",
-  "rooms.form.roomSize": "Kamergrootte (m\u00B2)",
+  "rooms.form.roomSize": "Kamergrootte (m²)",
   "rooms.form.totalRooms": "Totaal kamers",
   "rooms.form.totalRoomsHint": "Aantal beschikbare eenheden voor dit kamertype",
   "rooms.form.roomDescription": "Kamerbeschrijving",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "(getoond aan gasten in de boekingsmodule)",
   "rooms.form.selectCategory": "Selecteer categorie",
   "rooms.form.sortOrder": "Sorteervolgorde",
-
   "rooms.form.bedTypeKing": "Kingsize bed",
   "rooms.form.bedTypeQueen": "Queensize bed",
   "rooms.form.bedTypeDouble": "Tweepersoons bed",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "Eenpersoons bed",
   "rooms.form.bedTypeBunk": "Stapelbed",
   "rooms.form.bedTypeSofa": "Slaapbank",
-
   "rooms.form.categoryStandard": "Standaard",
   "rooms.form.categoryDeluxe": "Deluxe",
   "rooms.form.categorySuperior": "Superior",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "Bungalow",
   "rooms.form.categoryStudio": "Studio",
   "rooms.form.categoryPenthouse": "Penthouse",
-
   "rooms.form.pricingStep1Title": "Wanneer bent u open?",
   "rooms.form.pricingStep1Desc": "Operationele periodes herhalen zich jaarlijks - datums daarbuiten worden automatisch gesloten",
   "rooms.form.yearRound": "Het hele jaar",
   "rooms.form.period": "Periode {num}",
   "rooms.form.addPeriod": "Periode toevoegen",
   "rooms.form.endDateAfterStart": "Einddatum moet na de startdatum zijn",
-
   "rooms.form.pricingStep2Title": "Hoe veranderen uw prijzen gedurende het jaar?",
   "rooms.form.pricingStep2Desc": "Teken seizoenen op uw operationele periode en stel een basistarief per seizoen in",
   "rooms.form.noSeasonsYet": "Nog geen seizoenen. Voeg er een toe hieronder.",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "Seizoen",
   "rooms.form.flexRateColumn": "Flexibel tarief",
   "rooms.form.minStayColumn": "Min. verblijf",
-
   "rooms.form.pricingStep3Title": "Wat kunnen gasten boeken?",
   "rooms.form.pricingStep3Desc": "Selecteer minstens een tariefplan",
   "rooms.form.flexibleRate": "Flexibel tarief",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "(korting zonder annulering)",
   "rooms.form.discount": "Korting:",
   "rooms.form.offFlexibleRate": "korting op flexibel tarief",
-
   "rooms.form.pricingStep4Title": "Kosten weekenden meer?",
   "rooms.form.pricingStep4Desc": "Weekendprijzen gelden voor vrijdag- en zaterdagnacht in alle seizoenen",
-
   "rooms.form.liveRatePreview": "Live tariefvoorbeeld",
   "rooms.form.noPrice": "geen prijs",
   "rooms.form.dailyOverrideHint": "Klik op een datum om een dagelijks aangepaste prijs in te stellen. Rechtsklik om te verwijderen.",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "Gesloten",
   "rooms.form.weekendPlus": "Weekend +",
   "rooms.form.override": "Aanpassing",
-
   "rooms.form.roomImages": "Kamerafbeeldingen",
   "rooms.form.uploadRoomImages": "Kamerafbeeldingen uploaden",
   "rooms.form.addMoreImages": "Meer afbeeldingen toevoegen",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "Maximaal {max} afbeeldingen toegestaan",
   "rooms.form.onlyImageFiles": "Alleen afbeeldingsbestanden toegestaan (JPG, PNG, WebP)",
   "rooms.form.imageSizeLimit": "Elke afbeelding moet kleiner zijn dan {maxSize}MB",
-
   "rooms.form.features": "Kenmerken",
   "rooms.form.featuresRoomCardTags": "Kamerkaarttags",
   "rooms.form.featuresModalHighlights": "Venster highlights",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "Selecteer kenmerken hieronder om kaarttags te bekijken...",
   "rooms.form.featuresMore": "+{count} meer",
   "rooms.form.featuresCount": "{count} kenmerken geselecteerd - Eerste 5 getoond op de kaart",
-
   "rooms.form.amenities": "Voorzieningen",
   "rooms.form.amenitiesModalFullList": "Volledige lijst in venster",
   "rooms.form.amenitiesHint": "Wat is inbegrepen - gasten zien dit na het klikken op 'Details bekijken'. Groepeer per categorie voor overzichtelijkheid.",
-
   "rooms.form.featureCategoryViewsLocation": "UITZICHT & LOCATIE",
   "rooms.form.featureCategoryOutdoorRecreation": "BUITEN & RECREATIE",
   "rooms.form.featureCategorySpaceType": "RUIMTE & TYPE",
-
   "rooms.form.amenityCategoryInternetTech": "Internet & Technologie",
   "rooms.form.amenityCategoryKitchen": "Keuken",
   "rooms.form.amenityCategoryBathroom": "Badkamer",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "Wasserij",
   "rooms.form.amenityCategorySafetyAccess": "Veiligheid & Toegang",
   "rooms.form.amenityCategoryServices": "Diensten",
-
   "rooms.form.monthlyPricing": "Maandelijkse prijzen",
   "rooms.form.monthlyPricingOverrides": "{count} aanpassing(en)",
   "rooms.form.monthlyPricingHint": "Stel seizoenstarieven per maand in. Lege velden gebruiken het standaardtarief hierboven.",
   "rooms.form.monthColumn": "Maand",
   "rooms.form.baseRateColumn": "Basistarief",
   "rooms.form.nonRefundableColumn": "Niet-restitueerbaar",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "Verbinden",
   "channels.stepProperty": "Accommodatie",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "Koppeling aanmaken mislukt",
   "channels.failedToDeleteMapping": "Koppeling verwijderen mislukt",
   "channels.failedToStartSync": "Synchronisatie starten mislukt",
-
   "settings.title": "Instellingen",
   "settings.currency": "Valuta",
   "settings.currencyDescription": "Kies de weergavevaluta voor prijzen in uw dashboard.",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "bijv. 07:00 - 11:00",
   "settings.timesSaved": "Check-in/out tijden opgeslagen",
   "settings.failedToSaveTimes": "Tijden opslaan mislukt",
-
   "inbox.title": "Postvak",
   "inbox.searchPlaceholder": "Gesprekken zoeken...",
   "inbox.statusAll": "Alle",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "E-mail",
-
   "setup.redirecting": "Doorsturen naar instellingen...",
-
   "pagination.showing": "Weergave {from}-{to} van {total}",
   "pagination.previous": "Vorige",
   "pagination.next": "Volgende"

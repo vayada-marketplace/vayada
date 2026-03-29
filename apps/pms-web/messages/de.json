@@ -48,7 +48,6 @@
   "common.coverLabel": "Titelbild",
   "common.uploading": "Hochladen...",
   "common.uploadFailed": "Hochladen fehlgeschlagen",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "Melden Sie sich an, um Ihre Unterkunft zu verwalten",
   "auth.login.emailLabel": "E-Mail-Adresse",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
   "auth.login.sessionExpiredBanner": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   "auth.login.signOut": "Abmelden",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Erstellen Sie Ihr Unterkunftsverwaltungskonto",
   "auth.register.fullNameLabel": "Vollstaendiger Name",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "Passwoerter stimmen nicht ueberein",
   "auth.register.emailExists": "Ein Konto mit dieser E-Mail existiert bereits.",
   "auth.register.unexpectedError": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
-
   "layout.header.switchProperty": "Unterkunft wechseln",
   "layout.header.addProperty": "Unterkunft hinzufuegen",
   "layout.header.arrivals": "Ankuenfte",
   "layout.header.departures": "Abreisen",
-
   "layout.sidebar.propertyManager": "Unterkunftsverwaltung",
   "layout.sidebar.operationsAndInventory": "Betrieb & Inventar",
   "layout.sidebar.switchApp": "App wechseln",
@@ -111,13 +107,11 @@
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Einstellungen",
   "layout.sidebar.collapse": "Einklappen",
-
   "search.placeholder": "Reservierungen, Gaeste, Zimmer suchen...",
   "search.noResults": "Keine Ergebnisse fuer '{query}'",
   "search.startTyping": "Tippen Sie, um zu suchen...",
   "search.categoryReservations": "Reservierungen",
   "search.categoryRoomTypes": "Zimmertypen",
-
   "dashboard.title": "Dashboard",
   "dashboard.occupancyTonight": "Belegung heute Nacht",
   "dashboard.occupancySub": "{occupied} von {total} Zimmern belegt",
@@ -134,7 +128,6 @@
   "dashboard.settled": "Abgerechnet",
   "dashboard.occupancyForecast": "Belegungsprognose",
   "dashboard.next14Days": "Naechste 14 Tage",
-
   "bookings.title": "Reservierungen",
   "bookings.subtitle": "Hauptbuch aller Buchungen",
   "bookings.searchPlaceholder": "Nach Gast, Reservierungs-ID oder Zimmer suchen...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "Teilweise",
   "bookings.balanceRefunded": "Erstattet",
   "bookings.balanceDue": "Faellig",
-
   "bookings.detail.title": "Buchung {reference}",
   "bookings.detail.notFound": "Buchung nicht gefunden.",
   "bookings.detail.actionRequired": "Aktion erforderlich",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "Buchung konnte nicht angenommen werden",
   "bookings.detail.failedToReject": "Buchung konnte nicht abgelehnt werden",
   "bookings.detail.failedToUpdate": "Status konnte nicht aktualisiert werden",
-
   "bookings.modal.notFound": "Buchung nicht gefunden",
   "bookings.modal.editBooking": "Buchung bearbeiten",
   "bookings.modal.checkInLabel": "Check-in",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "Bestaetigen",
   "bookings.modal.cancelButton": "Abbrechen",
   "bookings.modal.cancelBookingButton": "Buchung stornieren",
-
   "calendar.title": "Kalender",
   "calendar.today": "Heute",
   "calendar.blockRoom": "Zimmer sperren",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "Keine Buchungen an diesem Tag",
   "calendar.selectDay": "Tag auswaehlen",
   "calendar.newShort": "+ Neu",
-
   "calendar.newBookingModal.title": "Neue Buchung",
   "calendar.newBookingModal.roomLabel": "Zimmer",
   "calendar.newBookingModal.checkInLabel": "Check-in",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "E-Mail des Gastes ist erforderlich",
   "calendar.newBookingModal.errorRoomRequired": "Bitte waehlen Sie ein Zimmer",
   "calendar.newBookingModal.maxOccupancyWarning": "Dieser Zimmertyp hat eine maximale Belegung von {max} Gaesten. Sie haben {selected} ausgewaehlt.",
-
   "calendar.blockModal.title": "Zimmer sperren",
   "calendar.blockModal.roomTypeLabel": "Zimmertyp",
   "calendar.blockModal.startDateLabel": "Startdatum",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "Bitte waehlen Sie sowohl Start- als auch Enddatum",
   "calendar.blockModal.errorEndAfterStart": "Enddatum muss nach dem Startdatum liegen",
   "calendar.blockModal.failedToCreate": "Sperrung konnte nicht erstellt werden",
-
   "rooms.title": "Zimmer & Preise",
   "rooms.subtitle": "Zimmerinventar und taegliche Preise verwalten",
   "rooms.addRoomType": "Zimmertyp hinzufuegen",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "Abgeleitete Preise:",
   "rooms.nonRefundable": "Nicht erstattbar:",
   "rooms.occ": "Bel.",
-
   "rooms.new.title": "Neuer Zimmertyp",
   "rooms.new.submitLabel": "Zimmertyp erstellen",
   "rooms.new.nameRequired": "Name ist erforderlich",
   "rooms.new.seasonRateRequired": "Mindestens eine Saison mit einem Preis groesser als 0 ist erforderlich",
   "rooms.new.everySeasonRateRequired": "Jede Saison muss einen Preis groesser als 0 haben",
   "rooms.new.failedToCreate": "Zimmertyp konnte nicht erstellt werden",
-
   "rooms.edit.title": "Bearbeiten: {name}",
   "rooms.edit.submitLabel": "Aenderungen speichern",
   "rooms.edit.success": "Zimmertyp erfolgreich aktualisiert",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "Moechten Sie diesen Zimmertyp wirklich loeschen?",
   "rooms.edit.cannotDelete": "Loeschen nicht moeglich - Zimmertyp hat moeglicherweise Buchungen",
   "rooms.edit.notFound": "Zimmertyp nicht gefunden.",
-
   "rooms.form.tabDetails": "Zimmerdetails",
   "rooms.form.tabPricing": "Preise & Tarife",
   "rooms.form.tabMedia": "Bilder & Ausstattung",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "Wird als 'Bis zu X Gaeste' auf der Zimmerkarte angezeigt",
   "rooms.form.bedrooms": "Schlafzimmer",
   "rooms.form.bathrooms": "Badezimmer",
-  "rooms.form.roomSize": "Zimmergroesse (m\u00B2)",
+  "rooms.form.roomSize": "Zimmergroesse (m²)",
   "rooms.form.totalRooms": "Gesamtzahl Zimmer",
   "rooms.form.totalRoomsHint": "Anzahl der verfuegbaren Einheiten fuer diesen Zimmertyp",
   "rooms.form.roomDescription": "Zimmerbeschreibung",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "(wird Gaesten in der Buchungsmaschine angezeigt)",
   "rooms.form.selectCategory": "Kategorie waehlen",
   "rooms.form.sortOrder": "Sortierreihenfolge",
-
   "rooms.form.bedTypeKing": "Kingsize-Bett",
   "rooms.form.bedTypeQueen": "Queen-Bett",
   "rooms.form.bedTypeDouble": "Doppelbett",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "Einzelbett",
   "rooms.form.bedTypeBunk": "Etagenbett",
   "rooms.form.bedTypeSofa": "Schlafsofa",
-
   "rooms.form.categoryStandard": "Standard",
   "rooms.form.categoryDeluxe": "Deluxe",
   "rooms.form.categorySuperior": "Superior",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "Bungalow",
   "rooms.form.categoryStudio": "Studio",
   "rooms.form.categoryPenthouse": "Penthouse",
-
   "rooms.form.pricingStep1Title": "Wann haben Sie geoeffnet?",
   "rooms.form.pricingStep1Desc": "Betriebszeitraeume wiederholen sich jaehrlich - Daten ausserhalb werden automatisch geschlossen",
   "rooms.form.yearRound": "Ganzjaehrig",
   "rooms.form.period": "Zeitraum {num}",
   "rooms.form.addPeriod": "Zeitraum hinzufuegen",
   "rooms.form.endDateAfterStart": "Enddatum muss nach dem Startdatum liegen",
-
   "rooms.form.pricingStep2Title": "Wie aendert sich Ihre Preisgestaltung im Laufe des Jahres?",
   "rooms.form.pricingStep2Desc": "Zeichnen Sie Saisons auf Ihrem Betriebszeitraum ein und legen Sie einen Basispreis pro Saison fest",
   "rooms.form.noSeasonsYet": "Noch keine Saisons. Fuegen Sie eine unten hinzu.",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "Saison",
   "rooms.form.flexRateColumn": "Flexibler Preis",
   "rooms.form.minStayColumn": "Mindestaufenthalt",
-
   "rooms.form.pricingStep3Title": "Was koennen Gaeste buchen?",
   "rooms.form.pricingStep3Desc": "Waehlen Sie mindestens einen Tarifplan",
   "rooms.form.flexibleRate": "Flexibler Tarif",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "(Rabatt bei Nicht-Stornierung)",
   "rooms.form.discount": "Rabatt:",
   "rooms.form.offFlexibleRate": "Rabatt auf flexiblen Tarif",
-
   "rooms.form.pricingStep4Title": "Kosten Wochenenden mehr?",
   "rooms.form.pricingStep4Desc": "Wochenendpreise gelten fuer Freitag- und Samstagnacht ueber alle Saisons",
-
   "rooms.form.liveRatePreview": "Live-Preisvorschau",
   "rooms.form.noPrice": "kein Preis",
   "rooms.form.dailyOverrideHint": "Klicken Sie auf ein Datum, um einen taeglichen Preisueberschreibung festzulegen. Rechtsklick, um eine Ueberschreibung zu entfernen.",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "Geschlossen",
   "rooms.form.weekendPlus": "Wochenende +",
   "rooms.form.override": "Ueberschreibung",
-
   "rooms.form.roomImages": "Zimmerbilder",
   "rooms.form.uploadRoomImages": "Zimmerbilder hochladen",
   "rooms.form.addMoreImages": "Weitere Bilder hinzufuegen",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "Maximal {max} Bilder erlaubt",
   "rooms.form.onlyImageFiles": "Nur Bilddateien sind erlaubt (JPG, PNG, WebP)",
   "rooms.form.imageSizeLimit": "Jedes Bild muss unter {maxSize}MB sein",
-
   "rooms.form.features": "Merkmale",
   "rooms.form.featuresRoomCardTags": "Zimmerkarten-Tags",
   "rooms.form.featuresModalHighlights": "Modal-Highlights",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "Waehlen Sie unten Merkmale aus, um Karten-Tags in der Vorschau anzuzeigen...",
   "rooms.form.featuresMore": "+{count} mehr",
   "rooms.form.featuresCount": "{count} Merkmale ausgewaehlt - Die ersten 5 werden auf der Karte angezeigt",
-
   "rooms.form.amenities": "Ausstattung",
   "rooms.form.amenitiesModalFullList": "Vollstaendige Liste im Modal",
   "rooms.form.amenitiesHint": "Was ist enthalten - Gaeste sehen dies nach dem Klick auf 'Details anzeigen'. Nach Kategorie gruppieren fuer schnelle Uebersicht.",
-
   "rooms.form.featureCategoryViewsLocation": "AUSSICHT & LAGE",
   "rooms.form.featureCategoryOutdoorRecreation": "AUSSEN & FREIZEIT",
   "rooms.form.featureCategorySpaceType": "RAUM & TYP",
-
   "rooms.form.amenityCategoryInternetTech": "Internet & Technik",
   "rooms.form.amenityCategoryKitchen": "Kueche",
   "rooms.form.amenityCategoryBathroom": "Badezimmer",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "Waescherei",
   "rooms.form.amenityCategorySafetyAccess": "Sicherheit & Zugang",
   "rooms.form.amenityCategoryServices": "Dienstleistungen",
-
   "rooms.form.monthlyPricing": "Monatliche Preisgestaltung",
   "rooms.form.monthlyPricingOverrides": "{count} Ueberschreibung(en)",
   "rooms.form.monthlyPricingHint": "Legen Sie saisonale Preise pro Monat fest. Leere Felder verwenden den Standardpreis oben.",
   "rooms.form.monthColumn": "Monat",
   "rooms.form.baseRateColumn": "Basispreis",
   "rooms.form.nonRefundableColumn": "Nicht erstattbar",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "Verbinden",
   "channels.stepProperty": "Unterkunft",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "Zuordnung konnte nicht erstellt werden",
   "channels.failedToDeleteMapping": "Zuordnung konnte nicht geloescht werden",
   "channels.failedToStartSync": "Synchronisierung konnte nicht gestartet werden",
-
   "settings.title": "Einstellungen",
   "settings.currency": "Waehrung",
   "settings.currencyDescription": "Waehlen Sie die Anzeigewaehrung fuer Preise in Ihrem Dashboard.",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "z.B. 07:00 - 11:00",
   "settings.timesSaved": "Check-in/out-Zeiten gespeichert",
   "settings.failedToSaveTimes": "Zeiten konnten nicht gespeichert werden",
-
   "inbox.title": "Posteingang",
   "inbox.searchPlaceholder": "Konversationen suchen...",
   "inbox.statusAll": "Alle",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "E-Mail",
-
   "setup.redirecting": "Weiterleitung zur Einrichtung...",
-
   "pagination.showing": "Zeige {from}-{to} von {total}",
   "pagination.previous": "Zurueck",
   "pagination.next": "Weiter"

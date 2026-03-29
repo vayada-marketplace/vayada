@@ -38,7 +38,7 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { labelKey: 'layout.sidebar.calendar', href: '/calendar', icon: CalendarIcon },
   { labelKey: 'layout.sidebar.reservations', href: '/bookings', icon: ReservationsIcon },
   // { labelKey: 'layout.sidebar.inbox', href: '/inbox', icon: InboxIcon },
-  { labelKey: 'layout.sidebar.roomsRates', href: '/rooms', icon: RoomsIcon },
+  { labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
   { labelKey: 'layout.sidebar.channelManager', href: '/channel-manager', icon: ChannelsIcon },
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: SettingsIcon },
 ]

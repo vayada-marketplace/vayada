@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
 import { formatCurrency } from '@/lib/formatCurrency'
+import { useTranslation } from '@/lib/i18n'
 
 const CATEGORY_STYLES: Record<string, string> = {
   suite: 'bg-blue-50 text-blue-600 border border-blue-200',
@@ -31,6 +32,7 @@ function getCategoryLabel(name: string): string {
 }
 
 function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const [addingRoom, setAddingRoom] = useState(false)
   const [newRoomNumber, setNewRoomNumber] = useState('')
@@ -54,17 +56,17 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
       setAddingRoom(false)
       onRoomsChange()
     } catch (err: any) {
-      alert(err.message || 'Failed to add room')
+      alert(err.message || t('rooms.failedToAddRoom'))
     }
   }
 
   const handleDeleteRoom = async (roomId: string) => {
-    if (!confirm('Delete this room?')) return
+    if (!confirm(t('rooms.deleteRoomConfirm'))) return
     try {
       await individualRoomsService.delete(roomId)
       onRoomsChange()
     } catch (err: any) {
-      alert(err.message || 'Cannot delete room (may have bookings)')
+      alert(err.message || t('rooms.cannotDeleteRoom'))
     }
   }
 
@@ -112,7 +114,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
           </div>
           <p className="text-[12px] text-gray-400 mt-0.5">
             {typeRooms.length} room{typeRooms.length !== 1 ? 's' : ''}
-            {room.maxOccupancy > 0 && <> &middot; {room.maxOccupancy} occ</>}
+            {room.maxOccupancy > 0 && <> &middot; {room.maxOccupancy} {t('rooms.occ')}</>}
             {room.size > 0 && <> &middot; {room.size}m&sup2;</>}
           </p>
         </div>
@@ -131,7 +133,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
           className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
         >
           <Cog6ToothIcon className="w-3.5 h-3.5" />
-          Configure
+          {t('rooms.configure')}
         </Link>
       </div>
 
@@ -141,9 +143,9 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
           {/* Derived Rates */}
           {room.nonRefundableRate != null && room.nonRefundableRate > 0 && (
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-[11px] text-gray-400 font-medium">Derived Rates:</span>
+              <span className="text-[11px] text-gray-400 font-medium">{t('rooms.derivedRates')}</span>
               <span className="text-[11px] px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-gray-600">
-                Non-Refundable: {formatCurrency(room.nonRefundableRate, room.currency)}
+                {t('rooms.nonRefundable')} {formatCurrency(room.nonRefundableRate, room.currency)}
                 {room.baseRate > 0 && (
                   <span className="text-gray-400 ml-1">
                     (-{Math.round((1 - room.nonRefundableRate / room.baseRate) * 100)}%)
@@ -177,14 +179,14 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
                     onChange={(e) => handleStatusChange(r.id, e.target.value)}
                     className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 ${statusStyles[r.status] || statusStyles.available}`}
                   >
-                    <option value="available">Available</option>
-                    <option value="maintenance">Maintenance</option>
-                    <option value="out_of_order">Out of Order</option>
+                    <option value="available">{t('rooms.statusAvailable')}</option>
+                    <option value="maintenance">{t('rooms.statusMaintenance')}</option>
+                    <option value="out_of_order">{t('rooms.statusOutOfOrder')}</option>
                   </select>
                   <button
                     onClick={() => handleDeleteRoom(r.id)}
                     className="p-1 text-gray-300 hover:text-red-500 transition-colors"
-                    title="Delete room"
+                    title={t('rooms.deleteRoom')}
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
@@ -192,7 +194,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
               )
             })
           ) : (
-            <p className="text-[12px] text-gray-400 py-2">No rooms yet. Add rooms so bookings can be assigned.</p>
+            <p className="text-[12px] text-gray-400 py-2">{t('rooms.noRoomsYet')}</p>
           )}
 
           {/* Add room form */}
@@ -202,7 +204,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
                 type="text"
                 value={newRoomNumber}
                 onChange={(e) => setNewRoomNumber(e.target.value)}
-                placeholder="Room number (e.g. 101)"
+                placeholder={t('rooms.roomNumberPlaceholder')}
                 className="w-32 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleAddRoom()}
@@ -211,7 +213,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
                 type="text"
                 value={newRoomFloor}
                 onChange={(e) => setNewRoomFloor(e.target.value)}
-                placeholder="Floor (opt)"
+                placeholder={t('rooms.floorPlaceholder')}
                 className="w-20 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 onKeyDown={(e) => e.key === 'Enter' && handleAddRoom()}
               />
@@ -219,13 +221,13 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
                 onClick={handleAddRoom}
                 className="px-3 py-1.5 text-[11px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
               >
-                Add
+                {t('common.add')}
               </button>
               <button
                 onClick={() => { setAddingRoom(false); setNewRoomNumber(''); setNewRoomFloor('') }}
                 className="px-2 py-1.5 text-[11px] text-gray-500 hover:text-gray-700"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           ) : (
@@ -233,7 +235,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
               onClick={() => setAddingRoom(true)}
               className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors"
             >
-              <PlusIcon className="w-3.5 h-3.5" /> Add Room
+              <PlusIcon className="w-3.5 h-3.5" /> {t('rooms.addRoom')}
             </button>
           )}
         </div>
@@ -243,6 +245,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
 }
 
 export default function RoomsPage() {
+  const { t } = useTranslation()
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [individualRooms, setIndividualRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
@@ -272,8 +275,8 @@ export default function RoomsPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Rooms & Rates</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage room inventory and daily pricing</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('rooms.title')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t('rooms.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -281,7 +284,7 @@ export default function RoomsPage() {
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
-            Add Room Type
+            {t('rooms.addRoomType')}
           </Link>
         </div>
       </div>
@@ -292,7 +295,7 @@ export default function RoomsPage() {
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search room types..."
+            placeholder={t('rooms.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-72 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
@@ -316,18 +319,18 @@ export default function RoomsPage() {
               <path d="M3 21h18" />
             </svg>
           </div>
-          <p className="text-gray-500 text-sm mb-4">No room types yet. Create your first room type to get started.</p>
+          <p className="text-gray-500 text-sm mb-4">{t('rooms.noRoomTypes')}</p>
           <Link
             href="/rooms/new"
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
-            Add Room Type
+            {t('rooms.addRoomType')}
           </Link>
         </div>
       ) : filteredRooms.length === 0 ? (
         <div className="py-16 text-center">
-          <p className="text-sm text-gray-400">No room types match your search.</p>
+          <p className="text-sm text-gray-400">{t('rooms.noSearchResults')}</p>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">

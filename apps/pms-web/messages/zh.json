@@ -48,7 +48,6 @@
   "common.coverLabel": "封面",
   "common.uploading": "上传中...",
   "common.uploadFailed": "上传失败",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "登录以管理您的物业",
   "auth.login.emailLabel": "电子邮箱",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "发生意外错误，请重试。",
   "auth.login.sessionExpiredBanner": "您的会话已过期，请重新登录。",
   "auth.login.signOut": "退出登录",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "创建您的物业管理账户",
   "auth.register.fullNameLabel": "全名",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "两次密码不一致",
   "auth.register.emailExists": "此邮箱已注册账户。",
   "auth.register.unexpectedError": "发生意外错误，请重试。",
-
   "layout.header.switchProperty": "切换物业",
   "layout.header.addProperty": "添加物业",
   "layout.header.arrivals": "到达",
   "layout.header.departures": "离店",
-
   "layout.sidebar.propertyManager": "物业管理",
   "layout.sidebar.operationsAndInventory": "运营与库存",
   "layout.sidebar.switchApp": "切换应用",
@@ -107,17 +103,15 @@
   "layout.sidebar.calendar": "日历",
   "layout.sidebar.reservations": "预订",
   "layout.sidebar.inbox": "收件箱",
-  "layout.sidebar.roomsAndRates": "房型与价格",
+  "layout.sidebar.roomsAndRates": "客房与价格",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "设置",
   "layout.sidebar.collapse": "收起",
-
   "search.placeholder": "搜索预订、客人、房间...",
   "search.noResults": "'{query}' 无搜索结果",
   "search.startTyping": "开始输入以搜索...",
   "search.categoryReservations": "预订",
   "search.categoryRoomTypes": "房型",
-
   "dashboard.title": "仪表板",
   "dashboard.occupancyTonight": "今晚入住率",
   "dashboard.occupancySub": "{total}间房中已入住{occupied}间",
@@ -134,7 +128,6 @@
   "dashboard.settled": "已结算",
   "dashboard.occupancyForecast": "入住率预测",
   "dashboard.next14Days": "未来14天",
-
   "bookings.title": "预订",
   "bookings.subtitle": "所有预订总账",
   "bookings.searchPlaceholder": "按客人、预订号或房间搜索...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "部分付款",
   "bookings.balanceRefunded": "已退款",
   "bookings.balanceDue": "待付",
-
   "bookings.detail.title": "预订 {reference}",
   "bookings.detail.notFound": "未找到预订。",
   "bookings.detail.actionRequired": "需要处理",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "接受预订失败",
   "bookings.detail.failedToReject": "拒绝预订失败",
   "bookings.detail.failedToUpdate": "更新状态失败",
-
   "bookings.modal.notFound": "未找到预订",
   "bookings.modal.editBooking": "编辑预订",
   "bookings.modal.checkInLabel": "入住",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "确认",
   "bookings.modal.cancelButton": "取消",
   "bookings.modal.cancelBookingButton": "取消预订",
-
   "calendar.title": "日历",
   "calendar.today": "今天",
   "calendar.blockRoom": "锁定房间",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "当日无预订",
   "calendar.selectDay": "选择日期",
   "calendar.newShort": "+ 新建",
-
   "calendar.newBookingModal.title": "新建预订",
   "calendar.newBookingModal.roomLabel": "房间",
   "calendar.newBookingModal.checkInLabel": "入住",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "客人邮箱为必填项",
   "calendar.newBookingModal.errorRoomRequired": "请选择房间",
   "calendar.newBookingModal.maxOccupancyWarning": "此房型最大入住人数为{max}人，您已选择{selected}人。",
-
   "calendar.blockModal.title": "锁定房间",
   "calendar.blockModal.roomTypeLabel": "房型",
   "calendar.blockModal.startDateLabel": "开始日期",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "请选择开始和结束日期",
   "calendar.blockModal.errorEndAfterStart": "结束日期必须晚于开始日期",
   "calendar.blockModal.failedToCreate": "创建锁定失败",
-
   "rooms.title": "房型与价格",
   "rooms.subtitle": "管理房间库存和每日价格",
   "rooms.addRoomType": "添加房型",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "派生价格:",
   "rooms.nonRefundable": "不可退款:",
   "rooms.occ": "入住",
-
   "rooms.new.title": "新建房型",
   "rooms.new.submitLabel": "创建房型",
   "rooms.new.nameRequired": "名称为必填项",
   "rooms.new.seasonRateRequired": "至少需要一个价格大于0的季节",
   "rooms.new.everySeasonRateRequired": "每个季节的价格必须大于0",
   "rooms.new.failedToCreate": "创建房型失败",
-
   "rooms.edit.title": "编辑: {name}",
   "rooms.edit.submitLabel": "保存更改",
   "rooms.edit.success": "房型更新成功",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "确定要删除此房型吗？",
   "rooms.edit.cannotDelete": "无法删除 - 房型可能有预订",
   "rooms.edit.notFound": "未找到房型。",
-
   "rooms.form.tabDetails": "房间详情",
   "rooms.form.tabPricing": "价格与费率",
   "rooms.form.tabMedia": "图片与设施",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "在房间卡片上显示为'最多X位客人'",
   "rooms.form.bedrooms": "卧室",
   "rooms.form.bathrooms": "浴室",
-  "rooms.form.roomSize": "房间面积 (m\u00B2)",
+  "rooms.form.roomSize": "房间面积 (m²)",
   "rooms.form.totalRooms": "房间总数",
   "rooms.form.totalRoomsHint": "此房型的可用单元数",
   "rooms.form.roomDescription": "房间描述",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "（在预订引擎中显示给客人）",
   "rooms.form.selectCategory": "选择类别",
   "rooms.form.sortOrder": "排序",
-
   "rooms.form.bedTypeKing": "特大床",
   "rooms.form.bedTypeQueen": "大床",
   "rooms.form.bedTypeDouble": "双人床",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "单人床",
   "rooms.form.bedTypeBunk": "双层床",
   "rooms.form.bedTypeSofa": "沙发床",
-
   "rooms.form.categoryStandard": "标准",
   "rooms.form.categoryDeluxe": "豪华",
   "rooms.form.categorySuperior": "高级",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "平房",
   "rooms.form.categoryStudio": "开间",
   "rooms.form.categoryPenthouse": "顶层公寓",
-
   "rooms.form.pricingStep1Title": "您何时营业？",
   "rooms.form.pricingStep1Desc": "营业期间每年重复 - 期间外的日期自动关闭",
   "rooms.form.yearRound": "全年",
   "rooms.form.period": "时段 {num}",
   "rooms.form.addPeriod": "添加时段",
   "rooms.form.endDateAfterStart": "结束日期必须晚于开始日期",
-
   "rooms.form.pricingStep2Title": "全年价格如何变化？",
   "rooms.form.pricingStep2Desc": "在您的营业期间绘制季节，然后设置每个季节的基础价格",
   "rooms.form.noSeasonsYet": "暂无季节。在下方添加。",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "季节",
   "rooms.form.flexRateColumn": "灵活价格",
   "rooms.form.minStayColumn": "最短住宿",
-
   "rooms.form.pricingStep3Title": "客人可以预订什么？",
   "rooms.form.pricingStep3Desc": "至少选择一个价格方案",
   "rooms.form.flexibleRate": "灵活价格",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "（不可取消优惠）",
   "rooms.form.discount": "折扣:",
   "rooms.form.offFlexibleRate": "灵活价格折扣",
-
   "rooms.form.pricingStep4Title": "周末价格更高吗？",
   "rooms.form.pricingStep4Desc": "周末价格适用于所有季节的周五和周六晚",
-
   "rooms.form.liveRatePreview": "实时价格预览",
   "rooms.form.noPrice": "无价格",
   "rooms.form.dailyOverrideHint": "点击日期设置每日价格覆盖。右键点击移除覆盖。",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "关闭",
   "rooms.form.weekendPlus": "周末 +",
   "rooms.form.override": "覆盖",
-
   "rooms.form.roomImages": "房间图片",
   "rooms.form.uploadRoomImages": "上传房间图片",
   "rooms.form.addMoreImages": "添加更多图片",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "最多允许 {max} 张图片",
   "rooms.form.onlyImageFiles": "仅允许图片文件（JPG, PNG, WebP）",
   "rooms.form.imageSizeLimit": "每张图片须小于 {maxSize}MB",
-
   "rooms.form.features": "特色",
   "rooms.form.featuresRoomCardTags": "房间卡片标签",
   "rooms.form.featuresModalHighlights": "弹窗亮点",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "选择下方特色以预览卡片标签...",
   "rooms.form.featuresMore": "+{count} 更多",
   "rooms.form.featuresCount": "已选择 {count} 个特色 - 前5个显示在卡片上",
-
   "rooms.form.amenities": "设施",
   "rooms.form.amenitiesModalFullList": "弹窗完整列表",
   "rooms.form.amenitiesHint": "包含内容 - 客人点击'查看详情'后可见。按类别分组便于浏览。",
-
   "rooms.form.featureCategoryViewsLocation": "景观与位置",
   "rooms.form.featureCategoryOutdoorRecreation": "户外与休闲",
   "rooms.form.featureCategorySpaceType": "空间与类型",
-
   "rooms.form.amenityCategoryInternetTech": "网络与科技",
   "rooms.form.amenityCategoryKitchen": "厨房",
   "rooms.form.amenityCategoryBathroom": "浴室",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "洗衣",
   "rooms.form.amenityCategorySafetyAccess": "安全与通行",
   "rooms.form.amenityCategoryServices": "服务",
-
   "rooms.form.monthlyPricing": "月度价格",
   "rooms.form.monthlyPricingOverrides": "{count} 个覆盖",
   "rooms.form.monthlyPricingHint": "按月设置季节价格。空白字段使用上方的默认价格。",
   "rooms.form.monthColumn": "月份",
   "rooms.form.baseRateColumn": "基础价格",
   "rooms.form.nonRefundableColumn": "不可退款",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "连接",
   "channels.stepProperty": "物业",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "创建映射失败",
   "channels.failedToDeleteMapping": "删除映射失败",
   "channels.failedToStartSync": "启动同步失败",
-
   "settings.title": "设置",
   "settings.currency": "货币",
   "settings.currencyDescription": "选择仪表板中的价格显示货币。",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "如 07:00 - 11:00",
   "settings.timesSaved": "入住/退房时间已保存",
   "settings.failedToSaveTimes": "保存时间失败",
-
   "inbox.title": "收件箱",
   "inbox.searchPlaceholder": "搜索对话...",
   "inbox.statusAll": "全部",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "邮件",
-
   "setup.redirecting": "正在跳转到设置...",
-
   "pagination.showing": "显示 {from}-{to}，共 {total}",
   "pagination.previous": "上一页",
   "pagination.next": "下一页"

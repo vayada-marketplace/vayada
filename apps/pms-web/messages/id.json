@@ -48,7 +48,6 @@
   "common.coverLabel": "Sampul",
   "common.uploading": "Mengunggah...",
   "common.uploadFailed": "Gagal mengunggah",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "Masuk untuk mengelola properti Anda",
   "auth.login.emailLabel": "Alamat email",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "Terjadi kesalahan yang tidak terduga. Silakan coba lagi.",
   "auth.login.sessionExpiredBanner": "Sesi Anda telah berakhir. Silakan masuk kembali.",
   "auth.login.signOut": "Keluar",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Buat akun manajemen properti Anda",
   "auth.register.fullNameLabel": "Nama Lengkap",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "Kata sandi tidak cocok",
   "auth.register.emailExists": "Akun dengan email ini sudah ada.",
   "auth.register.unexpectedError": "Terjadi kesalahan yang tidak terduga. Silakan coba lagi.",
-
   "layout.header.switchProperty": "Ganti Properti",
   "layout.header.addProperty": "Tambah Properti",
   "layout.header.arrivals": "kedatangan",
   "layout.header.departures": "keberangkatan",
-
   "layout.sidebar.propertyManager": "Manajer Properti",
   "layout.sidebar.operationsAndInventory": "Operasional & Inventaris",
   "layout.sidebar.switchApp": "Ganti Aplikasi",
@@ -111,13 +107,11 @@
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Pengaturan",
   "layout.sidebar.collapse": "Perkecil",
-
   "search.placeholder": "Cari reservasi, tamu, kamar...",
   "search.noResults": "Tidak ada hasil untuk '{query}'",
   "search.startTyping": "Mulai mengetik untuk mencari...",
   "search.categoryReservations": "Reservasi",
   "search.categoryRoomTypes": "Tipe Kamar",
-
   "dashboard.title": "Dasbor",
   "dashboard.occupancyTonight": "Hunian Malam Ini",
   "dashboard.occupancySub": "{occupied} dari {total} kamar terisi",
@@ -134,7 +128,6 @@
   "dashboard.settled": "Diselesaikan",
   "dashboard.occupancyForecast": "Perkiraan Hunian",
   "dashboard.next14Days": "14 hari ke depan",
-
   "bookings.title": "Reservasi",
   "bookings.subtitle": "Buku besar semua pemesanan",
   "bookings.searchPlaceholder": "Cari berdasarkan tamu, ID reservasi, atau kamar...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "Sebagian",
   "bookings.balanceRefunded": "Dikembalikan",
   "bookings.balanceDue": "Jatuh Tempo",
-
   "bookings.detail.title": "Pemesanan {reference}",
   "bookings.detail.notFound": "Pemesanan tidak ditemukan.",
   "bookings.detail.actionRequired": "Tindakan Diperlukan",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "Gagal menerima pemesanan",
   "bookings.detail.failedToReject": "Gagal menolak pemesanan",
   "bookings.detail.failedToUpdate": "Gagal memperbarui status",
-
   "bookings.modal.notFound": "Pemesanan tidak ditemukan",
   "bookings.modal.editBooking": "Edit Pemesanan",
   "bookings.modal.checkInLabel": "Check-in",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "Konfirmasi",
   "bookings.modal.cancelButton": "Batal",
   "bookings.modal.cancelBookingButton": "Batalkan Pemesanan",
-
   "calendar.title": "Kalender",
   "calendar.today": "Hari ini",
   "calendar.blockRoom": "Blokir Kamar",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "Tidak ada pemesanan pada hari ini",
   "calendar.selectDay": "Pilih hari",
   "calendar.newShort": "+ Baru",
-
   "calendar.newBookingModal.title": "Pemesanan Baru",
   "calendar.newBookingModal.roomLabel": "Kamar",
   "calendar.newBookingModal.checkInLabel": "Check-in",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "Email tamu wajib diisi",
   "calendar.newBookingModal.errorRoomRequired": "Silakan pilih kamar",
   "calendar.newBookingModal.maxOccupancyWarning": "Tipe kamar ini memiliki kapasitas maksimal {max} tamu. Anda telah memilih {selected}.",
-
   "calendar.blockModal.title": "Blokir Kamar",
   "calendar.blockModal.roomTypeLabel": "Tipe Kamar",
   "calendar.blockModal.startDateLabel": "Tanggal Mulai",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "Silakan pilih tanggal mulai dan selesai",
   "calendar.blockModal.errorEndAfterStart": "Tanggal selesai harus setelah tanggal mulai",
   "calendar.blockModal.failedToCreate": "Gagal membuat pemblokiran",
-
   "rooms.title": "Kamar & Tarif",
   "rooms.subtitle": "Kelola inventaris kamar dan harga harian",
   "rooms.addRoomType": "Tambah Tipe Kamar",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "Tarif Turunan:",
   "rooms.nonRefundable": "Tidak Dapat Dikembalikan:",
   "rooms.occ": "hun.",
-
   "rooms.new.title": "Tipe Kamar Baru",
   "rooms.new.submitLabel": "Buat Tipe Kamar",
   "rooms.new.nameRequired": "Nama wajib diisi",
   "rooms.new.seasonRateRequired": "Minimal satu musim dengan tarif lebih dari 0 diperlukan",
   "rooms.new.everySeasonRateRequired": "Setiap musim harus memiliki tarif lebih dari 0",
   "rooms.new.failedToCreate": "Gagal membuat tipe kamar",
-
   "rooms.edit.title": "Edit: {name}",
   "rooms.edit.submitLabel": "Simpan Perubahan",
   "rooms.edit.success": "Tipe kamar berhasil diperbarui",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "Apakah Anda yakin ingin menghapus tipe kamar ini?",
   "rooms.edit.cannotDelete": "Tidak dapat menghapus - tipe kamar mungkin memiliki pemesanan",
   "rooms.edit.notFound": "Tipe kamar tidak ditemukan.",
-
   "rooms.form.tabDetails": "Detail Kamar",
   "rooms.form.tabPricing": "Harga & Tarif",
   "rooms.form.tabMedia": "Gambar & Fasilitas",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "Ditampilkan sebagai 'Hingga X tamu' pada kartu kamar",
   "rooms.form.bedrooms": "Kamar Tidur",
   "rooms.form.bathrooms": "Kamar Mandi",
-  "rooms.form.roomSize": "Ukuran Kamar (m\u00B2)",
+  "rooms.form.roomSize": "Ukuran Kamar (m²)",
   "rooms.form.totalRooms": "Total Kamar",
   "rooms.form.totalRoomsHint": "Jumlah unit yang tersedia untuk tipe kamar ini",
   "rooms.form.roomDescription": "Deskripsi Kamar",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "(ditampilkan kepada tamu di Mesin Pemesanan)",
   "rooms.form.selectCategory": "Pilih kategori",
   "rooms.form.sortOrder": "Urutan",
-
   "rooms.form.bedTypeKing": "Tempat Tidur King",
   "rooms.form.bedTypeQueen": "Tempat Tidur Queen",
   "rooms.form.bedTypeDouble": "Tempat Tidur Double",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "Tempat Tidur Single",
   "rooms.form.bedTypeBunk": "Tempat Tidur Susun",
   "rooms.form.bedTypeSofa": "Sofa Bed",
-
   "rooms.form.categoryStandard": "Standar",
   "rooms.form.categoryDeluxe": "Deluxe",
   "rooms.form.categorySuperior": "Superior",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "Bungalow",
   "rooms.form.categoryStudio": "Studio",
   "rooms.form.categoryPenthouse": "Penthouse",
-
   "rooms.form.pricingStep1Title": "Kapan Anda buka?",
   "rooms.form.pricingStep1Desc": "Periode operasional berulang setiap tahun - tanggal di luar otomatis ditutup",
   "rooms.form.yearRound": "Sepanjang Tahun",
   "rooms.form.period": "Periode {num}",
   "rooms.form.addPeriod": "Tambah periode",
   "rooms.form.endDateAfterStart": "Tanggal selesai harus setelah tanggal mulai",
-
   "rooms.form.pricingStep2Title": "Bagaimana harga Anda berubah sepanjang tahun?",
   "rooms.form.pricingStep2Desc": "Gambar musim pada periode operasional Anda, lalu tetapkan tarif dasar per musim",
   "rooms.form.noSeasonsYet": "Belum ada musim. Tambahkan satu di bawah.",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "Musim",
   "rooms.form.flexRateColumn": "Tarif Fleksibel",
   "rooms.form.minStayColumn": "Minimal Menginap",
-
   "rooms.form.pricingStep3Title": "Apa yang bisa dipesan tamu?",
   "rooms.form.pricingStep3Desc": "Pilih setidaknya satu paket tarif",
   "rooms.form.flexibleRate": "Tarif fleksibel",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "(diskon tanpa pembatalan)",
   "rooms.form.discount": "Diskon:",
   "rooms.form.offFlexibleRate": "diskon dari tarif fleksibel",
-
   "rooms.form.pricingStep4Title": "Apakah akhir pekan lebih mahal?",
   "rooms.form.pricingStep4Desc": "Harga akhir pekan berlaku untuk malam Jumat & Sabtu di semua musim",
-
   "rooms.form.liveRatePreview": "Pratinjau Tarif Langsung",
   "rooms.form.noPrice": "tidak ada harga",
   "rooms.form.dailyOverrideHint": "Klik tanggal untuk menetapkan harga harian khusus. Klik kanan untuk menghapusnya.",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "Tutup",
   "rooms.form.weekendPlus": "Akhir pekan +",
   "rooms.form.override": "Kustom",
-
   "rooms.form.roomImages": "Gambar Kamar",
   "rooms.form.uploadRoomImages": "Unggah gambar kamar",
   "rooms.form.addMoreImages": "Tambah gambar lagi",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "Maksimal {max} gambar diperbolehkan",
   "rooms.form.onlyImageFiles": "Hanya file gambar yang diperbolehkan (JPG, PNG, WebP)",
   "rooms.form.imageSizeLimit": "Setiap gambar harus di bawah {maxSize}MB",
-
   "rooms.form.features": "Fitur",
   "rooms.form.featuresRoomCardTags": "Tag kartu kamar",
   "rooms.form.featuresModalHighlights": "Sorotan modal",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "Pilih fitur di bawah untuk melihat pratinjau tag kartu...",
   "rooms.form.featuresMore": "+{count} lainnya",
   "rooms.form.featuresCount": "{count} fitur dipilih - 5 pertama ditampilkan di kartu",
-
   "rooms.form.amenities": "Fasilitas",
   "rooms.form.amenitiesModalFullList": "Daftar lengkap di modal",
   "rooms.form.amenitiesHint": "Apa yang termasuk - tamu melihat ini setelah mengklik 'Lihat Detail'. Kelompokkan berdasarkan kategori untuk kemudahan membaca.",
-
   "rooms.form.featureCategoryViewsLocation": "PEMANDANGAN & LOKASI",
   "rooms.form.featureCategoryOutdoorRecreation": "LUAR RUANGAN & REKREASI",
   "rooms.form.featureCategorySpaceType": "RUANG & TIPE",
-
   "rooms.form.amenityCategoryInternetTech": "Internet & Teknologi",
   "rooms.form.amenityCategoryKitchen": "Dapur",
   "rooms.form.amenityCategoryBathroom": "Kamar Mandi",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "Binatu",
   "rooms.form.amenityCategorySafetyAccess": "Keamanan & Akses",
   "rooms.form.amenityCategoryServices": "Layanan",
-
   "rooms.form.monthlyPricing": "Harga Bulanan",
   "rooms.form.monthlyPricingOverrides": "{count} penyesuaian",
   "rooms.form.monthlyPricingHint": "Tetapkan tarif musiman per bulan. Kolom kosong menggunakan tarif default di atas.",
   "rooms.form.monthColumn": "Bulan",
   "rooms.form.baseRateColumn": "Tarif Dasar",
   "rooms.form.nonRefundableColumn": "Tidak Dapat Dikembalikan",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "Hubungkan",
   "channels.stepProperty": "Properti",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "Gagal membuat pemetaan",
   "channels.failedToDeleteMapping": "Gagal menghapus pemetaan",
   "channels.failedToStartSync": "Gagal memulai sinkronisasi",
-
   "settings.title": "Pengaturan",
   "settings.currency": "Mata Uang",
   "settings.currencyDescription": "Pilih mata uang tampilan untuk harga di seluruh dasbor Anda.",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "cth. 07:00 - 11:00",
   "settings.timesSaved": "Waktu check-in/out disimpan",
   "settings.failedToSaveTimes": "Gagal menyimpan waktu",
-
   "inbox.title": "Kotak Masuk",
   "inbox.searchPlaceholder": "Cari percakapan...",
   "inbox.statusAll": "Semua",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "Email",
-
   "setup.redirecting": "Mengalihkan ke pengaturan...",
-
   "pagination.showing": "Menampilkan {from}-{to} dari {total}",
   "pagination.previous": "Sebelumnya",
   "pagination.next": "Berikutnya"

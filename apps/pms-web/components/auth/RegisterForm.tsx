@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { useTranslation } from '@/lib/i18n'
 
 interface RegisterFormProps {
   onSubmit: (data: { name: string; email: string; password: string }) => Promise<void>
@@ -20,6 +21,7 @@ export default function RegisterForm({
   onErrorClear,
   loginHref = '/login',
 }: RegisterFormProps) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -43,25 +45,25 @@ export default function RegisterForm({
     const newErrors: typeof localErrors = {}
 
     if (!name.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('auth.register.nameRequired')
     }
 
     if (!email.trim()) {
-      newErrors.email = 'Email is required'
+      newErrors.email = t('auth.register.emailRequired')
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address'
+      newErrors.email = t('auth.register.invalidEmail')
     }
 
     if (!password) {
-      newErrors.password = 'Password is required'
+      newErrors.password = t('auth.register.passwordRequired')
     } else if (password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters'
+      newErrors.password = t('auth.register.passwordMinLength')
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password'
+      newErrors.confirmPassword = t('auth.register.confirmPasswordRequired')
     } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match'
+      newErrors.confirmPassword = t('auth.register.passwordsMismatch')
     }
 
     setLocalErrors(newErrors)
@@ -83,7 +85,7 @@ export default function RegisterForm({
       {/* Name Field */}
       <div>
         <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Full Name
+          {t('auth.register.fullNameLabel')}
         </label>
         <input
           id="name"
@@ -95,7 +97,7 @@ export default function RegisterForm({
             clearFieldError('name')
           }}
           required
-          placeholder="John Doe"
+          placeholder={t('auth.register.fullNamePlaceholder')}
           autoComplete="name"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
             errors.name ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
@@ -109,7 +111,7 @@ export default function RegisterForm({
       {/* Email Field */}
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Email address
+          {t('auth.register.emailLabel')}
         </label>
         <input
           id="email"
@@ -121,7 +123,7 @@ export default function RegisterForm({
             clearFieldError('email')
           }}
           required
-          placeholder="admin@example.com"
+          placeholder={t('auth.register.emailPlaceholder')}
           autoComplete="email"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
             errors.email ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
@@ -135,7 +137,7 @@ export default function RegisterForm({
       {/* Password Field */}
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Password
+          {t('auth.register.passwordLabel')}
         </label>
         <div className="relative">
           <input
@@ -148,7 +150,7 @@ export default function RegisterForm({
               clearFieldError('password')
             }}
             required
-            placeholder="At least 8 characters"
+            placeholder={t('auth.register.passwordPlaceholder')}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -172,7 +174,7 @@ export default function RegisterForm({
       {/* Confirm Password Field */}
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Confirm Password
+          {t('auth.register.confirmPasswordLabel')}
         </label>
         <div className="relative">
           <input
@@ -185,7 +187,7 @@ export default function RegisterForm({
               clearFieldError('confirmPassword')
             }}
             required
-            placeholder="Confirm your password"
+            placeholder={t('auth.register.confirmPasswordPlaceholder')}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -219,15 +221,15 @@ export default function RegisterForm({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? 'Creating Account...' : 'Create Account'}
+        {isSubmitting ? t('auth.register.submitting') : t('auth.register.submitButton')}
       </button>
 
       {/* Login Link */}
       <div className="text-center">
         <p className="text-sm text-gray-600">
-          Already have an account?{' '}
+          {t('auth.register.alreadyHaveAccount')}{' '}
           <a href={loginHref} className="text-primary-600 hover:text-primary-700 font-medium">
-            Sign in
+            {t('auth.register.signIn')}
           </a>
         </p>
       </div>

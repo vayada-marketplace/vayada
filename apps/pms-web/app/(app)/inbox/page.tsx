@@ -13,20 +13,21 @@ import {
   Conversation,
   Message,
 } from '@/services/messaging'
+import { useTranslation } from '@/lib/i18n'
 
-const CHANNEL_STYLES: Record<string, { bg: string; label: string }> = {
-  direct: { bg: 'bg-blue-500', label: 'Direct' },
-  airbnb: { bg: 'bg-pink-500', label: 'Airbnb' },
-  'booking.com': { bg: 'bg-indigo-600', label: 'Booking.com' },
-  beds24: { bg: 'bg-purple-500', label: 'Beds24' },
-  email: { bg: 'bg-gray-500', label: 'Email' },
+const CHANNEL_STYLES: Record<string, { bg: string; labelKey: string }> = {
+  direct: { bg: 'bg-blue-500', labelKey: 'inbox.channelDirect' },
+  airbnb: { bg: 'bg-pink-500', labelKey: 'inbox.channelAirbnb' },
+  'booking.com': { bg: 'bg-indigo-600', labelKey: 'inbox.channelBookingCom' },
+  beds24: { bg: 'bg-purple-500', labelKey: 'inbox.channelBeds24' },
+  email: { bg: 'bg-gray-500', labelKey: 'inbox.channelEmail' },
 }
 
-const STATUS_TABS = [
-  { label: 'All', value: '' },
-  { label: 'Open', value: 'open' },
-  { label: 'Closed', value: 'closed' },
-  { label: 'Archived', value: 'archived' },
+const STATUS_TAB_KEYS = [
+  { labelKey: 'inbox.statusAll', value: '' },
+  { labelKey: 'inbox.statusOpen', value: 'open' },
+  { labelKey: 'inbox.statusClosed', value: 'closed' },
+  { labelKey: 'inbox.statusArchived', value: 'archived' },
 ]
 
 function formatTime(dateStr: string | null): string {
@@ -44,16 +45,17 @@ function formatTime(dateStr: string | null): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function ChannelBadge({ channel }: { channel: string }) {
+function ChannelBadge({ channel, t }: { channel: string; t: (key: string) => string }) {
   const style = CHANNEL_STYLES[channel] || CHANNEL_STYLES.direct
   return (
     <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white', style.bg)}>
-      {style.label}
+      {t(style.labelKey)}
     </span>
   )
 }
 
 export default function InboxPage() {
+  const { t } = useTranslation()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [total, setTotal] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -174,12 +176,12 @@ export default function InboxPage() {
       <div className="w-80 border-r border-gray-200 flex flex-col shrink-0">
         {/* Header */}
         <div className="p-3 border-b border-gray-200">
-          <h1 className="text-sm font-semibold text-gray-900 mb-2">Inbox</h1>
+          <h1 className="text-sm font-semibold text-gray-900 mb-2">{t('inbox.title')}</h1>
           <div className="relative">
             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search conversations..."
+              placeholder={t('inbox.searchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -187,7 +189,7 @@ export default function InboxPage() {
           </div>
           {/* Status tabs */}
           <div className="flex gap-1 mt-2">
-            {STATUS_TABS.map(tab => (
+            {STATUS_TAB_KEYS.map(tab => (
               <button
                 key={tab.value}
                 onClick={() => setStatusFilter(tab.value)}
@@ -198,7 +200,7 @@ export default function InboxPage() {
                     : 'text-gray-600 hover:bg-gray-100'
                 )}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             ))}
           </div>
@@ -207,11 +209,11 @@ export default function InboxPage() {
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 text-center text-xs text-gray-400">Loading...</div>
+            <div className="p-4 text-center text-xs text-gray-400">{t('common.loading')}</div>
           ) : conversations.length === 0 ? (
             <div className="p-8 text-center">
               <ChatBubbleLeftRightIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-xs text-gray-400">No conversations yet</p>
+              <p className="text-xs text-gray-400">{t('inbox.noConversations')}</p>
             </div>
           ) : (
             conversations.map(conv => (
@@ -233,11 +235,11 @@ export default function InboxPage() {
                         'text-xs truncate',
                         conv.unreadCount > 0 ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'
                       )}>
-                        {conv.guestName || conv.guestEmail || 'Unknown Guest'}
+                        {conv.guestName || conv.guestEmail || t('inbox.unknownGuest')}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <ChannelBadge channel={conv.channel} />
+                      <ChannelBadge t={t} channel={conv.channel} />
                       {conv.bookingReference && (
                         <span className="text-[10px] text-gray-400 font-mono">{conv.bookingReference}</span>
                       )}
@@ -260,7 +262,7 @@ export default function InboxPage() {
         {/* Count */}
         {total > 0 && (
           <div className="px-3 py-1.5 border-t border-gray-200 text-[10px] text-gray-400">
-            {total} conversation{total !== 1 ? 's' : ''}
+            {t('inbox.conversationsCount', { count: String(total) })}
           </div>
         )}
       </div>
@@ -271,7 +273,7 @@ export default function InboxPage() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <ChatBubbleLeftRightIcon className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-              <p className="text-sm text-gray-400">Select a conversation</p>
+              <p className="text-sm text-gray-400">{t('inbox.selectConversation')}</p>
             </div>
           </div>
         ) : (
@@ -283,7 +285,7 @@ export default function InboxPage() {
                   <h2 className="text-sm font-semibold text-gray-900 truncate">
                     {selectedConversation.guestName || selectedConversation.guestEmail}
                   </h2>
-                  <ChannelBadge channel={selectedConversation.channel} />
+                  <ChannelBadge t={t} channel={selectedConversation.channel} />
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
                   {selectedConversation.bookingReference && (
@@ -307,14 +309,14 @@ export default function InboxPage() {
                     onClick={() => handleStatusChange(selectedConversation.id, 'closed')}
                     className="px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
                   >
-                    Close
+                    {t('common.close')}
                   </button>
                 ) : (
                   <button
                     onClick={() => handleStatusChange(selectedConversation.id, 'open')}
                     className="px-2 py-1 text-[11px] font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
                   >
-                    Reopen
+                    {t('common.reopen')}
                   </button>
                 )}
                 <button
@@ -329,9 +331,9 @@ export default function InboxPage() {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {messagesLoading ? (
-                <div className="text-center text-xs text-gray-400 py-8">Loading messages...</div>
+                <div className="text-center text-xs text-gray-400 py-8">{t('inbox.loadingMessages')}</div>
               ) : messages.length === 0 ? (
-                <div className="text-center text-xs text-gray-400 py-8">No messages yet. Send the first message below.</div>
+                <div className="text-center text-xs text-gray-400 py-8">{t('inbox.noMessages')}</div>
               ) : (
                 messages.map(msg => (
                   <div
@@ -387,7 +389,7 @@ export default function InboxPage() {
                       handleSend()
                     }
                   }}
-                  placeholder="Type a message..."
+                  placeholder={t('inbox.typePlaceholder')}
                   rows={1}
                   className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-24"
                 />

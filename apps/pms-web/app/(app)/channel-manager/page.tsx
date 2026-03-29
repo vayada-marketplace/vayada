@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react'
 import { beds24Service, Beds24Connection, Beds24Property, Beds24Room, Beds24RoomMapping } from '@/services/beds24'
 import { roomsService, RoomType } from '@/services/rooms'
 import { ArrowPathIcon, TrashIcon, LinkIcon } from '@heroicons/react/24/outline'
+import { useTranslation } from '@/lib/i18n'
 
 type Step = 'connect' | 'select-property' | 'room-mappings'
 
 export default function ChannelManagerPage() {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -77,7 +79,7 @@ export default function ChannelManagerPage() {
       const props = await beds24Service.listProperties()
       setProperties(props)
     } catch (err: any) {
-      setError(err.message || 'Failed to load properties')
+      setError(err.message || t('channels.failedToLoadProperties'))
     } finally {
       setLoadingProperties(false)
     }
@@ -94,7 +96,7 @@ export default function ChannelManagerPage() {
       setRoomTypes(rTypes)
       setMappings(maps)
     } catch (err: any) {
-      setError(err.message || 'Failed to load room data')
+      setError(err.message || t('channels.failedToLoadRoomData'))
     }
   }
 
@@ -106,16 +108,16 @@ export default function ChannelManagerPage() {
       const conn = await beds24Service.connect(inviteCode.trim())
       setConnection(conn)
       setInviteCode('')
-      setSuccess('Connected to Beds24')
+      setSuccess(t('channels.connectedToBeds24'))
     } catch (err: any) {
-      setError(err.message || 'Failed to connect')
+      setError(err.message || t('channels.failedToConnect'))
     } finally {
       setConnecting(false)
     }
   }
 
   const handleDisconnect = async () => {
-    if (!confirm('Disconnect from Beds24? This will stop all syncing.')) return
+    if (!confirm(t('channels.disconnectConfirm'))) return
     setDisconnecting(true)
     setError('')
     try {
@@ -124,9 +126,9 @@ export default function ChannelManagerPage() {
       setMappings([])
       setBeds24Rooms([])
       setProperties([])
-      setSuccess('Disconnected from Beds24')
+      setSuccess(t('channels.disconnectedFromBeds24'))
     } catch (err: any) {
-      setError(err.message || 'Failed to disconnect')
+      setError(err.message || t('channels.failedToDisconnect'))
     } finally {
       setDisconnecting(false)
     }
@@ -139,9 +141,9 @@ export default function ChannelManagerPage() {
     try {
       const conn = await beds24Service.setProperty(selectedPropertyId)
       setConnection(conn)
-      setSuccess('Property selected')
+      setSuccess(t('channels.propertySelected'))
     } catch (err: any) {
-      setError(err.message || 'Failed to set property')
+      setError(err.message || t('channels.failedToSetProperty'))
     } finally {
       setSettingProperty(false)
     }
@@ -156,9 +158,9 @@ export default function ChannelManagerPage() {
       setMappings([...mappings, mapping])
       setNewMappingRoomTypeId('')
       setNewMappingBeds24RoomId('')
-      setSuccess('Room mapping created')
+      setSuccess(t('channels.roomMappingCreated'))
     } catch (err: any) {
-      setError(err.message || 'Failed to create mapping')
+      setError(err.message || t('channels.failedToCreateMapping'))
     } finally {
       setCreatingMapping(false)
     }
@@ -171,7 +173,7 @@ export default function ChannelManagerPage() {
       await beds24Service.deleteRoomMapping(mappingId)
       setMappings(mappings.filter((m) => m.id !== mappingId))
     } catch (err: any) {
-      setError(err.message || 'Failed to delete mapping')
+      setError(err.message || t('channels.failedToDeleteMapping'))
     } finally {
       setDeletingMappingId(null)
     }
@@ -182,9 +184,9 @@ export default function ChannelManagerPage() {
     setError('')
     try {
       await beds24Service.syncAvailability()
-      setSuccess('Availability sync started')
+      setSuccess(t('channels.availabilitySyncStarted'))
     } catch (err: any) {
-      setError(err.message || 'Failed to start sync')
+      setError(err.message || t('channels.failedToStartSync'))
     } finally {
       setSyncing(false)
     }
@@ -216,7 +218,7 @@ export default function ChannelManagerPage() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-6">Channel Manager</h1>
+      <h1 className="text-xl font-bold text-gray-900 mb-6">{t('channels.title')}</h1>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -232,20 +234,20 @@ export default function ChannelManagerPage() {
       <div className="space-y-8">
         {/* Step indicator */}
         <div className="flex items-center gap-3 text-xs">
-          <StepBadge num={1} label="Connect" active={step === 'connect'} done={step !== 'connect'} />
+          <StepBadge num={1} label={t('channels.stepConnect')} active={step === 'connect'} done={step !== 'connect'} />
           <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={2} label="Property" active={step === 'select-property'} done={step === 'room-mappings'} />
+          <StepBadge num={2} label={t('channels.stepProperty')} active={step === 'select-property'} done={step === 'room-mappings'} />
           <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={3} label="Room Mapping" active={step === 'room-mappings'} done={false} />
+          <StepBadge num={3} label={t('channels.stepRoomMapping')} active={step === 'room-mappings'} done={false} />
         </div>
 
         {/* Step 1: Connect */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">Beds24 Connection</h2>
+            <h2 className="text-sm font-semibold text-gray-900">{t('channels.beds24Connection')}</h2>
             {connection?.isActive && (
               <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                Connected
+                {t('channels.connected')}
               </span>
             )}
           </div>
@@ -253,15 +255,15 @@ export default function ChannelManagerPage() {
           {!connection || !connection.isActive ? (
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
-                Enter your Beds24 invite code to connect your account. You can generate one from the Beds24 dashboard under API &gt; Invite Codes.
+                {t('channels.connectDescription')}
               </p>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Invite Code</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.inviteCodeLabel')}</label>
                 <input
                   type="text"
                   value={inviteCode}
                   onChange={(e) => setInviteCode(e.target.value)}
-                  placeholder="Paste your Beds24 invite code"
+                  placeholder={t('channels.inviteCodePlaceholder')}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
@@ -270,19 +272,19 @@ export default function ChannelManagerPage() {
                 disabled={connecting || !inviteCode.trim()}
                 className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
               >
-                {connecting ? 'Connecting...' : 'Connect'}
+                {connecting ? t('channels.connecting') : t('channels.connect')}
               </button>
             </div>
           ) : (
             <div className="space-y-3">
               <div className="text-sm text-gray-600 space-y-1">
                 <p>
-                  <span className="text-gray-500">Property ID:</span>{' '}
-                  <span className="font-mono text-xs">{connection.beds24PropertyId || 'Not selected'}</span>
+                  <span className="text-gray-500">{t('channels.propertyIdLabel')}</span>{' '}
+                  <span className="font-mono text-xs">{connection.beds24PropertyId || t('channels.notSelected')}</span>
                 </p>
                 {connection.lastSyncAt && (
                   <p>
-                    <span className="text-gray-500">Last sync:</span>{' '}
+                    <span className="text-gray-500">{t('channels.lastSync')}</span>{' '}
                     {new Date(connection.lastSyncAt).toLocaleString()}
                   </p>
                 )}
@@ -292,7 +294,7 @@ export default function ChannelManagerPage() {
                 disabled={disconnecting}
                 className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
-                {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+                {disconnecting ? t('channels.disconnecting') : t('channels.disconnect')}
               </button>
             </div>
           )}
@@ -301,21 +303,21 @@ export default function ChannelManagerPage() {
         {/* Step 2: Select Property */}
         {step === 'select-property' && (
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">Select Beds24 Property</h2>
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.selectBeds24Property')}</h2>
             {loadingProperties ? (
               <div className="animate-pulse h-20 bg-gray-100 rounded" />
             ) : properties.length === 0 ? (
-              <p className="text-sm text-gray-500">No properties found in your Beds24 account.</p>
+              <p className="text-sm text-gray-500">{t('channels.noPropertiesFound')}</p>
             ) : (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Property</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.propertyLabel')}</label>
                   <select
                     value={selectedPropertyId}
                     onChange={(e) => setSelectedPropertyId(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
-                    <option value="">Select a property...</option>
+                    <option value="">{t('channels.selectProperty')}</option>
                     {properties.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
@@ -326,7 +328,7 @@ export default function ChannelManagerPage() {
                   disabled={settingProperty || !selectedPropertyId}
                   className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
                 >
-                  {settingProperty ? 'Saving...' : 'Confirm Property'}
+                  {settingProperty ? t('channels.savingProperty') : t('channels.confirmProperty')}
                 </button>
               </div>
             )}
@@ -338,19 +340,19 @@ export default function ChannelManagerPage() {
           <>
             <div className="bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-gray-900">Room Mappings</h2>
+                <h2 className="text-sm font-semibold text-gray-900">{t('channels.roomMappings')}</h2>
                 <button
                   onClick={handleSync}
                   disabled={syncing}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
                 >
                   <ArrowPathIcon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-                  {syncing ? 'Syncing...' : 'Sync Availability'}
+                  {syncing ? t('channels.syncing') : t('channels.syncAvailability')}
                 </button>
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
-                Map your room types to Beds24 rooms so availability and bookings stay in sync.
+                {t('channels.roomMappingsDescription')}
               </p>
 
               {/* Existing mappings */}
@@ -386,36 +388,36 @@ export default function ChannelManagerPage() {
                 </div>
               ) : (
                 <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4 mb-4">
-                  No room mappings yet. Add one below.
+                  {t('channels.noRoomMappings')}
                 </div>
               )}
 
               {/* Add mapping */}
               {unmappedRoomTypes.length > 0 && unmappedBeds24Rooms.length > 0 ? (
                 <div className="border-t border-gray-100 pt-4">
-                  <h3 className="text-xs font-medium text-gray-700 mb-3">Add Mapping</h3>
+                  <h3 className="text-xs font-medium text-gray-700 mb-3">{t('channels.addMapping')}</h3>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Your Room Type</label>
+                      <label className="block text-xs text-gray-500 mb-1">{t('channels.yourRoomType')}</label>
                       <select
                         value={newMappingRoomTypeId}
                         onChange={(e) => setNewMappingRoomTypeId(e.target.value)}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       >
-                        <option value="">Select room type...</option>
+                        <option value="">{t('channels.selectRoomType')}</option>
                         {unmappedRoomTypes.map((rt) => (
                           <option key={rt.id} value={rt.id}>{rt.name}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Beds24 Room</label>
+                      <label className="block text-xs text-gray-500 mb-1">{t('channels.beds24Room')}</label>
                       <select
                         value={newMappingBeds24RoomId}
                         onChange={(e) => setNewMappingBeds24RoomId(e.target.value)}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       >
-                        <option value="">Select Beds24 room...</option>
+                        <option value="">{t('channels.selectBeds24Room')}</option>
                         {unmappedBeds24Rooms.map((r) => (
                           <option key={r.id} value={r.id}>
                             {r.name} {r.qty > 1 ? `(${r.qty}x)` : ''}
@@ -429,12 +431,12 @@ export default function ChannelManagerPage() {
                     disabled={creatingMapping || !newMappingRoomTypeId || !newMappingBeds24RoomId}
                     className="mt-3 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
                   >
-                    {creatingMapping ? 'Adding...' : 'Add Mapping'}
+                    {creatingMapping ? t('channels.adding') : t('channels.addMappingButton')}
                   </button>
                 </div>
               ) : mappings.length > 0 ? (
                 <p className="text-xs text-gray-500 border-t border-gray-100 pt-4">
-                  All rooms are mapped.
+                  {t('channels.allRoomsMapped')}
                 </p>
               ) : null}
             </div>

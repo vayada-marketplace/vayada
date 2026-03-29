@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { bookingsService } from '@/services/bookings'
 import { apiClient } from '@/services/api/client'
+import { useTranslation } from '@/lib/i18n'
 
 const CURRENCY_OPTIONS = [
   { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
@@ -41,7 +42,7 @@ const CURRENCY_OPTIONS = [
 
 const CURRENCIES = CURRENCY_OPTIONS.map(c => ({ value: c.code, label: `${c.flag} ${c.name} (${c.code})` }))
 
-function CurrencySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CurrencySelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: (key: string) => string }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -76,13 +77,13 @@ function CurrencySelect({ value, onChange }: { value: string; onChange: (v: stri
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search currency..."
+            placeholder={t('settings.searchCurrency')}
             autoFocus
             className="w-full px-3 py-2 text-sm border-b border-gray-200 focus:outline-none rounded-t-lg"
           />
           <ul className="max-h-60 overflow-y-auto py-1">
             {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-gray-400">No results</li>
+              <li className="px-3 py-2 text-sm text-gray-400">{t('common.noResults')}</li>
             ) : (
               filtered.map((c) => (
                 <li
@@ -102,6 +103,7 @@ function CurrencySelect({ value, onChange }: { value: string; onChange: (v: stri
 }
 
 export default function SettingsPage() {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
@@ -150,9 +152,9 @@ export default function SettingsPage() {
         check_out_until: checkOutUntil,
         check_out_time: checkOutUntil,
       })
-      setSuccess('Check-in/out times saved')
+      setSuccess(t('settings.timesSaved'))
     } catch (err: any) {
-      setError(err.message || 'Failed to save times')
+      setError(err.message || t('settings.failedToSaveTimes'))
     } finally {
       setSavingTimes(false)
     }
@@ -164,9 +166,9 @@ export default function SettingsPage() {
     setSuccess('')
     try {
       await bookingsService.updatePaymentSettings({ defaultCurrency: currency })
-      setSuccess('Currency saved')
+      setSuccess(t('settings.currencySaved'))
     } catch (err: any) {
-      setError(err.message || 'Failed to save currency')
+      setError(err.message || t('settings.failedToSaveCurrency'))
     } finally {
       setSavingCurrency(false)
     }
@@ -185,7 +187,7 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-6">Settings</h1>
+      <h1 className="text-xl font-bold text-gray-900 mb-6">{t('settings.title')}</h1>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -201,28 +203,28 @@ export default function SettingsPage() {
       <div className="space-y-8">
         {/* Currency */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Currency</h2>
-          <p className="text-xs text-gray-500 mb-4">Choose the display currency for prices across your dashboard.</p>
-          <CurrencySelect value={currency} onChange={setCurrency} />
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.currency')}</h2>
+          <p className="text-xs text-gray-500 mb-4">{t('settings.currencyDescription')}</p>
+          <CurrencySelect value={currency} onChange={setCurrency} t={t} />
           <button
             onClick={saveCurrency}
             disabled={savingCurrency}
             className="mt-3 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {savingCurrency ? 'Saving...' : 'Save'}
+            {savingCurrency ? t('common.saving') : t('common.save')}
           </button>
         </div>
 
         {/* Check-in / Check-out */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Check-in & Check-out</h2>
-          <p className="text-xs text-gray-500 mb-4">Set the time windows for guest arrivals and departures.</p>
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.checkInCheckOut')}</h2>
+          <p className="text-xs text-gray-500 mb-4">{t('settings.checkInCheckOutDescription')}</p>
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-in Period</label>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">{t('settings.checkInPeriod')}</label>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">{t('common.from')}</label>
                   <input
                     type="time"
                     value={checkInFrom}
@@ -232,7 +234,7 @@ export default function SettingsPage() {
                 </div>
                 <span className="text-gray-400 mt-4">—</span>
                 <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">{t('common.until')}</label>
                   <input
                     type="time"
                     value={checkInUntil}
@@ -241,13 +243,13 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400 mt-1">e.g. 14:00 — 22:00</p>
+              <p className="text-[10px] text-gray-400 mt-1">{t('settings.checkInExample')}</p>
             </div>
             <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-out Period</label>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-2">{t('settings.checkOutPeriod')}</label>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">From</label>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">{t('common.from')}</label>
                   <input
                     type="time"
                     value={checkOutFrom}
@@ -257,7 +259,7 @@ export default function SettingsPage() {
                 </div>
                 <span className="text-gray-400 mt-4">—</span>
                 <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">Until</label>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">{t('common.until')}</label>
                   <input
                     type="time"
                     value={checkOutUntil}
@@ -266,7 +268,7 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400 mt-1">e.g. 07:00 — 11:00</p>
+              <p className="text-[10px] text-gray-400 mt-1">{t('settings.checkOutExample')}</p>
             </div>
           </div>
           <button
@@ -274,7 +276,7 @@ export default function SettingsPage() {
             disabled={savingTimes}
             className="mt-4 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {savingTimes ? 'Saving...' : 'Save'}
+            {savingTimes ? t('common.saving') : t('common.save')}
           </button>
         </div>
 

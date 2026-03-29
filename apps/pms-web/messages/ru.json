@@ -48,7 +48,6 @@
   "common.coverLabel": "Обложка",
   "common.uploading": "Загрузка...",
   "common.uploadFailed": "Ошибка загрузки",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "Войдите для управления вашим объектом",
   "auth.login.emailLabel": "Электронная почта",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.login.sessionExpiredBanner": "Ваша сессия истекла. Пожалуйста, войдите снова.",
   "auth.login.signOut": "Выйти",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Создайте аккаунт для управления объектом",
   "auth.register.fullNameLabel": "Полное имя",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "Пароли не совпадают",
   "auth.register.emailExists": "Аккаунт с этим адресом уже существует.",
   "auth.register.unexpectedError": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
-
   "layout.header.switchProperty": "Сменить объект",
   "layout.header.addProperty": "Добавить объект",
   "layout.header.arrivals": "заезды",
   "layout.header.departures": "выезды",
-
   "layout.sidebar.propertyManager": "Управление объектом",
   "layout.sidebar.operationsAndInventory": "Операции и инвентарь",
   "layout.sidebar.switchApp": "Сменить приложение",
@@ -107,17 +103,15 @@
   "layout.sidebar.calendar": "Календарь",
   "layout.sidebar.reservations": "Бронирования",
   "layout.sidebar.inbox": "Входящие",
-  "layout.sidebar.roomsAndRates": "Номера и тарифы",
+  "layout.sidebar.roomsAndRates": "Номера и цены",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Настройки",
   "layout.sidebar.collapse": "Свернуть",
-
   "search.placeholder": "Поиск бронирований, гостей, номеров...",
   "search.noResults": "Нет результатов для '{query}'",
   "search.startTyping": "Начните вводить для поиска...",
   "search.categoryReservations": "Бронирования",
   "search.categoryRoomTypes": "Типы номеров",
-
   "dashboard.title": "Панель управления",
   "dashboard.occupancyTonight": "Заполняемость сегодня",
   "dashboard.occupancySub": "{occupied} из {total} номеров занято",
@@ -134,7 +128,6 @@
   "dashboard.settled": "Оплачено",
   "dashboard.occupancyForecast": "Прогноз заполняемости",
   "dashboard.next14Days": "Ближайшие 14 дней",
-
   "bookings.title": "Бронирования",
   "bookings.subtitle": "Главная книга всех бронирований",
   "bookings.searchPlaceholder": "Поиск по гостю, ID бронирования или номеру...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "Частично",
   "bookings.balanceRefunded": "Возвращено",
   "bookings.balanceDue": "К оплате",
-
   "bookings.detail.title": "Бронирование {reference}",
   "bookings.detail.notFound": "Бронирование не найдено.",
   "bookings.detail.actionRequired": "Требуется действие",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "Не удалось принять бронирование",
   "bookings.detail.failedToReject": "Не удалось отклонить бронирование",
   "bookings.detail.failedToUpdate": "Не удалось обновить статус",
-
   "bookings.modal.notFound": "Бронирование не найдено",
   "bookings.modal.editBooking": "Редактировать бронирование",
   "bookings.modal.checkInLabel": "Заезд",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "Подтвердить",
   "bookings.modal.cancelButton": "Отмена",
   "bookings.modal.cancelBookingButton": "Отменить бронирование",
-
   "calendar.title": "Календарь",
   "calendar.today": "Сегодня",
   "calendar.blockRoom": "Заблокировать номер",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "Нет бронирований в этот день",
   "calendar.selectDay": "Выберите день",
   "calendar.newShort": "+ Новое",
-
   "calendar.newBookingModal.title": "Новое бронирование",
   "calendar.newBookingModal.roomLabel": "Номер",
   "calendar.newBookingModal.checkInLabel": "Заезд",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "Электронная почта гостя обязательна",
   "calendar.newBookingModal.errorRoomRequired": "Пожалуйста, выберите номер",
   "calendar.newBookingModal.maxOccupancyWarning": "Максимальная вместимость этого типа номера - {max} гостей. Вы выбрали {selected}.",
-
   "calendar.blockModal.title": "Заблокировать номера",
   "calendar.blockModal.roomTypeLabel": "Тип номера",
   "calendar.blockModal.startDateLabel": "Дата начала",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "Пожалуйста, выберите даты начала и окончания",
   "calendar.blockModal.errorEndAfterStart": "Дата окончания должна быть позже даты начала",
   "calendar.blockModal.failedToCreate": "Не удалось создать блокировку",
-
   "rooms.title": "Номера и тарифы",
   "rooms.subtitle": "Управление номерным фондом и ежедневными ценами",
   "rooms.addRoomType": "Добавить тип номера",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "Производные тарифы:",
   "rooms.nonRefundable": "Невозвратный:",
   "rooms.occ": "заг.",
-
   "rooms.new.title": "Новый тип номера",
   "rooms.new.submitLabel": "Создать тип номера",
   "rooms.new.nameRequired": "Название обязательно",
   "rooms.new.seasonRateRequired": "Требуется как минимум один сезон с тарифом больше 0",
   "rooms.new.everySeasonRateRequired": "Каждый сезон должен иметь тариф больше 0",
   "rooms.new.failedToCreate": "Не удалось создать тип номера",
-
   "rooms.edit.title": "Редактировать: {name}",
   "rooms.edit.submitLabel": "Сохранить изменения",
   "rooms.edit.success": "Тип номера успешно обновлен",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "Вы уверены, что хотите удалить этот тип номера?",
   "rooms.edit.cannotDelete": "Невозможно удалить - тип номера может иметь бронирования",
   "rooms.edit.notFound": "Тип номера не найден.",
-
   "rooms.form.tabDetails": "Детали номера",
   "rooms.form.tabPricing": "Цены и тарифы",
   "rooms.form.tabMedia": "Изображения и удобства",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "Отображается как 'До X гостей' на карточке номера",
   "rooms.form.bedrooms": "Спальни",
   "rooms.form.bathrooms": "Ванные комнаты",
-  "rooms.form.roomSize": "Площадь номера (m\u00B2)",
+  "rooms.form.roomSize": "Площадь номера (m²)",
   "rooms.form.totalRooms": "Всего номеров",
   "rooms.form.totalRoomsHint": "Количество доступных единиц этого типа номера",
   "rooms.form.roomDescription": "Описание номера",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "(отображается гостям в системе бронирования)",
   "rooms.form.selectCategory": "Выберите категорию",
   "rooms.form.sortOrder": "Порядок сортировки",
-
   "rooms.form.bedTypeKing": "Кровать King-size",
   "rooms.form.bedTypeQueen": "Кровать Queen-size",
   "rooms.form.bedTypeDouble": "Двуспальная кровать",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "Односпальная кровать",
   "rooms.form.bedTypeBunk": "Двухъярусная кровать",
   "rooms.form.bedTypeSofa": "Диван-кровать",
-
   "rooms.form.categoryStandard": "Стандарт",
   "rooms.form.categoryDeluxe": "Делюкс",
   "rooms.form.categorySuperior": "Супериор",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "Бунгало",
   "rooms.form.categoryStudio": "Студия",
   "rooms.form.categoryPenthouse": "Пентхаус",
-
   "rooms.form.pricingStep1Title": "Когда вы работаете?",
   "rooms.form.pricingStep1Desc": "Рабочие периоды повторяются каждый год - даты за пределами автоматически закрыты",
   "rooms.form.yearRound": "Круглый год",
   "rooms.form.period": "Период {num}",
   "rooms.form.addPeriod": "Добавить период",
   "rooms.form.endDateAfterStart": "Дата окончания должна быть позже даты начала",
-
   "rooms.form.pricingStep2Title": "Как меняются ваши цены в течение года?",
   "rooms.form.pricingStep2Desc": "Обозначьте сезоны на рабочем периоде, затем установите базовый тариф для каждого сезона",
   "rooms.form.noSeasonsYet": "Сезонов пока нет. Добавьте один ниже.",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "Сезон",
   "rooms.form.flexRateColumn": "Гибкий тариф",
   "rooms.form.minStayColumn": "Мин. проживание",
-
   "rooms.form.pricingStep3Title": "Что могут бронировать гости?",
   "rooms.form.pricingStep3Desc": "Выберите хотя бы один тарифный план",
   "rooms.form.flexibleRate": "Гибкий тариф",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "(скидка за невозвратный тариф)",
   "rooms.form.discount": "Скидка:",
   "rooms.form.offFlexibleRate": "скидка от гибкого тарифа",
-
   "rooms.form.pricingStep4Title": "Выходные дороже?",
   "rooms.form.pricingStep4Desc": "Цены выходных применяются к пятнице и субботе для всех сезонов",
-
   "rooms.form.liveRatePreview": "Предварительный просмотр тарифов",
   "rooms.form.noPrice": "нет цены",
   "rooms.form.dailyOverrideHint": "Нажмите на дату для установки ежедневной цены. Правый клик для удаления.",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "Закрыто",
   "rooms.form.weekendPlus": "Выходные +",
   "rooms.form.override": "Переопределение",
-
   "rooms.form.roomImages": "Изображения номера",
   "rooms.form.uploadRoomImages": "Загрузить изображения номера",
   "rooms.form.addMoreImages": "Добавить больше изображений",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "Максимум {max} изображений",
   "rooms.form.onlyImageFiles": "Допускаются только изображения (JPG, PNG, WebP)",
   "rooms.form.imageSizeLimit": "Каждое изображение должно быть менее {maxSize}МБ",
-
   "rooms.form.features": "Особенности",
   "rooms.form.featuresRoomCardTags": "Теги карточки номера",
   "rooms.form.featuresModalHighlights": "Основные моменты",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "Выберите особенности ниже для предварительного просмотра тегов...",
   "rooms.form.featuresMore": "+{count} еще",
   "rooms.form.featuresCount": "Выбрано {count} особенностей - Первые 5 отображаются на карточке",
-
   "rooms.form.amenities": "Удобства",
   "rooms.form.amenitiesModalFullList": "Полный список",
   "rooms.form.amenitiesHint": "Что включено - гости видят это после нажатия 'Подробнее'. Группировка по категориям для удобства.",
-
   "rooms.form.featureCategoryViewsLocation": "ВИД И РАСПОЛОЖЕНИЕ",
   "rooms.form.featureCategoryOutdoorRecreation": "УЛИЦА И ОТДЫХ",
   "rooms.form.featureCategorySpaceType": "ПРОСТРАНСТВО И ТИП",
-
   "rooms.form.amenityCategoryInternetTech": "Интернет и техника",
   "rooms.form.amenityCategoryKitchen": "Кухня",
   "rooms.form.amenityCategoryBathroom": "Ванная комната",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "Прачечная",
   "rooms.form.amenityCategorySafetyAccess": "Безопасность и доступ",
   "rooms.form.amenityCategoryServices": "Услуги",
-
   "rooms.form.monthlyPricing": "Ежемесячные цены",
   "rooms.form.monthlyPricingOverrides": "{count} переопределений",
   "rooms.form.monthlyPricingHint": "Установите сезонные тарифы по месяцам. Пустые поля используют тариф по умолчанию.",
   "rooms.form.monthColumn": "Месяц",
   "rooms.form.baseRateColumn": "Базовый тариф",
   "rooms.form.nonRefundableColumn": "Невозвратный",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "Подключить",
   "channels.stepProperty": "Объект",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "Не удалось создать сопоставление",
   "channels.failedToDeleteMapping": "Не удалось удалить сопоставление",
   "channels.failedToStartSync": "Не удалось запустить синхронизацию",
-
   "settings.title": "Настройки",
   "settings.currency": "Валюта",
   "settings.currencyDescription": "Выберите валюту для отображения цен в панели управления.",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "напр. 07:00 - 11:00",
   "settings.timesSaved": "Время заезда/выезда сохранено",
   "settings.failedToSaveTimes": "Не удалось сохранить время",
-
   "inbox.title": "Входящие",
   "inbox.searchPlaceholder": "Поиск разговоров...",
   "inbox.statusAll": "Все",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "Электронная почта",
-
   "setup.redirecting": "Перенаправление на настройку...",
-
   "pagination.showing": "Показано {from}-{to} из {total}",
   "pagination.previous": "Назад",
   "pagination.next": "Далее"

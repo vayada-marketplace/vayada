@@ -12,6 +12,7 @@ import BlockModal from '@/components/calendar/BlockModal'
 import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
 import MobileCalendar from '@/components/calendar/MobileCalendar'
+import { useTranslation } from '@/lib/i18n'
 
 const VIEW_DAYS = 21
 
@@ -23,15 +24,16 @@ const CHANNEL_COLORS: Record<string, string> = {
   other: 'bg-gray-500',
 }
 
-const CHANNEL_LEGEND = [
-  { key: 'direct', label: 'Direct', color: 'bg-blue-500' },
-  { key: 'airbnb', label: 'Airbnb', color: 'bg-pink-500' },
-  { key: 'booking.com', label: 'Booking.com', color: 'bg-indigo-500' },
-  { key: 'expedia', label: 'Expedia', color: 'bg-yellow-500' },
-  { key: 'other', label: 'Other', color: 'bg-gray-500' },
+const CHANNEL_LEGEND_KEYS = [
+  { key: 'direct', labelKey: 'calendar.channelDirect', color: 'bg-blue-500' },
+  { key: 'airbnb', labelKey: 'calendar.channelAirbnb', color: 'bg-pink-500' },
+  { key: 'booking.com', labelKey: 'calendar.channelBookingCom', color: 'bg-indigo-500' },
+  { key: 'expedia', labelKey: 'calendar.channelExpedia', color: 'bg-yellow-500' },
+  { key: 'other', labelKey: 'calendar.channelOther', color: 'bg-gray-500' },
 ]
 
 export default function CalendarPage() {
+  const { t } = useTranslation()
   const [startDate, setStartDate] = useState(() => startOfDay(new Date()))
   const [data, setData] = useState<CalendarData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -148,7 +150,7 @@ export default function CalendarPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-2 mb-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Calendar</h1>
+          <h1 className="text-xl font-bold text-gray-900">{t('calendar.title')}</h1>
           <p className="text-sm text-gray-500">
             {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
           </p>
@@ -158,7 +160,7 @@ export default function CalendarPage() {
             onClick={goToday}
             className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
-            Today
+            {t('calendar.today')}
           </button>
           <button
             onClick={goPrev}
@@ -176,23 +178,23 @@ export default function CalendarPage() {
             onClick={() => setShowBlockModal(true)}
             className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
           >
-            Block Room
+            {t('calendar.blockRoom')}
           </button>
           <button
             onClick={() => setShowNewBookingModal(true)}
             className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
           >
-            + New Booking
+            {t('calendar.newBooking')}
           </button>
         </div>
       </div>
 
       {/* Channel Legend */}
       <div className="flex items-center gap-4 mb-4">
-        {CHANNEL_LEGEND.map((ch) => (
+        {CHANNEL_LEGEND_KEYS.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
             <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
-            <span className="text-xs text-gray-600">{ch.label}</span>
+            <span className="text-xs text-gray-600">{t(ch.labelKey)}</span>
           </div>
         ))}
       </div>
@@ -203,7 +205,7 @@ export default function CalendarPage() {
         </div>
       ) : !data || data.rooms.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-          <p className="text-gray-500">No rooms found. Create rooms under Rooms &amp; Rates first.</p>
+          <p className="text-gray-500">{t('calendar.noRooms')}</p>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-x-auto">
@@ -212,7 +214,7 @@ export default function CalendarPage() {
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
                 <th className="w-20 md:w-48 px-1.5 md:px-3 py-2 text-left text-[10px] md:text-xs font-medium text-gray-600 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
-                  Room
+                  {t('calendar.roomColumn')}
                 </th>
                 {dates.map((d) => {
                   const isToday = format(d, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
@@ -281,7 +283,7 @@ export default function CalendarPage() {
               {unassignedBookings.length > 0 && (
                 <tr className="border-b border-gray-100 bg-amber-50/30">
                   <td className="px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 bg-amber-50/30 z-10 border-r border-gray-200">
-                    <div className="text-[11px] md:text-sm font-medium text-amber-700 truncate">Unassigned</div>
+                    <div className="text-[11px] md:text-sm font-medium text-amber-700 truncate">{t('calendar.unassigned')}</div>
                     <div className="hidden md:block text-[10px] text-amber-500">{unassignedBookings.length} booking{unassignedBookings.length !== 1 ? 's' : ''}</div>
                   </td>
                   <td colSpan={VIEW_DAYS} className="relative h-12 p-0">

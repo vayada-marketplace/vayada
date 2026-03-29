@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { bookingsService, Booking, BookingListResponse } from '@/services/bookings'
 import { MagnifyingGlassIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
+import { useTranslation } from '@/lib/i18n'
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-yellow-50 text-yellow-700',
@@ -14,13 +15,13 @@ const STATUS_STYLES: Record<string, string> = {
   expired: 'bg-gray-100 text-gray-600',
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pending',
-  confirmed: 'Confirmed',
-  checked_in: 'Checked In',
-  in_house: 'In-House',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending: 'bookings.statusPending',
+  confirmed: 'bookings.statusConfirmed',
+  checked_in: 'bookings.statusCheckedIn',
+  in_house: 'bookings.statusInHouse',
+  cancelled: 'bookings.statusCancelled',
+  expired: 'bookings.statusExpired',
 }
 
 const BALANCE_STYLES: Record<string, string> = {
@@ -62,6 +63,7 @@ function getGuestCount(b: Booking): number {
 }
 
 export default function ReservationsPage() {
+  const { t } = useTranslation()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -112,13 +114,13 @@ export default function ReservationsPage() {
   }, [bookings, searchQuery])
 
   const STATUS_TABS = [
-    { label: 'All', value: '', count: total },
-    { label: 'Confirmed', value: 'confirmed', count: statusCounts['confirmed'] || 0 },
-    { label: 'Checked In', value: 'checked_in', count: statusCounts['checked_in'] || 0 },
-    { label: 'In-House', value: 'in_house', count: statusCounts['in_house'] || 0 },
-    { label: 'Cancelled', value: 'cancelled', count: statusCounts['cancelled'] || 0 },
-    { label: 'Pending', value: 'pending', count: statusCounts['pending'] || 0 },
-    { label: 'Expired', value: 'expired', count: statusCounts['expired'] || 0 },
+    { label: t('bookings.statusAll'), value: '', count: total },
+    { label: t('bookings.statusConfirmed'), value: 'confirmed', count: statusCounts['confirmed'] || 0 },
+    { label: t('bookings.statusCheckedIn'), value: 'checked_in', count: statusCounts['checked_in'] || 0 },
+    { label: t('bookings.statusInHouse'), value: 'in_house', count: statusCounts['in_house'] || 0 },
+    { label: t('bookings.statusCancelled'), value: 'cancelled', count: statusCounts['cancelled'] || 0 },
+    { label: t('bookings.statusPending'), value: 'pending', count: statusCounts['pending'] || 0 },
+    { label: t('bookings.statusExpired'), value: 'expired', count: statusCounts['expired'] || 0 },
   ]
 
   const visibleTabs = STATUS_TABS.filter((t) => t.value === '' || t.count > 0 || t.value === statusFilter)
@@ -127,8 +129,8 @@ export default function ReservationsPage() {
     <div className="p-6 pb-0">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-bold text-gray-900">Reservations</h1>
-        <p className="text-sm text-gray-500 mt-1">Master ledger of all bookings</p>
+        <h1 className="text-xl font-bold text-gray-900">{t('bookings.title')}</h1>
+        <p className="text-sm text-gray-500 mt-1">{t('bookings.subtitle')}</p>
       </div>
 
       {/* Search & Filters */}
@@ -137,7 +139,7 @@ export default function ReservationsPage() {
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by guest, reservation ID, or room..."
+            placeholder={t('bookings.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-80 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
@@ -150,7 +152,7 @@ export default function ReservationsPage() {
             <path d="M8 2v4" />
             <path d="M3 10h18" />
           </svg>
-          Filter by date range
+          {t('bookings.filterByDateRange')}
           <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -186,20 +188,20 @@ export default function ReservationsPage() {
         </div>
       ) : filteredBookings.length === 0 ? (
         <div className="py-20 text-center">
-          <p className="text-gray-400 text-sm">No reservations found.</p>
+          <p className="text-gray-400 text-sm">{t('bookings.noReservations')}</p>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[200px]">Guest</th>
-                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[110px]">Status</th>
-                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">Room</th>
-                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">Stay Period</th>
-                <th className="text-right px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[90px]">Total</th>
-                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[80px]">Balance</th>
-                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[70px]">Source</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[200px]">{t('bookings.tableGuest')}</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[110px]">{t('bookings.tableStatus')}</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">{t('bookings.tableRoom')}</th>
+                <th className="text-left px-4 pb-3 pt-4 text-xs font-medium text-gray-400">{t('bookings.tableStayPeriod')}</th>
+                <th className="text-right px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[90px]">{t('bookings.tableTotal')}</th>
+                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[80px]">{t('bookings.tableBalance')}</th>
+                <th className="text-center px-4 pb-3 pt-4 text-xs font-medium text-gray-400 w-[70px]">{t('bookings.tableSource')}</th>
                 <th className="w-10 pt-4"></th>
               </tr>
             </thead>
@@ -229,7 +231,7 @@ export default function ReservationsPage() {
                     {/* Status */}
                     <td className="px-4 py-4">
                       <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold ${STATUS_STYLES[b.status] || STATUS_STYLES['pending']}`}>
-                        {STATUS_LABELS[b.status] || b.status}
+                        {STATUS_LABEL_KEYS[b.status] ? t(STATUS_LABEL_KEYS[b.status]) : b.status}
                       </span>
                     </td>
 
@@ -269,7 +271,7 @@ export default function ReservationsPage() {
                     {/* Balance */}
                     <td className="px-4 py-4 text-center">
                       <span className={`text-[11px] font-semibold capitalize ${BALANCE_STYLES[balance] || BALANCE_STYLES['due']}`}>
-                        {balance === 'paid' ? 'Paid' : balance === 'partial' ? 'Partial' : balance === 'refunded' ? 'Refunded' : 'Due'}
+                        {balance === 'paid' ? t('bookings.balancePaid') : balance === 'partial' ? t('bookings.balancePartial') : balance === 'refunded' ? t('bookings.balanceRefunded') : t('bookings.balanceDue')}
                       </span>
                     </td>
 
@@ -306,7 +308,7 @@ export default function ReservationsPage() {
           {total > limit && (
             <div className="flex items-center justify-between px-4 py-4 border-t border-gray-200">
               <p className="text-sm text-gray-400">
-                Showing {offset + 1}-{Math.min(offset + limit, total)} of {total}
+                {t('common.showingOf', { from: String(offset + 1), to: String(Math.min(offset + limit, total)), total: String(total) })}
               </p>
               <div className="flex gap-2">
                 <button
@@ -314,14 +316,14 @@ export default function ReservationsPage() {
                   disabled={offset === 0}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors"
                 >
-                  Previous
+                  {t('common.previous')}
                 </button>
                 <button
                   onClick={() => setOffset(offset + limit)}
                   disabled={offset + limit >= total}
                   className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 transition-colors"
                 >
-                  Next
+                  {t('common.next')}
                 </button>
               </div>
             </div>

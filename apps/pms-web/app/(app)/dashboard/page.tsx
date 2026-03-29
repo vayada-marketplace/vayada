@@ -6,6 +6,7 @@ import { roomsService, RoomType } from '@/services/rooms'
 import { bookingsService, Booking } from '@/services/bookings'
 import { formatCurrency } from '@/lib/formatCurrency'
 import { getCurrencySymbol } from '@/lib/utils'
+import { useTranslation } from '@/lib/i18n'
 
 function getToday() {
   return new Date().toISOString().split('T')[0]
@@ -30,6 +31,7 @@ function getInitials(first: string, last: string) {
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation()
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
   const [hotelCurrency, setHotelCurrency] = useState('EUR')
@@ -100,7 +102,7 @@ export default function DashboardPage() {
         date,
         dateStr,
         pct,
-        label: i === 0 ? 'Today' : date.toLocaleDateString('en-US', { weekday: 'short' }),
+        label: i === 0 ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: date.getDate(),
       })
     }
@@ -138,38 +140,38 @@ export default function DashboardPage() {
     <div className="p-4 space-y-3">
       {/* Title */}
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-xl font-bold text-gray-900">{t('dashboard.title')}</h1>
         <p className="text-xs text-gray-400 mt-0.5">{dateLabel}</p>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-3">
         <StatCard
-          label="Occupancy Tonight"
+          label={t('dashboard.occupancyTonight')}
           value={`${occupancyPct}%`}
-          sub={`${occupiedTonight} of ${totalRooms} rooms occupied`}
+          sub={t('dashboard.occupancySub', { occupied: String(occupiedTonight), total: String(totalRooms) })}
           icon={<OccupancyIcon />}
         />
         <StatCard
-          label="Arrivals Today"
+          label={t('dashboard.arrivalsToday')}
           value={String(arrivalsToday.length)}
           sub={
             arrivalsToday[0]
-              ? `Next arrival: 3:00 PM — ${arrivalsToday[0].guestFirstName} ${arrivalsToday[0].guestLastName}`
-              : 'No arrivals today'
+              ? t('dashboard.nextArrival', { guestName: `${arrivalsToday[0].guestFirstName} ${arrivalsToday[0].guestLastName}` })
+              : t('dashboard.noArrivals')
           }
           icon={<ArrowDownIcon />}
         />
         <StatCard
-          label="Departures Today"
+          label={t('dashboard.departuresToday')}
           value={String(departuresToday.length)}
-          sub={departuresToday.length > 0 ? 'First checkout: 11:00 AM' : 'No departures today'}
+          sub={departuresToday.length > 0 ? t('dashboard.firstCheckout') : t('dashboard.noDepartures')}
           icon={<ArrowUpIcon />}
         />
         <StatCard
-          label="Revenue This Month"
+          label={t('dashboard.revenueThisMonth')}
           value={formatCurrency(revenueThisMonth, hotelCurrency)}
-          sub="Last 30 days"
+          sub={t('dashboard.last30Days')}
           icon={<DollarIcon />}
         />
       </div>
@@ -180,17 +182,17 @@ export default function DashboardPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-900">Arrivals Today</span>
+              <span className="text-sm font-semibold text-gray-900">{t('dashboard.arrivalsToday')}</span>
               <span className="inline-flex items-center justify-center w-5 h-5 text-[11px] font-semibold bg-blue-100 text-blue-700 rounded-full">
                 {arrivalsToday.length}
               </span>
             </div>
             <Link href="/bookings" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
-              View all ↗
+              {t('dashboard.viewAll')} ↗
             </Link>
           </div>
           {arrivalsToday.length === 0 ? (
-            <p className="text-sm text-gray-400 py-6 text-center">No arrivals today</p>
+            <p className="text-sm text-gray-400 py-6 text-center">{t('dashboard.noArrivals')}</p>
           ) : (
             <div className="divide-y divide-gray-50">
               {arrivalsToday.map(b => (
@@ -204,7 +206,7 @@ export default function DashboardPage() {
                   </div>
                   <span className="text-xs text-gray-500 shrink-0">3:00 PM</span>
                   <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                    Confirmed
+                    {t('dashboard.confirmed')}
                   </span>
                 </div>
               ))}
@@ -216,17 +218,17 @@ export default function DashboardPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-900">Departures Today</span>
+              <span className="text-sm font-semibold text-gray-900">{t('dashboard.departuresToday')}</span>
               <span className="inline-flex items-center justify-center w-5 h-5 text-[11px] font-semibold bg-blue-100 text-blue-700 rounded-full">
                 {departuresToday.length}
               </span>
             </div>
             <Link href="/bookings" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
-              View all ↗
+              {t('dashboard.viewAll')} ↗
             </Link>
           </div>
           {departuresToday.length === 0 ? (
-            <p className="text-sm text-gray-400 py-6 text-center">No departures today</p>
+            <p className="text-sm text-gray-400 py-6 text-center">{t('dashboard.noDepartures')}</p>
           ) : (
             <div className="divide-y divide-gray-50">
               {departuresToday.map(b => (
@@ -239,7 +241,7 @@ export default function DashboardPage() {
                     <p className="text-xs text-gray-400">{b.roomName}</p>
                   </div>
                   <span className="text-xs text-gray-500 shrink-0">11:00 AM</span>
-                  <span className="shrink-0 text-xs font-medium text-green-600">Settled ✓</span>
+                  <span className="shrink-0 text-xs font-medium text-green-600">{t('dashboard.settled')} ✓</span>
                 </div>
               ))}
             </div>
@@ -251,8 +253,8 @@ export default function DashboardPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Occupancy Forecast</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Next 14 days</p>
+            <h3 className="text-sm font-semibold text-gray-900">{t('dashboard.occupancyForecast')}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{t('dashboard.next14Days')}</p>
           </div>
           {forecastDays.length >= 14 && (
             <p className="text-xs text-gray-400">

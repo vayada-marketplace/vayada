@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { bookingsService, Booking } from '@/services/bookings'
 import { roomsService, RoomType } from '@/services/rooms'
+import { useTranslation } from '@/lib/i18n'
 
 interface SearchResult {
   id: string
@@ -14,6 +15,7 @@ interface SearchResult {
 }
 
 export default function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation()
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -113,8 +115,8 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   if (!open) return null
 
   const CATEGORY_LABELS: Record<string, string> = {
-    reservation: 'Reservations',
-    room: 'Room Types',
+    reservation: t('search.categoryReservations'),
+    room: t('search.categoryRoomTypes'),
   }
 
   // Group results by category
@@ -147,7 +149,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search reservations, guests, rooms..."
+            placeholder={t('search.placeholder')}
             className="flex-1 text-sm text-gray-900 placeholder:text-gray-400 outline-none bg-transparent"
           />
           <kbd className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-gray-50 text-gray-400 leading-none">ESC</kbd>
@@ -157,7 +159,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
         <div className="max-h-80 overflow-y-auto">
           {query.trim() && results.length === 0 && (
             <div className="px-4 py-8 text-center text-sm text-gray-400">
-              No results for &ldquo;{query}&rdquo;
+              {t('search.noResults', { query })}
             </div>
           )}
 
@@ -207,7 +209,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
 
           {!query.trim() && (
             <div className="px-4 py-8 text-center text-sm text-gray-400">
-              Start typing to search...
+              {t('search.startTyping')}
             </div>
           )}
         </div>

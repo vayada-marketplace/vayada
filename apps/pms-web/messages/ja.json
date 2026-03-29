@@ -48,7 +48,6 @@
   "common.coverLabel": "カバー",
   "common.uploading": "アップロード中...",
   "common.uploadFailed": "アップロード失敗",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "施設を管理するにはサインインしてください",
   "auth.login.emailLabel": "メールアドレス",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
   "auth.login.sessionExpiredBanner": "セッションが期限切れです。再度サインインしてください。",
   "auth.login.signOut": "ログアウト",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "施設管理アカウントを作成",
   "auth.register.fullNameLabel": "氏名",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "パスワードが一致しません",
   "auth.register.emailExists": "このメールアドレスのアカウントは既に存在します。",
   "auth.register.unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
-
   "layout.header.switchProperty": "施設を切り替え",
   "layout.header.addProperty": "施設を追加",
   "layout.header.arrivals": "到着",
   "layout.header.departures": "出発",
-
   "layout.sidebar.propertyManager": "施設管理",
   "layout.sidebar.operationsAndInventory": "運営・在庫管理",
   "layout.sidebar.switchApp": "アプリ切替",
@@ -107,17 +103,15 @@
   "layout.sidebar.calendar": "カレンダー",
   "layout.sidebar.reservations": "予約",
   "layout.sidebar.inbox": "受信トレイ",
-  "layout.sidebar.roomsAndRates": "客室・料金",
+  "layout.sidebar.roomsAndRates": "客室と料金",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "設定",
   "layout.sidebar.collapse": "折りたたむ",
-
   "search.placeholder": "予約、ゲスト、部屋を検索...",
   "search.noResults": "'{query}' の検索結果なし",
   "search.startTyping": "入力して検索...",
   "search.categoryReservations": "予約",
   "search.categoryRoomTypes": "客室タイプ",
-
   "dashboard.title": "ダッシュボード",
   "dashboard.occupancyTonight": "今夜の稼働率",
   "dashboard.occupancySub": "{total}室中{occupied}室稼働中",
@@ -134,7 +128,6 @@
   "dashboard.settled": "精算済み",
   "dashboard.occupancyForecast": "稼働率予測",
   "dashboard.next14Days": "今後14日間",
-
   "bookings.title": "予約",
   "bookings.subtitle": "全予約の元帳",
   "bookings.searchPlaceholder": "ゲスト、予約ID、部屋で検索...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "一部支払い",
   "bookings.balanceRefunded": "返金済み",
   "bookings.balanceDue": "未払い",
-
   "bookings.detail.title": "予約 {reference}",
   "bookings.detail.notFound": "予約が見つかりません。",
   "bookings.detail.actionRequired": "対応が必要",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "予約の承認に失敗しました",
   "bookings.detail.failedToReject": "予約の拒否に失敗しました",
   "bookings.detail.failedToUpdate": "ステータスの更新に失敗しました",
-
   "bookings.modal.notFound": "予約が見つかりません",
   "bookings.modal.editBooking": "予約を編集",
   "bookings.modal.checkInLabel": "チェックイン",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "確認",
   "bookings.modal.cancelButton": "キャンセル",
   "bookings.modal.cancelBookingButton": "予約をキャンセル",
-
   "calendar.title": "カレンダー",
   "calendar.today": "今日",
   "calendar.blockRoom": "部屋をブロック",
@@ -251,7 +241,6 @@
   "calendar.noBookingsOnDay": "この日の予約はありません",
   "calendar.selectDay": "日を選択",
   "calendar.newShort": "+ 新規",
-
   "calendar.newBookingModal.title": "新規予約",
   "calendar.newBookingModal.roomLabel": "部屋",
   "calendar.newBookingModal.checkInLabel": "チェックイン",
@@ -276,7 +265,6 @@
   "calendar.newBookingModal.errorEmailRequired": "ゲストのメールアドレスは必須です",
   "calendar.newBookingModal.errorRoomRequired": "部屋を選択してください",
   "calendar.newBookingModal.maxOccupancyWarning": "この客室タイプの最大定員は{max}名です。{selected}名選択されています。",
-
   "calendar.blockModal.title": "部屋をブロック",
   "calendar.blockModal.roomTypeLabel": "客室タイプ",
   "calendar.blockModal.startDateLabel": "開始日",
@@ -290,7 +278,6 @@
   "calendar.blockModal.errorBothDates": "開始日と終了日の両方を選択してください",
   "calendar.blockModal.errorEndAfterStart": "終了日は開始日の後でなければなりません",
   "calendar.blockModal.failedToCreate": "ブロックの作成に失敗しました",
-
   "rooms.title": "客室・料金",
   "rooms.subtitle": "客室在庫と日別料金を管理",
   "rooms.addRoomType": "客室タイプを追加",
@@ -312,14 +299,12 @@
   "rooms.derivedRates": "派生料金:",
   "rooms.nonRefundable": "返金不可:",
   "rooms.occ": "稼働",
-
   "rooms.new.title": "新規客室タイプ",
   "rooms.new.submitLabel": "客室タイプを作成",
   "rooms.new.nameRequired": "名前は必須です",
   "rooms.new.seasonRateRequired": "0より大きい料金を持つシーズンが少なくとも1つ必要です",
   "rooms.new.everySeasonRateRequired": "すべてのシーズンに0より大きい料金が必要です",
   "rooms.new.failedToCreate": "客室タイプの作成に失敗しました",
-
   "rooms.edit.title": "編集: {name}",
   "rooms.edit.submitLabel": "変更を保存",
   "rooms.edit.success": "客室タイプが正常に更新されました",
@@ -327,7 +312,6 @@
   "rooms.edit.deleteConfirm": "この客室タイプを削除してよろしいですか？",
   "rooms.edit.cannotDelete": "削除できません - 客室タイプに予約がある可能性があります",
   "rooms.edit.notFound": "客室タイプが見つかりません。",
-
   "rooms.form.tabDetails": "客室詳細",
   "rooms.form.tabPricing": "料金設定",
   "rooms.form.tabMedia": "画像・アメニティ",
@@ -343,7 +327,7 @@
   "rooms.form.maxOccupancyHint": "客室カードに'最大X名'と表示されます",
   "rooms.form.bedrooms": "ベッドルーム",
   "rooms.form.bathrooms": "バスルーム",
-  "rooms.form.roomSize": "部屋の広さ (m\u00B2)",
+  "rooms.form.roomSize": "部屋の広さ (m²)",
   "rooms.form.totalRooms": "部屋数",
   "rooms.form.totalRoomsHint": "この客室タイプの利用可能なユニット数",
   "rooms.form.roomDescription": "客室説明",
@@ -353,7 +337,6 @@
   "rooms.form.roomCategoryTagHint": "(予約エンジンでゲストに表示されます)",
   "rooms.form.selectCategory": "カテゴリを選択",
   "rooms.form.sortOrder": "表示順",
-
   "rooms.form.bedTypeKing": "キングベッド",
   "rooms.form.bedTypeQueen": "クイーンベッド",
   "rooms.form.bedTypeDouble": "ダブルベッド",
@@ -361,7 +344,6 @@
   "rooms.form.bedTypeSingle": "シングルベッド",
   "rooms.form.bedTypeBunk": "二段ベッド",
   "rooms.form.bedTypeSofa": "ソファベッド",
-
   "rooms.form.categoryStandard": "スタンダード",
   "rooms.form.categoryDeluxe": "デラックス",
   "rooms.form.categorySuperior": "スーペリア",
@@ -370,14 +352,12 @@
   "rooms.form.categoryBungalow": "バンガロー",
   "rooms.form.categoryStudio": "スタジオ",
   "rooms.form.categoryPenthouse": "ペントハウス",
-
   "rooms.form.pricingStep1Title": "営業期間はいつですか？",
   "rooms.form.pricingStep1Desc": "営業期間は毎年繰り返されます - 期間外の日付は自動的にクローズされます",
   "rooms.form.yearRound": "通年",
   "rooms.form.period": "期間 {num}",
   "rooms.form.addPeriod": "期間を追加",
   "rooms.form.endDateAfterStart": "終了日は開始日より後でなければなりません",
-
   "rooms.form.pricingStep2Title": "年間の料金はどのように変わりますか？",
   "rooms.form.pricingStep2Desc": "営業期間にシーズンを描画し、シーズンごとの基本料金を設定してください",
   "rooms.form.noSeasonsYet": "シーズンがまだありません。下記から追加してください。",
@@ -394,7 +374,6 @@
   "rooms.form.seasonColumn": "シーズン",
   "rooms.form.flexRateColumn": "フレキシブル料金",
   "rooms.form.minStayColumn": "最低宿泊数",
-
   "rooms.form.pricingStep3Title": "ゲストが予約できるプランは？",
   "rooms.form.pricingStep3Desc": "少なくとも1つの料金プランを選択してください",
   "rooms.form.flexibleRate": "フレキシブル料金",
@@ -411,10 +390,8 @@
   "rooms.form.nonRefundableDesc": "(キャンセル不可の割引)",
   "rooms.form.discount": "割引:",
   "rooms.form.offFlexibleRate": "フレキシブル料金からの割引",
-
   "rooms.form.pricingStep4Title": "週末は料金が上がりますか？",
   "rooms.form.pricingStep4Desc": "週末料金は全シーズンの金曜・土曜の宿泊に適用されます",
-
   "rooms.form.liveRatePreview": "リアルタイム料金プレビュー",
   "rooms.form.noPrice": "料金なし",
   "rooms.form.dailyOverrideHint": "日付をクリックして日別料金を設定。右クリックでオーバーライドを削除。",
@@ -422,7 +399,6 @@
   "rooms.form.closed": "休業",
   "rooms.form.weekendPlus": "週末 +",
   "rooms.form.override": "オーバーライド",
-
   "rooms.form.roomImages": "客室画像",
   "rooms.form.uploadRoomImages": "客室画像をアップロード",
   "rooms.form.addMoreImages": "画像を追加",
@@ -430,7 +406,6 @@
   "rooms.form.maxImagesAllowed": "最大{max}枚まで",
   "rooms.form.onlyImageFiles": "画像ファイルのみ可能です（JPG, PNG, WebP）",
   "rooms.form.imageSizeLimit": "各画像は{maxSize}MB以下にしてください",
-
   "rooms.form.features": "特徴",
   "rooms.form.featuresRoomCardTags": "客室カードタグ",
   "rooms.form.featuresModalHighlights": "モーダルハイライト",
@@ -439,15 +414,12 @@
   "rooms.form.featuresPreviewEmpty": "下の特徴を選択してカードタグをプレビュー...",
   "rooms.form.featuresMore": "+{count}件",
   "rooms.form.featuresCount": "{count}個の特徴が選択済み - 最初の5個がカードに表示されます",
-
   "rooms.form.amenities": "アメニティ",
   "rooms.form.amenitiesModalFullList": "モーダル全リスト",
   "rooms.form.amenitiesHint": "含まれるもの - ゲストが'詳細を見る'をクリックした後に表示されます。カテゴリ別に整理すると見やすくなります。",
-
   "rooms.form.featureCategoryViewsLocation": "眺望・立地",
   "rooms.form.featureCategoryOutdoorRecreation": "アウトドア・レクリエーション",
   "rooms.form.featureCategorySpaceType": "空間・タイプ",
-
   "rooms.form.amenityCategoryInternetTech": "インターネット・テクノロジー",
   "rooms.form.amenityCategoryKitchen": "キッチン",
   "rooms.form.amenityCategoryBathroom": "バスルーム",
@@ -456,14 +428,12 @@
   "rooms.form.amenityCategoryLaundry": "ランドリー",
   "rooms.form.amenityCategorySafetyAccess": "安全・アクセス",
   "rooms.form.amenityCategoryServices": "サービス",
-
   "rooms.form.monthlyPricing": "月別料金",
   "rooms.form.monthlyPricingOverrides": "{count}件のオーバーライド",
   "rooms.form.monthlyPricingHint": "月ごとのシーズン料金を設定。空欄のフィールドは上記のデフォルト料金を使用します。",
   "rooms.form.monthColumn": "月",
   "rooms.form.baseRateColumn": "基本料金",
   "rooms.form.nonRefundableColumn": "返金不可",
-
   "channels.title": "Channel Manager",
   "channels.stepConnect": "接続",
   "channels.stepProperty": "施設",
@@ -513,7 +483,6 @@
   "channels.failedToCreateMapping": "マッピングの作成に失敗しました",
   "channels.failedToDeleteMapping": "マッピングの削除に失敗しました",
   "channels.failedToStartSync": "同期の開始に失敗しました",
-
   "settings.title": "設定",
   "settings.currency": "通貨",
   "settings.currencyDescription": "ダッシュボード全体の表示通貨を選択してください。",
@@ -528,7 +497,6 @@
   "settings.checkOutExample": "例: 07:00 - 11:00",
   "settings.timesSaved": "チェックイン/アウト時間が保存されました",
   "settings.failedToSaveTimes": "時間の保存に失敗しました",
-
   "inbox.title": "受信トレイ",
   "inbox.searchPlaceholder": "会話を検索...",
   "inbox.statusAll": "すべて",
@@ -547,9 +515,7 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelBeds24": "Beds24",
   "inbox.channelEmail": "メール",
-
   "setup.redirecting": "セットアップにリダイレクト中...",
-
   "pagination.showing": "{from}-{to} / {total}件",
   "pagination.previous": "前へ",
   "pagination.next": "次へ"

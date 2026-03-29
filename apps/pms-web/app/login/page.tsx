@@ -6,12 +6,14 @@ import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { checkPmsSetupStatus } from '@/lib/utils/setupStatus'
 import LoginForm from '@/components/auth/LoginForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function LoginPage() {
+  const { t } = useTranslation()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [submitError, setSubmitError] = useState(
-    searchParams.get('expired') === 'true' ? 'Your session has expired. Please sign in again.' : ''
+    searchParams.get('expired') === 'true' ? t('auth.login.sessionExpiredBanner') : ''
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -35,23 +37,23 @@ export default function LoginPage() {
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
-          setSubmitError('Invalid email or password.')
+          setSubmitError(t('auth.login.invalidCredentials'))
         } else if (error.status === 403) {
-          setSubmitError('Your account has been suspended. Please contact support.')
+          setSubmitError(t('auth.login.accountSuspended'))
         } else if (error.status === 422) {
           const detail = error.data.detail
           if (Array.isArray(detail)) {
             setSubmitError(detail.map(e => e.msg).join('. '))
           } else {
-            setSubmitError(detail || 'Validation error.')
+            setSubmitError(detail || t('auth.login.validationError'))
           }
         } else {
-          setSubmitError('An unexpected error occurred. Please try again.')
+          setSubmitError(t('auth.login.unexpectedError'))
         }
       } else if (error instanceof Error) {
         setSubmitError(error.message)
       } else {
-        setSubmitError('An unexpected error occurred. Please try again.')
+        setSubmitError(t('auth.login.unexpectedError'))
       }
     } finally {
       setIsSubmitting(false)
@@ -71,8 +73,8 @@ export default function LoginPage() {
               <path d="M8 11h8" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">vayada PMS</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Sign in to manage your property</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.login.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.login.subtitle')}</p>
         </div>
 
         <LoginForm
@@ -86,12 +88,12 @@ export default function LoginPage() {
 
         {/* Sign up link */}
         <p className="text-center text-[13px] text-gray-500 mt-5">
-          Don&apos;t have an account?{' '}
+          {t('auth.login.noAccount')}{' '}
           <a
             href="/register"
             className="text-primary-600 hover:text-primary-700 font-medium"
           >
-            Sign up
+            {t('auth.login.signUp')}
           </a>
         </p>
       </div>

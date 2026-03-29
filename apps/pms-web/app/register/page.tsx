@@ -6,8 +6,10 @@ import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { checkPmsSetupStatus } from '@/lib/utils/setupStatus'
 import RegisterForm from '@/components/auth/RegisterForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function RegisterPage() {
+  const { t } = useTranslation()
   const router = useRouter()
   const [submitError, setSubmitError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<{
@@ -34,7 +36,7 @@ export default function RegisterPage() {
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 400) {
-          setSubmitError('An account with this email already exists.')
+          setSubmitError(t('auth.register.emailExists'))
         } else if (error.status === 422) {
           const detail = error.data.detail
           if (Array.isArray(detail)) {
@@ -43,10 +45,10 @@ export default function RegisterPage() {
             setSubmitError(detail || 'Validation error.')
           }
         } else {
-          setSubmitError('An unexpected error occurred. Please try again.')
+          setSubmitError(t('auth.register.unexpectedError'))
         }
       } else {
-        setSubmitError('An unexpected error occurred. Please try again.')
+        setSubmitError(t('auth.register.unexpectedError'))
       }
     } finally {
       setIsSubmitting(false)
@@ -66,8 +68,8 @@ export default function RegisterPage() {
               <path d="M8 11h8" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">vayada PMS</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Create your property management account</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.register.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.register.subtitle')}</p>
         </div>
 
         <RegisterForm
