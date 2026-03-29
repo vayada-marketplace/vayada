@@ -114,13 +114,29 @@ function BookPageContent() {
 
   useEffect(() => {
     if (slug) {
-      bookingService.getPaymentSettings(slug).then((settings) => {
-        setGuestFormSettings({
-          specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
-          arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
-          guestCountEnabled: settings.guestCountEnabled ?? false,
+      // Fetch guest form settings from booking engine backend (source of truth for admin config)
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      fetch(`${apiUrl}/api/hotels/${slug}/payment-settings`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => {
+          if (data) {
+            setGuestFormSettings({
+              specialRequestsEnabled: data.specialRequestsEnabled ?? true,
+              arrivalTimeEnabled: data.arrivalTimeEnabled ?? false,
+              guestCountEnabled: data.guestCountEnabled ?? false,
+            })
+          }
         })
-      })
+        .catch(() => {
+          // Fallback: try PMS endpoint
+          bookingService.getPaymentSettings(slug).then((settings) => {
+            setGuestFormSettings({
+              specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
+              arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
+              guestCountEnabled: settings.guestCountEnabled ?? false,
+            })
+          })
+        })
     }
   }, [slug])
 
