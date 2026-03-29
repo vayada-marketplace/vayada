@@ -1093,15 +1093,9 @@ export default function SettingsPage() {
                         <p className="text-[11px] text-gray-500">Secure payments processed by Stripe. Payouts go directly to your bank account.</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Email</label>
-                        <input type="email" value={connectEmail} onChange={(e) => setConnectEmail(e.target.value)} placeholder="your@email.com" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
-                        <CountrySelect value={connectCountry} onChange={setConnectCountry} />
-                      </div>
+                    <div className="max-w-xs">
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
+                      <CountrySelect value={connectCountry} onChange={setConnectCountry} />
                     </div>
                     <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
                       {creatingAccount ? 'Connecting...' : 'Connect Payment Account'}
