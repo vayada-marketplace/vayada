@@ -12,7 +12,7 @@ export const MOCK_ROOMS: RoomType[] = [
     baseRate: 120,
     nonRefundableRate: 102,
     currency: 'EUR',
-    amenities: ['Free WiFi', 'Flat Screen TV', 'Mini Bar', 'Safe', 'Hair Dryer', 'Heating'],
+    amenities: ['Free WiFi', 'Flat Screen TV', 'Minibar', 'Safe', 'Hair Dryer', 'Heating'],
     images: [
       'https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=800&q=80',
       'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800&q=80',
@@ -37,7 +37,7 @@ export const MOCK_ROOMS: RoomType[] = [
     amenities: [
       'Free WiFi',
       'Flat Screen TV',
-      'Mini Bar',
+      'Minibar',
       'Nespresso Machine',
       'Safe',
       'Rain Shower',
@@ -67,7 +67,7 @@ export const MOCK_ROOMS: RoomType[] = [
     amenities: [
       'Free WiFi',
       'Flat Screen TV',
-      'Mini Bar',
+      'Minibar',
       'Nespresso Machine',
       'Safe',
       'Rain Shower',
@@ -99,7 +99,7 @@ export const MOCK_ROOMS: RoomType[] = [
     amenities: [
       'Free WiFi',
       'Flat Screen TV',
-      'Mini Bar',
+      'Minibar',
       'Nespresso Machine',
       'Safe',
       'Rain Shower',
