@@ -255,7 +255,7 @@ class BookingRepository:
         if not row:
             return None
 
-        # Recalculate total_amount and nights if dates or rate changed
+        # Recalculate total_amount if dates or rate changed
         if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
             current = await BookingRepository.get_by_id(booking_id)
             ci = date.fromisoformat(str(current["check_in"]))
@@ -264,8 +264,8 @@ class BookingRepository:
             rate = float(current["nightly_rate"])
             total = round(rate * nights, 2)
             await Database.execute(
-                "UPDATE bookings SET nights = $2, total_amount = $3, updated_at = now() WHERE id = $1",
-                booking_id, nights, total,
+                "UPDATE bookings SET total_amount = $2, updated_at = now() WHERE id = $1",
+                booking_id, total,
             )
 
         return await BookingRepository.get_by_id(booking_id)
