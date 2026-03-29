@@ -33,7 +33,7 @@ from app.models.auth import (
     VerifyEmailChangeResponse,
 )
 from app.repositories.email_change_repo import EmailChangeRepository
-from app.email_service import send_email, create_email_change_verification_html, create_password_reset_html
+from app.email_service import send_email, create_email_change_verification_html, create_password_reset_html, create_welcome_email_html
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,11 @@ async def register(request: RegisterRequest):
     access_token = create_access_token(
         data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
     )
+
+    # Send welcome/registration confirmation email
+    login_link = f"{settings.FRONTEND_URL}/login"
+    welcome_html = create_welcome_email_html(user_name, login_link)
+    await send_email(user['email'], "Welcome to Vayada!", welcome_html)
 
     return RegisterResponse(
         id=str(user['id']),
