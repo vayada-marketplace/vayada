@@ -250,25 +250,25 @@ class BookingRepository:
             params.append(val)
 
         set_clauses.append("updated_at = now()")
-        sql = f"UPDATE bookings SET {', '.join(set_clauses)} WHERE id = $1 RETURNING *"
+        sql = f"UPDATE bookings SET {', '.join(set_clauses)} WHERE id = $1 RETURNING id"
         row = await Database.fetchrow(sql, *params)
         if not row:
             return None
 
         # Recalculate total_amount and nights if dates or rate changed
-        booking = dict(row)
         if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
-            ci = date.fromisoformat(str(booking["check_in"]))
-            co = date.fromisoformat(str(booking["check_out"]))
+            current = await BookingRepository.get_by_id(booking_id)
+            ci = date.fromisoformat(str(current["check_in"]))
+            co = date.fromisoformat(str(current["check_out"]))
             nights = max(1, (co - ci).days)
-            rate = float(booking["nightly_rate"])
+            rate = float(current["nightly_rate"])
             total = round(rate * nights, 2)
-            row = await Database.fetchrow(
-                "UPDATE bookings SET nights = $2, total_amount = $3, updated_at = now() WHERE id = $1 RETURNING *",
+            await Database.execute(
+                "UPDATE bookings SET nights = $2, total_amount = $3, updated_at = now() WHERE id = $1",
                 booking_id, nights, total,
             )
-            booking = dict(row) if row else booking
-        return booking
+
+        return await BookingRepository.get_by_id(booking_id)
 
     @staticmethod
     async def update_payment_status(booking_id: str, payment_status: str) -> Optional[dict]:
