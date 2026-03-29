@@ -92,6 +92,10 @@ export interface AddonItem {
   duration?: string
   perPerson?: boolean
   perNight?: boolean
+  location?: string
+  maxGuests?: string
+  highlights?: string[]
+  includedItems?: string[]
 }
 
 export interface SuperAdminHotel extends HotelSummary {

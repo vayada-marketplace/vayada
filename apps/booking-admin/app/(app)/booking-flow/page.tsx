@@ -51,6 +51,10 @@ const emptyAddon = {
   duration: '',
   perPerson: false,
   perNight: false,
+  location: '',
+  maxGuests: '',
+  highlights: [] as string[],
+  includedItems: [] as string[],
 }
 
 export default function BookingFlowPage() {
@@ -67,6 +71,8 @@ export default function BookingFlowPage() {
   const [savingAddon, setSavingAddon] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [highlightInput, setHighlightInput] = useState('')
+  const [includedItemInput, setIncludedItemInput] = useState('')
   const addonFileInputRef = useRef<HTMLInputElement>(null)
 
   // Promo codes state
@@ -159,7 +165,9 @@ export default function BookingFlowPage() {
 
   const openCreateModal = () => {
     setEditingAddon(null)
-    setFormData({ ...emptyAddon })
+    setFormData({ ...emptyAddon, highlights: [], includedItems: [] })
+    setHighlightInput('')
+    setIncludedItemInput('')
     setShowModal(true)
   }
 
@@ -175,7 +183,13 @@ export default function BookingFlowPage() {
       duration: addon.duration || '',
       perPerson: addon.perPerson || false,
       perNight: addon.perNight || false,
+      location: addon.location || '',
+      maxGuests: addon.maxGuests || '',
+      highlights: addon.highlights || [],
+      includedItems: addon.includedItems || [],
     })
+    setHighlightInput('')
+    setIncludedItemInput('')
     setShowModal(true)
   }
 
@@ -213,6 +227,10 @@ export default function BookingFlowPage() {
         duration: formData.duration || undefined,
         perPerson: formData.perPerson,
         perNight: formData.perNight,
+        location: formData.location || undefined,
+        maxGuests: formData.maxGuests || undefined,
+        highlights: formData.highlights.length > 0 ? formData.highlights : undefined,
+        includedItems: formData.includedItems.length > 0 ? formData.includedItems : undefined,
       }
       if (editingAddon) {
         const updated = await settingsService.updateAddon(editingAddon.id, payload)
@@ -809,6 +827,146 @@ export default function BookingFlowPage() {
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   placeholder={t('bookingFlow.addons.modal.durationPlaceholder')}
                 />
+              </div>
+
+              {/* Location */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Location</label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="e.g., Hotel Lobby, Gili Islands"
+                />
+              </div>
+
+              {/* Max Guests */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Max Guests</label>
+                <input
+                  type="text"
+                  value={formData.maxGuests}
+                  onChange={(e) => setFormData({ ...formData, maxGuests: e.target.value })}
+                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="e.g., 2-4 guests"
+                />
+              </div>
+
+              {/* Highlights */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Highlights (optional)</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={highlightInput}
+                    onChange={(e) => setHighlightInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const val = highlightInput.trim()
+                        if (val && !formData.highlights.includes(val)) {
+                          setFormData({ ...formData, highlights: [...formData.highlights, val] })
+                          setHighlightInput('')
+                        }
+                      }
+                    }}
+                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder="e.g., PADI certification"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = highlightInput.trim()
+                      if (val && !formData.highlights.includes(val)) {
+                        setFormData({ ...formData, highlights: [...formData.highlights, val] })
+                        setHighlightInput('')
+                      }
+                    }}
+                    className="px-3 py-1.5 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+                {formData.highlights.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {formData.highlights.map((item, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-[12px] text-gray-700 rounded-full"
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFormData({ ...formData, highlights: formData.highlights.filter((_, i) => i !== idx) })
+                          }
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <XMarkIcon className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* What's Included */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">What&apos;s Included (optional)</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={includedItemInput}
+                    onChange={(e) => setIncludedItemInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const val = includedItemInput.trim()
+                        if (val && !formData.includedItems.includes(val)) {
+                          setFormData({ ...formData, includedItems: [...formData.includedItems, val] })
+                          setIncludedItemInput('')
+                        }
+                      }
+                    }}
+                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder="e.g., Equipment rental"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = includedItemInput.trim()
+                      if (val && !formData.includedItems.includes(val)) {
+                        setFormData({ ...formData, includedItems: [...formData.includedItems, val] })
+                        setIncludedItemInput('')
+                      }
+                    }}
+                    className="px-3 py-1.5 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+                {formData.includedItems.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {formData.includedItems.map((item, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-[12px] text-gray-700 rounded-full"
+                      >
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFormData({ ...formData, includedItems: formData.includedItems.filter((_, i) => i !== idx) })
+                          }
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <XMarkIcon className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Per Person toggle */}
