@@ -33,7 +33,7 @@ from app.models.auth import (
     VerifyEmailChangeResponse,
 )
 from app.repositories.email_change_repo import EmailChangeRepository
-from app.email_service import send_email, create_email_change_verification_html
+from app.email_service import send_email, create_email_change_verification_html, create_password_reset_html
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,10 @@ async def forgot_password(request: ForgotPasswordRequest):
 
     if user and user['status'] != 'suspended':
         token = await create_password_reset_token(str(user['id']), expires_in_hours=1)
-        logger.info(f"Password reset link generated for user {user['id']}")
+        reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        html_body = create_password_reset_html(reset_link, user.get('name'))
+        await send_email(user['email'], "Reset Your Password", html_body)
+        logger.info(f"Password reset email sent to user {user['id']}")
         return ForgotPasswordResponse(
             message=generic_msg,
             token=token if settings.DEBUG else None,
