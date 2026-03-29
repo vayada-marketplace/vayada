@@ -231,7 +231,7 @@ export default function RoomsStep({
   const getUncoveredDays = (): string | null => {
     const periods = room.operatingPeriods.filter(p => p.from && p.to && !isEndBeforeStart(p.from, p.to))
     const seasons = room.seasons.filter(s => s.from && s.to && !isEndBeforeStart(s.from, s.to))
-    if (periods.length === 0 || seasons.length === 0) return null
+    if (periods.length === 0) return null
     const toDoy = (dateStr: string) => { const [m, d] = dateStr.split('-').map(Number); return DAYS_IN_MONTH.slice(0, m - 1).reduce((a, b) => a + b, 0) + d }
     const toDateLabel = (doy: number) => { let d = doy; for (let m = 0; m < 12; m++) { if (d <= DAYS_IN_MONTH[m]) return `${MONTHS[m]} ${d}`; d -= DAYS_IN_MONTH[m] } return `Dec 31` }
     const open = new Set<number>()
