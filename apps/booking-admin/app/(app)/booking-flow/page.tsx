@@ -20,7 +20,7 @@ import AddonsTab from '@/components/booking-flow/AddonsTab'
 import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 import PromoCodesTab from '@/components/booking-flow/PromoCodesTab'
 
-type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes'
+type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes' | 'localization'
 
 const CATEGORIES = [
   { value: 'dining', label: 'Dining' },
@@ -399,6 +399,7 @@ export default function BookingFlowPage() {
     { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
     { id: 'promo-codes' as const, label: 'Promos', icon: PromoIcon },
     { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
+    { id: 'localization' as const, label: 'Localization', icon: LocalizationIcon },
   ]
 
   if (loading) {
@@ -422,7 +423,7 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-4 shrink-0 max-w-xl">
+      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5 shrink-0 max-w-xl">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -491,82 +492,83 @@ export default function BookingFlowPage() {
           />
         )}
 
-        {/* Currency & Languages */}
-        <div className="mt-6 bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-          <div className="flex items-center gap-1.5">
-            <GlobeAltIcon className="w-4 h-4 text-gray-700" />
-            <h2 className="text-sm font-semibold text-gray-900">Currency & Languages</h2>
-          </div>
+        {activeTab === 'localization' && (
+          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+            <div className="flex items-center gap-1.5">
+              <GlobeAltIcon className="w-4 h-4 text-gray-700" />
+              <h2 className="text-sm font-semibold text-gray-900">Currency & Languages</h2>
+            </div>
 
-          {/* Default Currency & Language */}
-          <div className="grid grid-cols-2 gap-3">
+            {/* Default Currency & Language */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Currency <span className="text-gray-700">*</span></label>
+                <FlagSelect<CurrencyOption>
+                  value={defaultCurrency}
+                  onChange={(code) => {
+                    setDefaultCurrency(code)
+                    setSupportedCurrencies((prev) => prev.filter((c) => c !== code))
+                  }}
+                  options={CURRENCY_OPTIONS}
+                  getLabel={(o) => o.name}
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Language <span className="text-gray-700">*</span></label>
+                <FlagSelect<LanguageOption>
+                  value={defaultLanguage}
+                  onChange={(code) => {
+                    setDefaultLanguage(code)
+                    setSupportedLanguages((prev) => prev.filter((l) => l !== code))
+                  }}
+                  options={LANGUAGE_OPTIONS}
+                  getLabel={(o) => o.name}
+                />
+              </div>
+            </div>
+
+            {/* Additional Currencies */}
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Currency <span className="text-gray-700">*</span></label>
-              <FlagSelect<CurrencyOption>
-                value={defaultCurrency}
-                onChange={(code) => {
-                  setDefaultCurrency(code)
-                  setSupportedCurrencies((prev) => prev.filter((c) => c !== code))
-                }}
+              <label className="block text-[13px] text-gray-700 mb-1">
+                <span className="font-medium">Additional Currencies</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+              </label>
+              <SearchableMultiSelect<CurrencyOption>
+                selected={supportedCurrencies}
+                onToggle={toggleCurrency}
                 options={CURRENCY_OPTIONS}
-                getLabel={(o) => o.name}
+                excludeCode={defaultCurrency}
+                placeholder={`Search currencies, e.g. "Swiss" or "CHF"...`}
+                getLabel={(o) => o.code}
+                getSearchLabel={(o) => `${o.name} \u00b7 ${o.code}`}
+                popularCodes={POPULAR_CURRENCY_CODES}
+                emptyMessage={`No additional currencies added \u2014 your booking page will show only ${defaultCurrency}`}
               />
             </div>
+
+            {/* Additional Languages */}
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Language <span className="text-gray-700">*</span></label>
-              <FlagSelect<LanguageOption>
-                value={defaultLanguage}
-                onChange={(code) => {
-                  setDefaultLanguage(code)
-                  setSupportedLanguages((prev) => prev.filter((l) => l !== code))
-                }}
+              <label className="block text-[13px] text-gray-700 mb-1">
+                <span className="font-medium">Additional Languages</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+              </label>
+              <SearchableMultiSelect<LanguageOption>
+                selected={supportedLanguages}
+                onToggle={toggleLanguage}
                 options={LANGUAGE_OPTIONS}
-                getLabel={(o) => o.name}
+                excludeCode={defaultLanguage}
+                placeholder={`Search languages, e.g. "German" or "Deutsch"...`}
+                getLabel={(o) => o.nativeName}
+                getSearchLabel={(o) => `${o.name} \u00b7 ${o.nativeName}`}
+                popularCodes={POPULAR_LANGUAGE_CODES}
+                emptyMessage={`No additional languages added \u2014 your booking page will show only ${defaultLanguage.toUpperCase()}`}
               />
             </div>
-          </div>
 
-          {/* Additional Currencies */}
-          <div>
-            <label className="block text-[13px] text-gray-700 mb-1">
-              <span className="font-medium">Additional Currencies</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
-            </label>
-            <SearchableMultiSelect<CurrencyOption>
-              selected={supportedCurrencies}
-              onToggle={toggleCurrency}
-              options={CURRENCY_OPTIONS}
-              excludeCode={defaultCurrency}
-              placeholder={`Search currencies, e.g. "Swiss" or "CHF"...`}
-              getLabel={(o) => o.code}
-              getSearchLabel={(o) => `${o.name} \u00b7 ${o.code}`}
-              popularCodes={POPULAR_CURRENCY_CODES}
-              emptyMessage={`No additional currencies added \u2014 your booking page will show only ${defaultCurrency}`}
-            />
+            {/* Save button */}
+            <div className="flex justify-end">
+              <SaveButton onClick={handleSaveCurrencyLang} saving={savingCurrencyLang} />
+            </div>
           </div>
-
-          {/* Additional Languages */}
-          <div>
-            <label className="block text-[13px] text-gray-700 mb-1">
-              <span className="font-medium">Additional Languages</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
-            </label>
-            <SearchableMultiSelect<LanguageOption>
-              selected={supportedLanguages}
-              onToggle={toggleLanguage}
-              options={LANGUAGE_OPTIONS}
-              excludeCode={defaultLanguage}
-              placeholder={`Search languages, e.g. "German" or "Deutsch"...`}
-              getLabel={(o) => o.nativeName}
-              getSearchLabel={(o) => `${o.name} \u00b7 ${o.nativeName}`}
-              popularCodes={POPULAR_LANGUAGE_CODES}
-              emptyMessage={`No additional languages added \u2014 your booking page will show only ${defaultLanguage.toUpperCase()}`}
-            />
-          </div>
-
-          {/* Save button */}
-          <div className="flex justify-end">
-            <SaveButton onClick={handleSaveCurrencyLang} saving={savingCurrencyLang} />
-          </div>
-        </div>
+        )}
 
       </div>
 
@@ -934,6 +936,16 @@ function BenefitsIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 12l2 2 4-4" />
       <path d="M12 3a9 9 0 100 18 9 9 0 000-18z" />
+    </svg>
+  )
+}
+
+function LocalizationIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
     </svg>
   )
 }
