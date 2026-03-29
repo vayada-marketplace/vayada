@@ -19,7 +19,8 @@ export function calculatePromoDiscount(
   return Math.min(discountValue, subtotal)
 }
 
-/** Calculate the total price for selected addons, accounting for perPerson, perNight, and quantity. */
+/** Calculate the total price for selected addons, accounting for perPerson, perNight, and quantity.
+ *  For perNight addons, qty represents the number of nights selected (not a generic multiplier). */
 export function calculateAddonTotal(
   addons: Addon[],
   selectedIds: string[],
@@ -30,10 +31,13 @@ export function calculateAddonTotal(
   let total = 0
   for (const addon of addons) {
     if (!selectedIds.includes(addon.id)) continue
-    const qty = quantities?.[addon.id] ?? 1
+    // For perNight addons, qty = number of nights selected; default to all nights
+    const qty = addon.perNight
+      ? (quantities?.[addon.id] ?? nights)
+      : (quantities?.[addon.id] ?? 1)
     let price = addon.price
     if (addon.perPerson) price *= adults
-    if (addon.perNight) price *= nights
+    // qty already represents nights for perNight addons, so just multiply by qty
     price *= qty
     total += price
   }

@@ -52,7 +52,7 @@ export default function AddonsPage() {
 
   const selectedIds = Object.keys(selections)
 
-  const MAX_QUANTITY = 10
+  const getMaxQuantity = (addon: { perNight?: boolean }) => addon.perNight ? nights : 10
 
   const toggleAddon = (id: string) => {
     setSelections((prev) => {
@@ -61,14 +61,16 @@ export default function AddonsPage() {
         delete next[id]
         return next
       }
-      return { ...prev, [id]: 1 }
+      const addon = addons.find(a => a.id === id)
+      return { ...prev, [id]: addon?.perNight ? nights : 1 }
     })
   }
 
-  const setQuantity = (id: string, qty: number) => {
+  const setQuantity = (id: string, qty: number, addon: { perNight?: boolean }) => {
+    const max = getMaxQuantity(addon)
     setSelections((prev) => ({
       ...prev,
-      [id]: Math.max(1, Math.min(qty, MAX_QUANTITY)),
+      [id]: Math.max(1, Math.min(qty, max)),
     }))
   }
 
@@ -131,18 +133,18 @@ export default function AddonsPage() {
                     {isAdded ? (
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => setQuantity(addon.id, selections[addon.id] - 1)}
+                          onClick={() => setQuantity(addon.id, selections[addon.id] - 1, addon)}
                           disabled={selections[addon.id] <= 1}
                           className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
                         </button>
                         <span className="w-8 text-center text-sm font-semibold text-gray-900">
-                          {selections[addon.id]}
+                          {addon.perNight ? `${selections[addon.id]}/${nights}` : selections[addon.id]}
                         </span>
                         <button
-                          onClick={() => setQuantity(addon.id, selections[addon.id] + 1)}
-                          disabled={selections[addon.id] >= MAX_QUANTITY}
+                          onClick={() => setQuantity(addon.id, selections[addon.id] + 1, addon)}
+                          disabled={selections[addon.id] >= getMaxQuantity(addon)}
                           className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
@@ -185,7 +187,6 @@ export default function AddonsPage() {
                 const qty = selections[addon.id]
                 let computedPrice = addon.price
                 if (addon.perPerson) computedPrice *= adultsParam
-                if (addon.perNight) computedPrice *= nights
                 computedPrice *= qty
                 return (
                 <div key={addon.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-gray-100">
@@ -196,9 +197,10 @@ export default function AddonsPage() {
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{addon.name}</p>
                       <p className="text-xs text-gray-500">
-                        {qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
-                        {addon.perPerson && qty > 1 ? ` · ${tc('perPerson')}` : ''}
-                        {addon.perNight ? ` · ${tc('nights', { count: nights })}` : ''}
+                        {addon.perNight
+                          ? `${qty}/${nights} ${tc('nights', { count: nights })}`
+                          : qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
+                        {addon.perPerson ? ` · ${tc('perPerson')}` : ''}
                       </p>
                     </div>
                   </div>
@@ -227,7 +229,6 @@ export default function AddonsPage() {
                     const qty = selections[addon.id] ?? 1
                     let price = addon.price
                     if (addon.perPerson) price *= adultsParam
-                    if (addon.perNight) price *= nights
                     price *= qty
                     total += convertPrice(price, addon.currency)
                   }
