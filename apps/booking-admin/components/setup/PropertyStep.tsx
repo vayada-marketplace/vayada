@@ -511,8 +511,10 @@ export default function PropertyStep({
               <FlagSelect<CurrencyOption>
                 value={currency}
                 onChange={(code) => {
+                  const oldDefault = currency
                   setCurrency(code)
-                  setSupportedCurrencies(supportedCurrencies.filter((c) => c !== code))
+                  const without = supportedCurrencies.filter((c) => c !== code)
+                  setSupportedCurrencies(oldDefault && !without.includes(oldDefault) ? [...without, oldDefault] : without)
                 }}
                 options={CURRENCY_OPTIONS}
                 getLabel={(o) => o.name}
@@ -523,8 +525,10 @@ export default function PropertyStep({
               <FlagSelect<LanguageOption>
                 value={defaultLanguage}
                 onChange={(code) => {
+                  const oldDefault = defaultLanguage
                   setDefaultLanguage(code)
-                  setSupportedLanguages(supportedLanguages.filter((c) => c !== code))
+                  const without = supportedLanguages.filter((l) => l !== code)
+                  setSupportedLanguages(oldDefault && !without.includes(oldDefault) ? [...without, oldDefault] : without)
                 }}
                 options={LANGUAGE_OPTIONS}
                 getLabel={(o) => o.name}
