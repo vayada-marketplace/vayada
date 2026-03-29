@@ -562,8 +562,12 @@ export default function BookingFlowPage() {
                 <FlagSelect<CurrencyOption>
                   value={defaultCurrency}
                   onChange={(code) => {
+                    const oldDefault = defaultCurrency
                     setDefaultCurrency(code)
-                    setSupportedCurrencies((prev) => prev.filter((c) => c !== code))
+                    setSupportedCurrencies((prev) => {
+                      const without = prev.filter((c) => c !== code)
+                      return oldDefault && !without.includes(oldDefault) ? [...without, oldDefault] : without
+                    })
                   }}
                   options={CURRENCY_OPTIONS}
                   getLabel={(o) => o.name}
@@ -574,8 +578,12 @@ export default function BookingFlowPage() {
                 <FlagSelect<LanguageOption>
                   value={defaultLanguage}
                   onChange={(code) => {
+                    const oldDefault = defaultLanguage
                     setDefaultLanguage(code)
-                    setSupportedLanguages((prev) => prev.filter((l) => l !== code))
+                    setSupportedLanguages((prev) => {
+                      const without = prev.filter((l) => l !== code)
+                      return oldDefault && !without.includes(oldDefault) ? [...without, oldDefault] : without
+                    })
                   }}
                   options={LANGUAGE_OPTIONS}
                   getLabel={(o) => o.name}
