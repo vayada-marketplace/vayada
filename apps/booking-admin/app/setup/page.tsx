@@ -13,7 +13,7 @@ import { uploadSingleImage, uploadImages } from '@/lib/utils/uploadImage'
 import PropertyStep from '@/components/setup/PropertyStep'
 import BrandMediaStep from '@/components/setup/BrandMediaStep'
 import PmsStep from '@/components/setup/PmsStep'
-import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/RoomsStep'
+import RoomsStep, { type RoomType, createEmptyRoom, hasSeasonCoverageGaps } from '@/components/setup/RoomsStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
 import AddonsStep, { type SetupAddon } from '@/components/setup/AddonsStep'
 import BenefitsStep from '@/components/setup/BenefitsStep'
@@ -220,7 +220,8 @@ export default function SetupPage() {
     if (step === 4) {
       return rooms.every(r =>
         !!(r.name.trim() && r.maxOccupancy >= 1 && r.totalRooms >= 1) &&
-        r.seasons.some(s => s.rate && Number(s.rate) > 0)
+        r.seasons.some(s => s.rate && Number(s.rate) > 0) &&
+        !hasSeasonCoverageGaps(r)
       )
     }
     if (step === 5) {

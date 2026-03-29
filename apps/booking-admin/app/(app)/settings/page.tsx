@@ -157,7 +157,7 @@ export default function SettingsPage() {
   // Stripe Connect / Payments
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null)
   const [stripeOnboarded, setStripeOnboarded] = useState(false)
-  const [connectEmail, setConnectEmail] = useState('')
+  const [connectEmail, setConnectEmail] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('userEmail') || '' : '')
   const [connectCountry, setConnectCountry] = useState('AT')
   const [creatingAccount, setCreatingAccount] = useState(false)
   const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
@@ -246,7 +246,8 @@ export default function SettingsPage() {
       const link = await pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link')
       window.open(link.url, '_blank')
     } catch (err: any) {
-      setPaymentError(err.message || 'Failed to create account')
+      const msg = err instanceof TypeError ? 'Could not reach the payment server. Please try again later.' : (err.message || 'Failed to create account')
+      setPaymentError(msg)
     } finally {
       setCreatingAccount(false)
     }
@@ -1103,7 +1104,7 @@ export default function SettingsPage() {
                       </div>
                     </div>
                     <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
-                      {creatingAccount ? 'Connecting...' : 'Connect with Stripe'}
+                      {creatingAccount ? 'Connecting...' : 'Connect Payment Account'}
                     </button>
                   </div>
                 )}
