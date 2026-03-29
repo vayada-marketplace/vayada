@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional, List
 from app.repositories.booking_hotel_repo import BookingHotelRepository
@@ -93,6 +94,19 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
     if not hotel or not hotel.get("show_addons_step", True):
         return []
     rows = await BookingAddonRepository.list_by_hotel_id(str(hotel["id"]))
+    def _parse_json_list(value) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
     return [
         AddonResponse(
             id=str(row["id"]),
@@ -105,6 +119,10 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
             duration=row.get("duration"),
             per_person=row.get("per_person"),
             per_night=row.get("per_night"),
+            location=row.get("location", ""),
+            max_guests=row.get("max_guests", ""),
+            highlights=_parse_json_list(row.get("highlights")),
+            included_items=_parse_json_list(row.get("included_items")),
         )
         for row in rows
     ]

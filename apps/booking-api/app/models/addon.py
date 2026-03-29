@@ -17,6 +17,10 @@ class AddonResponse(BaseModel):
     duration: Optional[str] = None
     per_person: Optional[bool] = None
     per_night: Optional[bool] = None
+    location: str = ''
+    max_guests: str = ''
+    highlights: list[str] = []
+    included_items: list[str] = []
 
 
 class CreateAddonRequest(BaseModel):
@@ -31,6 +35,10 @@ class CreateAddonRequest(BaseModel):
     duration: Optional[str] = None
     per_person: Optional[bool] = None
     per_night: Optional[bool] = None
+    location: Optional[str] = None
+    max_guests: Optional[str] = None
+    highlights: Optional[list[str]] = None
+    included_items: Optional[list[str]] = None
 
 
 class UpdateAddonRequest(BaseModel):
@@ -45,6 +53,10 @@ class UpdateAddonRequest(BaseModel):
     duration: Optional[str] = None
     per_person: Optional[bool] = None
     per_night: Optional[bool] = None
+    location: Optional[str] = None
+    max_guests: Optional[str] = None
+    highlights: Optional[list[str]] = None
+    included_items: Optional[list[str]] = None
 
 
 class AddonSettingsResponse(BaseModel):

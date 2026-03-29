@@ -1,0 +1,4 @@
+ALTER TABLE booking_addons ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
+ALTER TABLE booking_addons ADD COLUMN IF NOT EXISTS max_guests TEXT DEFAULT '';
+ALTER TABLE booking_addons ADD COLUMN IF NOT EXISTS highlights JSONB DEFAULT '[]';
+ALTER TABLE booking_addons ADD COLUMN IF NOT EXISTS included_items JSONB DEFAULT '[]';

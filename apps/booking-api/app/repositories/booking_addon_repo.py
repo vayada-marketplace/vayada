@@ -1,6 +1,7 @@
 """
 Repository for booking_addons table (Database).
 """
+import json
 from typing import Optional
 
 from app.database import Database
@@ -35,13 +36,24 @@ class BookingAddonRepository:
         image: str = '',
         duration: Optional[str] = None,
         per_person: Optional[bool] = None,
+        per_night: Optional[bool] = None,
+        location: Optional[str] = None,
+        max_guests: Optional[str] = None,
+        highlights: Optional[list[str]] = None,
+        included_items: Optional[list[str]] = None,
     ) -> dict:
         query = """
-            INSERT INTO booking_addons (hotel_id, name, description, price, currency, category, image, duration, per_person)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO booking_addons
+                (hotel_id, name, description, price, currency, category, image, duration, per_person, per_night, location, max_guests, highlights, included_items)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
         """
-        row = await Database.fetchrow(query, hotel_id, name, description, price, currency, category, image, duration, per_person)
+        row = await Database.fetchrow(
+            query, hotel_id, name, description, price, currency, category, image,
+            duration, per_person, per_night,
+            location or '', max_guests or '',
+            json.dumps(highlights or []), json.dumps(included_items or []),
+        )
         return dict(row)
 
     @staticmethod

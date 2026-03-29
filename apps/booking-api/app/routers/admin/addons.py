@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, HTTPException, Depends, status
 from app.dependencies import require_current_hotel
 from app.repositories.booking_addon_repo import BookingAddonRepository
@@ -13,6 +15,21 @@ from app.models.addon import (
 router = APIRouter()
 
 
+def _parse_json_list(value) -> list[str]:
+    """Parse a JSONB value that may already be a list or a JSON string."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
+
+
 def _addon_to_response(row: dict) -> AddonResponse:
     return AddonResponse(
         id=str(row["id"]),
@@ -24,6 +41,11 @@ def _addon_to_response(row: dict) -> AddonResponse:
         image=row["image"],
         duration=row.get("duration"),
         per_person=row.get("per_person"),
+        per_night=row.get("per_night"),
+        location=row.get("location", ""),
+        max_guests=row.get("max_guests", ""),
+        highlights=_parse_json_list(row.get("highlights")),
+        included_items=_parse_json_list(row.get("included_items")),
     )
 
 
@@ -48,6 +70,11 @@ async def create_addon(
         image=data.image,
         duration=data.duration,
         per_person=data.per_person,
+        per_night=data.per_night,
+        location=data.location,
+        max_guests=data.max_guests,
+        highlights=data.highlights,
+        included_items=data.included_items,
     )
     return _addon_to_response(row)
 
@@ -64,10 +91,14 @@ async def update_addon(
         raise HTTPException(status_code=404, detail="Addon not found")
 
     updates = {}
-    for field in ("name", "description", "price", "currency", "category", "image", "duration", "per_person"):
+    for field in ("name", "description", "price", "currency", "category", "image", "duration", "per_person", "per_night", "location", "max_guests"):
         value = getattr(data, field)
         if value is not None:
             updates[field] = value
+    for field in ("highlights", "included_items"):
+        value = getattr(data, field)
+        if value is not None:
+            updates[field] = json.dumps(value)
 
     if updates:
         row = await BookingAddonRepository.update(addon_id, hotel_id, updates)
