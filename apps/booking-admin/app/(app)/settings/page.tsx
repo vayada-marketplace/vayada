@@ -572,38 +572,6 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {/* Guest Information Form */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
-                    <h2 className="text-sm font-semibold text-gray-900">Guest Information Form</h2>
-                    <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Additional fields shown to guests during the booking process</p>
-                    <div className="space-y-2">
-                      <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${settings.special_requests_enabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
-                        <div>
-                          <span className="text-[13px] font-medium text-gray-900">Special Requests</span>
-                          <span className="ml-2 text-[10px] font-medium text-green-600">Recommended</span>
-                        </div>
-                        <button type="button" onClick={() => updateSetting('special_requests_enabled', !settings.special_requests_enabled)}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.special_requests_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.special_requests_enabled ? 'left-4' : 'left-0.5'}`} />
-                        </button>
-                      </div>
-                      <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${settings.arrival_time_enabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
-                        <span className="text-[13px] font-medium text-gray-900">Estimated Arrival Time</span>
-                        <button type="button" onClick={() => updateSetting('arrival_time_enabled', !settings.arrival_time_enabled)}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.arrival_time_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.arrival_time_enabled ? 'left-4' : 'left-0.5'}`} />
-                        </button>
-                      </div>
-                      <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${settings.guest_count_enabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
-                        <span className="text-[13px] font-medium text-gray-900">Number of Guests</span>
-                        <button type="button" onClick={() => updateSetting('guest_count_enabled', !settings.guest_count_enabled)}
-                          className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${settings.guest_count_enabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${settings.guest_count_enabled ? 'left-4' : 'left-0.5'}`} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Custom Domain */}
                   <div className="bg-white rounded-lg border border-gray-200 p-5">
                     <h2 className="text-sm font-semibold text-gray-900">Custom Domain</h2>

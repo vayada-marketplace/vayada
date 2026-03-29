@@ -20,7 +20,7 @@ import AddonsTab from '@/components/booking-flow/AddonsTab'
 import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 import PromoCodesTab from '@/components/booking-flow/PromoCodesTab'
 
-type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes' | 'localization'
+type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes' | 'localization' | 'guest-form'
 
 const CATEGORIES = [
   { value: 'dining', label: 'Dining' },
@@ -90,6 +90,12 @@ export default function BookingFlowPage() {
   const [pmsRooms, setPmsRooms] = useState<{ id: string; name: string }[]>([])
   const [pmsRoomsLoading, setPmsRoomsLoading] = useState(false)
 
+  // Guest Information Form state
+  const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(false)
+  const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(false)
+  const [guestCountEnabled, setGuestCountEnabled] = useState(false)
+  const [savingGuestForm, setSavingGuestForm] = useState(false)
+
   // Currency & Languages state
   const [defaultCurrency, setDefaultCurrency] = useState('EUR')
   const [defaultLanguage, setDefaultLanguage] = useState('en')
@@ -120,12 +126,15 @@ export default function BookingFlowPage() {
       if (design.filter_rooms) {
         setFilterRooms(design.filter_rooms)
       }
-      // Populate currency & language settings
+      // Populate currency, language & guest form settings
       if (property) {
         setDefaultCurrency(property.default_currency || 'EUR')
         setDefaultLanguage(property.default_language || 'en')
         setSupportedCurrencies(property.supported_currencies || [])
         setSupportedLanguages(property.supported_languages || [])
+        setSpecialRequestsEnabled(property.special_requests_enabled ?? false)
+        setArrivalTimeEnabled(property.arrival_time_enabled ?? false)
+        setGuestCountEnabled(property.guest_count_enabled ?? false)
       }
       // Fetch rooms from PMS
       if (property?.slug) {
@@ -363,6 +372,24 @@ export default function BookingFlowPage() {
     }
   }
 
+  // ── Guest Information Form handlers ──
+
+  const handleSaveGuestForm = async () => {
+    try {
+      setSavingGuestForm(true)
+      await settingsService.updatePropertySettings({
+        special_requests_enabled: specialRequestsEnabled,
+        arrival_time_enabled: arrivalTimeEnabled,
+        guest_count_enabled: guestCountEnabled,
+      })
+      showFeedback('success', 'Guest form settings saved')
+    } catch {
+      showFeedback('error', 'Failed to save guest form settings')
+    } finally {
+      setSavingGuestForm(false)
+    }
+  }
+
   // ── Currency & Language handlers ──
 
   const toggleCurrency = (code: string) => {
@@ -400,6 +427,7 @@ export default function BookingFlowPage() {
     { id: 'promo-codes' as const, label: 'Promos', icon: PromoIcon },
     { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
     { id: 'localization' as const, label: 'Localization', icon: LocalizationIcon },
+    { id: 'guest-form' as const, label: 'Guest Form', icon: GuestFormIcon },
   ]
 
   if (loading) {
@@ -423,7 +451,7 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5 shrink-0 max-w-xl">
+      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-6 shrink-0 max-w-2xl">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -566,6 +594,44 @@ export default function BookingFlowPage() {
             {/* Save button */}
             <div className="flex justify-end">
               <SaveButton onClick={handleSaveCurrencyLang} saving={savingCurrencyLang} />
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'guest-form' && (
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h2 className="text-sm font-semibold text-gray-900">Guest Information Form</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Additional fields shown to guests during the booking process</p>
+            <div className="space-y-2">
+              <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${specialRequestsEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
+                <div>
+                  <span className="text-[13px] font-medium text-gray-900">Special Requests</span>
+                  <span className="ml-2 text-[10px] font-medium text-green-600">Recommended</span>
+                </div>
+                <button type="button" onClick={() => setSpecialRequestsEnabled(!specialRequestsEnabled)}
+                  className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${specialRequestsEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${specialRequestsEnabled ? 'left-4' : 'left-0.5'}`} />
+                </button>
+              </div>
+              <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${arrivalTimeEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
+                <span className="text-[13px] font-medium text-gray-900">Estimated Arrival Time</span>
+                <button type="button" onClick={() => setArrivalTimeEnabled(!arrivalTimeEnabled)}
+                  className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${arrivalTimeEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${arrivalTimeEnabled ? 'left-4' : 'left-0.5'}`} />
+                </button>
+              </div>
+              <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${guestCountEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
+                <span className="text-[13px] font-medium text-gray-900">Number of Guests</span>
+                <button type="button" onClick={() => setGuestCountEnabled(!guestCountEnabled)}
+                  className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${guestCountEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${guestCountEnabled ? 'left-4' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Save button */}
+            <div className="flex justify-end mt-4">
+              <SaveButton onClick={handleSaveGuestForm} saving={savingGuestForm} />
             </div>
           </div>
         )}
@@ -946,6 +1012,17 @@ function LocalizationIcon({ className }: { className?: string }) {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+    </svg>
+  )
+}
+
+function GuestFormIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 12h6" />
+      <path d="M9 16h6" />
     </svg>
   )
 }
