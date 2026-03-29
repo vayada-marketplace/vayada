@@ -60,7 +60,7 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: 'USD', name: 'US Dollar', flag: '\u{1F1FA}\u{1F1F8}' },
 ]
 
-export const POPULAR_CURRENCY_CODES = ['EUR', 'GBP', 'AUD', 'SGD', 'CHF', 'CAD', 'THB', 'JPY']
+export const POPULAR_CURRENCY_CODES = ['USD', 'EUR', 'GBP', 'AUD', 'SGD', 'CHF', 'CAD', 'THB', 'JPY']
 
 export interface LanguageOption {
   code: string
