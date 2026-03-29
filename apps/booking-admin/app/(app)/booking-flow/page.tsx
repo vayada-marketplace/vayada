@@ -377,11 +377,18 @@ export default function BookingFlowPage() {
   const handleSaveGuestForm = async () => {
     try {
       setSavingGuestForm(true)
-      await settingsService.updatePropertySettings({
+      const guestFormData = {
         special_requests_enabled: specialRequestsEnabled,
         arrival_time_enabled: arrivalTimeEnabled,
         guest_count_enabled: guestCountEnabled,
-      })
+      }
+      await settingsService.updatePropertySettings(guestFormData)
+      // Sync to PMS so guest-facing booking page picks up the changes
+      try {
+        await pmsClient.patch('/admin/guest-form-settings', guestFormData)
+      } catch {
+        // Non-fatal: PMS sync may fail if not using vayada PMS
+      }
       showFeedback('success', 'Guest form settings saved')
     } catch {
       showFeedback('error', 'Failed to save guest form settings')
