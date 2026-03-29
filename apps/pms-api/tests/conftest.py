@@ -347,7 +347,7 @@ async def create_test_room_type(
         """,
         hotel_id, name, "A spacious suite", "Spacious and comfortable",
         2, 45, base_rate, non_refundable_rate, "EUR",
-        json.dumps(["WiFi", "Mini Bar"]), json.dumps([]), "King",
+        json.dumps(["WiFi", "Minibar"]), json.dumps([]), "King",
         json.dumps(["Mountain View"]),
         total_rooms, is_active, 0, non_refundable_enabled,
     )
