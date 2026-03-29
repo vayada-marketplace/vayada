@@ -3,8 +3,10 @@
 import { useState } from 'react'
 import { authService } from '@/services/auth'
 import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function ForgotPasswordPage() {
+  const { t } = useTranslation()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleForgotPassword = async (email: string) => {
@@ -24,8 +26,8 @@ export default function ForgotPasswordPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Booking Engine</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Reset your password</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.forgotPassword.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.forgotPassword.subtitle')}</p>
         </div>
 
         <ForgotPasswordForm

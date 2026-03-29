@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from '@/lib/i18n'
 import {
   XMarkIcon,
   PhotoIcon,
@@ -96,6 +97,8 @@ export default function BookingFlowPage() {
   const [guestCountEnabled, setGuestCountEnabled] = useState(false)
   const [savingGuestForm, setSavingGuestForm] = useState(false)
 
+  const { t } = useTranslation()
+
   // Currency & Languages state
   const [defaultCurrency, setDefaultCurrency] = useState('EUR')
   const [defaultLanguage, setDefaultLanguage] = useState('en')
@@ -190,7 +193,7 @@ export default function BookingFlowPage() {
       console.error('Image upload failed:', err)
       URL.revokeObjectURL(previewUrl)
       setFormData((prev) => ({ ...prev, image: previousImage }))
-      showFeedback('error', 'Image upload failed. Please try again.')
+      showFeedback('error', t('bookingFlow.addons.feedback.uploadError'))
     } finally {
       setUploadingImage(false)
     }
@@ -214,29 +217,29 @@ export default function BookingFlowPage() {
       if (editingAddon) {
         const updated = await settingsService.updateAddon(editingAddon.id, payload)
         setAddons((prev) => prev.map((a) => (a.id === editingAddon.id ? updated : a)))
-        showFeedback('success', 'Add-on updated successfully')
+        showFeedback('success', t('bookingFlow.addons.feedback.updateSuccess'))
       } else {
         const created = await settingsService.createAddon(payload as Omit<AddonItem, 'id'>)
         setAddons((prev) => [...prev, created])
-        showFeedback('success', 'Add-on created successfully')
+        showFeedback('success', t('bookingFlow.addons.feedback.createSuccess'))
       }
       setShowModal(false)
     } catch {
-      showFeedback('error', 'Failed to save add-on')
+      showFeedback('error', t('bookingFlow.addons.feedback.saveError'))
     } finally {
       setSavingAddon(false)
     }
   }
 
   const handleDeleteAddon = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this add-on?')) return
+    if (!confirm(t('bookingFlow.addons.confirm.delete'))) return
     try {
       setDeletingId(id)
       await settingsService.deleteAddon(id)
       setAddons((prev) => prev.filter((a) => a.id !== id))
-      showFeedback('success', 'Add-on deleted')
+      showFeedback('success', t('bookingFlow.addons.feedback.deleteSuccess'))
     } catch {
-      showFeedback('error', 'Failed to delete add-on')
+      showFeedback('error', t('bookingFlow.addons.feedback.deleteError'))
     } finally {
       setDeletingId(null)
     }
@@ -250,7 +253,7 @@ export default function BookingFlowPage() {
       await settingsService.updateAddonSettings({ [key]: newValue })
     } catch {
       setAddonSettings(addonSettings)
-      showFeedback('error', 'Failed to update setting')
+      showFeedback('error', t('bookingFlow.addons.feedback.settingError'))
     }
   }
 
@@ -292,29 +295,29 @@ export default function BookingFlowPage() {
       if (editingPromo) {
         const updated = await settingsService.updatePromoCode(editingPromo.id, payload)
         setPromoCodes((prev) => prev.map((p) => (p.id === editingPromo.id ? updated : p)))
-        showFeedback('success', 'Promo code updated successfully')
+        showFeedback('success', t('bookingFlow.promoCodes.feedback.updateSuccess'))
       } else {
         const created = await settingsService.createPromoCode(payload as any)
         setPromoCodes((prev) => [created, ...prev])
-        showFeedback('success', 'Promo code created successfully')
+        showFeedback('success', t('bookingFlow.promoCodes.feedback.createSuccess'))
       }
       setShowPromoModal(false)
     } catch {
-      showFeedback('error', 'Failed to save promo code')
+      showFeedback('error', t('bookingFlow.promoCodes.feedback.saveError'))
     } finally {
       setSavingPromo(false)
     }
   }
 
   const handleDeletePromoCode = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this promo code?')) return
+    if (!confirm(t('bookingFlow.promoCodes.confirm.delete'))) return
     try {
       setDeletingPromoId(id)
       await settingsService.deletePromoCode(id)
       setPromoCodes((prev) => prev.filter((p) => p.id !== id))
-      showFeedback('success', 'Promo code deleted')
+      showFeedback('success', t('bookingFlow.promoCodes.feedback.deleteSuccess'))
     } catch {
-      showFeedback('error', 'Failed to delete promo code')
+      showFeedback('error', t('bookingFlow.promoCodes.feedback.deleteError'))
     } finally {
       setDeletingPromoId(null)
     }
@@ -331,7 +334,7 @@ export default function BookingFlowPage() {
         await settingsService.updateDesignSettings({ booking_filters: [], custom_filters: customFilters, filter_rooms: {} })
       } catch {
         setFiltersEnabled(true)
-        setFeedback({ type: 'error', message: 'Failed to disable filters' })
+        setFeedback({ type: 'error', message: t('bookingFlow.rooms.feedback.disableError') })
       }
     }
   }
@@ -342,9 +345,9 @@ export default function BookingFlowPage() {
       const filters = filtersEnabled ? bookingFilters : []
       const rooms = filtersEnabled ? filterRooms : {}
       await settingsService.updateDesignSettings({ booking_filters: filters, custom_filters: customFilters, filter_rooms: rooms })
-      showFeedback('success', 'Filters saved successfully')
+      showFeedback('success', t('bookingFlow.rooms.feedback.saveSuccess'))
     } catch {
-      showFeedback('error', 'Failed to save filters')
+      showFeedback('error', t('bookingFlow.rooms.feedback.saveError'))
     } finally {
       setSavingFilters(false)
     }
@@ -364,9 +367,9 @@ export default function BookingFlowPage() {
         setBenefitInput('')
       }
       await settingsService.updateBenefits(finalBenefits)
-      showFeedback('success', 'Benefits saved successfully')
+      showFeedback('success', t('bookingFlow.benefits.feedback.saveSuccess'))
     } catch {
-      showFeedback('error', 'Failed to save benefits')
+      showFeedback('error', t('bookingFlow.benefits.feedback.saveError'))
     } finally {
       setSavingBenefits(false)
     }
@@ -389,9 +392,9 @@ export default function BookingFlowPage() {
       } catch {
         // Non-fatal: PMS sync may fail if not using vayada PMS
       }
-      showFeedback('success', 'Guest form settings saved')
+      showFeedback('success', t('bookingFlow.guestForm.feedback.saveSuccess'))
     } catch {
-      showFeedback('error', 'Failed to save guest form settings')
+      showFeedback('error', t('bookingFlow.guestForm.feedback.saveError'))
     } finally {
       setSavingGuestForm(false)
     }
@@ -420,21 +423,21 @@ export default function BookingFlowPage() {
         supported_currencies: supportedCurrencies,
         supported_languages: supportedLanguages,
       })
-      showFeedback('success', 'Currency & language settings saved')
+      showFeedback('success', t('bookingFlow.localization.feedback.saveSuccess'))
     } catch {
-      showFeedback('error', 'Failed to save currency & language settings')
+      showFeedback('error', t('bookingFlow.localization.feedback.saveError'))
     } finally {
       setSavingCurrencyLang(false)
     }
   }
 
   const tabs = [
-    { id: 'rooms' as const, label: 'Filters', icon: RoomsIcon },
-    { id: 'addons' as const, label: 'Add-ons', icon: AddonsIcon },
-    { id: 'promo-codes' as const, label: 'Promos', icon: PromoIcon },
-    { id: 'benefits' as const, label: 'Benefits', icon: BenefitsIcon },
-    { id: 'localization' as const, label: 'Localization', icon: LocalizationIcon },
-    { id: 'guest-form' as const, label: 'Guest Form', icon: GuestFormIcon },
+    { id: 'rooms' as const, label: t('bookingFlow.tabs.filters'), icon: RoomsIcon },
+    { id: 'addons' as const, label: t('bookingFlow.tabs.addons'), icon: AddonsIcon },
+    { id: 'promo-codes' as const, label: t('bookingFlow.tabs.promos'), icon: PromoIcon },
+    { id: 'benefits' as const, label: t('bookingFlow.tabs.benefits'), icon: BenefitsIcon },
+    { id: 'localization' as const, label: t('bookingFlow.tabs.localization'), icon: LocalizationIcon },
+    { id: 'guest-form' as const, label: t('bookingFlow.tabs.guestForm'), icon: GuestFormIcon },
   ]
 
   if (loading) {
@@ -448,8 +451,8 @@ export default function BookingFlowPage() {
   return (
     <div className="p-6 h-full flex flex-col">
       <div className="shrink-0">
-        <h1 className="text-xl font-bold text-gray-900">Booking Flow</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Configure each step of your guest&apos;s booking experience</p>
+        <h1 className="text-xl font-bold text-gray-900">{t('bookingFlow.title')}</h1>
+        <p className="text-sm text-gray-500 mt-0.5">{t('bookingFlow.subtitle')}</p>
       </div>
 
       {/* Feedback banner */}
@@ -531,13 +534,13 @@ export default function BookingFlowPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
             <div className="flex items-center gap-1.5">
               <GlobeAltIcon className="w-4 h-4 text-gray-700" />
-              <h2 className="text-sm font-semibold text-gray-900">Currency & Languages</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{t('bookingFlow.localization.title')}</h2>
             </div>
 
             {/* Default Currency & Language */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Currency <span className="text-gray-700">*</span></label>
+                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.localization.defaultCurrency')} <span className="text-gray-700">*</span></label>
                 <FlagSelect<CurrencyOption>
                   value={defaultCurrency}
                   onChange={(code) => {
@@ -549,7 +552,7 @@ export default function BookingFlowPage() {
                 />
               </div>
               <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Default Language <span className="text-gray-700">*</span></label>
+                <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.localization.defaultLanguage')} <span className="text-gray-700">*</span></label>
                 <FlagSelect<LanguageOption>
                   value={defaultLanguage}
                   onChange={(code) => {
@@ -565,7 +568,7 @@ export default function BookingFlowPage() {
             {/* Additional Currencies */}
             <div>
               <label className="block text-[13px] text-gray-700 mb-1">
-                <span className="font-medium">Additional Currencies</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                <span className="font-medium">{t('bookingFlow.localization.additionalCurrencies')}</span> <span className="text-gray-400 font-normal text-[11px]">{t('bookingFlow.localization.optional')}</span>
               </label>
               <SearchableMultiSelect<CurrencyOption>
                 selected={supportedCurrencies}
@@ -583,7 +586,7 @@ export default function BookingFlowPage() {
             {/* Additional Languages */}
             <div>
               <label className="block text-[13px] text-gray-700 mb-1">
-                <span className="font-medium">Additional Languages</span> <span className="text-gray-400 font-normal text-[11px]">(optional)</span>
+                <span className="font-medium">{t('bookingFlow.localization.additionalLanguages')}</span> <span className="text-gray-400 font-normal text-[11px]">{t('bookingFlow.localization.optional')}</span>
               </label>
               <SearchableMultiSelect<LanguageOption>
                 selected={supportedLanguages}
@@ -607,13 +610,13 @@ export default function BookingFlowPage() {
 
         {activeTab === 'guest-form' && (
           <div className="bg-white rounded-lg border border-gray-200 p-5">
-            <h2 className="text-sm font-semibold text-gray-900">Guest Information Form</h2>
-            <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Additional fields shown to guests during the booking process</p>
+            <h2 className="text-sm font-semibold text-gray-900">{t('bookingFlow.guestForm.title')}</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-3">{t('bookingFlow.guestForm.subtitle')}</p>
             <div className="space-y-2">
               <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${specialRequestsEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
                 <div>
-                  <span className="text-[13px] font-medium text-gray-900">Special Requests</span>
-                  <span className="ml-2 text-[10px] font-medium text-green-600">Recommended</span>
+                  <span className="text-[13px] font-medium text-gray-900">{t('bookingFlow.guestForm.specialRequests')}</span>
+                  <span className="ml-2 text-[10px] font-medium text-green-600">{t('bookingFlow.guestForm.recommended')}</span>
                 </div>
                 <button type="button" onClick={() => setSpecialRequestsEnabled(!specialRequestsEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${specialRequestsEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
@@ -621,14 +624,14 @@ export default function BookingFlowPage() {
                 </button>
               </div>
               <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${arrivalTimeEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
-                <span className="text-[13px] font-medium text-gray-900">Estimated Arrival Time</span>
+                <span className="text-[13px] font-medium text-gray-900">{t('bookingFlow.guestForm.estimatedArrivalTime')}</span>
                 <button type="button" onClick={() => setArrivalTimeEnabled(!arrivalTimeEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${arrivalTimeEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${arrivalTimeEnabled ? 'left-4' : 'left-0.5'}`} />
                 </button>
               </div>
               <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${guestCountEnabled ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'}`}>
-                <span className="text-[13px] font-medium text-gray-900">Number of Guests</span>
+                <span className="text-[13px] font-medium text-gray-900">{t('bookingFlow.guestForm.numberOfGuests')}</span>
                 <button type="button" onClick={() => setGuestCountEnabled(!guestCountEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${guestCountEnabled ? 'bg-primary-500' : 'bg-gray-300'}`}>
                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${guestCountEnabled ? 'left-4' : 'left-0.5'}`} />
@@ -652,7 +655,7 @@ export default function BookingFlowPage() {
           <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="text-[15px] font-semibold text-gray-900">
-                {editingAddon ? 'Edit Add-on' : 'Create Add-on'}
+                {editingAddon ? t('bookingFlow.addons.modal.editTitle') : t('bookingFlow.addons.modal.createTitle')}
               </h3>
               <button onClick={() => setShowModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
                 <XMarkIcon className="w-5 h-5" />
@@ -662,32 +665,32 @@ export default function BookingFlowPage() {
             <div className="p-4 space-y-3">
               {/* Name */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Name *</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.nameLabel')}</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g., Airport Transfer"
+                  placeholder={t('bookingFlow.addons.modal.namePlaceholder')}
                 />
               </div>
 
               {/* Description */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Description</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.descriptionLabel')}</label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={2}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
-                  placeholder="Brief description of this add-on"
+                  placeholder={t('bookingFlow.addons.modal.descriptionPlaceholder')}
                 />
               </div>
 
               {/* Price + Currency */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Price *</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.priceLabel')}</label>
                   <input
                     type="number"
                     min="0"
@@ -698,7 +701,7 @@ export default function BookingFlowPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Currency</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.currencyLabel')}</label>
                   <select
                     value={formData.currency}
                     onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
@@ -715,7 +718,7 @@ export default function BookingFlowPage() {
 
               {/* Category */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Category</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.categoryLabel')}</label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
@@ -729,7 +732,7 @@ export default function BookingFlowPage() {
 
               {/* Image */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Image</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.imageLabel')}</label>
                 {formData.image ? (
                   <div className="relative rounded-lg overflow-hidden bg-gray-200">
                     <img
@@ -769,7 +772,7 @@ export default function BookingFlowPage() {
                     ) : (
                       <>
                         <PhotoIcon className="w-6 h-6" />
-                        <span className="text-[12px]">Click or drag to upload</span>
+                        <span className="text-[12px]">{t('bookingFlow.addons.modal.clickOrDrag')}</span>
                       </>
                     )}
                   </button>
@@ -791,20 +794,20 @@ export default function BookingFlowPage() {
                     onClick={() => addonFileInputRef.current?.click()}
                     className="mt-2 w-full py-1.5 text-[12px] text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    Replace Image
+                    {t('bookingFlow.addons.modal.replaceImage')}
                   </button>
                 )}
               </div>
 
               {/* Duration */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Duration</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.addons.modal.durationLabel')}</label>
                 <input
                   type="text"
                   value={formData.duration}
                   onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g., 60 min, 2 hours, Full day"
+                  placeholder={t('bookingFlow.addons.modal.durationPlaceholder')}
                 />
               </div>
 
@@ -813,8 +816,8 @@ export default function BookingFlowPage() {
                 size="sm"
                 enabled={formData.perPerson}
                 onChange={() => setFormData({ ...formData, perPerson: !formData.perPerson })}
-                label="Per Person Pricing"
-                description="Price is multiplied by number of guests"
+                label={t('bookingFlow.addons.modal.perPersonPricing')}
+                description={t('bookingFlow.addons.modal.perPersonPricingDesc')}
               />
 
               {/* Per Night toggle */}
@@ -822,8 +825,8 @@ export default function BookingFlowPage() {
                 size="sm"
                 enabled={formData.perNight}
                 onChange={() => setFormData({ ...formData, perNight: !formData.perNight })}
-                label="Per Night Pricing"
-                description="Price is charged for each night of the stay (e.g. daily breakfast)"
+                label={t('bookingFlow.addons.modal.perNightPricing')}
+                description={t('bookingFlow.addons.modal.perNightPricingDesc')}
               />
             </div>
 
@@ -832,7 +835,7 @@ export default function BookingFlowPage() {
                 onClick={() => setShowModal(false)}
                 className="flex-1 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleSaveAddon}
@@ -842,7 +845,7 @@ export default function BookingFlowPage() {
                 {savingAddon && (
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 )}
-                {editingAddon ? 'Save Changes' : 'Create Add-on'}
+                {editingAddon ? t('bookingFlow.addons.modal.saveChanges') : t('bookingFlow.addons.modal.createAddon')}
               </button>
             </div>
           </div>
@@ -855,7 +858,7 @@ export default function BookingFlowPage() {
           <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="text-[15px] font-semibold text-gray-900">
-                {editingPromo ? 'Edit Promo Code' : 'Create Promo Code'}
+                {editingPromo ? t('bookingFlow.promoCodes.modal.editTitle') : t('bookingFlow.promoCodes.modal.createTitle')}
               </h3>
               <button onClick={() => setShowPromoModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
                 <XMarkIcon className="w-5 h-5" />
@@ -865,32 +868,32 @@ export default function BookingFlowPage() {
             <div className="p-4 space-y-3">
               {/* Code */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Code *</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.promoCodes.modal.codeLabel')}</label>
                 <input
                   type="text"
                   value={promoFormData.code}
                   onChange={(e) => setPromoFormData({ ...promoFormData, code: e.target.value.toUpperCase() })}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g., SUMMER20"
+                  placeholder={t('bookingFlow.promoCodes.modal.codePlaceholder')}
                 />
               </div>
 
               {/* Discount Type + Value */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Discount Type</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.promoCodes.modal.discountTypeLabel')}</label>
                   <select
                     value={promoFormData.discountType}
                     onChange={(e) => setPromoFormData({ ...promoFormData, discountType: e.target.value as 'percentage' | 'fixed' })}
                     className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                   >
-                    <option value="percentage">Percentage (%)</option>
-                    <option value="fixed">Fixed Amount</option>
+                    <option value="percentage">{t('bookingFlow.promoCodes.modal.percentage')}</option>
+                    <option value="fixed">{t('bookingFlow.promoCodes.modal.fixedAmount')}</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {promoFormData.discountType === 'percentage' ? 'Discount (%)' : 'Discount Amount'} *
+                    {promoFormData.discountType === 'percentage' ? t('bookingFlow.promoCodes.modal.discountPercent') : t('bookingFlow.promoCodes.modal.discountAmount')} *
                   </label>
                   <input
                     type="number"
@@ -907,7 +910,7 @@ export default function BookingFlowPage() {
               {/* Validity Dates */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Valid From</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.promoCodes.modal.validFromLabel')}</label>
                   <input
                     type="date"
                     value={promoFormData.validFrom || ''}
@@ -916,7 +919,7 @@ export default function BookingFlowPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Valid Until</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.promoCodes.modal.validUntilLabel')}</label>
                   <input
                     type="date"
                     value={promoFormData.validUntil || ''}
@@ -928,14 +931,14 @@ export default function BookingFlowPage() {
 
               {/* Max Uses */}
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Max Uses (leave empty for unlimited)</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.promoCodes.modal.maxUsesLabel')}</label>
                 <input
                   type="number"
                   min="0"
                   value={promoFormData.maxUses ?? ''}
                   onChange={(e) => setPromoFormData({ ...promoFormData, maxUses: e.target.value ? parseInt(e.target.value) : null })}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  placeholder="Unlimited"
+                  placeholder={t('bookingFlow.promoCodes.modal.maxUsesPlaceholder')}
                 />
               </div>
 
@@ -944,8 +947,8 @@ export default function BookingFlowPage() {
                 size="sm"
                 enabled={promoFormData.isActive}
                 onChange={() => setPromoFormData({ ...promoFormData, isActive: !promoFormData.isActive })}
-                label="Active"
-                description="Only active promo codes can be used by guests"
+                label={t('bookingFlow.promoCodes.modal.activeLabel')}
+                description={t('bookingFlow.promoCodes.modal.activeDesc')}
               />
             </div>
 
@@ -954,7 +957,7 @@ export default function BookingFlowPage() {
                 onClick={() => setShowPromoModal(false)}
                 className="flex-1 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleSavePromoCode}
@@ -964,7 +967,7 @@ export default function BookingFlowPage() {
                 {savingPromo && (
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 )}
-                {editingPromo ? 'Save Changes' : 'Create Promo Code'}
+                {editingPromo ? t('bookingFlow.promoCodes.modal.saveChanges') : t('bookingFlow.promoCodes.modal.createPromoCode')}
               </button>
             </div>
           </div>

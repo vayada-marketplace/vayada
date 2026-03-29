@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useTranslation } from '@/lib/i18n'
 import { settingsService, type PropertySettings } from '@/services/settings'
 import {
   dashboardService,
@@ -31,16 +32,18 @@ function formatCurrencyWithCode(value: number, currencyCode: string): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR'): { text: string; positive: boolean | null } {
+function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR', t?: (key: string) => string): { text: string; positive: boolean | null } {
   const diff = current - previous
-  if (diff === 0 && current === 0) return { text: 'No data yet', positive: null }
-  if (diff === 0) return { text: 'Same as previous period', positive: null }
+  if (diff === 0 && current === 0) return { text: t ? t('dashboard.stats.noDataYet') : 'No data yet', positive: null }
+  if (diff === 0) return { text: t ? t('dashboard.stats.samePeriod') : 'Same as previous period', positive: null }
   const formatted = isCurrency ? formatCurrencyWithCode(Math.abs(diff), currencyCode) : Math.abs(diff).toString()
-  if (diff > 0) return { text: `\u2191 +${formatted} vs previous`, positive: true }
-  return { text: `\u2193 -${formatted} vs previous`, positive: false }
+  const vsPrevious = t ? t('dashboard.stats.vsPrevious') : 'vs previous'
+  if (diff > 0) return { text: `\u2191 +${formatted} ${vsPrevious}`, positive: true }
+  return { text: `\u2193 -${formatted} ${vsPrevious}`, positive: false }
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation()
   const [propertyName, setPropertyName] = useState('')
   const [slug, setSlug] = useState('')
   const [timeRange, setTimeRange] = useState<TimeRange>('today')
@@ -118,26 +121,26 @@ export default function DashboardPage() {
     )
   }
 
-  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency) : null
-  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous) : null
-  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency) : null
-  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous) : null
+  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency, t) : null
+  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous, false, 'EUR', t) : null
+  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency, t) : null
+  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, false, 'EUR', t) : null
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Booking Engine</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
         </div>
       </div>
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
         {([
-          { key: 'today' as TimeRange, label: 'Today' },
-          { key: 'week' as TimeRange, label: 'This week' },
-          { key: 'month' as TimeRange, label: 'Last 30 days' },
+          { key: 'today' as TimeRange, label: t('dashboard.timeRange.today') },
+          { key: 'week' as TimeRange, label: t('dashboard.timeRange.week') },
+          { key: 'month' as TimeRange, label: t('dashboard.timeRange.month') },
         ]).map(({ key, label }) => (
           <button
             key={key}
@@ -158,7 +161,7 @@ export default function DashboardPage() {
         {/* Revenue */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Revenue {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'Last 30 Days'}</span>
+            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.revenue')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
@@ -175,7 +178,7 @@ export default function DashboardPage() {
         {/* New Bookings */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">New Bookings {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'Last 30 Days'}</span>
+            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.newBookings')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
@@ -188,7 +191,7 @@ export default function DashboardPage() {
           )}
           {stats?.next_arrival && (
             <p className="text-[11px] text-gray-500 mt-1">
-              Next arrival: {new Date(stats.next_arrival).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {t('dashboard.stats.nextArrival')} {new Date(stats.next_arrival).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </p>
           )}
           {sparklines && renderSparkline(sparklines.bookings)}
@@ -197,7 +200,7 @@ export default function DashboardPage() {
         {/* Avg. Nightly Rate */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Avg. Nightly Rate</span>
+            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.avgNightlyRate')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
@@ -215,7 +218,7 @@ export default function DashboardPage() {
         {/* Page Views */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Page Views {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'Last 30 Days'}</span>
+            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.pageViews')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
@@ -229,7 +232,7 @@ export default function DashboardPage() {
           )}
           {stats && stats.bookings > 0 && stats.page_views > 0 && (
             <p className="text-[11px] text-gray-500 mt-1">
-              {((stats.bookings / stats.page_views) * 100).toFixed(1)}% booking rate
+              {((stats.bookings / stats.page_views) * 100).toFixed(1)}% {t('dashboard.stats.bookingRate')}
             </p>
           )}
           {sparklines && renderSparkline(sparklines.page_views, 'bg-gray-200')}
@@ -240,7 +243,7 @@ export default function DashboardPage() {
       <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 ${loading ? 'opacity-60' : ''}`}>
         {/* Bookings by Source */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-6">Bookings by Source</h3>
+          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-6">{t('dashboard.bookingsBySource.title')}</h3>
 
           {/* Donut Chart */}
           <div className="flex justify-center mb-6">
@@ -254,7 +257,7 @@ export default function DashboardPage() {
                   <span className="text-2xl font-bold text-gray-900">
                     {sources ? formatCurrencyWithCode(sources.total_revenue, currency) : '--'}
                   </span>
-                  <span className="text-[11px] text-gray-500">Total Revenue</span>
+                  <span className="text-[11px] text-gray-500">{t('dashboard.bookingsBySource.totalRevenue')}</span>
                 </div>
               </div>
             </div>
@@ -271,7 +274,7 @@ export default function DashboardPage() {
                       style={{ backgroundColor: SOURCE_COLORS[s.source] || '#d1d5db' }}
                     />
                     <span className="text-[13px] text-gray-700">
-                      {SOURCE_LABELS[s.source] || s.source}
+                      {s.source === 'direct' ? t('dashboard.bookingsBySource.direct') : (SOURCE_LABELS[s.source] || s.source)}
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
@@ -281,7 +284,7 @@ export default function DashboardPage() {
                 </div>
               ))
             ) : (
-              <p className="text-[13px] text-gray-500 text-center py-4">No booking data for this period</p>
+              <p className="text-[13px] text-gray-500 text-center py-4">{t('dashboard.bookingsBySource.noData')}</p>
             )}
           </div>
 
@@ -289,7 +292,7 @@ export default function DashboardPage() {
           {sources && sources.sources.length > 0 && sources.sources[0]?.source === 'direct' && sources.sources[0]?.percentage > 50 && (
             <div className="mt-5 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
               <p className="text-[13px] text-blue-700">
-                {sources.sources[0].percentage}% of bookings came through your vayada page &mdash; great direct booking share!
+                {sources.sources[0].percentage}% {t('dashboard.bookingsBySource.directBookingShare')}
               </p>
             </div>
           )}
@@ -299,7 +302,7 @@ export default function DashboardPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-6">
             <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              Conversion Funnel &middot; {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'Last 30 Days'}
+              {t('dashboard.conversionFunnel.title')} &middot; {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}
             </h3>
             <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
@@ -330,7 +333,7 @@ export default function DashboardPage() {
                 </div>
               ))
             ) : (
-              <p className="text-[13px] text-gray-500 text-center py-8">No booking data for this period</p>
+              <p className="text-[13px] text-gray-500 text-center py-8">{t('dashboard.bookingsBySource.noData')}</p>
             )}
           </div>
         </div>

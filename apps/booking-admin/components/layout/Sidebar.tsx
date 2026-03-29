@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
 import { authService } from '@/services/auth'
+import { useTranslation } from '@/lib/i18n'
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
 
@@ -29,35 +30,15 @@ function buildHandoffUrl(baseUrl: string): string {
 }
 
 const baseNavItems = [
-  {
-    label: 'Dashboard',
-    href: '/',
-    icon: DashboardIcon,
-  },
-  {
-    label: 'Affiliates',
-    href: '/affiliates',
-    icon: AffiliatesIcon,
-  },
-  {
-    label: 'Design Studio',
-    href: '/design-studio',
-    icon: DesignStudioIcon,
-  },
-  {
-    label: 'Booking Flow',
-    href: '/booking-flow',
-    icon: BookingFlowIcon,
-  },
-  {
-    label: 'Settings',
-    href: '/settings',
-    icon: Cog6ToothIcon,
-  },
+  { labelKey: 'layout.sidebar.dashboard', href: '/', icon: DashboardIcon },
+  { labelKey: 'layout.sidebar.affiliates', href: '/affiliates', icon: AffiliatesIcon },
+  { labelKey: 'layout.sidebar.designStudio', href: '/design-studio', icon: DesignStudioIcon },
+  { labelKey: 'layout.sidebar.bookingFlow', href: '/booking-flow', icon: BookingFlowIcon },
+  { labelKey: 'layout.sidebar.settings', href: '/settings', icon: Cog6ToothIcon },
 ]
 
 const superAdminNavItem = {
-  label: 'Manage Hotels',
+  labelKey: 'layout.sidebar.manageHotels',
   href: '/manage-hotels',
   icon: BuildingOffice2Icon,
 }
@@ -67,6 +48,7 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
   const switcherRef = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
   const isSuperAdmin = authService.isSuperAdmin()
   const navItems = isSuperAdmin ? [superAdminNavItem, ...baseNavItems] : baseNavItems
 
@@ -107,8 +89,8 @@ export default function Sidebar() {
           {!collapsed && (
             <>
               <div className="min-w-0 text-left flex-1">
-                <p className="text-xs font-semibold text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight truncate">Direct bookings & revenue</p>
+                <p className="text-xs font-semibold text-gray-900 leading-tight">{t('layout.sidebar.bookingEngine')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight truncate">{t('layout.sidebar.bookingEngineDescription')}</p>
               </div>
               <ChevronDownIcon className={cn('w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform', showSwitcher && 'rotate-180')} />
             </>
@@ -121,7 +103,7 @@ export default function Sidebar() {
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
               </svg>
-              Switch App
+              {t('layout.sidebar.switchApp')}
             </p>
             <button
               onClick={() => setShowSwitcher(false)}
@@ -136,8 +118,8 @@ export default function Sidebar() {
                 </svg>
               </div>
               <div className="min-w-0 flex-1 text-left">
-                <p className="text-xs font-medium text-gray-900 leading-tight">Booking Engine</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Direct bookings & revenue</p>
+                <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.bookingEngine')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.bookingEngineDescription')}</p>
               </div>
               <CheckIcon className="w-4 h-4 text-primary-500 shrink-0" />
             </button>
@@ -155,8 +137,8 @@ export default function Sidebar() {
                 </svg>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-900 leading-tight">Property Manager</p>
-                <p className="text-[10px] text-gray-500 leading-tight">Operations & Inventory</p>
+                <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.propertyManager')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.propertyManagerDescription')}</p>
               </div>
             </a>
           </div>
@@ -178,7 +160,7 @@ export default function Sidebar() {
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50',
                 collapsed && 'justify-center px-0'
               )}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? t(item.labelKey) : undefined}
             >
               <item.icon
                 className={cn(
@@ -186,7 +168,7 @@ export default function Sidebar() {
                   isActive ? 'text-gray-900' : 'text-gray-400'
                 )}
               />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && <span>{t(item.labelKey)}</span>}
             </Link>
           )
         })}
@@ -208,7 +190,7 @@ export default function Sidebar() {
               collapsed && 'rotate-180'
             )}
           />
-          {!collapsed && <span>Collapse</span>}
+          {!collapsed && <span>{t('layout.sidebar.collapse')}</span>}
         </button>
       </div>
     </aside>

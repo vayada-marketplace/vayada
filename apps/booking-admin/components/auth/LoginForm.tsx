@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { validateEmail } from '@/lib/utils/validation'
+import { useTranslation } from '@/lib/i18n'
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void>
@@ -26,9 +27,10 @@ export default function LoginForm({
   forgotPasswordHref = '/forgot-password',
   showRegister = true,
   registerHref = '/register',
-  registerLabel = 'Sign up',
+  registerLabel,
   sessionExpired = false,
 }: LoginFormProps) {
+  const { t } = useTranslation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -40,7 +42,7 @@ export default function LoginForm({
     onErrorClear()
 
     if (!validateEmail(email)) {
-      setEmailError('Please enter a valid email address')
+      setEmailError(t('auth.login.emailError'))
       return
     }
 
@@ -52,7 +54,7 @@ export default function LoginForm({
       {sessionExpired && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">
-            Your session has expired. Please login again.
+            {t('auth.login.sessionExpired')}
           </p>
         </div>
       )}
@@ -60,7 +62,7 @@ export default function LoginForm({
       {/* Email Field */}
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Email address
+          {t('auth.login.emailLabel')}
         </label>
         <input
           id="email"
@@ -72,7 +74,7 @@ export default function LoginForm({
             if (emailError) setEmailError('')
           }}
           required
-          placeholder="admin@example.com"
+          placeholder={t('auth.login.emailPlaceholder')}
           autoComplete="email"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
             emailError ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
@@ -86,7 +88,7 @@ export default function LoginForm({
       {/* Password Field */}
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Password
+          {t('auth.login.passwordLabel')}
         </label>
         <div className="relative">
           <input
@@ -96,7 +98,7 @@ export default function LoginForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            placeholder="Enter your password"
+            placeholder={t('auth.login.passwordPlaceholder')}
             autoComplete="current-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -115,7 +117,7 @@ export default function LoginForm({
         {showForgotPassword && (
           <div className="mt-2 text-right">
             <a href={forgotPasswordHref} className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-              Forgot password?
+              {t('auth.login.forgotPassword')}
             </a>
           </div>
         )}
@@ -134,16 +136,16 @@ export default function LoginForm({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? 'Signing In...' : 'Sign In'}
+        {isSubmitting ? t('auth.login.submitting') : t('auth.login.submit')}
       </button>
 
       {/* Register Link */}
       {showRegister && (
         <div className="text-center">
           <p className="text-sm text-gray-600">
-            Don&apos;t have an account?{' '}
+            {t('auth.login.noAccount')}{' '}
             <a href={registerHref} className="text-primary-600 hover:text-primary-700 font-medium">
-              {registerLabel}
+              {registerLabel || t('auth.login.signUp')}
             </a>
           </p>
         </div>

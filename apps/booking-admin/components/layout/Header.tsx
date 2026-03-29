@@ -10,14 +10,17 @@ import {
 } from '@heroicons/react/24/outline'
 import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
+import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
 export default function Header() {
   const router = useRouter()
+  const { t, locale, setLocale } = useTranslation()
   const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([])
   const [selectedHotel, setSelectedHotel] = useState<(HotelSummary | SuperAdminHotel) | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [langOpen, setLangOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
@@ -78,21 +81,21 @@ export default function Header() {
         <div className="relative" ref={dropdownRef}>
           {hotels.length <= 1 && !isSuperAdmin ? (
             <span className="text-[13px] font-medium text-gray-700">
-              {selectedHotel?.name || 'No properties'}
+              {selectedHotel?.name || t('layout.header.noProperties')}
             </span>
           ) : (
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
             >
-              <span className="font-medium">{selectedHotel?.name || 'No properties'}</span>
+              <span className="font-medium">{selectedHotel?.name || t('layout.header.noProperties')}</span>
               <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>
           )}
 
           {dropdownOpen && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
-              <p className="px-3 py-1.5 text-xs text-gray-500">Switch Property</p>
+              <p className="px-3 py-1.5 text-xs text-gray-500">{t('layout.header.switchProperty')}</p>
               {isSuperAdmin && (
                 <button
                   onClick={() => {
@@ -101,7 +104,7 @@ export default function Header() {
                   }}
                   className="w-full text-left px-3 py-2 text-xs text-primary-600 hover:bg-primary-50 transition-colors border-b border-gray-100 mb-1"
                 >
-                  View all hotels...
+                  {t('layout.header.viewAllHotels')}
                 </button>
               )}
               <div className="px-1.5 max-h-60 overflow-y-auto">
@@ -143,7 +146,7 @@ export default function Header() {
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
                 >
                   <PlusIcon className="w-4 h-4" />
-                  Add Property
+                  {t('layout.header.addProperty')}
                 </button>
               </div>
             </div>
@@ -153,7 +156,7 @@ export default function Header() {
         {/* Super Admin Badge */}
         {isManagingOtherHotel && (
           <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded-full">
-            Super Admin
+            {t('layout.header.superAdmin')}
           </span>
         )}
 
@@ -172,7 +175,7 @@ export default function Header() {
           className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-          Preview
+          {t('layout.header.preview')}
         </button>
 
         {/* Notification Bell + Dropdown */}
@@ -187,11 +190,11 @@ export default function Header() {
           {notificationsOpen && (
             <div className="absolute top-full right-0 mt-1.5 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
               <div className="px-4 py-3">
-                <h3 className="text-[13px] font-semibold text-gray-900">Notifications</h3>
+                <h3 className="text-[13px] font-semibold text-gray-900">{t('layout.header.notifications')}</h3>
               </div>
               <div className="px-4 py-6 text-center">
                 <BellIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-[13px] text-gray-500">No notifications yet</p>
+                <p className="text-[13px] text-gray-500">{t('layout.header.noNotifications')}</p>
               </div>
             </div>
           )}
@@ -210,11 +213,11 @@ export default function Header() {
             <div className="absolute top-full right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
               {/* User info */}
               <div className="px-3.5 py-2.5">
-                <p className="text-[13px] font-semibold text-gray-900">{userName || 'User'}</p>
+                <p className="text-[13px] font-semibold text-gray-900">{userName || t('layout.header.user')}</p>
                 <p className="text-xs text-gray-500">{userEmail}</p>
                 {isSuperAdmin && (
                   <span className="inline-flex items-center mt-1 px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded">
-                    Super Admin
+                    {t('layout.header.superAdmin')}
                   </span>
                 )}
               </div>
@@ -222,8 +225,34 @@ export default function Header() {
               {/* Menu items */}
               <div className="py-1">
                 <button className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors">
-                  Account Settings
+                  {t('layout.header.accountSettings')}
                 </button>
+                {/* Language selector */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setLangOpen(!langOpen) }}
+                    className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <span>{t('layout.header.language')}</span>
+                    <span className="text-gray-400">{SUPPORTED_LANGUAGES.find(l => l.code === locale)?.flag} {SUPPORTED_LANGUAGES.find(l => l.code === locale)?.nativeName}</span>
+                  </button>
+                  {langOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 max-h-72 overflow-y-auto">
+                      {SUPPORTED_LANGUAGES.map((lang) => (
+                        <button
+                          key={lang.code}
+                          onClick={() => { setLocale(lang.code); setLangOpen(false); setProfileOpen(false) }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
+                            locale === lang.code ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span>{lang.flag}</span>
+                          <span>{lang.nativeName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="border-t border-gray-100" />
               {/* Sign out */}
@@ -232,7 +261,7 @@ export default function Header() {
                   onClick={() => authService.logout()}
                   className="w-full text-left px-3.5 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
                 >
-                  Sign Out
+                  {t('layout.header.signOut')}
                 </button>
               </div>
             </div>

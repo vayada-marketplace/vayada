@@ -7,12 +7,14 @@ import { ApiErrorResponse } from '@/services/api/client'
 import { isSetupComplete } from '@/lib/utils/setupStatus'
 import { settingsService } from '@/services/settings'
 import LoginForm from '@/components/auth/LoginForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function LoginPage() {
+  const { t } = useTranslation()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [submitError, setSubmitError] = useState(
-    searchParams.get('expired') === 'true' ? 'Your session has expired. Please sign in again.' : ''
+    searchParams.get('expired') === 'true' ? t('auth.login.errorSessionExpired') : ''
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -51,23 +53,23 @@ export default function LoginPage() {
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
-          setSubmitError('Invalid email or password.')
+          setSubmitError(t('auth.login.errorInvalidCredentials'))
         } else if (error.status === 403) {
-          setSubmitError('Your account has been suspended. Please contact support.')
+          setSubmitError(t('auth.login.errorSuspended'))
         } else if (error.status === 422) {
           const detail = error.data.detail
           if (Array.isArray(detail)) {
             setSubmitError(detail.map(e => e.msg).join('. '))
           } else {
-            setSubmitError(detail || 'Validation error.')
+            setSubmitError(detail || t('auth.login.errorValidation'))
           }
         } else {
-          setSubmitError('An unexpected error occurred. Please try again.')
+          setSubmitError(t('auth.login.errorUnexpected'))
         }
       } else if (error instanceof Error) {
         setSubmitError(error.message)
       } else {
-        setSubmitError('An unexpected error occurred. Please try again.')
+        setSubmitError(t('auth.login.errorUnexpected'))
       }
     } finally {
       setIsSubmitting(false)
@@ -82,8 +84,8 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Booking Engine</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Sign in to the admin panel</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.login.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.login.subtitle')}</p>
         </div>
 
         <LoginForm

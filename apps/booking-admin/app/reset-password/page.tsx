@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import ResetPasswordForm from '@/components/auth/ResetPasswordForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function ResetPasswordPage() {
+  const { t } = useTranslation()
   const router = useRouter()
   const [submitError, setSubmitError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -22,12 +24,12 @@ export default function ResetPasswordPage() {
 
       if (error instanceof ApiErrorResponse) {
         if (error.status === 400) {
-          setSubmitError('Invalid or expired reset token. Please request a new one.')
+          setSubmitError(t('auth.resetPassword.errorExpiredToken'))
         } else {
-          setSubmitError('An unexpected error occurred. Please try again.')
+          setSubmitError(t('auth.resetPassword.errorUnexpected'))
         }
       } else {
-        setSubmitError('An unexpected error occurred. Please try again.')
+        setSubmitError(t('auth.resetPassword.errorUnexpected'))
       }
 
       throw error
@@ -44,8 +46,8 @@ export default function ResetPasswordPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Booking Engine</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Set your new password</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.resetPassword.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.resetPassword.subtitle')}</p>
         </div>
 
         <ResetPasswordForm

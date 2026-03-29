@@ -4,8 +4,10 @@ import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { settingsService } from '@/services/settings'
 import { ApiErrorResponse } from '@/services/api/client'
+import { useTranslation } from '@/lib/i18n'
 
 function VerifyEmailChangeContent() {
+  const { t } = useTranslation()
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token')
@@ -17,26 +19,26 @@ function VerifyEmailChangeContent() {
   useEffect(() => {
     if (!token) {
       setStatus('error')
-      setMessage('Invalid verification link. No token provided.')
+      setMessage(t('auth.verifyEmail.errorNoToken'))
       return
     }
 
     settingsService.verifyEmailChange(token)
       .then((res) => {
         setStatus('success')
-        setMessage(res.message || 'Email updated successfully!')
+        setMessage(res.message || t('auth.verifyEmail.successDefault'))
         setNewEmail(res.email)
         setTimeout(() => router.push('/login'), 3000)
       })
       .catch((err) => {
         setStatus('error')
         if (err instanceof ApiErrorResponse) {
-          setMessage(err.message || 'Verification failed. The link may be invalid or expired.')
+          setMessage(err.message || t('auth.verifyEmail.errorVerificationFailed'))
         } else {
-          setMessage('An unexpected error occurred. Please try again.')
+          setMessage(t('auth.verifyEmail.errorUnexpected'))
         }
       })
-  }, [token, router])
+  }, [token, router, t])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -44,14 +46,14 @@ function VerifyEmailChangeContent() {
         <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
           <span className="text-white font-bold text-[16px]">B</span>
         </div>
-        <h1 className="text-xl font-bold text-gray-900 mb-1">Booking Engine</h1>
+        <h1 className="text-xl font-bold text-gray-900 mb-1">{t('auth.verifyEmail.title')}</h1>
 
         {status === 'loading' && (
           <>
             <div className="mt-6 flex justify-center">
               <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
             </div>
-            <p className="text-[13px] text-gray-500 mt-3">Verifying your email change...</p>
+            <p className="text-[13px] text-gray-500 mt-3">{t('auth.verifyEmail.loading')}</p>
           </>
         )}
 
@@ -64,9 +66,9 @@ function VerifyEmailChangeContent() {
             </div>
             <p className="text-[13px] text-gray-700 mt-3 font-medium">{message}</p>
             {newEmail && (
-              <p className="text-[13px] text-gray-500 mt-1">Your email is now <strong>{newEmail}</strong></p>
+              <p className="text-[13px] text-gray-500 mt-1">{t('auth.verifyEmail.newEmailMessage')} <strong>{newEmail}</strong></p>
             )}
-            <p className="text-[12px] text-gray-400 mt-3">Redirecting to login...</p>
+            <p className="text-[12px] text-gray-400 mt-3">{t('auth.verifyEmail.redirecting')}</p>
           </>
         )}
 
@@ -82,7 +84,7 @@ function VerifyEmailChangeContent() {
               onClick={() => router.push('/login')}
               className="mt-4 text-[13px] text-primary-600 hover:text-primary-700 font-medium"
             >
-              Go to Login
+              {t('auth.verifyEmail.goToLogin')}
             </button>
           </>
         )}

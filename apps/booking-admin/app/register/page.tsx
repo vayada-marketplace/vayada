@@ -6,8 +6,10 @@ import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { isSetupComplete } from '@/lib/utils/setupStatus'
 import RegisterForm from '@/components/auth/RegisterForm'
+import { useTranslation } from '@/lib/i18n'
 
 export default function RegisterPage() {
+  const { t } = useTranslation()
   const router = useRouter()
   const [submitError, setSubmitError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<{
@@ -33,19 +35,19 @@ export default function RegisterPage() {
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 400) {
-          setSubmitError('An account with this email already exists.')
+          setSubmitError(t('auth.register.errorEmailExists'))
         } else if (error.status === 422) {
           const detail = error.data.detail
           if (Array.isArray(detail)) {
             setSubmitError(detail.map(e => e.msg).join('. '))
           } else {
-            setSubmitError(detail || 'Validation error.')
+            setSubmitError(detail || t('auth.register.errorValidation'))
           }
         } else {
-          setSubmitError('An unexpected error occurred. Please try again.')
+          setSubmitError(t('auth.register.errorUnexpected'))
         }
       } else {
-        setSubmitError('An unexpected error occurred. Please try again.')
+        setSubmitError(t('auth.register.errorUnexpected'))
       }
     } finally {
       setIsSubmitting(false)
@@ -60,8 +62,8 @@ export default function RegisterPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">Booking Engine</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Create a new admin account</p>
+          <h1 className="text-xl font-bold text-gray-900">{t('auth.register.title')}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t('auth.register.subtitle')}</p>
         </div>
 
         <RegisterForm

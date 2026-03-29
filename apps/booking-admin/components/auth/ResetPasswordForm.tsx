@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { useTranslation } from '@/lib/i18n'
 
 interface ResetPasswordFormProps {
   onSubmit: (token: string, password: string) => Promise<void>
@@ -23,6 +24,7 @@ function ResetPasswordFormInner({
   forgotPasswordHref = '/forgot-password',
   onSuccess,
 }: ResetPasswordFormProps) {
+  const { t } = useTranslation()
   const searchParams = useSearchParams()
   const token = searchParams.get('token')
 
@@ -47,14 +49,14 @@ function ResetPasswordFormInner({
       <div className="text-center space-y-5">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700 font-medium">
-            Invalid or missing reset token. Please request a new password reset link.
+            {t('auth.resetPassword.errorInvalidToken')}
           </p>
         </div>
         <a
           href={forgotPasswordHref}
           className="inline-block w-full text-center px-4 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
         >
-          Request New Reset Link
+          {t('auth.resetPassword.requestNewLink')}
         </a>
       </div>
     )
@@ -65,14 +67,14 @@ function ResetPasswordFormInner({
       <div className="text-center space-y-5">
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <p className="text-sm text-green-700 font-medium">
-            Password reset successful! Redirecting to sign in...
+            {t('auth.resetPassword.successMessage')}
           </p>
         </div>
         <a
           href={loginHref}
           className="inline-block w-full text-center px-4 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
         >
-          Back to Sign In
+          {t('auth.resetPassword.backToSignIn')}
         </a>
       </div>
     )
@@ -84,15 +86,15 @@ function ResetPasswordFormInner({
     onErrorClear()
 
     if (!password) {
-      newErrors.password = 'Password is required'
+      newErrors.password = t('auth.resetPassword.errorPasswordRequired')
     } else if (password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters'
+      newErrors.password = t('auth.resetPassword.errorPasswordLength')
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password'
+      newErrors.confirmPassword = t('auth.resetPassword.errorConfirmRequired')
     } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match'
+      newErrors.confirmPassword = t('auth.resetPassword.errorPasswordMismatch')
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -115,7 +117,7 @@ function ResetPasswordFormInner({
       {/* New Password */}
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-          New Password
+          {t('auth.resetPassword.newPasswordLabel')}
         </label>
         <div className="relative">
           <input
@@ -127,7 +129,7 @@ function ResetPasswordFormInner({
               if (localErrors.password) setLocalErrors(prev => ({ ...prev, password: undefined }))
             }}
             required
-            placeholder="At least 8 characters"
+            placeholder={t('auth.resetPassword.newPasswordPlaceholder')}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -151,7 +153,7 @@ function ResetPasswordFormInner({
       {/* Confirm Password */}
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Confirm Password
+          {t('auth.resetPassword.confirmPasswordLabel')}
         </label>
         <div className="relative">
           <input
@@ -163,7 +165,7 @@ function ResetPasswordFormInner({
               if (localErrors.confirmPassword) setLocalErrors(prev => ({ ...prev, confirmPassword: undefined }))
             }}
             required
-            placeholder="Confirm your password"
+            placeholder={t('auth.resetPassword.confirmPasswordPlaceholder')}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -197,15 +199,15 @@ function ResetPasswordFormInner({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? 'Resetting...' : 'Reset Password'}
+        {isSubmitting ? t('auth.resetPassword.submitting') : t('auth.resetPassword.submit')}
       </button>
 
       {/* Login Link */}
       <div className="text-center">
         <p className="text-sm text-gray-600">
-          Remember your password?{' '}
+          {t('auth.resetPassword.rememberPassword')}{' '}
           <a href={loginHref} className="text-primary-600 hover:text-primary-700 font-medium">
-            Sign in
+            {t('auth.resetPassword.signIn')}
           </a>
         </p>
       </div>
