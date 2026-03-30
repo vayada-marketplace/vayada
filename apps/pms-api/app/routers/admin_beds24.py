@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.repositories.booking_repo import BookingRepository
 from app.repositories.beds24_mapping_repo import (
     Beds24ConnectionRepository,
     Beds24RoomMappingRepository,
