@@ -19,8 +19,10 @@ export const PAYMENT_STATUS_STYLES: Record<string, string> = {
 export const CHANNEL_COLORS: Record<string, { bg: string; text: string }> = {
   direct: { bg: 'bg-blue-100', text: 'text-blue-700' },
   airbnb: { bg: 'bg-pink-100', text: 'text-pink-700' },
+  booking: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
   'booking.com': { bg: 'bg-indigo-100', text: 'text-indigo-700' },
   expedia: { bg: 'bg-yellow-100', text: 'text-yellow-700' },
+  beds24: { bg: 'bg-gray-100', text: 'text-gray-700' },
   other: { bg: 'bg-gray-100', text: 'text-gray-700' },
 }
 
@@ -28,8 +30,10 @@ export function getChannelLabel(channel: string): string {
   const labels: Record<string, string> = {
     direct: 'Direct',
     airbnb: 'Airbnb',
+    booking: 'Booking.com',
     'booking.com': 'Booking.com',
     expedia: 'Expedia',
+    beds24: 'Beds24',
     other: 'Other',
   }
   return labels[channel] || channel

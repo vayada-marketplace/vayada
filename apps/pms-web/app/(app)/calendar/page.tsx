@@ -19,8 +19,10 @@ const VIEW_DAYS = 21
 const CHANNEL_COLORS: Record<string, string> = {
   direct: 'bg-blue-500',
   airbnb: 'bg-pink-500',
+  booking: 'bg-indigo-500',
   'booking.com': 'bg-indigo-500',
   expedia: 'bg-yellow-500',
+  beds24: 'bg-gray-500',
   other: 'bg-gray-500',
 }
 
