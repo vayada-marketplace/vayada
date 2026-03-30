@@ -58,4 +58,7 @@ export const beds24Service = {
 
   syncAvailability: () =>
     pmsClient.post<{ status: string }>('/admin/beds24/sync-availability'),
+
+  syncBookings: () =>
+    pmsClient.post<{ status: string }>('/admin/beds24/sync-bookings'),
 }

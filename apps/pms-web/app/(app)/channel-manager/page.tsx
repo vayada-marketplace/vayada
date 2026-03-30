@@ -35,6 +35,7 @@ export default function ChannelManagerPage() {
   const [creatingMapping, setCreatingMapping] = useState(false)
   const [deletingMappingId, setDeletingMappingId] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [syncingBookings, setSyncingBookings] = useState(false)
 
   const step: Step = !connection || !connection.isActive
     ? 'connect'
@@ -192,6 +193,19 @@ export default function ChannelManagerPage() {
     }
   }
 
+  const handleSyncBookings = async () => {
+    setSyncingBookings(true)
+    setError('')
+    try {
+      await beds24Service.syncBookings()
+      setSuccess(t('channels.bookingSyncComplete'))
+    } catch (err: any) {
+      setError(err.message || t('channels.failedToSyncBookings'))
+    } finally {
+      setSyncingBookings(false)
+    }
+  }
+
   // Clear success message after 3s
   useEffect(() => {
     if (success) {
@@ -341,14 +355,24 @@ export default function ChannelManagerPage() {
             <div className="bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-gray-900">{t('channels.roomMappings')}</h2>
-                <button
-                  onClick={handleSync}
-                  disabled={syncing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
-                >
-                  <ArrowPathIcon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-                  {syncing ? t('channels.syncing') : t('channels.syncAvailability')}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSyncBookings}
+                    disabled={syncingBookings}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
+                  >
+                    <ArrowPathIcon className={`w-3.5 h-3.5 ${syncingBookings ? 'animate-spin' : ''}`} />
+                    {syncingBookings ? t('channels.syncing') : t('channels.syncBookings')}
+                  </button>
+                  <button
+                    onClick={handleSync}
+                    disabled={syncing}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
+                  >
+                    <ArrowPathIcon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? t('channels.syncing') : t('channels.syncAvailability')}
+                  </button>
+                </div>
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
