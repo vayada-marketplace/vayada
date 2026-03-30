@@ -126,13 +126,19 @@ async def get_property_rooms(hotel_id: str, property_id: str) -> List[dict]:
     """List rooms for a given Beds24 property."""
     token = await _ensure_valid_token(hotel_id)
     data = await _rate_limited_request(
-        "GET", "/properties/rooms", token, params={"propertyId": property_id}
+        "GET", "/properties", token,
+        params={"id": property_id, "includeAllRooms": "true"},
     )
-    rooms = data if isinstance(data, list) else data.get("data", [])
-    return [
-        {"id": str(r["id"]), "name": r.get("name", ""), "qty": r.get("qty", 1)}
-        for r in rooms
-    ]
+    properties = data if isinstance(data, list) else data.get("data", [])
+    rooms = []
+    for prop in properties:
+        for r in prop.get("roomTypes", []):
+            rooms.append({
+                "id": str(r["id"]),
+                "name": r.get("name", ""),
+                "qty": r.get("qty", 1),
+            })
+    return rooms
 
 
 async def set_room_calendar(
