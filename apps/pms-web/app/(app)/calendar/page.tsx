@@ -85,6 +85,9 @@ export default function CalendarPage() {
   }
 
   // Calculate bar position and width relative to the visible date range
+  // Bars start at the midpoint of the check-in column and end at the midpoint
+  // of the check-out column, matching the standard hotel calendar convention.
+  const HALF_COL = 0.5 / VIEW_DAYS // half a day-column in fraction
   const getBarStyle = (itemStart: string, itemEnd: string) => {
     const s = parseISO(itemStart)
     const e = parseISO(itemEnd)
@@ -92,9 +95,13 @@ export default function CalendarPage() {
     const endOffset = Math.min(VIEW_DAYS, differenceInDays(e, startDate))
     const spanDays = endOffset - offsetDays
     if (spanDays <= 0) return null
+    const startsInView = differenceInDays(s, startDate) >= 0
+    const endsInView = differenceInDays(e, startDate) <= VIEW_DAYS
+    const leftShift = startsInView ? HALF_COL : 0
+    const rightShift = endsInView ? HALF_COL : 0
     return {
-      left: `${(offsetDays / VIEW_DAYS) * 100}%`,
-      width: `${(spanDays / VIEW_DAYS) * 100}%`,
+      left: `${((offsetDays / VIEW_DAYS) + leftShift) * 100}%`,
+      width: `${((spanDays / VIEW_DAYS) - leftShift + rightShift) * 100}%`,
     }
   }
 
