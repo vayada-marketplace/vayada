@@ -196,3 +196,51 @@ async def beds24_sync_availability(
 
     asyncio.create_task(push_availability_for_hotel(hotel_id))
     return {"status": "sync_started"}
+
+
+@router.post("/beds24/assign-unassigned-rooms")
+async def beds24_assign_unassigned_rooms(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """One-time fix: assign room units to Beds24 bookings that were imported without one."""
+    from app.database import Database
+
+    hotel_id = await get_hotel_id(user_id)
+    unassigned = await Database.fetch(
+        """
+        SELECT b.id, b.room_type_id, b.check_in, b.check_out
+        FROM bookings b
+        JOIN beds24_booking_mappings bm ON bm.booking_id = b.id
+        WHERE b.hotel_id = $1
+          AND b.room_id IS NULL
+          AND b.status IN ('pending', 'confirmed')
+        """,
+        hotel_id,
+    )
+
+    assigned_count = 0
+    for booking in unassigned:
+        available_room = await Database.fetchrow(
+            """
+            SELECT r.id FROM rooms r
+            WHERE r.room_type_id = $1
+              AND r.status = 'available'
+              AND r.id NOT IN (
+                SELECT b.room_id FROM bookings b
+                WHERE b.room_id IS NOT NULL
+                  AND b.status IN ('pending', 'confirmed')
+                  AND b.check_in < $3
+                  AND b.check_out > $2
+              )
+            ORDER BY r.sort_order, r.room_number
+            LIMIT 1
+            """,
+            str(booking["room_type_id"]),
+            booking["check_in"],
+            booking["check_out"],
+        )
+        if available_room:
+            await BookingRepository.assign_room(str(booking["id"]), str(available_room["id"]))
+            assigned_count += 1
+
+    return {"assigned": assigned_count, "total_unassigned": len(unassigned)}
