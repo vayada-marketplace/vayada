@@ -507,6 +507,7 @@
   "channels.allRoomsMapped": "All rooms are mapped.",
   "channels.failedToLoadProperties": "Failed to load properties",
   "channels.failedToLoadRoomData": "Failed to load room data",
+  "channels.failedToLoadBeds24Rooms": "Failed to fetch rooms from Beds24. Please check your connection and try again.",
   "channels.failedToConnect": "Failed to connect",
   "channels.failedToDisconnect": "Failed to disconnect",
   "channels.failedToSetProperty": "Failed to set property",

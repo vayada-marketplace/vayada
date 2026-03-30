@@ -86,18 +86,18 @@ export default function ChannelManagerPage() {
   }
 
   const loadRoomsAndMappings = async () => {
-    try {
-      const [b24Rooms, rTypes, maps] = await Promise.all([
-        beds24Service.listRooms(),
-        roomsService.list(),
-        beds24Service.listRoomMappings(),
-      ])
-      setBeds24Rooms(b24Rooms)
-      setRoomTypes(rTypes)
-      setMappings(maps)
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToLoadRoomData'))
+    const [b24Result, rTypesResult, mapsResult] = await Promise.allSettled([
+      beds24Service.listRooms(),
+      roomsService.list(),
+      beds24Service.listRoomMappings(),
+    ])
+    if (b24Result.status === 'fulfilled') {
+      setBeds24Rooms(b24Result.value)
+    } else {
+      setError(t('channels.failedToLoadBeds24Rooms'))
     }
+    if (rTypesResult.status === 'fulfilled') setRoomTypes(rTypesResult.value)
+    if (mapsResult.status === 'fulfilled') setMappings(mapsResult.value)
   }
 
   const handleConnect = async () => {
