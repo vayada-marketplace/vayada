@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import List
 
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
@@ -129,6 +131,9 @@ async def beds24_list_rooms(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to fetch Beds24 rooms for hotel %s", hotel_id)
+        raise HTTPException(status_code=502, detail="Failed to fetch rooms from Beds24")
     return [Beds24RoomResponse(id=r["id"], name=r["name"], qty=r.get("qty", 1)) for r in rooms]
 
 
