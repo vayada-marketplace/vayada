@@ -126,7 +126,7 @@ async def get_property_rooms(hotel_id: str, property_id: str) -> List[dict]:
     """List rooms for a given Beds24 property."""
     token = await _ensure_valid_token(hotel_id)
     data = await _rate_limited_request(
-        "GET", "/rooms", token, params={"propertyId": property_id}
+        "GET", "/properties/rooms", token, params={"propertyId": property_id}
     )
     rooms = data if isinstance(data, list) else data.get("data", [])
     return [
