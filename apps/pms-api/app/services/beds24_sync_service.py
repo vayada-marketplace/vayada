@@ -121,7 +121,7 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
     existing = await Beds24BookingMappingRepository.get_by_beds24_id(beds24_booking_id)
 
     beds24_status = beds24_booking.get("status", "").lower()
-    channel_source = beds24_booking.get("channelName", "beds24") or "beds24"
+    channel_source = beds24_booking.get("channel", "") or beds24_booking.get("channelName", "") or "beds24"
 
     if existing:
         # Handle cancellation of existing booking
@@ -171,26 +171,40 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
     # Resolve rate
     base_rate, _ = RoomTypeRepository.resolve_rate(room_type, check_in)
     total_from_beds24 = beds24_booking.get("price")
+    if total_from_beds24 is None:
+        # Try invoiceItems sum
+        invoice_items = beds24_booking.get("invoiceItems", [])
+        if invoice_items:
+            total_from_beds24 = sum(float(item.get("amount", 0)) for item in invoice_items)
     if total_from_beds24 is not None:
         total_amount = float(total_from_beds24)
-        nightly_rate = round(total_amount / nights, 2)
+        nightly_rate = round(total_amount / nights, 2) if nights > 0 else total_amount
     else:
         nightly_rate = base_rate
         total_amount = nightly_rate * nights
 
-    guest_name = beds24_booking.get("guestName", "")
-    name_parts = guest_name.split(" ", 1) if guest_name else ["", ""]
-    first_name = name_parts[0] or "Guest"
-    last_name = name_parts[1] if len(name_parts) > 1 else ""
+    first_name = beds24_booking.get("firstName", "") or ""
+    last_name = beds24_booking.get("lastName", "") or ""
+    if not first_name and not last_name:
+        # Fallback: try combined guestName field
+        guest_name = beds24_booking.get("guestName", "")
+        name_parts = guest_name.split(" ", 1) if guest_name else ["", ""]
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+    if not first_name:
+        first_name = "Guest"
+    guest_email = beds24_booking.get("email", "") or beds24_booking.get("guestEmail", "") or ""
+    guest_phone = beds24_booking.get("mobile", "") or beds24_booking.get("guestPhone", "") or ""
+    guest_name = f"{first_name} {last_name}".strip()
 
     booking_data = {
         "hotel_id": hotel_id,
         "room_type_id": room_type_id,
         "guest_first_name": first_name,
         "guest_last_name": last_name,
-        "guest_email": beds24_booking.get("guestEmail", ""),
-        "guest_phone": beds24_booking.get("guestPhone", ""),
-        "special_requests": beds24_booking.get("guestComments", ""),
+        "guest_email": guest_email,
+        "guest_phone": guest_phone,
+        "special_requests": beds24_booking.get("comment", "") or beds24_booking.get("guestComments", "") or "",
         "check_in": check_in,
         "check_out": check_out,
         "adults": beds24_booking.get("numAdult", 1) or 1,
