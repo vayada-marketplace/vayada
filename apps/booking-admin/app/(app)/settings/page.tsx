@@ -952,74 +952,69 @@ export default function SettingsPage() {
                   </button>
 
                   {/* Pay at Hotel */}
-                  <button
-                    onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}
-                    className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                  <div
+                    className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
                       settings.pay_at_property_enabled
                         ? 'border-primary-500 bg-primary-50/30'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                      {settings.pay_at_property_enabled && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                    </div>
-                    <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                    <span className="text-[13px] font-semibold text-gray-900">Pay at Hotel</span>
-                    <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays cash or card at check-in — no online payment</p>
-                    <div className="mt-auto space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                        <span className="text-[10px] text-gray-500">No processing fees</span>
+                    <div onClick={() => updateSetting('pay_at_property_enabled', !settings.pay_at_property_enabled)}>
+                      <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                        {settings.pay_at_property_enabled && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                        <span className="text-[10px] text-gray-500">
-                          {settings.pay_at_hotel_methods.length === 2 ? 'Cash & card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
+                      <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                      <span className="text-[13px] font-semibold text-gray-900">Pay at Hotel</span>
+                      <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays cash or card at check-in — no online payment</p>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                          <span className="text-[10px] text-gray-500">No processing fees</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                          <span className="text-[10px] text-gray-500">No Stripe account needed</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                          <span className="text-[10px] text-gray-500">Higher no-show risk</span>
+                        </div>
+                      </div>
+                    </div>
+                    {settings.pay_at_property_enabled && (
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200">
+                        {[
+                          { key: 'cash', label: 'Cash' },
+                          { key: 'card', label: 'Card' },
+                        ].map((m) => {
+                          const selected = settings.pay_at_hotel_methods.includes(m.key)
+                          return (
+                            <button
+                              key={m.key}
+                              type="button"
+                              onClick={() => {
+                                if (selected && settings.pay_at_hotel_methods.length > 1) {
+                                  updateSetting('pay_at_hotel_methods', settings.pay_at_hotel_methods.filter(v => v !== m.key))
+                                } else if (!selected) {
+                                  updateSetting('pay_at_hotel_methods', [...settings.pay_at_hotel_methods, m.key])
+                                }
+                              }}
+                              className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                                selected
+                                  ? 'border-primary-500 bg-primary-50 text-primary-700'
+                                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                              }`}
+                            >
+                              {m.label}
+                            </button>
+                          )
+                        })}
+                        <span className="text-[11px] text-gray-400 ml-1">
+                          {settings.pay_at_hotel_methods.length === 2 ? 'Cash & Card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                        <span className="text-[10px] text-gray-500">No Stripe account needed</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                        <span className="text-[10px] text-gray-500">Higher no-show risk</span>
-                      </div>
-                    </div>
-                  </button>
-                  {settings.pay_at_property_enabled && (
-                    <div className="col-span-full flex items-center gap-2 -mt-1">
-                      {[
-                        { key: 'cash', label: 'Cash' },
-                        { key: 'card', label: 'Card' },
-                      ].map((m) => {
-                        const selected = settings.pay_at_hotel_methods.includes(m.key)
-                        return (
-                          <button
-                            key={m.key}
-                            type="button"
-                            onClick={() => {
-                              if (selected && settings.pay_at_hotel_methods.length > 1) {
-                                updateSetting('pay_at_hotel_methods', settings.pay_at_hotel_methods.filter(v => v !== m.key))
-                              } else if (!selected) {
-                                updateSetting('pay_at_hotel_methods', [...settings.pay_at_hotel_methods, m.key])
-                              }
-                            }}
-                            className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
-                              selected
-                                ? 'border-primary-500 bg-primary-50 text-primary-700'
-                                : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        )
-                      })}
-                      <span className="text-[11px] text-gray-400 ml-1">
-                        {settings.pay_at_hotel_methods.length === 2 ? 'Cash & Card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
-                      </span>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {/* Bank Transfer */}
                   <button
