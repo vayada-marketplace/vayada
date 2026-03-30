@@ -245,3 +245,80 @@ async def beds24_assign_unassigned_rooms(
             assigned_count += 1
 
     return {"assigned": assigned_count, "total_unassigned": len(unassigned)}
+
+
+@router.post("/beds24/backfill-guest-info")
+async def beds24_backfill_guest_info(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Re-fetch Beds24 bookings and update guest info for existing bookings."""
+    from app.database import Database
+    from app.services import beds24_service
+    from app.repositories.beds24_mapping_repo import Beds24BookingMappingRepository
+
+    hotel_id = await get_hotel_id(user_id)
+    conn = await Beds24ConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"]:
+        raise HTTPException(status_code=400, detail="No active Beds24 connection")
+
+    # Get all beds24 booking mappings for this hotel
+    mappings = await Database.fetch(
+        "SELECT * FROM beds24_booking_mappings WHERE hotel_id = $1",
+        hotel_id,
+    )
+    if not mappings:
+        return {"updated": 0}
+
+    # Fetch all bookings from Beds24 (no modifiedSince filter)
+    try:
+        b24_bookings = await beds24_service.get_bookings(
+            hotel_id, property_id=conn.get("beds24_property_id"),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch from Beds24: {e}")
+
+    # Index by beds24 booking ID
+    b24_by_id = {str(b.get("id", "")): b for b in b24_bookings}
+
+    updated_count = 0
+    for mapping in mappings:
+        b24 = b24_by_id.get(str(mapping["beds24_booking_id"]))
+        if not b24:
+            continue
+
+        first_name = b24.get("firstName", "") or ""
+        last_name = b24.get("lastName", "") or ""
+        email = b24.get("email", "") or ""
+        phone = b24.get("mobile", "") or ""
+        comments = b24.get("comment", "") or ""
+        channel = b24.get("channel", "") or "beds24"
+
+        if not first_name and not last_name:
+            guest_name = b24.get("guestName", "")
+            parts = guest_name.split(" ", 1) if guest_name else ["", ""]
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else ""
+
+        await Database.execute(
+            """
+            UPDATE bookings SET
+                guest_first_name = $2,
+                guest_last_name = $3,
+                guest_email = $4,
+                guest_phone = $5,
+                special_requests = $6,
+                channel = $7,
+                updated_at = now()
+            WHERE id = $1
+            """,
+            str(mapping["booking_id"]),
+            first_name or "Guest",
+            last_name,
+            email,
+            phone,
+            comments,
+            channel,
+        )
+        updated_count += 1
+
+    return {"updated": updated_count, "total": len(mappings)}
