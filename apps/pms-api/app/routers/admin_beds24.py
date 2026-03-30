@@ -199,6 +199,22 @@ async def beds24_sync_availability(
     return {"status": "sync_started"}
 
 
+@router.post("/beds24/sync-bookings")
+async def beds24_sync_bookings(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Pull bookings from Beds24 and import any that are missing locally."""
+    from app.services.beds24_sync_service import poll_bookings_for_hotel
+
+    hotel_id = await get_hotel_id(user_id)
+    conn = await Beds24ConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"]:
+        raise HTTPException(status_code=400, detail="No active Beds24 connection")
+
+    await poll_bookings_for_hotel(hotel_id)
+    return {"status": "sync_complete"}
+
+
 @router.post("/beds24/assign-unassigned-rooms")
 async def beds24_assign_unassigned_rooms(
     user_id: str = Depends(require_hotel_admin),
