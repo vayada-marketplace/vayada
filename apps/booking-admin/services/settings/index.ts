@@ -24,6 +24,7 @@ export interface PropertySettings {
   check_out_from?: string
   check_out_until?: string
   pay_at_property_enabled: boolean
+  pay_at_hotel_methods: string[]
   online_card_payment?: boolean
   bank_transfer?: boolean
   special_requests_enabled?: boolean

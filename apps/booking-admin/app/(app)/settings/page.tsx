@@ -115,6 +115,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   check_in_time: '15:00',
   check_out_time: '11:00',
   pay_at_property_enabled: false,
+  pay_at_hotel_methods: ['cash', 'card'],
   online_card_payment: false,
   bank_transfer: false,
   free_cancellation_days: 7,
@@ -972,7 +973,9 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                        <span className="text-[10px] text-gray-500">Cash & card accepted</span>
+                        <span className="text-[10px] text-gray-500">
+                          {settings.pay_at_hotel_methods.length === 2 ? 'Cash & card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
@@ -984,6 +987,39 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   </button>
+                  {settings.pay_at_property_enabled && (
+                    <div className="col-span-full flex items-center gap-2 -mt-1">
+                      {[
+                        { key: 'cash', label: 'Cash' },
+                        { key: 'card', label: 'Card' },
+                      ].map((m) => {
+                        const selected = settings.pay_at_hotel_methods.includes(m.key)
+                        return (
+                          <button
+                            key={m.key}
+                            type="button"
+                            onClick={() => {
+                              if (selected && settings.pay_at_hotel_methods.length > 1) {
+                                updateSetting('pay_at_hotel_methods', settings.pay_at_hotel_methods.filter(v => v !== m.key))
+                              } else if (!selected) {
+                                updateSetting('pay_at_hotel_methods', [...settings.pay_at_hotel_methods, m.key])
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                              selected
+                                ? 'border-primary-500 bg-primary-50 text-primary-700'
+                                : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        )
+                      })}
+                      <span className="text-[11px] text-gray-400 ml-1">
+                        {settings.pay_at_hotel_methods.length === 2 ? 'Cash & Card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
+                      </span>
+                    </div>
+                  )}
 
                   {/* Bank Transfer */}
                   <button
