@@ -255,8 +255,12 @@ export default function BookingDetailModal({
               </div>
             </div>
 
-            {/* Check-in / Check-out */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            {/* Booked / Check-in / Check-out */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Booked</p>
+                <p className="text-sm font-semibold text-gray-900 mt-0.5">{booking.createdAt ? new Date(booking.createdAt).toLocaleDateString() : '—'}</p>
+              </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Check-in</p>
                 <p className="text-sm font-semibold text-gray-900 mt-0.5">{booking.checkIn}</p>
