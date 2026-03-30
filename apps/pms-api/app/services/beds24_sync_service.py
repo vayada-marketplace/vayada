@@ -4,6 +4,7 @@ from typing import Optional
 
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
+from app.database import Database
 from app.repositories.beds24_mapping_repo import (
     Beds24ConnectionRepository,
     Beds24RoomMappingRepository,
@@ -202,6 +203,27 @@ async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
         "payment_method": "pay_at_property",
         "payment_status": "pay_at_property",
     }
+
+    # Auto-assign an available room unit
+    available_room = await Database.fetchrow(
+        """
+        SELECT r.id FROM rooms r
+        WHERE r.room_type_id = $1
+          AND r.status = 'available'
+          AND r.id NOT IN (
+            SELECT b.room_id FROM bookings b
+            WHERE b.room_id IS NOT NULL
+              AND b.status IN ('pending', 'confirmed')
+              AND b.check_in < $3
+              AND b.check_out > $2
+          )
+        ORDER BY r.sort_order, r.room_number
+        LIMIT 1
+        """,
+        room_type_id, check_in, check_out,
+    )
+    if available_room:
+        booking_data["room_id"] = str(available_room["id"])
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
