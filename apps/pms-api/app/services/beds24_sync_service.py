@@ -425,10 +425,30 @@ async def pull_calendar_blocks_for_room_type(
                         room_type_id, current_day, next_day,
                     ) or 0
 
+                    # Also count ALL bookings for comparison
+                    all_booked = await Database.fetchval(
+                        """
+                        SELECT COUNT(*) FROM bookings
+                        WHERE room_type_id = $1
+                          AND status IN ('pending', 'confirmed')
+                          AND check_in < $3
+                          AND check_out > $2
+                        """,
+                        room_type_id, current_day, next_day,
+                    ) or 0
+
                     external_blocked = (
                         total_rooms - beds24_available - beds24_booked
                     )
                     if external_blocked > 0:
+                        logger.info(
+                            "Block detected: room_type=%s date=%s total=%d "
+                            "numAvail=%d beds24_booked=%d all_booked=%d "
+                            "external_blocked=%d",
+                            room_type_id, current_day, total_rooms,
+                            beds24_available, beds24_booked, all_booked,
+                            external_blocked,
+                        )
                         blocked_dates.append({
                             "date": current_day,
                             "blocked_count": min(external_blocked, total_rooms),
