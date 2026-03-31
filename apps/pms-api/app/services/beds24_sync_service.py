@@ -410,16 +410,17 @@ async def pull_calendar_blocks_for_room_type(
                     next_day = current_day + timedelta(days=1)
 
                     # Beds24's numAvail = total - beds24_bookings - manual_blocks.
-                    # Subtract our local beds24-channel bookings to isolate
-                    # manual blocks (set via Booking.com/Airbnb extranets).
+                    # Subtract bookings that came from Beds24 (identified via
+                    # beds24_booking_mappings, not channel field which may have
+                    # been overwritten by backfill) to isolate manual blocks.
                     beds24_booked = await Database.fetchval(
                         """
-                        SELECT COUNT(*) FROM bookings
-                        WHERE room_type_id = $1
-                          AND status IN ('pending', 'confirmed')
-                          AND check_in < $3
-                          AND check_out > $2
-                          AND channel = 'beds24'
+                        SELECT COUNT(*) FROM bookings b
+                        JOIN beds24_booking_mappings bm ON bm.booking_id = b.id
+                        WHERE b.room_type_id = $1
+                          AND b.status IN ('pending', 'confirmed')
+                          AND b.check_in < $3
+                          AND b.check_out > $2
                         """,
                         room_type_id, current_day, next_day,
                     ) or 0
