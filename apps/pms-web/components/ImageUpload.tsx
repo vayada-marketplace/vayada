@@ -23,7 +23,7 @@ export default function ImageUpload({
   images,
   onChange,
   maxImages = 10,
-  maxSizeMB = 5,
+  maxSizeMB = 20,
   label = 'Room Images',
   compact = false,
 }: ImageUploadProps) {
