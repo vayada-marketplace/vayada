@@ -238,6 +238,7 @@
   "calendar.channelBookingCom": "Booking.com",
   "calendar.channelExpedia": "Expedia",
   "calendar.channelOther": "Sonstige",
+  "calendar.blocked": "Blocked",
   "calendar.noBookingsOnDay": "Keine Buchungen an diesem Tag",
   "calendar.selectDay": "Tag auswaehlen",
   "calendar.newShort": "+ Neu",

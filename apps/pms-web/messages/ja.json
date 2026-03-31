@@ -238,6 +238,7 @@
   "calendar.channelBookingCom": "Booking.com",
   "calendar.channelExpedia": "Expedia",
   "calendar.channelOther": "その他",
+  "calendar.blocked": "Blocked",
   "calendar.noBookingsOnDay": "この日の予約はありません",
   "calendar.selectDay": "日を選択",
   "calendar.newShort": "+ 新規",

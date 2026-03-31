@@ -238,6 +238,7 @@
   "calendar.channelBookingCom": "Booking.com",
   "calendar.channelExpedia": "Expedia",
   "calendar.channelOther": "其他",
+  "calendar.blocked": "Blocked",
   "calendar.noBookingsOnDay": "当日无预订",
   "calendar.selectDay": "选择日期",
   "calendar.newShort": "+ 新建",
