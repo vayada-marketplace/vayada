@@ -5,22 +5,15 @@ import { channexService, ChannexSyncStatus, ChannexRoomTypeMapping, ChannexRateP
 import { ArrowPathIcon, CheckCircleIcon, LinkIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
 
-type Step = 'connect' | 'provision' | 'ready'
-
 export default function ChannelManagerPage() {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  // Connection
   const [status, setStatus] = useState<ChannexSyncStatus | null>(null)
-  const [apiKey, setApiKey] = useState('')
-  const [connecting, setConnecting] = useState(false)
-  const [disconnecting, setDisconnecting] = useState(false)
-
-  // Provisioning
-  const [provisioning, setProvisioning] = useState(false)
+  const [enabling, setEnabling] = useState(false)
+  const [disabling, setDisabling] = useState(false)
 
   // Mappings
   const [roomMappings, setRoomMappings] = useState<ChannexRoomTypeMapping[]>([])
@@ -34,21 +27,17 @@ export default function ChannelManagerPage() {
   const [iframeUrl, setIframeUrl] = useState<string | null>(null)
   const [loadingIframe, setLoadingIframe] = useState(false)
 
-  const step: Step = !status || !status.isConnected
-    ? 'connect'
-    : !status.channexPropertyId || status.roomTypesProvisioned === 0
-      ? 'provision'
-      : 'ready'
+  const isEnabled = status?.isConnected && status?.channexPropertyId
 
   useEffect(() => {
     loadStatus()
   }, [])
 
   useEffect(() => {
-    if (step === 'ready') {
+    if (isEnabled) {
       loadMappings()
     }
-  }, [step])
+  }, [isEnabled])
 
   const loadStatus = async () => {
     setLoading(true)
@@ -71,52 +60,39 @@ export default function ChannelManagerPage() {
     if (rates.status === 'fulfilled') setRateMappings(rates.value)
   }
 
-  const handleConnect = async () => {
-    if (!apiKey.trim()) return
-    setConnecting(true)
+  const handleEnable = async () => {
+    setEnabling(true)
     setError('')
     try {
-      await channexService.connect(apiKey.trim())
-      setApiKey('')
-      setSuccess(t('channels.connectedToChannex'))
-      await loadStatus()
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToConnect'))
-    } finally {
-      setConnecting(false)
-    }
-  }
-
-  const handleDisconnect = async () => {
-    if (!confirm(t('channels.disconnectConfirm'))) return
-    setDisconnecting(true)
-    setError('')
-    try {
-      await channexService.disconnect()
-      setStatus(null)
-      setRoomMappings([])
-      setRateMappings([])
-      setSuccess(t('channels.disconnectedFromChannex'))
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToDisconnect'))
-    } finally {
-      setDisconnecting(false)
-    }
-  }
-
-  const handleProvision = async () => {
-    setProvisioning(true)
-    setError('')
-    try {
-      const result = await channexService.provision()
+      const result = await channexService.enable()
       setSuccess(
-        `Provisioned: ${result.roomsCreated} room types, ${result.ratesCreated} rate plans`
+        result.status === 'already_enabled'
+          ? t('channels.alreadyEnabled')
+          : `${t('channels.enabled')} (${result.roomsCreated} rooms, ${result.ratesCreated} rates)`
       )
       await loadStatus()
     } catch (err: any) {
-      setError(err.message || t('channels.failedToProvision'))
+      setError(err.message || t('channels.failedToEnable'))
     } finally {
-      setProvisioning(false)
+      setEnabling(false)
+    }
+  }
+
+  const handleDisable = async () => {
+    if (!confirm(t('channels.disableConfirm'))) return
+    setDisabling(true)
+    setError('')
+    try {
+      await channexService.disable()
+      setStatus(null)
+      setRoomMappings([])
+      setRateMappings([])
+      setIframeUrl(null)
+      setSuccess(t('channels.disabled'))
+    } catch (err: any) {
+      setError(err.message || t('channels.failedToDisable'))
+    } finally {
+      setDisabling(false)
     }
   }
 
@@ -195,112 +171,34 @@ export default function ChannelManagerPage() {
         </div>
       )}
 
-      <div className="space-y-8">
-        {/* Step indicator */}
-        <div className="flex items-center gap-3 text-xs">
-          <StepBadge num={1} label={t('channels.stepConnect')} active={step === 'connect'} done={step !== 'connect'} />
-          <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={2} label={t('channels.stepProvision')} active={step === 'provision'} done={step === 'ready'} />
-          <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={3} label={t('channels.stepSync')} active={step === 'ready'} done={false} />
-        </div>
-
-        {/* Step 1: Connect */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">{t('channels.channexConnection')}</h2>
-            {status?.isConnected && (
-              <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                {t('channels.connected')}
-              </span>
-            )}
-          </div>
-
-          {!status || !status.isConnected ? (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-600">
-                {t('channels.channexConnectDescription')}
-              </p>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.apiKeyLabel')}</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={t('channels.apiKeyPlaceholder')}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-              <button
-                onClick={handleConnect}
-                disabled={connecting || !apiKey.trim()}
-                className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-              >
-                {connecting ? t('channels.connecting') : t('channels.connect')}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="text-sm text-gray-600 space-y-1">
-                <p>
-                  <span className="text-gray-500">{t('channels.propertyIdLabel')}</span>{' '}
-                  <span className="font-mono text-xs">{status.channexPropertyId || t('channels.notProvisioned')}</span>
-                </p>
-                <p>
-                  <span className="text-gray-500">{t('channels.roomTypesLabel')}</span>{' '}
-                  {status.roomTypesProvisioned} provisioned
-                </p>
-                <p>
-                  <span className="text-gray-500">{t('channels.ratePlansLabel')}</span>{' '}
-                  {status.ratePlansProvisioned} provisioned
-                </p>
-                {status.lastAriSyncAt && (
-                  <p>
-                    <span className="text-gray-500">{t('channels.lastAriSync')}</span>{' '}
-                    {new Date(status.lastAriSyncAt).toLocaleString()}
-                  </p>
-                )}
-                {status.lastBookingSyncAt && (
-                  <p>
-                    <span className="text-gray-500">{t('channels.lastBookingSync')}</span>{' '}
-                    {new Date(status.lastBookingSyncAt).toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-              >
-                {disconnecting ? t('channels.disconnecting') : t('channels.disconnect')}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Step 2: Provision */}
-        {step === 'provision' && (
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.provisionTitle')}</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              {t('channels.provisionDescription')}
+      <div className="space-y-6">
+        {!isEnabled ? (
+          /* ── Not enabled ─────────────────────────────── */
+          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center">
+            <h2 className="text-sm font-semibold text-gray-900 mb-2">{t('channels.title')}</h2>
+            <p className="text-sm text-gray-600 mb-5">
+              {t('channels.enableDescription')}
             </p>
             <button
-              onClick={handleProvision}
-              disabled={provisioning}
-              className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              onClick={handleEnable}
+              disabled={enabling}
+              className="px-5 py-2.5 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
-              {provisioning ? t('channels.provisioning') : t('channels.provisionButton')}
+              {enabling ? t('channels.enabling') : t('channels.enableButton')}
             </button>
           </div>
-        )}
-
-        {/* Step 3: Ready — sync controls + mappings */}
-        {step === 'ready' && (
+        ) : (
+          /* ── Enabled ─────────────────────────────────── */
           <>
+            {/* Status bar */}
             <div className="bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-gray-900">{t('channels.syncControls')}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold text-gray-900">{t('channels.title')}</h2>
+                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    {t('channels.active')}
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSyncBookings}
@@ -320,16 +218,35 @@ export default function ChannelManagerPage() {
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-gray-600">
-                {t('channels.syncDescription')}
-              </p>
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>
+                  <span className="text-gray-500">{t('channels.roomTypesLabel')}</span>{' '}
+                  {status.roomTypesProvisioned} {t('channels.provisioned')}
+                </p>
+                <p>
+                  <span className="text-gray-500">{t('channels.ratePlansLabel')}</span>{' '}
+                  {status.ratePlansProvisioned} {t('channels.provisioned')}
+                </p>
+                {status.lastAriSyncAt && (
+                  <p>
+                    <span className="text-gray-500">{t('channels.lastAriSync')}</span>{' '}
+                    {new Date(status.lastAriSyncAt).toLocaleString()}
+                  </p>
+                )}
+                {status.lastBookingSyncAt && (
+                  <p>
+                    <span className="text-gray-500">{t('channels.lastBookingSync')}</span>{' '}
+                    {new Date(status.lastBookingSyncAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* OTA Channel Connections (iframe) */}
             <div className="bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-gray-900">{t('channels.otaConnections')}</h2>
-                {!iframeUrl && (
+                {!iframeUrl ? (
                   <button
                     onClick={handleOpenChannels}
                     disabled={loadingIframe}
@@ -337,8 +254,7 @@ export default function ChannelManagerPage() {
                   >
                     {loadingIframe ? t('channels.loading') : t('channels.manageChannels')}
                   </button>
-                )}
-                {iframeUrl && (
+                ) : (
                   <button
                     onClick={() => setIframeUrl(null)}
                     className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -362,7 +278,7 @@ export default function ChannelManagerPage() {
               )}
             </div>
 
-            {/* Provisioned mappings */}
+            {/* Provisioned room types */}
             {roomMappings.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-xl p-6">
                 <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.provisionedRoomTypes')}</h2>
@@ -392,30 +308,20 @@ export default function ChannelManagerPage() {
                 </div>
               </div>
             )}
+
+            {/* Disable */}
+            <div className="pt-2">
+              <button
+                onClick={handleDisable}
+                disabled={disabling}
+                className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                {disabling ? t('channels.disabling') : t('channels.disableButton')}
+              </button>
+            </div>
           </>
         )}
       </div>
-    </div>
-  )
-}
-
-function StepBadge({ num, label, active, done }: { num: number; label: string; active: boolean; done: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span
-        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-          done
-            ? 'bg-green-100 text-green-700'
-            : active
-              ? 'bg-primary-100 text-primary-700'
-              : 'bg-gray-100 text-gray-400'
-        }`}
-      >
-        {done ? '\u2713' : num}
-      </span>
-      <span className={`font-medium ${active ? 'text-gray-900' : done ? 'text-green-700' : 'text-gray-400'}`}>
-        {label}
-      </span>
     </div>
   )
 }

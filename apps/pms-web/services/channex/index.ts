@@ -1,15 +1,5 @@
 import { pmsClient } from '@/services/api/pmsClient'
 
-export interface ChannexConnection {
-  id: string
-  hotelId: string
-  channexPropertyId: string | null
-  isActive: boolean
-  lastBookingSyncAt: string | null
-  lastAriSyncAt: string | null
-  createdAt: string
-}
-
 export interface ChannexSyncStatus {
   isConnected: boolean
   channexPropertyId: string | null
@@ -37,30 +27,28 @@ export interface ChannexRatePlanMapping {
   createdAt: string
 }
 
-export interface ChannexProvisionResult {
+export interface ChannexEnableResult {
+  status: string
   channexPropertyId: string
   roomsCreated: number
   ratesCreated: number
 }
 
 export const channexService = {
-  // Connection
-  connect: (apiKey: string) =>
-    pmsClient.post<ChannexConnection>('/admin/channex/connect', { apiKey }),
+  // Enable / disable
+  enable: () =>
+    pmsClient.post<ChannexEnableResult>('/admin/channex/enable'),
 
-  getConnection: () =>
-    pmsClient.get<ChannexConnection>('/admin/channex/connection'),
-
-  disconnect: () =>
-    pmsClient.delete('/admin/channex/connection'),
+  disable: () =>
+    pmsClient.post('/admin/channex/disable'),
 
   // Status
   getStatus: () =>
     pmsClient.get<ChannexSyncStatus>('/admin/channex/status'),
 
-  // Provisioning
+  // Re-provision (after adding new room types)
   provision: () =>
-    pmsClient.post<ChannexProvisionResult>('/admin/channex/provision'),
+    pmsClient.post<{ channexPropertyId: string; roomsCreated: number; ratesCreated: number }>('/admin/channex/provision'),
 
   // Mappings
   listRoomTypeMappings: () =>
