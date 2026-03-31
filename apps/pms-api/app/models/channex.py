@@ -7,33 +7,6 @@ def to_camel(string: str) -> str:
     return parts[0] + "".join(w.capitalize() for w in parts[1:])
 
 
-# ── Connection ───────────────────────────────────────────────────────
-
-class ChannexConnectRequest(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-    api_key: str
-
-
-class ChannexConnectionResponse(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-    id: str
-    hotel_id: str
-    channex_property_id: Optional[str] = None
-    is_active: bool
-    last_booking_sync_at: Optional[str] = None
-    last_ari_sync_at: Optional[str] = None
-    created_at: str
-
-
-# ── Property provisioning ────────────────────────────────────────────
-
-class ChannexProvisionPropertyRequest(BaseModel):
-    """Trigger auto-creation of property + rooms + rate plans in Channex."""
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-
 # ── Room type mapping ────────────────────────────────────────────────
 
 class ChannexRoomTypeMappingResponse(BaseModel):

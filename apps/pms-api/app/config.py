@@ -74,6 +74,7 @@ class Settings(BaseSettings):
 
     # Channex
     CHANNEX_API_BASE_URL: str = "https://staging.channex.io"
+    CHANNEX_API_KEY: str = ""
     CHANNEX_POLL_INTERVAL_MINUTES: int = 5
     CHANNEX_FULL_SYNC_HOUR: int = 4
     CHANNEX_API_DELAY_SECONDS: float = 0.5

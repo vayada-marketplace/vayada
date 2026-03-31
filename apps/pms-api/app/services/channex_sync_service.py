@@ -27,7 +27,7 @@ async def provision_property(hotel_id: str) -> dict:
     if not conn or not conn["is_active"]:
         raise ValueError("No active Channex connection")
 
-    api_key = conn["api_key"]
+    api_key = channex_service.get_platform_api_key()
 
     # Get hotel info
     hotel = await Database.fetchrow("SELECT * FROM hotels WHERE id = $1", hotel_id)
@@ -166,7 +166,7 @@ async def push_availability_for_room_type(
     if end_date is None:
         end_date = start_date + timedelta(days=SYNC_HORIZON_DAYS)
 
-    api_key = conn["api_key"]
+    api_key = channex_service.get_platform_api_key()
     channex_property_id = str(conn["channex_property_id"])
     channex_room_type_id = str(room_mapping["channex_room_type_id"])
     total_rooms = room_type["total_rooms"]
@@ -317,7 +317,7 @@ async def push_restrictions_for_rate_plan(
     if end_date is None:
         end_date = start_date + timedelta(days=SYNC_HORIZON_DAYS)
 
-    api_key = conn["api_key"]
+    api_key = channex_service.get_platform_api_key()
     channex_property_id = str(conn["channex_property_id"])
 
     # Build restriction entries, batching consecutive identical days into ranges
@@ -639,7 +639,7 @@ async def poll_bookings_for_hotel(hotel_id: str) -> None:
     if not conn or not conn["is_active"]:
         return
 
-    api_key = conn["api_key"]
+    api_key = channex_service.get_platform_api_key()
     property_id = str(conn["channex_property_id"]) if conn.get("channex_property_id") else None
 
     try:

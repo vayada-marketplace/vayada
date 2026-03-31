@@ -12,8 +12,6 @@ from app.repositories.channex_mapping_repo import (
     ChannexRatePlanMappingRepository,
 )
 from app.models.channex import (
-    ChannexConnectRequest,
-    ChannexConnectionResponse,
     ChannexRoomTypeMappingResponse,
     ChannexRatePlanMappingResponse,
     ChannexSyncStatusResponse,
@@ -24,79 +22,56 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-channex"])
 
 
-def _conn_to_response(c: dict) -> ChannexConnectionResponse:
-    last_booking = c.get("last_booking_sync_at")
-    last_ari = c.get("last_ari_sync_at")
-    prop_id = c.get("channex_property_id")
-    return ChannexConnectionResponse(
-        id=str(c["id"]),
-        hotel_id=str(c["hotel_id"]),
-        channex_property_id=str(prop_id) if prop_id else None,
-        is_active=c["is_active"],
-        last_booking_sync_at=last_booking.isoformat() if last_booking else None,
-        last_ari_sync_at=last_ari.isoformat() if last_ari else None,
-        created_at=c["created_at"].isoformat(),
-    )
+# ── Enable / Disable ─────────────────────────────────────────────────
 
-
-def _room_mapping_to_response(m: dict) -> ChannexRoomTypeMappingResponse:
-    return ChannexRoomTypeMappingResponse(
-        id=str(m["id"]),
-        hotel_id=str(m["hotel_id"]),
-        room_type_id=str(m["room_type_id"]),
-        channex_room_type_id=str(m["channex_room_type_id"]),
-        created_at=m["created_at"].isoformat(),
-    )
-
-
-def _rate_mapping_to_response(m: dict) -> ChannexRatePlanMappingResponse:
-    return ChannexRatePlanMappingResponse(
-        id=str(m["id"]),
-        hotel_id=str(m["hotel_id"]),
-        room_type_id=str(m["room_type_id"]),
-        channex_rate_plan_id=str(m["channex_rate_plan_id"]),
-        channex_room_type_id=str(m["channex_room_type_id"]),
-        sell_mode=m["sell_mode"],
-        created_at=m["created_at"].isoformat(),
-    )
-
-
-# ── Connection ───────────────────────────────────────────────────────
-
-@router.post("/channex/connect", response_model=ChannexConnectionResponse)
-async def channex_connect(
-    data: ChannexConnectRequest,
+@router.post("/channex/enable")
+async def channex_enable(
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Store a Channex API key and verify it works."""
+    """Enable the channel manager for this hotel.
+
+    Creates the Channex connection, provisions the property, room types,
+    and rate plans — all in one step. Uses the platform-wide API key.
+    """
     from app.services import channex_service
+    from app.services.channex_sync_service import provision_property
 
     hotel_id = await get_hotel_id(user_id)
 
-    # Verify the API key is valid
-    valid = await channex_service.test_connection(data.api_key)
+    # Check if already enabled
+    existing = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if existing and existing["is_active"] and existing.get("channex_property_id"):
+        return {"status": "already_enabled", "channex_property_id": str(existing["channex_property_id"])}
+
+    # Verify platform API key works
+    api_key = channex_service.get_platform_api_key()
+    valid = await channex_service.test_connection(api_key)
     if not valid:
-        raise HTTPException(status_code=400, detail="Invalid Channex API key")
+        raise HTTPException(status_code=502, detail="Channel manager is not configured")
 
-    conn = await ChannexConnectionRepository.upsert(hotel_id, data.api_key)
-    return _conn_to_response(conn)
+    # Create or reactivate connection
+    await ChannexConnectionRepository.upsert(hotel_id)
+
+    # Provision property + rooms + rate plans in Channex
+    try:
+        result = await provision_property(hotel_id)
+    except Exception as e:
+        logger.exception("Failed to provision Channex for hotel %s", hotel_id)
+        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
+
+    return {
+        "status": "enabled",
+        "channex_property_id": result["channex_property_id"],
+        "rooms_created": result["rooms_created"],
+        "rates_created": result["rates_created"],
+    }
 
 
-@router.get("/channex/connection")
-async def channex_get_connection(
+@router.post("/channex/disable", status_code=204)
+async def channex_disable(
     user_id: str = Depends(require_hotel_admin),
 ):
-    hotel_id = await get_hotel_id(user_id)
-    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="No Channex connection found")
-    return _conn_to_response(conn)
-
-
-@router.delete("/channex/connection", status_code=204)
-async def channex_disconnect(
-    user_id: str = Depends(require_hotel_admin),
-):
+    """Disable the channel manager for this hotel."""
     hotel_id = await get_hotel_id(user_id)
     await ChannexConnectionRepository.deactivate(hotel_id)
 
@@ -131,19 +106,19 @@ async def channex_status(
     )
 
 
-# ── Provisioning ─────────────────────────────────────────────────────
+# ── Re-provision (when new room types are added) ─────────────────────
 
 @router.post("/channex/provision")
 async def channex_provision(
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Auto-create property + room types + rate plans in Channex."""
+    """Re-provision: create any new room types and rate plans in Channex."""
     from app.services.channex_sync_service import provision_property
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"]:
-        raise HTTPException(status_code=400, detail="No active Channex connection")
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
 
     try:
         result = await provision_property(hotel_id)
@@ -165,7 +140,12 @@ async def channex_list_room_type_mappings(
 ):
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRoomTypeMappingRepository.list_by_hotel_id(hotel_id)
-    return [_room_mapping_to_response(m) for m in mappings]
+    return [ChannexRoomTypeMappingResponse(
+        id=str(m["id"]), hotel_id=str(m["hotel_id"]),
+        room_type_id=str(m["room_type_id"]),
+        channex_room_type_id=str(m["channex_room_type_id"]),
+        created_at=m["created_at"].isoformat(),
+    ) for m in mappings]
 
 
 @router.get(
@@ -177,7 +157,14 @@ async def channex_list_rate_plan_mappings(
 ):
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRatePlanMappingRepository.list_by_hotel_id(hotel_id)
-    return [_rate_mapping_to_response(m) for m in mappings]
+    return [ChannexRatePlanMappingResponse(
+        id=str(m["id"]), hotel_id=str(m["hotel_id"]),
+        room_type_id=str(m["room_type_id"]),
+        channex_rate_plan_id=str(m["channex_rate_plan_id"]),
+        channex_room_type_id=str(m["channex_room_type_id"]),
+        sell_mode=m["sell_mode"],
+        created_at=m["created_at"].isoformat(),
+    ) for m in mappings]
 
 
 # ── ARI Sync ─────────────────────────────────────────────────────────
@@ -192,7 +179,7 @@ async def channex_sync_ari(
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"]:
-        raise HTTPException(status_code=400, detail="No active Channex connection")
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
 
     asyncio.create_task(push_ari_for_hotel(hotel_id))
     return {"status": "sync_started"}
@@ -210,7 +197,7 @@ async def channex_sync_bookings(
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"]:
-        raise HTTPException(status_code=400, detail="No active Channex connection")
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
 
     await poll_bookings_for_hotel(hotel_id)
     return {"status": "sync_complete"}
@@ -233,17 +220,15 @@ async def channex_iframe_url(
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"]:
-        raise HTTPException(status_code=400, detail="No active Channex connection")
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
     if not conn.get("channex_property_id"):
         raise HTTPException(status_code=400, detail="Property not provisioned yet")
 
-    api_key = conn["api_key"]
+    api_key = channex_service.get_platform_api_key()
     property_id = str(conn["channex_property_id"])
 
     try:
-        token = await channex_service.create_iframe_token(
-            api_key, property_id
-        )
+        token = await channex_service.create_iframe_token(api_key, property_id)
         url = channex_service.build_iframe_url(token, property_id)
     except Exception as e:
         logger.exception("Failed to generate Channex iframe URL")

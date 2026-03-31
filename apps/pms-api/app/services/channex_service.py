@@ -29,16 +29,11 @@ async def close_client():
         _client = None
 
 
-async def _get_api_key(hotel_id: str) -> str:
-    """Retrieve the stored API key for a hotel's Channex connection."""
-    from app.repositories.channex_mapping_repo import ChannexConnectionRepository
-
-    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
-    if not conn:
-        raise ValueError("No Channex connection for this hotel")
-    if not conn["is_active"]:
-        raise ValueError("Channex connection is deactivated")
-    return conn["api_key"]
+def get_platform_api_key() -> str:
+    """Return the platform-wide Channex API key from config."""
+    if not settings.CHANNEX_API_KEY:
+        raise ValueError("CHANNEX_API_KEY not configured")
+    return settings.CHANNEX_API_KEY
 
 
 def _headers(api_key: str) -> dict:

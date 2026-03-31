@@ -7,26 +7,26 @@ from app.database import Database
 class ChannexConnectionRepository:
 
     @staticmethod
-    async def upsert(hotel_id: str, api_key: str) -> dict:
+    async def upsert(hotel_id: str) -> dict:
         existing = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
         if existing:
             row = await Database.fetchrow(
                 """
                 UPDATE channex_connections
-                SET api_key = $2, is_active = true, updated_at = now()
+                SET is_active = true, updated_at = now()
                 WHERE hotel_id = $1
                 RETURNING *
                 """,
-                hotel_id, api_key,
+                hotel_id,
             )
         else:
             row = await Database.fetchrow(
                 """
-                INSERT INTO channex_connections (hotel_id, api_key)
-                VALUES ($1, $2)
+                INSERT INTO channex_connections (hotel_id)
+                VALUES ($1)
                 RETURNING *
                 """,
-                hotel_id, api_key,
+                hotel_id,
             )
         return dict(row)
 
