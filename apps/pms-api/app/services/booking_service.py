@@ -491,9 +491,9 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
             send_host_booking_accepted(hotel["contact_email"], updated)
         )
 
-    # Sync availability to Beds24 (fire-and-forget)
-    from app.services.beds24_sync_service import push_availability_for_booking
-    asyncio.create_task(push_availability_for_booking(booking_id))
+    # Sync availability to Channex (fire-and-forget)
+    from app.services.channex_sync_service import push_ari_for_booking
+    asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
 
@@ -536,10 +536,10 @@ async def host_reject_booking(booking_id: str, user_id: str) -> dict:
         send_guest_booking_rejected(updated["guest_email"], updated)
     )
 
-    # Propagate cancellation and sync availability to Beds24 (fire-and-forget)
-    from app.services.beds24_sync_service import handle_vayada_cancellation, push_availability_for_booking
-    asyncio.create_task(handle_vayada_cancellation(booking_id))
-    asyncio.create_task(push_availability_for_booking(booking_id))
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
 
@@ -585,10 +585,10 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
         send_guest_booking_withdrawn(updated["guest_email"], updated)
     )
 
-    # Propagate cancellation and sync availability to Beds24 (fire-and-forget)
-    from app.services.beds24_sync_service import handle_vayada_cancellation, push_availability_for_booking
-    asyncio.create_task(handle_vayada_cancellation(booking_id))
-    asyncio.create_task(push_availability_for_booking(booking_id))
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
 
@@ -701,10 +701,10 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
             send_host_guest_cancelled(hotel["contact_email"], updated)
         )
 
-    # Propagate cancellation and sync availability to Beds24 (fire-and-forget)
-    from app.services.beds24_sync_service import handle_vayada_cancellation, push_availability_for_booking
-    asyncio.create_task(handle_vayada_cancellation(booking_id))
-    asyncio.create_task(push_availability_for_booking(booking_id))
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
 

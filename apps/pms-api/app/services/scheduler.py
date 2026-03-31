@@ -262,60 +262,32 @@ async def cancel_stale_unpaid_bookings():
         logger.info("Cancelled stale unpaid booking: %s", row["id"])
 
 
-async def poll_beds24_bookings():
-    """Poll all active Beds24 connections for new/modified bookings."""
-    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
-    from app.services.beds24_sync_service import poll_bookings_for_hotel
+async def poll_channex_bookings():
+    """Poll all active Channex connections for new booking revisions."""
+    from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+    from app.services.channex_sync_service import poll_bookings_for_hotel
 
-    connections = await Beds24ConnectionRepository.list_active()
+    connections = await ChannexConnectionRepository.list_active()
     for conn in connections:
         hotel_id = str(conn["hotel_id"])
         try:
             await poll_bookings_for_hotel(hotel_id)
         except Exception as e:
-            logger.error("Failed to poll Beds24 bookings for hotel %s: %s", hotel_id, e)
+            logger.error("Failed to poll Channex bookings for hotel %s: %s", hotel_id, e)
 
 
-async def full_beds24_availability_sync():
-    """Daily full availability push to Beds24 for all active connections."""
-    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
-    from app.services.beds24_sync_service import push_availability_for_hotel
+async def full_channex_ari_sync():
+    """Daily full availability + rates push to Channex for all active connections."""
+    from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+    from app.services.channex_sync_service import push_ari_for_hotel
 
-    connections = await Beds24ConnectionRepository.list_active()
+    connections = await ChannexConnectionRepository.list_active()
     for conn in connections:
         hotel_id = str(conn["hotel_id"])
         try:
-            await push_availability_for_hotel(hotel_id)
+            await push_ari_for_hotel(hotel_id)
         except Exception as e:
-            logger.error("Failed to sync Beds24 availability for hotel %s: %s", hotel_id, e)
-
-
-async def poll_beds24_calendar():
-    """Poll all active Beds24 connections for external calendar blocks."""
-    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
-    from app.services.beds24_sync_service import pull_calendar_blocks_for_hotel
-
-    connections = await Beds24ConnectionRepository.list_active()
-    for conn in connections:
-        hotel_id = str(conn["hotel_id"])
-        try:
-            await pull_calendar_blocks_for_hotel(hotel_id)
-        except Exception as e:
-            logger.error("Failed to poll Beds24 calendar for hotel %s: %s", hotel_id, e)
-
-
-async def poll_beds24_messages():
-    """Poll all active Beds24 connections for new guest messages."""
-    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
-    from app.services.messaging_service import receive_beds24_messages
-
-    connections = await Beds24ConnectionRepository.list_active()
-    for conn in connections:
-        hotel_id = str(conn["hotel_id"])
-        try:
-            await receive_beds24_messages(hotel_id)
-        except Exception as e:
-            logger.error("Failed to poll Beds24 messages for hotel %s: %s", hotel_id, e)
+            logger.error("Failed to sync Channex ARI for hotel %s: %s", hotel_id, e)
 
 
 def setup_scheduler():
@@ -357,31 +329,18 @@ def setup_scheduler():
         replace_existing=True,
     )
 
+    # ── Channex jobs ─────────────────────────────────────────────────
     scheduler.add_job(
-        poll_beds24_bookings,
-        trigger=IntervalTrigger(minutes=app_settings.BEDS24_POLL_INTERVAL_MINUTES),
-        id="poll_beds24_bookings",
+        poll_channex_bookings,
+        trigger=IntervalTrigger(minutes=app_settings.CHANNEX_POLL_INTERVAL_MINUTES),
+        id="poll_channex_bookings",
         replace_existing=True,
     )
 
     scheduler.add_job(
-        full_beds24_availability_sync,
-        trigger=CronTrigger(hour=app_settings.BEDS24_FULL_SYNC_HOUR, minute=0),
-        id="full_beds24_availability_sync",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        poll_beds24_calendar,
-        trigger=IntervalTrigger(minutes=15),
-        id="poll_beds24_calendar",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        poll_beds24_messages,
-        trigger=IntervalTrigger(minutes=2),
-        id="poll_beds24_messages",
+        full_channex_ari_sync,
+        trigger=CronTrigger(hour=app_settings.CHANNEX_FULL_SYNC_HOUR, minute=0),
+        id="full_channex_ari_sync",
         replace_existing=True,
     )
 

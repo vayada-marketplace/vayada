@@ -1,0 +1,87 @@
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, List
+
+
+def to_camel(string: str) -> str:
+    parts = string.split("_")
+    return parts[0] + "".join(w.capitalize() for w in parts[1:])
+
+
+# ── Connection ───────────────────────────────────────────────────────
+
+class ChannexConnectRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    api_key: str
+
+
+class ChannexConnectionResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    hotel_id: str
+    channex_property_id: Optional[str] = None
+    is_active: bool
+    last_booking_sync_at: Optional[str] = None
+    last_ari_sync_at: Optional[str] = None
+    created_at: str
+
+
+# ── Property provisioning ────────────────────────────────────────────
+
+class ChannexProvisionPropertyRequest(BaseModel):
+    """Trigger auto-creation of property + rooms + rate plans in Channex."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+# ── Room type mapping ────────────────────────────────────────────────
+
+class ChannexRoomTypeMappingResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    hotel_id: str
+    room_type_id: str
+    channex_room_type_id: str
+    created_at: str
+
+
+# ── Rate plan mapping ────────────────────────────────────────────────
+
+class ChannexRatePlanMappingResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    hotel_id: str
+    room_type_id: str
+    channex_rate_plan_id: str
+    channex_room_type_id: str
+    sell_mode: str
+    created_at: str
+
+
+# ── Booking mapping ──────────────────────────────────────────────────
+
+class ChannexBookingMappingResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    hotel_id: str
+    booking_id: str
+    channex_booking_id: str
+    channel_source: str
+    last_synced_at: Optional[str] = None
+    created_at: str
+
+
+# ── Sync status ──────────────────────────────────────────────────────
+
+class ChannexSyncStatusResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    is_connected: bool
+    channex_property_id: Optional[str] = None
+    room_types_provisioned: int = 0
+    rate_plans_provisioned: int = 0
+    last_booking_sync_at: Optional[str] = None
+    last_ari_sync_at: Optional[str] = None

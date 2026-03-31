@@ -72,12 +72,11 @@ class Settings(BaseSettings):
     # Booking engine frontend URL (for Xendit redirect URLs)
     BOOKING_ENGINE_URL: str = "https://booking.vayada.com"
 
-    # Beds24
-    BEDS24_API_BASE_URL: str = "https://api.beds24.com/v2"
-    BEDS24_WEBHOOK_SECRET: str = ""
-    BEDS24_POLL_INTERVAL_MINUTES: int = 5
-    BEDS24_FULL_SYNC_HOUR: int = 3
-    BEDS24_API_DELAY_SECONDS: float = 2.0
+    # Channex
+    CHANNEX_API_BASE_URL: str = "https://staging.channex.io"
+    CHANNEX_POLL_INTERVAL_MINUTES: int = 5
+    CHANNEX_FULL_SYNC_HOUR: int = 4
+    CHANNEX_API_DELAY_SECONDS: float = 0.5
 
     # Environment
     ENVIRONMENT: str = "development"

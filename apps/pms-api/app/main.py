@@ -13,11 +13,10 @@ from app.routers.admin_rooms import router as admin_rooms_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_payments import router as admin_payments_router
 from app.routers.admin_affiliates import router as admin_affiliates_router
-from app.routers.admin_beds24 import router as admin_beds24_router
+from app.routers.admin_channex import router as admin_channex_router
 from app.routers.upload import router as upload_router
 from app.routers.affiliates import router as affiliates_router
 from app.routers.webhooks import router as webhooks_router
-from app.routers.admin_messaging import router as admin_messaging_router
 from app.routers.affiliate_dashboard import router as affiliate_dashboard_router
 from app.services.scheduler import setup_scheduler
 
@@ -95,11 +94,10 @@ app.include_router(admin_rooms_router)
 app.include_router(admin_bookings_router)
 app.include_router(admin_payments_router)
 app.include_router(admin_affiliates_router)
-app.include_router(admin_beds24_router)
+app.include_router(admin_channex_router)
 app.include_router(upload_router)
 app.include_router(affiliates_router)
 app.include_router(webhooks_router)
-app.include_router(admin_messaging_router)
 app.include_router(affiliate_dashboard_router)
 
 
