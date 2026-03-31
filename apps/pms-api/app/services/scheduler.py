@@ -290,6 +290,20 @@ async def full_beds24_availability_sync():
             logger.error("Failed to sync Beds24 availability for hotel %s: %s", hotel_id, e)
 
 
+async def poll_beds24_calendar():
+    """Poll all active Beds24 connections for external calendar blocks."""
+    from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
+    from app.services.beds24_sync_service import pull_calendar_blocks_for_hotel
+
+    connections = await Beds24ConnectionRepository.list_active()
+    for conn in connections:
+        hotel_id = str(conn["hotel_id"])
+        try:
+            await pull_calendar_blocks_for_hotel(hotel_id)
+        except Exception as e:
+            logger.error("Failed to poll Beds24 calendar for hotel %s: %s", hotel_id, e)
+
+
 async def poll_beds24_messages():
     """Poll all active Beds24 connections for new guest messages."""
     from app.repositories.beds24_mapping_repo import Beds24ConnectionRepository
@@ -354,6 +368,13 @@ def setup_scheduler():
         full_beds24_availability_sync,
         trigger=CronTrigger(hour=app_settings.BEDS24_FULL_SYNC_HOUR, minute=0),
         id="full_beds24_availability_sync",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        poll_beds24_calendar,
+        trigger=IntervalTrigger(minutes=15),
+        id="poll_beds24_calendar",
         replace_existing=True,
     )
 

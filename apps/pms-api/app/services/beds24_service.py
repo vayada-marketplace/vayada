@@ -155,6 +155,26 @@ async def set_room_calendar(
     return await _rate_limited_request("POST", "/rooms/calendar", token, json=payload)
 
 
+async def get_room_calendar(
+    hotel_id: str,
+    beds24_room_id: str,
+    start_date: str,
+    end_date: str,
+) -> List[dict]:
+    """Fetch per-day calendar data (availability) for a Beds24 room."""
+    token = await _ensure_valid_token(hotel_id)
+    params = {
+        "roomId": beds24_room_id,
+        "startDate": start_date,
+        "endDate": end_date,
+        "includeNumAvail": "true",
+    }
+    data = await _rate_limited_request(
+        "GET", "/inventory/rooms/calendar", token, params=params
+    )
+    return data if isinstance(data, list) else data.get("data", [])
+
+
 async def get_bookings(
     hotel_id: str,
     *,

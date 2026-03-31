@@ -1,9 +1,10 @@
 import logging
 from datetime import date, timedelta, datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.room_block_repo import RoomBlockRepository
 from app.database import Database
 from app.repositories.beds24_mapping_repo import (
     Beds24ConnectionRepository,
@@ -45,7 +46,7 @@ async def push_availability_for_room_type(
         next_day = current + timedelta(days=1)
 
         booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
-        blocked = await RoomTypeRepository.count_blocked(room_type_id, current, next_day)
+        blocked = await _count_local_blocks(room_type_id, current, next_day)
         available = max(0, total_rooms - booked - blocked)
 
         base_rate, _ = RoomTypeRepository.resolve_rate(room_type, current)
@@ -328,3 +329,172 @@ async def handle_vayada_cancellation(booking_id: str) -> None:
             "Failed to propagate cancellation to Beds24 for booking %s: %s",
             booking_id, e,
         )
+
+
+BEDS24_SYNC_REASON = "beds24_sync"
+
+
+async def _count_local_blocks(
+    room_type_id: str, start_date: date, end_date: date
+) -> int:
+    """Count blocked rooms excluding beds24_sync blocks (to avoid circular push)."""
+    count = await Database.fetchval(
+        """
+        SELECT COALESCE(SUM(blocked_count), 0) FROM room_blocks
+        WHERE room_type_id = $1
+          AND start_date < $3
+          AND end_date > $2
+          AND reason != $4
+        """,
+        room_type_id, start_date, end_date, BEDS24_SYNC_REASON,
+    )
+    return count or 0
+
+
+async def pull_calendar_blocks_for_room_type(
+    hotel_id: str,
+    room_type_id: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> int:
+    """Fetch Beds24 calendar for a room type and create room_blocks for
+    dates blocked externally (e.g. via Booking.com/Airbnb extranets).
+    Returns number of block ranges created."""
+    mapping = await Beds24RoomMappingRepository.get_by_room_type_id(room_type_id)
+    if not mapping:
+        return 0
+
+    room_type = await RoomTypeRepository.get_by_id(room_type_id)
+    if not room_type:
+        return 0
+
+    if start_date is None:
+        start_date = date.today()
+    if end_date is None:
+        end_date = start_date + timedelta(days=SYNC_HORIZON_DAYS)
+
+    total_rooms = room_type["total_rooms"]
+
+    try:
+        calendar_entries = await beds24_service.get_room_calendar(
+            hotel_id,
+            mapping["beds24_room_id"],
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to fetch Beds24 calendar for room type %s: %s",
+            room_type_id, e,
+        )
+        return 0
+
+    logger.info(
+        "Beds24 calendar for room type %s: %d entries",
+        room_type_id, len(calendar_entries),
+    )
+
+    # For each date, figure out how many rooms are blocked externally
+    blocked_dates: List[dict] = []
+    for entry in calendar_entries:
+        try:
+            entry_date = date.fromisoformat(str(entry.get("date", "")))
+            beds24_available = int(entry.get("numAvail", total_rooms))
+            next_day = entry_date + timedelta(days=1)
+
+            local_booked = await RoomTypeRepository.count_booked(
+                room_type_id, entry_date, next_day
+            )
+
+            # External blocks = rooms Beds24 says are unavailable minus what we
+            # already know about from our own bookings
+            external_blocked = total_rooms - beds24_available - local_booked
+            if external_blocked > 0:
+                blocked_dates.append({
+                    "date": entry_date,
+                    "blocked_count": external_blocked,
+                })
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning("Failed to parse Beds24 calendar entry %s: %s", entry, e)
+            continue
+
+    # Delete old beds24_sync blocks for this room type in the date range
+    await Database.execute(
+        """
+        DELETE FROM room_blocks
+        WHERE room_type_id = $1
+          AND reason = $2
+          AND start_date >= $3
+          AND end_date <= $4
+        """,
+        room_type_id, BEDS24_SYNC_REASON, start_date, end_date,
+    )
+
+    if not blocked_dates:
+        logger.info("No external blocks found for room type %s", room_type_id)
+        return 0
+
+    # Merge consecutive dates with same blocked_count into ranges
+    merged = _merge_blocked_dates(blocked_dates)
+
+    for block_range in merged:
+        await RoomBlockRepository.create({
+            "hotel_id": hotel_id,
+            "room_type_id": room_type_id,
+            "start_date": block_range["start_date"],
+            "end_date": block_range["end_date"],
+            "blocked_count": block_range["blocked_count"],
+            "reason": BEDS24_SYNC_REASON,
+        })
+
+    logger.info(
+        "Created %d external block ranges for room type %s",
+        len(merged), room_type_id,
+    )
+    return len(merged)
+
+
+def _merge_blocked_dates(blocked_dates: List[dict]) -> List[dict]:
+    """Merge consecutive dates with same blocked_count into date ranges."""
+    if not blocked_dates:
+        return []
+
+    sorted_dates = sorted(blocked_dates, key=lambda x: x["date"])
+
+    merged = []
+    cur = {
+        "start_date": sorted_dates[0]["date"],
+        "end_date": sorted_dates[0]["date"] + timedelta(days=1),
+        "blocked_count": sorted_dates[0]["blocked_count"],
+    }
+
+    for entry in sorted_dates[1:]:
+        if (entry["date"] == cur["end_date"]
+                and entry["blocked_count"] == cur["blocked_count"]):
+            cur["end_date"] = entry["date"] + timedelta(days=1)
+        else:
+            merged.append(cur)
+            cur = {
+                "start_date": entry["date"],
+                "end_date": entry["date"] + timedelta(days=1),
+                "blocked_count": entry["blocked_count"],
+            }
+
+    merged.append(cur)
+    return merged
+
+
+async def pull_calendar_blocks_for_hotel(hotel_id: str) -> None:
+    """Pull external calendar blocks for all mapped room types in a hotel."""
+    mappings = await Beds24RoomMappingRepository.list_by_hotel_id(hotel_id)
+    total_blocks = 0
+    for mapping in mappings:
+        count = await pull_calendar_blocks_for_room_type(
+            hotel_id, str(mapping["room_type_id"])
+        )
+        total_blocks += count
+
+    logger.info(
+        "Calendar block sync completed for hotel %s (%d block ranges created)",
+        hotel_id, total_blocks,
+    )
