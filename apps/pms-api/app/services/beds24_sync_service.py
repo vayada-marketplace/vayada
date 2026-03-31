@@ -409,13 +409,28 @@ async def pull_calendar_blocks_for_room_type(
                 while current_day <= range_to:
                     next_day = current_day + timedelta(days=1)
 
-                    local_booked = await RoomTypeRepository.count_booked(
+                    # Only count direct (non-Beds24) bookings, because Beds24's
+                    # numAvail already accounts for bookings it knows about.
+                    direct_booked = await Database.fetchval(
+                        """
+                        SELECT COUNT(*) FROM bookings
+                        WHERE room_type_id = $1
+                          AND status IN ('pending', 'confirmed')
+                          AND check_in < $3
+                          AND check_out > $2
+                          AND channel != 'beds24'
+                        """,
+                        room_type_id, current_day, next_day,
+                    ) or 0
+
+                    # Also subtract any local (non-beds24) blocks
+                    local_blocked = await _count_local_blocks(
                         room_type_id, current_day, next_day
                     )
 
-                    # External blocks = rooms Beds24 says are unavailable minus
-                    # what we already know about from our own bookings
-                    external_blocked = total_rooms - beds24_available - local_booked
+                    external_blocked = (
+                        total_rooms - beds24_available - direct_booked - local_blocked
+                    )
                     if external_blocked > 0:
                         blocked_dates.append({
                             "date": current_day,
