@@ -112,6 +112,10 @@ async def push_availability_for_booking(booking_id: str) -> None:
 
 async def process_inbound_booking(beds24_booking: dict, hotel_id: str) -> None:
     """Import a Beds24 booking into vayada. Handles deduplication and cancellations."""
+    logger.info(
+        "Raw Beds24 booking payload for hotel %s: %s",
+        hotel_id, beds24_booking,
+    )
     beds24_booking_id = str(beds24_booking.get("id", ""))
     if not beds24_booking_id:
         logger.warning("Beds24 booking has no ID, skipping")
