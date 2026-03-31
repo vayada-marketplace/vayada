@@ -214,3 +214,39 @@ async def channex_sync_bookings(
 
     await poll_bookings_for_hotel(hotel_id)
     return {"status": "sync_complete"}
+
+
+# ── Channel IFrame ───────────────────────────────────────────────────
+
+@router.post("/channex/iframe-url")
+async def channex_iframe_url(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Generate a one-time iframe URL for channel management.
+
+    The hotel admin can use this iframe to connect/disconnect OTAs
+    (Booking.com, Airbnb, Expedia, etc.) and map rooms/rates
+    without leaving the PMS UI.
+    """
+    from app.services import channex_service
+
+    hotel_id = await get_hotel_id(user_id)
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"]:
+        raise HTTPException(status_code=400, detail="No active Channex connection")
+    if not conn.get("channex_property_id"):
+        raise HTTPException(status_code=400, detail="Property not provisioned yet")
+
+    api_key = conn["api_key"]
+    property_id = str(conn["channex_property_id"])
+
+    try:
+        token = await channex_service.create_iframe_token(
+            api_key, property_id
+        )
+        url = channex_service.build_iframe_url(token, property_id)
+    except Exception as e:
+        logger.exception("Failed to generate Channex iframe URL")
+        raise HTTPException(status_code=502, detail=f"Failed to generate iframe URL: {e}")
+
+    return {"iframe_url": url}

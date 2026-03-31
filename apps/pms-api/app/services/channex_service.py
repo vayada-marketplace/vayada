@@ -403,3 +403,52 @@ async def report_no_show(
         "POST", f"/api/v1/bookings/{booking_id}/no_show", api_key,
         json={"no_show_report": {"waived_fees": waived_fees}},
     )
+
+
+# ── Channel IFrame ──────────────────────────────────────────────────
+
+async def create_iframe_token(
+    api_key: str,
+    property_id: str,
+    username: str = "pms_user",
+) -> str:
+    """Generate a one-time token for the Channex channel management iframe.
+    Token is valid for 15 minutes and invalidated after first use."""
+    data = await _request(
+        "POST", "/api/v1/auth/one_time_token", api_key,
+        json={
+            "one_time_token": {
+                "property_id": property_id,
+                "username": username,
+            }
+        },
+    )
+    return data["data"]["token"]
+
+
+def build_iframe_url(
+    token: str,
+    property_id: str,
+    channels: str = None,
+    language: str = "en",
+) -> str:
+    """Build the Channex iframe URL for channel management.
+
+    Args:
+        token: One-time access token from create_iframe_token()
+        property_id: Channex property ID
+        channels: Optional comma-separated channel codes to show (e.g. "BDC,ABB")
+        language: UI language code (en, es, de, fr, it, etc.)
+    """
+    base = settings.CHANNEX_API_BASE_URL
+    url = (
+        f"{base}/auth/exchange"
+        f"?oauth_session_key={token}"
+        f"&app_mode=headless"
+        f"&redirect_to=/channels"
+        f"&property_id={property_id}"
+        f"&lng={language}"
+    )
+    if channels:
+        url += f"&channels={channels}"
+    return url
