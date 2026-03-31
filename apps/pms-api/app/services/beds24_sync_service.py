@@ -394,11 +394,10 @@ async def pull_calendar_blocks_for_room_type(
         room_type_id, len(calendar_entries),
     )
 
-    # Beds24 returns: [{ roomId, calendar: [{ from, to, numAvail, override? }, ...] }]
-    # Only create blocks for date ranges with an explicit override (e.g. "blackout"),
-    # which indicates the property owner manually closed the dates.
-    # Inferring blocks from numAvail alone is unreliable (can't distinguish
-    # manual blocks from unimported bookings or cross-channel reservations).
+    # Beds24 returns: [{ roomId, calendar: [{ from, to, numAvail }, ...] }]
+    # Compare numAvail against total_rooms minus ALL local bookings.
+    # A positive gap means something external is blocking availability
+    # (manual block in Booking.com/Airbnb, or an unimported booking).
     blocked_dates: List[dict] = []
     for room_entry in calendar_entries:
         cal_ranges = room_entry.get("calendar", [])
@@ -406,26 +405,33 @@ async def pull_calendar_blocks_for_room_type(
             try:
                 range_from = date.fromisoformat(cal_range["from"])
                 range_to = date.fromisoformat(cal_range["to"])
-                override = cal_range.get("override", "")
-                num_avail = cal_range.get("numAvail")
+                beds24_available = int(cal_range.get("numAvail", total_rooms))
 
-                # Log all fields for diagnosis
-                logger.info(
-                    "Calendar range: room_type=%s from=%s to=%s numAvail=%s override=%r",
-                    room_type_id, range_from, range_to, num_avail, override,
-                )
+                current_day = range_from
+                while current_day <= range_to:
+                    next_day = current_day + timedelta(days=1)
 
-                # Only block if there's an explicit override/closure
-                if override and override not in ("none", ""):
-                    current_day = range_from
-                    while current_day <= range_to:
+                    all_booked = await RoomTypeRepository.count_booked(
+                        room_type_id, current_day, next_day
+                    )
+                    local_blocked = await _count_local_blocks(
+                        room_type_id, current_day, next_day
+                    )
+
+                    # What we can account for locally
+                    local_unavailable = all_booked + local_blocked
+                    # What Beds24 says is unavailable
+                    beds24_unavailable = total_rooms - beds24_available
+                    # Gap = external blocks/bookings we don't know about
+                    external_blocked = beds24_unavailable - local_unavailable
+
+                    if external_blocked > 0:
                         blocked_dates.append({
                             "date": current_day,
-                            "blocked_count": total_rooms,
-                            "reason_detail": override,
+                            "blocked_count": min(external_blocked, total_rooms),
                         })
-                        current_day += timedelta(days=1)
 
+                    current_day = next_day
             except (ValueError, KeyError, TypeError) as e:
                 logger.warning(
                     "Failed to parse Beds24 calendar range %s: %s", cal_range, e
