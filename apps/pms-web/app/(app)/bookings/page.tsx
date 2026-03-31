@@ -36,7 +36,7 @@ const SOURCE_ICONS: Record<string, { bg: string }> = {
   airbnb: { bg: 'bg-pink-500' },
   'booking.com': { bg: 'bg-indigo-600' },
   expedia: { bg: 'bg-yellow-500' },
-  beds24: { bg: 'bg-purple-500' },
+  channex: { bg: 'bg-purple-500' },
 }
 
 function getBalanceStatus(b: Booking): string {

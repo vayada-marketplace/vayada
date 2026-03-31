@@ -37,8 +37,7 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { labelKey: 'layout.sidebar.dashboard', href: '/dashboard', icon: DashboardIcon },
   { labelKey: 'layout.sidebar.calendar', href: '/calendar', icon: CalendarIcon },
   { labelKey: 'layout.sidebar.reservations', href: '/bookings', icon: ReservationsIcon },
-  // { labelKey: 'layout.sidebar.inbox', href: '/inbox', icon: InboxIcon },
-  { labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
+{ labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
   { labelKey: 'layout.sidebar.channelManager', href: '/channel-manager', icon: ChannelsIcon },
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: SettingsIcon },
 ]
@@ -47,7 +46,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
-  const [unreadCount, setUnreadCount] = useState(0)
   const { t } = useTranslation()
   const switcherRef = useRef<HTMLDivElement>(null)
 
@@ -61,32 +59,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  // Poll unread message count
-  useEffect(() => {
-    async function fetchUnread() {
-      try {
-        const token = localStorage.getItem('access_token')
-        if (!token) return
-        const pmsUrl = process.env.NEXT_PUBLIC_PMS_API_URL || 'http://localhost:8002'
-        const res = await fetch(`${pmsUrl}/admin/conversations/unread-count`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (res.ok) {
-          const data = await res.json()
-          setUnreadCount(data.unreadCount || 0)
-        }
-      } catch {}
-    }
-    fetchUnread()
-    const interval = setInterval(fetchUnread, 60000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const navItems: NavItem[] = BASE_NAV_ITEMS.map(item =>
-    item.labelKey === 'layout.sidebar.inbox' && unreadCount > 0
-      ? { ...item, badge: unreadCount }
-      : item
-  )
+  const navItems: NavItem[] = BASE_NAV_ITEMS.map(item => item)
 
   return (
     <aside

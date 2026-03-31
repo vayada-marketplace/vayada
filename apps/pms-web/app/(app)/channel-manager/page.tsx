@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { beds24Service, Beds24Connection, Beds24Property, Beds24Room, Beds24RoomMapping } from '@/services/beds24'
-import { roomsService, RoomType } from '@/services/rooms'
-import { ArrowPathIcon, TrashIcon, LinkIcon } from '@heroicons/react/24/outline'
+import { channexService, ChannexSyncStatus, ChannexRoomTypeMapping, ChannexRatePlanMapping } from '@/services/channex'
+import { ArrowPathIcon, CheckCircleIcon, LinkIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
 
-type Step = 'connect' | 'select-property' | 'room-mappings'
+type Step = 'connect' | 'provision' | 'ready'
 
 export default function ChannelManagerPage() {
   const { t } = useTranslation()
@@ -15,101 +14,68 @@ export default function ChannelManagerPage() {
   const [success, setSuccess] = useState('')
 
   // Connection
-  const [connection, setConnection] = useState<Beds24Connection | null>(null)
-  const [inviteCode, setInviteCode] = useState('')
+  const [status, setStatus] = useState<ChannexSyncStatus | null>(null)
+  const [apiKey, setApiKey] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
 
-  // Property selection
-  const [properties, setProperties] = useState<Beds24Property[]>([])
-  const [selectedPropertyId, setSelectedPropertyId] = useState('')
-  const [settingProperty, setSettingProperty] = useState(false)
-  const [loadingProperties, setLoadingProperties] = useState(false)
+  // Provisioning
+  const [provisioning, setProvisioning] = useState(false)
 
-  // Room mappings
-  const [beds24Rooms, setBeds24Rooms] = useState<Beds24Room[]>([])
-  const [roomTypes, setRoomTypes] = useState<RoomType[]>([])
-  const [mappings, setMappings] = useState<Beds24RoomMapping[]>([])
-  const [newMappingRoomTypeId, setNewMappingRoomTypeId] = useState('')
-  const [newMappingBeds24RoomId, setNewMappingBeds24RoomId] = useState('')
-  const [creatingMapping, setCreatingMapping] = useState(false)
-  const [deletingMappingId, setDeletingMappingId] = useState<string | null>(null)
-  const [syncing, setSyncing] = useState(false)
+  // Mappings
+  const [roomMappings, setRoomMappings] = useState<ChannexRoomTypeMapping[]>([])
+  const [rateMappings, setRateMappings] = useState<ChannexRatePlanMapping[]>([])
+
+  // Sync
+  const [syncingAri, setSyncingAri] = useState(false)
   const [syncingBookings, setSyncingBookings] = useState(false)
 
-  const step: Step = !connection || !connection.isActive
+  const step: Step = !status || !status.isConnected
     ? 'connect'
-    : !connection.beds24PropertyId
-      ? 'select-property'
-      : 'room-mappings'
+    : !status.channexPropertyId || status.roomTypesProvisioned === 0
+      ? 'provision'
+      : 'ready'
 
   useEffect(() => {
-    loadConnection()
+    loadStatus()
   }, [])
 
-  const loadConnection = async () => {
+  useEffect(() => {
+    if (step === 'ready') {
+      loadMappings()
+    }
+  }, [step])
+
+  const loadStatus = async () => {
     setLoading(true)
     try {
-      const conn = await beds24Service.getConnection()
-      setConnection(conn)
+      const s = await channexService.getStatus()
+      setStatus(s)
     } catch {
-      // No connection yet — that's fine
-      setConnection(null)
+      setStatus(null)
     } finally {
       setLoading(false)
     }
   }
 
-  // Load properties when we reach step 2
-  useEffect(() => {
-    if (step === 'select-property') {
-      loadProperties()
-    }
-  }, [step])
-
-  // Load rooms and mappings when we reach step 3
-  useEffect(() => {
-    if (step === 'room-mappings') {
-      loadRoomsAndMappings()
-    }
-  }, [step])
-
-  const loadProperties = async () => {
-    setLoadingProperties(true)
-    try {
-      const props = await beds24Service.listProperties()
-      setProperties(props)
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToLoadProperties'))
-    } finally {
-      setLoadingProperties(false)
-    }
-  }
-
-  const loadRoomsAndMappings = async () => {
-    const [b24Result, rTypesResult, mapsResult] = await Promise.allSettled([
-      beds24Service.listRooms(),
-      roomsService.list(),
-      beds24Service.listRoomMappings(),
+  const loadMappings = async () => {
+    const [rooms, rates] = await Promise.allSettled([
+      channexService.listRoomTypeMappings(),
+      channexService.listRatePlanMappings(),
     ])
-    if (b24Result.status === 'fulfilled') {
-      setBeds24Rooms(b24Result.value)
-    } else {
-      setError(t('channels.failedToLoadBeds24Rooms'))
-    }
-    if (rTypesResult.status === 'fulfilled') setRoomTypes(rTypesResult.value)
-    if (mapsResult.status === 'fulfilled') setMappings(mapsResult.value)
+    if (rooms.status === 'fulfilled') setRoomMappings(rooms.value)
+    if (rates.status === 'fulfilled') setRateMappings(rates.value)
   }
 
   const handleConnect = async () => {
-    if (!inviteCode.trim()) return
+    if (!apiKey.trim()) return
     setConnecting(true)
     setError('')
     try {
-      const conn = await beds24Service.connect(inviteCode.trim())
-      setConnection(conn)
-      setInviteCode('')
-      setSuccess(t('channels.connectedToBeds24'))
+      await channexService.connect(apiKey.trim())
+      setApiKey('')
+      setSuccess(t('channels.connectedToChannex'))
+      await loadStatus()
     } catch (err: any) {
       setError(err.message || t('channels.failedToConnect'))
     } finally {
@@ -122,12 +88,11 @@ export default function ChannelManagerPage() {
     setDisconnecting(true)
     setError('')
     try {
-      await beds24Service.disconnect()
-      setConnection(null)
-      setMappings([])
-      setBeds24Rooms([])
-      setProperties([])
-      setSuccess(t('channels.disconnectedFromBeds24'))
+      await channexService.disconnect()
+      setStatus(null)
+      setRoomMappings([])
+      setRateMappings([])
+      setSuccess(t('channels.disconnectedFromChannex'))
     } catch (err: any) {
       setError(err.message || t('channels.failedToDisconnect'))
     } finally {
@@ -135,61 +100,33 @@ export default function ChannelManagerPage() {
     }
   }
 
-  const handleSetProperty = async () => {
-    if (!selectedPropertyId) return
-    setSettingProperty(true)
+  const handleProvision = async () => {
+    setProvisioning(true)
     setError('')
     try {
-      const conn = await beds24Service.setProperty(selectedPropertyId)
-      setConnection(conn)
-      setSuccess(t('channels.propertySelected'))
+      const result = await channexService.provision()
+      setSuccess(
+        `Provisioned: ${result.roomsCreated} room types, ${result.ratesCreated} rate plans`
+      )
+      await loadStatus()
     } catch (err: any) {
-      setError(err.message || t('channels.failedToSetProperty'))
+      setError(err.message || t('channels.failedToProvision'))
     } finally {
-      setSettingProperty(false)
+      setProvisioning(false)
     }
   }
 
-  const handleCreateMapping = async () => {
-    if (!newMappingRoomTypeId || !newMappingBeds24RoomId) return
-    setCreatingMapping(true)
+  const handleSyncAri = async () => {
+    setSyncingAri(true)
     setError('')
     try {
-      const mapping = await beds24Service.createRoomMapping(newMappingRoomTypeId, newMappingBeds24RoomId)
-      setMappings([...mappings, mapping])
-      setNewMappingRoomTypeId('')
-      setNewMappingBeds24RoomId('')
-      setSuccess(t('channels.roomMappingCreated'))
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToCreateMapping'))
-    } finally {
-      setCreatingMapping(false)
-    }
-  }
-
-  const handleDeleteMapping = async (mappingId: string) => {
-    setDeletingMappingId(mappingId)
-    setError('')
-    try {
-      await beds24Service.deleteRoomMapping(mappingId)
-      setMappings(mappings.filter((m) => m.id !== mappingId))
-    } catch (err: any) {
-      setError(err.message || t('channels.failedToDeleteMapping'))
-    } finally {
-      setDeletingMappingId(null)
-    }
-  }
-
-  const handleSync = async () => {
-    setSyncing(true)
-    setError('')
-    try {
-      await beds24Service.syncAvailability()
-      setSuccess(t('channels.availabilitySyncStarted'))
+      await channexService.syncAri()
+      setSuccess(t('channels.ariSyncStarted'))
+      await loadStatus()
     } catch (err: any) {
       setError(err.message || t('channels.failedToStartSync'))
     } finally {
-      setSyncing(false)
+      setSyncingAri(false)
     }
   }
 
@@ -197,8 +134,9 @@ export default function ChannelManagerPage() {
     setSyncingBookings(true)
     setError('')
     try {
-      await beds24Service.syncBookings()
+      await channexService.syncBookings()
       setSuccess(t('channels.bookingSyncComplete'))
+      await loadStatus()
     } catch (err: any) {
       setError(err.message || t('channels.failedToSyncBookings'))
     } finally {
@@ -209,15 +147,10 @@ export default function ChannelManagerPage() {
   // Clear success message after 3s
   useEffect(() => {
     if (success) {
-      const t = setTimeout(() => setSuccess(''), 3000)
-      return () => clearTimeout(t)
+      const timer = setTimeout(() => setSuccess(''), 3000)
+      return () => clearTimeout(timer)
     }
   }, [success])
-
-  const mappedRoomTypeIds = new Set(mappings.map((m) => m.roomTypeId))
-  const mappedBeds24RoomIds = new Set(mappings.map((m) => m.beds24RoomId))
-  const unmappedRoomTypes = roomTypes.filter((rt) => !mappedRoomTypeIds.has(rt.id))
-  const unmappedBeds24Rooms = beds24Rooms.filter((r) => !mappedBeds24RoomIds.has(r.id))
 
   if (loading) {
     return (
@@ -250,40 +183,40 @@ export default function ChannelManagerPage() {
         <div className="flex items-center gap-3 text-xs">
           <StepBadge num={1} label={t('channels.stepConnect')} active={step === 'connect'} done={step !== 'connect'} />
           <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={2} label={t('channels.stepProperty')} active={step === 'select-property'} done={step === 'room-mappings'} />
+          <StepBadge num={2} label={t('channels.stepProvision')} active={step === 'provision'} done={step === 'ready'} />
           <div className="h-px flex-1 bg-gray-200" />
-          <StepBadge num={3} label={t('channels.stepRoomMapping')} active={step === 'room-mappings'} done={false} />
+          <StepBadge num={3} label={t('channels.stepSync')} active={step === 'ready'} done={false} />
         </div>
 
         {/* Step 1: Connect */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">{t('channels.beds24Connection')}</h2>
-            {connection?.isActive && (
+            <h2 className="text-sm font-semibold text-gray-900">{t('channels.channexConnection')}</h2>
+            {status?.isConnected && (
               <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                 {t('channels.connected')}
               </span>
             )}
           </div>
 
-          {!connection || !connection.isActive ? (
+          {!status || !status.isConnected ? (
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
-                {t('channels.connectDescription')}
+                {t('channels.channexConnectDescription')}
               </p>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.inviteCodeLabel')}</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.apiKeyLabel')}</label>
                 <input
-                  type="text"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  placeholder={t('channels.inviteCodePlaceholder')}
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={t('channels.apiKeyPlaceholder')}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
               <button
                 onClick={handleConnect}
-                disabled={connecting || !inviteCode.trim()}
+                disabled={connecting || !apiKey.trim()}
                 className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
               >
                 {connecting ? t('channels.connecting') : t('channels.connect')}
@@ -294,12 +227,26 @@ export default function ChannelManagerPage() {
               <div className="text-sm text-gray-600 space-y-1">
                 <p>
                   <span className="text-gray-500">{t('channels.propertyIdLabel')}</span>{' '}
-                  <span className="font-mono text-xs">{connection.beds24PropertyId || t('channels.notSelected')}</span>
+                  <span className="font-mono text-xs">{status.channexPropertyId || t('channels.notProvisioned')}</span>
                 </p>
-                {connection.lastSyncAt && (
+                <p>
+                  <span className="text-gray-500">{t('channels.roomTypesLabel')}</span>{' '}
+                  {status.roomTypesProvisioned} provisioned
+                </p>
+                <p>
+                  <span className="text-gray-500">{t('channels.ratePlansLabel')}</span>{' '}
+                  {status.ratePlansProvisioned} provisioned
+                </p>
+                {status.lastAriSyncAt && (
                   <p>
-                    <span className="text-gray-500">{t('channels.lastSync')}</span>{' '}
-                    {new Date(connection.lastSyncAt).toLocaleString()}
+                    <span className="text-gray-500">{t('channels.lastAriSync')}</span>{' '}
+                    {new Date(status.lastAriSyncAt).toLocaleString()}
+                  </p>
+                )}
+                {status.lastBookingSyncAt && (
+                  <p>
+                    <span className="text-gray-500">{t('channels.lastBookingSync')}</span>{' '}
+                    {new Date(status.lastBookingSyncAt).toLocaleString()}
                   </p>
                 )}
               </div>
@@ -314,47 +261,29 @@ export default function ChannelManagerPage() {
           )}
         </div>
 
-        {/* Step 2: Select Property */}
-        {step === 'select-property' && (
+        {/* Step 2: Provision */}
+        {step === 'provision' && (
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.selectBeds24Property')}</h2>
-            {loadingProperties ? (
-              <div className="animate-pulse h-20 bg-gray-100 rounded" />
-            ) : properties.length === 0 ? (
-              <p className="text-sm text-gray-500">{t('channels.noPropertiesFound')}</p>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">{t('channels.propertyLabel')}</label>
-                  <select
-                    value={selectedPropertyId}
-                    onChange={(e) => setSelectedPropertyId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="">{t('channels.selectProperty')}</option>
-                    {properties.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={handleSetProperty}
-                  disabled={settingProperty || !selectedPropertyId}
-                  className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                >
-                  {settingProperty ? t('channels.savingProperty') : t('channels.confirmProperty')}
-                </button>
-              </div>
-            )}
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.provisionTitle')}</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              {t('channels.provisionDescription')}
+            </p>
+            <button
+              onClick={handleProvision}
+              disabled={provisioning}
+              className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+            >
+              {provisioning ? t('channels.provisioning') : t('channels.provisionButton')}
+            </button>
           </div>
         )}
 
-        {/* Step 3: Room Mappings */}
-        {step === 'room-mappings' && (
+        {/* Step 3: Ready — sync controls + mappings */}
+        {step === 'ready' && (
           <>
             <div className="bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-gray-900">{t('channels.roomMappings')}</h2>
+                <h2 className="text-sm font-semibold text-gray-900">{t('channels.syncControls')}</h2>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSyncBookings}
@@ -365,105 +294,50 @@ export default function ChannelManagerPage() {
                     {syncingBookings ? t('channels.syncing') : t('channels.syncBookings')}
                   </button>
                   <button
-                    onClick={handleSync}
-                    disabled={syncing}
+                    onClick={handleSyncAri}
+                    disabled={syncingAri}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50 transition-colors"
                   >
-                    <ArrowPathIcon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-                    {syncing ? t('channels.syncing') : t('channels.syncAvailability')}
+                    <ArrowPathIcon className={`w-3.5 h-3.5 ${syncingAri ? 'animate-spin' : ''}`} />
+                    {syncingAri ? t('channels.syncing') : t('channels.syncAri')}
                   </button>
                 </div>
               </div>
-
-              <p className="text-sm text-gray-600 mb-4">
-                {t('channels.roomMappingsDescription')}
+              <p className="text-sm text-gray-600">
+                {t('channels.syncDescription')}
               </p>
+            </div>
 
-              {/* Existing mappings */}
-              {mappings.length > 0 ? (
-                <div className="border border-gray-200 rounded-lg divide-y divide-gray-200 mb-4">
-                  {mappings.map((m) => {
-                    const roomType = roomTypes.find((rt) => rt.id === m.roomTypeId)
-                    const beds24Room = beds24Rooms.find((r) => r.id === m.beds24RoomId)
+            {/* Provisioned mappings */}
+            {roomMappings.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-xl p-6">
+                <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.provisionedRoomTypes')}</h2>
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                  {roomMappings.map((m) => {
+                    const rateMapping = rateMappings.find((r) => r.roomTypeId === m.roomTypeId)
                     return (
                       <div key={m.id} className="flex items-center justify-between px-4 py-3">
                         <div className="flex items-center gap-3 text-sm min-w-0">
+                          <CheckCircleIcon className="w-4 h-4 text-green-500 shrink-0" />
                           <span className="font-medium text-gray-900 truncate">
-                            {roomType?.name || m.roomTypeId}
+                            {(m as any).roomTypeName || m.roomTypeId}
                           </span>
                           <LinkIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                          <span className="text-gray-600 truncate">
-                            {beds24Room?.name || m.beds24RoomId}
-                            {beds24Room && beds24Room.qty > 1 && (
-                              <span className="text-gray-400 ml-1">({beds24Room.qty}x)</span>
-                            )}
+                          <span className="text-gray-500 font-mono text-xs truncate">
+                            {m.channexRoomTypeId.slice(0, 8)}...
                           </span>
                         </div>
-                        <button
-                          onClick={() => handleDeleteMapping(m.id)}
-                          disabled={deletingMappingId === m.id}
-                          className="p-1.5 text-gray-400 hover:text-red-500 disabled:opacity-50 transition-colors"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
+                        {rateMapping && (
+                          <span className="text-xs text-gray-400">
+                            {rateMapping.sellMode}
+                          </span>
+                        )}
                       </div>
                     )
                   })}
                 </div>
-              ) : (
-                <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4 mb-4">
-                  {t('channels.noRoomMappings')}
-                </div>
-              )}
-
-              {/* Add mapping */}
-              {unmappedRoomTypes.length > 0 && unmappedBeds24Rooms.length > 0 ? (
-                <div className="border-t border-gray-100 pt-4">
-                  <h3 className="text-xs font-medium text-gray-700 mb-3">{t('channels.addMapping')}</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">{t('channels.yourRoomType')}</label>
-                      <select
-                        value={newMappingRoomTypeId}
-                        onChange={(e) => setNewMappingRoomTypeId(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">{t('channels.selectRoomType')}</option>
-                        {unmappedRoomTypes.map((rt) => (
-                          <option key={rt.id} value={rt.id}>{rt.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">{t('channels.beds24Room')}</label>
-                      <select
-                        value={newMappingBeds24RoomId}
-                        onChange={(e) => setNewMappingBeds24RoomId(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">{t('channels.selectBeds24Room')}</option>
-                        {unmappedBeds24Rooms.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name} {r.qty > 1 ? `(${r.qty}x)` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleCreateMapping}
-                    disabled={creatingMapping || !newMappingRoomTypeId || !newMappingBeds24RoomId}
-                    className="mt-3 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                  >
-                    {creatingMapping ? t('channels.adding') : t('channels.addMappingButton')}
-                  </button>
-                </div>
-              ) : mappings.length > 0 ? (
-                <p className="text-xs text-gray-500 border-t border-gray-100 pt-4">
-                  {t('channels.allRoomsMapped')}
-                </p>
-              ) : null}
-            </div>
+              </div>
+            )}
           </>
         )}
       </div>

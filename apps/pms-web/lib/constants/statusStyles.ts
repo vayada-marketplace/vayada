@@ -22,7 +22,7 @@ export const CHANNEL_COLORS: Record<string, { bg: string; text: string }> = {
   booking: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
   'booking.com': { bg: 'bg-indigo-100', text: 'text-indigo-700' },
   expedia: { bg: 'bg-yellow-100', text: 'text-yellow-700' },
-  beds24: { bg: 'bg-gray-100', text: 'text-gray-700' },
+  channex: { bg: 'bg-gray-100', text: 'text-gray-700' },
   other: { bg: 'bg-gray-100', text: 'text-gray-700' },
 }
 
@@ -33,7 +33,7 @@ export function getChannelLabel(channel: string): string {
     booking: 'Booking.com',
     'booking.com': 'Booking.com',
     expedia: 'Expedia',
-    beds24: 'Beds24',
+    channex: 'Channex',
     other: 'Other',
   }
   return labels[channel] || channel
