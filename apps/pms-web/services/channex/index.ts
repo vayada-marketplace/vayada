@@ -75,4 +75,8 @@ export const channexService = {
 
   syncBookings: () =>
     pmsClient.post<{ status: string }>('/admin/channex/sync-bookings'),
+
+  // Channel iframe
+  getIframeUrl: () =>
+    pmsClient.post<{ iframeUrl: string }>('/admin/channex/iframe-url'),
 }

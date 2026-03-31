@@ -504,6 +504,12 @@
   "channels.failedToConnect": "Failed to connect. Check your API key.",
   "channels.failedToDisconnect": "Failed to disconnect",
   "channels.failedToStartSync": "Failed to start sync",
+  "channels.otaConnections": "OTA Channels",
+  "channels.manageChannels": "Manage Channels",
+  "channels.closeChannels": "Close",
+  "channels.loading": "Loading...",
+  "channels.otaDescription": "Connect your OTA channels (Booking.com, Airbnb, Expedia, etc.) and map rooms and rates. Click 'Manage Channels' to open the channel management panel.",
+  "channels.failedToLoadIframe": "Failed to load channel management panel",
 
   "settings.title": "Settings",
   "settings.currency": "Currency",

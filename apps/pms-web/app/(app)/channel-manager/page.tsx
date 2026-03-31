@@ -30,6 +30,10 @@ export default function ChannelManagerPage() {
   const [syncingAri, setSyncingAri] = useState(false)
   const [syncingBookings, setSyncingBookings] = useState(false)
 
+  // Channel iframe
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null)
+  const [loadingIframe, setLoadingIframe] = useState(false)
+
   const step: Step = !status || !status.isConnected
     ? 'connect'
     : !status.channexPropertyId || status.roomTypesProvisioned === 0
@@ -141,6 +145,19 @@ export default function ChannelManagerPage() {
       setError(err.message || t('channels.failedToSyncBookings'))
     } finally {
       setSyncingBookings(false)
+    }
+  }
+
+  const handleOpenChannels = async () => {
+    setLoadingIframe(true)
+    setError('')
+    try {
+      const { iframeUrl: url } = await channexService.getIframeUrl()
+      setIframeUrl(url)
+    } catch (err: any) {
+      setError(err.message || t('channels.failedToLoadIframe'))
+    } finally {
+      setLoadingIframe(false)
     }
   }
 
@@ -306,6 +323,43 @@ export default function ChannelManagerPage() {
               <p className="text-sm text-gray-600">
                 {t('channels.syncDescription')}
               </p>
+            </div>
+
+            {/* OTA Channel Connections (iframe) */}
+            <div className="bg-white border border-gray-200 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-gray-900">{t('channels.otaConnections')}</h2>
+                {!iframeUrl && (
+                  <button
+                    onClick={handleOpenChannels}
+                    disabled={loadingIframe}
+                    className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                  >
+                    {loadingIframe ? t('channels.loading') : t('channels.manageChannels')}
+                  </button>
+                )}
+                {iframeUrl && (
+                  <button
+                    onClick={() => setIframeUrl(null)}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    {t('channels.closeChannels')}
+                  </button>
+                )}
+              </div>
+
+              {!iframeUrl ? (
+                <p className="text-sm text-gray-600">
+                  {t('channels.otaDescription')}
+                </p>
+              ) : (
+                <iframe
+                  src={iframeUrl}
+                  className="w-full border border-gray-200 rounded-lg"
+                  style={{ height: '700px' }}
+                  allow="clipboard-write"
+                />
+              )}
             </div>
 
             {/* Provisioned mappings */}
