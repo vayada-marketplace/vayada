@@ -394,8 +394,11 @@ async def pull_calendar_blocks_for_room_type(
         room_type_id, len(calendar_entries),
     )
 
-    # Beds24 returns: [{ roomId, calendar: [{ from, to, numAvail }, ...] }]
-    # Each calendar range covers from..to (inclusive). Expand into per-day entries.
+    # Beds24 returns: [{ roomId, calendar: [{ from, to, numAvail, override? }, ...] }]
+    # Only create blocks for date ranges with an explicit override (e.g. "blackout"),
+    # which indicates the property owner manually closed the dates.
+    # Inferring blocks from numAvail alone is unreliable (can't distinguish
+    # manual blocks from unimported bookings or cross-channel reservations).
     blocked_dates: List[dict] = []
     for room_entry in calendar_entries:
         cal_ranges = room_entry.get("calendar", [])
@@ -403,58 +406,26 @@ async def pull_calendar_blocks_for_room_type(
             try:
                 range_from = date.fromisoformat(cal_range["from"])
                 range_to = date.fromisoformat(cal_range["to"])
-                beds24_available = int(cal_range.get("numAvail", total_rooms))
+                override = cal_range.get("override", "")
+                num_avail = cal_range.get("numAvail")
 
-                current_day = range_from
-                while current_day <= range_to:
-                    next_day = current_day + timedelta(days=1)
+                # Log all fields for diagnosis
+                logger.info(
+                    "Calendar range: room_type=%s from=%s to=%s numAvail=%s override=%r",
+                    room_type_id, range_from, range_to, num_avail, override,
+                )
 
-                    # Beds24's numAvail = total - beds24_bookings - manual_blocks.
-                    # Subtract bookings that came from Beds24 (identified via
-                    # beds24_booking_mappings, not channel field which may have
-                    # been overwritten by backfill) to isolate manual blocks.
-                    beds24_booked = await Database.fetchval(
-                        """
-                        SELECT COUNT(*) FROM bookings b
-                        JOIN beds24_booking_mappings bm ON bm.booking_id = b.id
-                        WHERE b.room_type_id = $1
-                          AND b.status IN ('pending', 'confirmed')
-                          AND b.check_in < $3
-                          AND b.check_out > $2
-                        """,
-                        room_type_id, current_day, next_day,
-                    ) or 0
-
-                    # Also count ALL bookings for comparison
-                    all_booked = await Database.fetchval(
-                        """
-                        SELECT COUNT(*) FROM bookings
-                        WHERE room_type_id = $1
-                          AND status IN ('pending', 'confirmed')
-                          AND check_in < $3
-                          AND check_out > $2
-                        """,
-                        room_type_id, current_day, next_day,
-                    ) or 0
-
-                    external_blocked = (
-                        total_rooms - beds24_available - beds24_booked
-                    )
-                    if external_blocked > 0:
-                        logger.info(
-                            "Block detected: room_type=%s date=%s total=%d "
-                            "numAvail=%d beds24_booked=%d all_booked=%d "
-                            "external_blocked=%d",
-                            room_type_id, current_day, total_rooms,
-                            beds24_available, beds24_booked, all_booked,
-                            external_blocked,
-                        )
+                # Only block if there's an explicit override/closure
+                if override and override not in ("none", ""):
+                    current_day = range_from
+                    while current_day <= range_to:
                         blocked_dates.append({
                             "date": current_day,
-                            "blocked_count": min(external_blocked, total_rooms),
+                            "blocked_count": total_rooms,
+                            "reason_detail": override,
                         })
+                        current_day += timedelta(days=1)
 
-                    current_day = next_day
             except (ValueError, KeyError, TypeError) as e:
                 logger.warning(
                     "Failed to parse Beds24 calendar range %s: %s", cal_range, e

@@ -168,6 +168,7 @@ async def get_room_calendar(
         "startDate": start_date,
         "endDate": end_date,
         "includeNumAvail": "true",
+        "includeOverride": "true",
     }
     data = await _rate_limited_request(
         "GET", "/inventory/rooms/calendar", token, params=params
