@@ -394,29 +394,40 @@ async def pull_calendar_blocks_for_room_type(
         room_type_id, len(calendar_entries),
     )
 
-    # For each date, figure out how many rooms are blocked externally
+    # Beds24 returns: [{ roomId, calendar: [{ from, to, numAvail }, ...] }]
+    # Each calendar range covers from..to (inclusive). Expand into per-day entries.
     blocked_dates: List[dict] = []
-    for entry in calendar_entries:
-        try:
-            entry_date = date.fromisoformat(str(entry.get("date", "")))
-            beds24_available = int(entry.get("numAvail", total_rooms))
-            next_day = entry_date + timedelta(days=1)
+    for room_entry in calendar_entries:
+        cal_ranges = room_entry.get("calendar", [])
+        for cal_range in cal_ranges:
+            try:
+                range_from = date.fromisoformat(cal_range["from"])
+                range_to = date.fromisoformat(cal_range["to"])
+                beds24_available = int(cal_range.get("numAvail", total_rooms))
 
-            local_booked = await RoomTypeRepository.count_booked(
-                room_type_id, entry_date, next_day
-            )
+                current_day = range_from
+                while current_day <= range_to:
+                    next_day = current_day + timedelta(days=1)
 
-            # External blocks = rooms Beds24 says are unavailable minus what we
-            # already know about from our own bookings
-            external_blocked = total_rooms - beds24_available - local_booked
-            if external_blocked > 0:
-                blocked_dates.append({
-                    "date": entry_date,
-                    "blocked_count": external_blocked,
-                })
-        except (ValueError, KeyError, TypeError) as e:
-            logger.warning("Failed to parse Beds24 calendar entry %s: %s", entry, e)
-            continue
+                    local_booked = await RoomTypeRepository.count_booked(
+                        room_type_id, current_day, next_day
+                    )
+
+                    # External blocks = rooms Beds24 says are unavailable minus
+                    # what we already know about from our own bookings
+                    external_blocked = total_rooms - beds24_available - local_booked
+                    if external_blocked > 0:
+                        blocked_dates.append({
+                            "date": current_day,
+                            "blocked_count": min(external_blocked, total_rooms),
+                        })
+
+                    current_day = next_day
+            except (ValueError, KeyError, TypeError) as e:
+                logger.warning(
+                    "Failed to parse Beds24 calendar range %s: %s", cal_range, e
+                )
+                continue
 
     # Delete old beds24_sync blocks for this room type in the date range
     await Database.execute(
