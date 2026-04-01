@@ -129,17 +129,6 @@ export default function CalendarPage() {
     return map
   }, [data])
 
-  // Group blocks by room type ID
-  const blocksByRoomType = useMemo(() => {
-    if (!data) return {}
-    const map: Record<string, CalendarBlock[]> = {}
-    for (const block of data.blocks) {
-      if (!map[block.roomTypeId]) map[block.roomTypeId] = []
-      map[block.roomTypeId].push(block)
-    }
-    return map
-  }, [data])
-
   const unassignedBookings = useMemo(() => {
     if (!data) return []
     return data.bookings.filter((b) => !b.roomId)
@@ -218,10 +207,6 @@ export default function CalendarPage() {
             <span className="text-xs text-gray-600">{t(ch.labelKey)}</span>
           </div>
         ))}
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-red-100 border border-red-300 border-dashed" />
-          <span className="text-xs text-gray-600">{t('calendar.blocked')}</span>
-        </div>
       </div>
 
       {loading && !data ? (
@@ -279,19 +264,6 @@ export default function CalendarPage() {
                           <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
                         ))}
                       </div>
-                      {/* Block bars (per room type — shown on each room row) */}
-                      {(blocksByRoomType[room.roomTypeId] || []).map((block) => {
-                        const style = getBarStyle(block.startDate, block.endDate)
-                        if (!style) return null
-                        return (
-                          <div
-                            key={`block-${block.id}`}
-                            className="absolute top-1.5 h-8 rounded-md bg-red-100 border border-red-300 border-dashed z-[0]"
-                            style={style}
-                            title={`Blocked${block.reason ? `: ${block.reason}` : ''}\n${block.startDate} → ${block.endDate}\n${block.blockedCount} room(s)`}
-                          />
-                        )
-                      })}
                       {/* Booking bars */}
                       {roomBookings.map((b) => {
                         const style = getBarStyle(b.checkIn, b.checkOut)
