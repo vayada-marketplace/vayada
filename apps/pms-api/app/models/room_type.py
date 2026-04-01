@@ -138,6 +138,7 @@ class RoomTypeCreate(BaseModel):
     @field_validator("seasons")
     @classmethod
     def validate_seasons(cls, v: List[dict]) -> List[dict]:
+        _normalize_season_dates(v)
         _validate_season_rates(v)
         _validate_no_season_overlap(v)
         return _validate_no_season_gaps(v)

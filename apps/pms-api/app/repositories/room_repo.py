@@ -12,7 +12,9 @@ class RoomRepository:
             FROM rooms r
             JOIN room_types rt ON rt.id = r.room_type_id
             WHERE r.hotel_id = $1
-            ORDER BY rt.sort_order, rt.name, r.sort_order, r.room_number
+            ORDER BY rt.sort_order, rt.name, r.sort_order,
+                     (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                     r.room_number
             """,
             hotel_id,
         )

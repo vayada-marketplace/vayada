@@ -554,7 +554,9 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
               AND b.check_in < $3
               AND b.check_out > $2
           )
-        ORDER BY r.sort_order, r.room_number
+        ORDER BY r.sort_order,
+                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                 r.room_number
         LIMIT 1
         """,
         room_type_id, check_in, check_out,

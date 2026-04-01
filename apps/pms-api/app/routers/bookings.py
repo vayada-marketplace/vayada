@@ -134,6 +134,8 @@ async def get_payment_settings(slug: str):
 
     return {
         "payAtPropertyEnabled": settings["pay_at_property_enabled"] if settings else False,
+        "onlineCardPayment": settings.get("online_card_payment", False) if settings else False,
+        "bankTransfer": settings.get("bank_transfer", False) if settings else False,
         "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False) if settings else False,
         "freeCancellationDays": policy["free_cancellation_days"] if policy else 7,
         "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,

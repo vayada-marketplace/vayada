@@ -8,6 +8,8 @@ from app.database import BookingEngineDatabase
 from app.config import settings as app_settings
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.currency_service import get_exchange_rate, convert_room_type_rates
 from app.models.payment import (
     HotelPaymentSettings,
     HotelPaymentSettingsUpdate,
@@ -109,9 +111,46 @@ async def update_payment_settings(
                 detail=f"Xendit bank details required: {', '.join(missing)}",
             )
 
+    # Convert room type rates when currency changes
+    new_currency = updates.get("default_currency")
+    if new_currency:
+        existing = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        old_currency = existing["default_currency"] if existing else await _get_booking_engine_currency(user_id)
+        if old_currency != new_currency:
+            try:
+                rate = await get_exchange_rate(old_currency, new_currency)
+                # Determine decimal places: currencies like IDR, JPY, KRW use 0
+                zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
+                decimals = 0 if zero_decimal else 2
+                room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
+                for rt in room_types:
+                    rt_updates = await convert_room_type_rates(rt, rate, decimals)
+                    rt_updates["currency"] = new_currency
+                    if rt_updates:
+                        await RoomTypeRepository.update(str(rt["id"]), rt_updates)
+                logger.info(
+                    "Converted %d room type rates from %s to %s (rate=%.6f)",
+                    len(room_types), old_currency, new_currency, rate,
+                )
+            except Exception as e:
+                logger.error("Failed to convert room rates: %s", e)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch exchange rate for {old_currency} → {new_currency}. Currency not updated.",
+                )
+
     await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
 
-    # Sync payment method toggles to booking engine
+    # Sync currency to booking engine
+    if new_currency and app_settings.BOOKING_ENGINE_DATABASE_URL:
+        try:
+            await BookingEngineDatabase.execute(
+                "UPDATE booking_hotels SET currency = $2 WHERE user_id = $1",
+                user_id, new_currency,
+            )
+        except Exception as e:
+            logger.warning("Failed to sync currency to booking engine: %s", e)
+
     sync_fields = {
         "pay_at_property_enabled", "online_card_payment", "bank_transfer",
     }
