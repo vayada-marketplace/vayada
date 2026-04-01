@@ -271,6 +271,29 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "addon_total": addon_total,
         "addon_quantities": addon_quantities,
     }
+    # Auto-assign an available room unit
+    available_room = await Database.fetchrow(
+        """
+        SELECT r.id FROM rooms r
+        WHERE r.room_type_id = $1
+          AND r.status = 'available'
+          AND r.id NOT IN (
+            SELECT b.room_id FROM bookings b
+            WHERE b.room_id IS NOT NULL
+              AND b.status IN ('pending', 'confirmed')
+              AND b.check_in < $3
+              AND b.check_out > $2
+          )
+        ORDER BY r.sort_order,
+                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                 r.room_number
+        LIMIT 1
+        """,
+        data.room_type_id, data.check_in, data.check_out,
+    )
+    if available_room:
+        booking_data["room_id"] = str(available_room["id"])
+
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
 
