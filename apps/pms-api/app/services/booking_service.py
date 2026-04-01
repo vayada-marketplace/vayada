@@ -16,6 +16,7 @@ from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRep
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 from app.models.booking import BookingCreate, BookingResponse
 from app.services import stripe_service, xendit_service
+from app.services.channex_sync_service import push_availability_for_room_type
 from app.services.payout_service import calculate_split, schedule_payouts
 from app.services.email_service import (
     send_hotel_notification,
@@ -394,6 +395,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     asyncio.create_task(
         send_guest_booking_requested(data.guest_email, booking)
     )
+
+    # Push updated availability to Channex so OTAs reflect the reduced inventory
+    asyncio.create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
 
     return {
         "booking": response.model_dump(by_alias=True),
