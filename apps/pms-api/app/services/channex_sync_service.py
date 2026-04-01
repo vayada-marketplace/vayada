@@ -437,6 +437,13 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
                     "Cancelled vayada booking %s (Channex %s cancelled)",
                     existing_booking_id, channex_booking_id,
                 )
+                # Push updated availability back to Channex
+                import asyncio
+                asyncio.create_task(push_availability_for_room_type(
+                    hotel_id, str(booking["room_type_id"]),
+                    start_date=booking["check_in"],
+                    end_date=booking["check_out"],
+                ))
         elif status == "modified":
             # Update existing booking with new details from OTA
             await _apply_booking_modification(existing_booking_id, attrs, hotel_id)
@@ -570,6 +577,14 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
         "Imported Channex booking %s as vayada booking %s (channel: %s)",
         channex_booking_id, booking_id, ota_name,
     )
+
+    # Push updated availability back to Channex so other OTAs see the reduced inventory
+    import asyncio
+    asyncio.create_task(push_availability_for_room_type(
+        hotel_id, room_type_id,
+        start_date=check_in,
+        end_date=check_out,
+    ))
 
 
 async def _apply_booking_modification(
