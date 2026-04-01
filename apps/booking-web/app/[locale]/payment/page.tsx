@@ -126,7 +126,7 @@ function PaymentPageContent() {
 
   const discountAmount = promoDiscount?.amount ?? 0
   const grandTotal = roomTotal + addonTotal - discountAmount
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit'>('card')
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit'>('pay_at_property')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
