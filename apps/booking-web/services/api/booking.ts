@@ -11,6 +11,8 @@ export interface BookingRequestResponse {
 
 export interface PaymentSettings {
   payAtPropertyEnabled: boolean
+  onlineCardPayment?: boolean
+  bankTransfer?: boolean
   xenditPaymentsEnabled?: boolean
   payAtHotelMethods?: string[]
   freeCancellationDays: number

@@ -128,6 +128,7 @@ function PaymentPageContent() {
   const grandTotal = roomTotal + addonTotal - discountAmount
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit'>('card')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
+  const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [agreedToTerms, setAgreedToTerms] = useState(false)
@@ -156,8 +157,17 @@ function PaymentPageContent() {
     if (slug) {
       bookingService.getPaymentSettings(slug).then((settings) => {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled)
+        setOnlineCardPayment(settings.onlineCardPayment || false)
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false)
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
+        // Default to first available payment method
+        if (settings.onlineCardPayment) {
+          setPaymentMethod('card')
+        } else if (settings.payAtPropertyEnabled) {
+          setPaymentMethod('pay_at_property')
+        } else if (settings.xenditPaymentsEnabled) {
+          setPaymentMethod('xendit')
+        }
       })
     }
   }, [slug])
@@ -284,6 +294,7 @@ function PaymentPageContent() {
 
               {/* Payment method tabs */}
               <div className="space-y-3 mb-6">
+                {onlineCardPayment && (
                 <button
                   onClick={() => setPaymentMethod('card')}
                   className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
@@ -311,6 +322,7 @@ function PaymentPageContent() {
                     </div>
                   </div>
                 </button>
+                )}
                 {xenditPaymentsEnabled && (
                   <button
                     onClick={() => setPaymentMethod('xendit')}
