@@ -143,6 +143,7 @@ async def channex_list_room_type_mappings(
     return [ChannexRoomTypeMappingResponse(
         id=str(m["id"]), hotel_id=str(m["hotel_id"]),
         room_type_id=str(m["room_type_id"]),
+        room_type_name=m.get("room_type_name"),
         channex_room_type_id=str(m["channex_room_type_id"]),
         created_at=m["created_at"].isoformat(),
     ) for m in mappings]

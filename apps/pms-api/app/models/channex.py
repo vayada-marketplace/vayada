@@ -15,6 +15,7 @@ class ChannexRoomTypeMappingResponse(BaseModel):
     id: str
     hotel_id: str
     room_type_id: str
+    room_type_name: Optional[str] = None
     channex_room_type_id: str
     created_at: str
 
