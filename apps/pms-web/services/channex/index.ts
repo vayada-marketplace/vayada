@@ -13,6 +13,7 @@ export interface ChannexRoomTypeMapping {
   id: string
   hotelId: string
   roomTypeId: string
+  roomTypeName: string | null
   channexRoomTypeId: string
   createdAt: string
 }

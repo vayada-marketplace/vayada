@@ -290,7 +290,7 @@ export default function ChannelManagerPage() {
                         <div className="flex items-center gap-3 text-sm min-w-0">
                           <CheckCircleIcon className="w-4 h-4 text-green-500 shrink-0" />
                           <span className="font-medium text-gray-900 truncate">
-                            {(m as any).roomTypeName || m.roomTypeId}
+                            {m.roomTypeName || m.roomTypeId}
                           </span>
                           <LinkIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                           <span className="text-gray-500 font-mono text-xs truncate">
