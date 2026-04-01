@@ -285,7 +285,15 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             if hotel_settings.get("stripe_connect_onboarded"):
                 stripe_account = hotel_settings["stripe_connect_account_id"]
         if not stripe_account:
-            raise ValueError("This hotel has not set up online payments yet. Please choose pay at property or contact the hotel.")
+            # Fall back to pay_at_property if the hotel supports it
+            if hotel_settings and hotel_settings.get("pay_at_property_enabled"):
+                payment_method = "pay_at_property"
+                await Database.execute(
+                    "UPDATE bookings SET payment_method = 'pay_at_property', payment_status = 'pay_at_property' WHERE id = $1",
+                    booking_id,
+                )
+            else:
+                raise ValueError("This hotel has not set up online payments yet. Please contact the hotel.")
 
         # Create Stripe PaymentIntent (manual capture = authorization hold)
         amount_cents = int(math.ceil(total_amount * 100))
