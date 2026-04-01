@@ -67,5 +67,5 @@ export const channexService = {
 
   // Channel iframe
   getIframeUrl: () =>
-    pmsClient.post<{ iframeUrl: string }>('/admin/channex/iframe-url'),
+    pmsClient.post<{ iframe_url: string }>('/admin/channex/iframe-url'),
 }

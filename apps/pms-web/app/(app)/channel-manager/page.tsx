@@ -128,7 +128,7 @@ export default function ChannelManagerPage() {
     setLoadingIframe(true)
     setError('')
     try {
-      const { iframeUrl: url } = await channexService.getIframeUrl()
+      const { iframe_url: url } = await channexService.getIframeUrl()
       setIframeUrl(url)
     } catch (err: any) {
       setError(err.message || t('channels.failedToLoadIframe'))
