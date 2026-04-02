@@ -14,6 +14,7 @@ from app.models.booking import BookingAdminResponse, BookingStatusUpdate, Bookin
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
+from app.services.channex_sync_service import push_availability_for_room_type
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,11 @@ async def create_admin_booking(
     # Re-fetch with JOINs for full response
     full_booking = await BookingRepository.get_by_id(str(booking["id"]))
 
+    # Push updated availability to Channex
+    asyncio.create_task(
+        push_availability_for_room_type(hotel_id, str(room["room_type_id"]))
+    )
+
     # Notify guest of their confirmed booking
     if full_booking.get("guest_email"):
         asyncio.create_task(
@@ -188,6 +194,13 @@ async def update_booking_details(
     updated = await BookingRepository.update_details(booking_id, updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
+
+    # Push availability if dates changed
+    if data.check_in is not None or data.check_out is not None:
+        asyncio.create_task(
+            push_availability_for_room_type(hotel_id, str(booking["room_type_id"]))
+        )
+
     return _booking_to_admin(updated)
 
 
@@ -209,6 +222,11 @@ async def update_booking_status(
 
     await BookingRepository.update_status(booking_id, data.status)
     updated = await BookingRepository.get_by_id(booking_id)
+
+    # Push availability to Channex (cancellation frees rooms, confirmation reserves them)
+    asyncio.create_task(
+        push_availability_for_room_type(hotel_id, str(booking["room_type_id"]))
+    )
 
     # Fire-and-forget: notify guest of status change
     if data.status == "confirmed":
