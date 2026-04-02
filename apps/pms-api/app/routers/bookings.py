@@ -15,7 +15,7 @@ from app.services.booking_service import (
 )
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
-from app.database import Database
+from app.database import Database, BookingEngineDatabase
 from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
@@ -132,13 +132,41 @@ async def get_payment_settings(slug: str):
         "FROM hotels WHERE id = $1", hotel_id,
     )
 
-    return {
-        "payAtPropertyEnabled": settings["pay_at_property_enabled"] if settings else False,
+    pay_at_property = settings["pay_at_property_enabled"] if settings else False
+    bank_transfer = settings.get("bank_transfer", False) if settings else False
+
+    result = {
+        "payAtPropertyEnabled": pay_at_property,
         "onlineCardPayment": settings.get("online_card_payment", False) if settings else False,
-        "bankTransfer": settings.get("bank_transfer", False) if settings else False,
+        "bankTransfer": bank_transfer,
         "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False) if settings else False,
         "freeCancellationDays": policy["free_cancellation_days"] if policy else 7,
         "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,
         "arrivalTimeEnabled": hotel["arrival_time_enabled"] if hotel else False,
         "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
     }
+
+    # Fetch pay-at-hotel methods and bank details from booking engine DB
+    try:
+        be_hotel = await BookingEngineDatabase.fetchrow(
+            "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
+            "payout_bank_name, payout_swift FROM booking_hotels WHERE slug = $1",
+            slug,
+        )
+        if be_hotel:
+            import json
+            methods = be_hotel.get("pay_at_hotel_methods")
+            if isinstance(methods, str):
+                methods = json.loads(methods)
+            result["payAtHotelMethods"] = methods or ["cash", "card"]
+            if bank_transfer:
+                result["bankDetails"] = {
+                    "accountHolder": be_hotel.get("payout_account_holder") or "",
+                    "iban": be_hotel.get("payout_iban") or "",
+                    "bankName": be_hotel.get("payout_bank_name") or "",
+                    "swift": be_hotel.get("payout_swift") or "",
+                }
+    except Exception:
+        result["payAtHotelMethods"] = ["cash", "card"]
+
+    return result
