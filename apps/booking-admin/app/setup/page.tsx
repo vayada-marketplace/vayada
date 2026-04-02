@@ -344,6 +344,8 @@ export default function SetupPage() {
         try {
           await pmsClient.patch('/admin/payment-settings', {
             payAtPropertyEnabled: payAtHotel,
+            onlineCardPayment: onlineCardPayment,
+            bankTransfer: bankTransfer,
             paymentProvider: paymentProvider,
             defaultCurrency: currency,
           })

@@ -223,7 +223,7 @@ export default function SettingsPage() {
     customDomainService.getStatus()
       .then(setDomainStatus)
       .catch(() => {})
-    // Load payment settings from PMS
+    // Load payment settings from PMS (single source of truth for payment methods)
     pmsClient.get<{ paymentSettings: any }>('/admin/payment-settings')
       .then((res) => {
         const ps = res.paymentSettings
@@ -233,6 +233,13 @@ export default function SettingsPage() {
         setXenditChannelCode(ps.xenditChannelCode || 'ID_BCA')
         setXenditAccountNumber(ps.xenditAccountNumber || '')
         setXenditAccountHolderName(ps.xenditAccountHolderName || '')
+        // Payment method toggles are authoritative from PMS
+        setSettings((prev) => ({
+          ...prev,
+          pay_at_property_enabled: ps.payAtPropertyEnabled ?? false,
+          online_card_payment: ps.onlineCardPayment ?? false,
+          bank_transfer: ps.bankTransfer ?? false,
+        }))
       })
       .catch(() => {})
   }, [fetchSettings])
@@ -298,13 +305,20 @@ export default function SettingsPage() {
       setFeedback(null)
       const data = await settingsService.updatePropertySettings(settings)
       setSettings(data)
-      // Sync slug and name to PMS
+      // Sync slug, name, and payment methods to PMS
       try {
-        await pmsClient.patch('/admin/hotel', {
-          slug: data.slug,
-          name: data.property_name,
-          contactEmail: data.reservation_email,
-        })
+        await Promise.all([
+          pmsClient.patch('/admin/hotel', {
+            slug: data.slug,
+            name: data.property_name,
+            contactEmail: data.reservation_email,
+          }),
+          pmsClient.patch('/admin/payment-settings', {
+            payAtPropertyEnabled: data.pay_at_property_enabled,
+            onlineCardPayment: data.online_card_payment,
+            bankTransfer: data.bank_transfer,
+          }),
+        ])
       } catch {
         // Non-fatal: PMS sync may fail if not using vayada PMS
       }
