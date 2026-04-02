@@ -370,6 +370,23 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             xendit_invoice_url=invoice["invoice_url"],
         )
 
+    elif payment_method == "bank_transfer":
+        # Bank transfer — guest transfers directly, hotel verifies manually
+        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+        if not hotel_settings or not hotel_settings.get("bank_transfer"):
+            raise ValueError("Bank transfer is not enabled for this hotel")
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=room["currency"],
+            payment_method="bank_transfer",
+        )
+        await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
+        booking = await BookingRepository.get_by_id(booking_id)
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
     else:
         # Pay at property
         await PaymentRepository.create(

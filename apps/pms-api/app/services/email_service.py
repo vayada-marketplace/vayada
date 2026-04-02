@@ -108,6 +108,10 @@ async def send_hotel_notification(hotel_email: str, booking: dict):
     """
     await _send_email(hotel_email, subject, _wrap_html(content))
 
+    # Also notify Vayada ops
+    if settings.VAYADA_OPS_EMAIL and settings.VAYADA_OPS_EMAIL != hotel_email:
+        await _send_email(settings.VAYADA_OPS_EMAIL, subject, _wrap_html(content))
+
 
 async def send_guest_confirmation(guest_email: str, booking: dict):
     subject = f"Booking Confirmed — {booking['booking_reference']}"
@@ -147,7 +151,13 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     booking_id = booking.get("id", "")
     pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
     payment_method = booking.get("payment_method", "card")
-    payment_label = "Card (authorization hold)" if payment_method == "card" else "Pay at property"
+    payment_labels = {
+        "card": "Card (authorization hold)",
+        "pay_at_property": "Pay at property",
+        "bank_transfer": "Bank transfer",
+        "xendit": "Online payment (Xendit)",
+    }
+    payment_label = payment_labels.get(payment_method, payment_method)
 
     subject = f"New Booking Request: {booking['booking_reference']}"
     content = f"""
@@ -164,6 +174,10 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     <a href="{pms_link}" class="btn btn-accept">Review &amp; Respond</a>
     """
     await _send_email(hotel_email, subject, _wrap_html(content))
+
+    # Also notify Vayada ops
+    if settings.VAYADA_OPS_EMAIL and settings.VAYADA_OPS_EMAIL != hotel_email:
+        await _send_email(settings.VAYADA_OPS_EMAIL, subject, _wrap_html(content))
 
 
 async def send_guest_booking_requested(guest_email: str, booking: dict):
