@@ -126,10 +126,12 @@ function PaymentPageContent() {
 
   const discountAmount = promoDiscount?.amount ?? 0
   const grandTotal = roomTotal + addonTotal - discountAmount
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit'>('pay_at_property')
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit' | 'bank_transfer'>('pay_at_property')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
+  const [bankTransferEnabled, setBankTransferEnabled] = useState(false)
+  const [bankDetails, setBankDetails] = useState<{ accountHolder: string; iban: string; bankName: string; swift: string } | null>(null)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -159,12 +161,16 @@ function PaymentPageContent() {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled)
         setOnlineCardPayment(settings.onlineCardPayment || false)
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false)
+        setBankTransferEnabled(settings.bankTransfer || false)
+        if (settings.bankDetails) setBankDetails(settings.bankDetails)
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
         // Default to first available payment method
         if (settings.onlineCardPayment) {
           setPaymentMethod('card')
         } else if (settings.payAtPropertyEnabled) {
           setPaymentMethod('pay_at_property')
+        } else if (settings.bankTransfer) {
+          setPaymentMethod('bank_transfer')
         } else if (settings.xenditPaymentsEnabled) {
           setPaymentMethod('xendit')
         }
@@ -379,6 +385,33 @@ function PaymentPageContent() {
                     </div>
                   </button>
                 )}
+                {bankTransferEnabled && !isNonRefundable && (
+                  <button
+                    onClick={() => setPaymentMethod('bank_transfer')}
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
+                      paymentMethod === 'bank_transfer'
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === 'bank_transfer' ? 'border-primary-600' : 'border-gray-300'}`}>
+                        {paymentMethod === 'bank_transfer' && <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l9-4 9 4M3 6v12l9 4 9-4V6M3 6l9 4 9-4M12 10v10" />
+                          </svg>
+                          <span className="font-semibold text-sm text-gray-900">{t('bankTransfer') || 'Bank Transfer'}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">
+                          {t('bankTransferNote') || 'Transfer directly to the hotel\'s bank account'}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                )}
               </div>
 
               {/* Payment method info */}
@@ -399,6 +432,28 @@ function PaymentPageContent() {
                   <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
                     You will be redirected to a secure payment page where you can pay with QRIS, OVO, DANA, ShopeePay, GoPay, or bank transfer. The host will review your booking after payment is confirmed.
                   </div>
+                </div>
+              ) : paymentMethod === 'bank_transfer' ? (
+                <div className="space-y-3">
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                    {t('bankTransferExplanation') || 'Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment.'}
+                  </div>
+                  {bankDetails && (bankDetails.iban || bankDetails.accountHolder) && (
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                      {bankDetails.bankName && (
+                        <p className="text-sm text-gray-700"><strong>{t('bankName') || 'Bank'}:</strong> {bankDetails.bankName}</p>
+                      )}
+                      {bankDetails.accountHolder && (
+                        <p className="text-sm text-gray-700"><strong>{t('accountHolder') || 'Account Holder'}:</strong> {bankDetails.accountHolder}</p>
+                      )}
+                      {bankDetails.iban && (
+                        <p className="text-sm text-gray-700"><strong>IBAN:</strong> {bankDetails.iban}</p>
+                      )}
+                      {bankDetails.swift && (
+                        <p className="text-sm text-gray-700"><strong>BIC/SWIFT:</strong> {bankDetails.swift}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">

@@ -9,10 +9,18 @@ export interface BookingRequestResponse {
   paymentMethod: string
 }
 
+export interface BankDetails {
+  accountHolder: string
+  iban: string
+  bankName: string
+  swift: string
+}
+
 export interface PaymentSettings {
   payAtPropertyEnabled: boolean
   onlineCardPayment?: boolean
   bankTransfer?: boolean
+  bankDetails?: BankDetails
   xenditPaymentsEnabled?: boolean
   payAtHotelMethods?: string[]
   freeCancellationDays: number
