@@ -202,11 +202,17 @@ class RoomTypeRepository:
             if not season_from or not season_to:
                 continue
             try:
-                s_from = date.fromisoformat(season_from)
-                s_to = date.fromisoformat(season_to)
-                # Normalize to check-in year so seasons repeat annually
-                s_from = s_from.replace(year=check_in.year)
-                s_to = s_to.replace(year=check_in.year)
+                # Seasons may be stored as MM-DD or YYYY-MM-DD
+                if len(season_from) <= 5:
+                    s_from = date(check_in.year, int(season_from[:2]), int(season_from[3:]))
+                else:
+                    s_from = date.fromisoformat(season_from)
+                    s_from = s_from.replace(year=check_in.year)
+                if len(season_to) <= 5:
+                    s_to = date(check_in.year, int(season_to[:2]), int(season_to[3:]))
+                else:
+                    s_to = date.fromisoformat(season_to)
+                    s_to = s_to.replace(year=check_in.year)
                 # Handle seasons crossing year boundary (e.g., Nov-Feb)
                 if s_from > s_to:
                     if check_in >= s_from or check_in <= s_to:
