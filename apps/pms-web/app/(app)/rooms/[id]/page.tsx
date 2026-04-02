@@ -7,12 +7,14 @@ import Link from 'next/link'
 import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
 import { bookingsService } from '@/services/bookings'
 import RoomTypeForm from '@/components/rooms/RoomTypeForm'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 export default function EditRoomPage({ params }: { params: { id: string } }) {
   const router = useRouter()
   const [room, setRoom] = useState<RoomType | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -88,7 +90,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
   }
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this room type?')) return
+    setShowDeleteConfirm(false)
     setDeleting(true)
     try {
       await roomsService.delete(params.id)
@@ -128,7 +130,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           <h1 className="text-xl font-bold text-gray-900">Edit: {room.name}</h1>
         </div>
         <button
-          onClick={handleDelete}
+          onClick={() => setShowDeleteConfirm(true)}
           disabled={deleting}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50"
         >
@@ -147,6 +149,16 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
         submitLabel="Save Changes"
         cancelHref="/rooms"
       />
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="Delete Room Type"
+          message="Are you sure you want to delete this room type? This cannot be undone."
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </div>
   )
 }

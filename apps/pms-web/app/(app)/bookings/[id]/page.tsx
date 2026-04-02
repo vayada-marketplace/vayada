@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { bookingsService, Booking } from '@/services/bookings'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatCurrency } from '@/lib/formatCurrency'
 import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from '@/lib/constants/statusStyles'
 
@@ -48,6 +49,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState('')
+  const [confirmDialog, setConfirmDialog] = useState<{
+    message: string
+    variant?: 'danger' | 'default'
+    confirmLabel?: string
+    onConfirm: () => void
+  } | null>(null)
 
   useEffect(() => {
     bookingsService.get(params.id)
@@ -56,46 +63,53 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       .finally(() => setLoading(false))
   }, [params.id])
 
-  const handleAccept = async () => {
-    if (!confirm('Are you sure you want to accept this booking? Payment will be captured.')) return
+  const doAction = useCallback(async (action: () => Promise<Booking>, errorMsg: string) => {
     setUpdating(true)
     setError('')
     try {
-      const updated = await bookingsService.acceptBooking(params.id)
+      const updated = await action()
       setBooking(updated)
     } catch (err: any) {
-      setError(err.message || 'Failed to accept booking')
+      setError(err.message || errorMsg)
     } finally {
       setUpdating(false)
     }
+  }, [])
+
+  const handleAccept = () => {
+    setConfirmDialog({
+      message: 'Are you sure you want to accept this booking? Payment will be captured.',
+      confirmLabel: 'Accept',
+      onConfirm: () => {
+        setConfirmDialog(null)
+        doAction(() => bookingsService.acceptBooking(params.id), 'Failed to accept booking')
+      },
+    })
   }
 
-  const handleReject = async () => {
-    if (!confirm('Are you sure you want to reject this booking? The card hold will be released.')) return
-    setUpdating(true)
-    setError('')
-    try {
-      const updated = await bookingsService.rejectBooking(params.id)
-      setBooking(updated)
-    } catch (err: any) {
-      setError(err.message || 'Failed to reject booking')
-    } finally {
-      setUpdating(false)
-    }
+  const handleReject = () => {
+    setConfirmDialog({
+      message: 'Are you sure you want to reject this booking? The card hold will be released.',
+      variant: 'danger',
+      confirmLabel: 'Reject',
+      onConfirm: () => {
+        setConfirmDialog(null)
+        doAction(() => bookingsService.rejectBooking(params.id), 'Failed to reject booking')
+      },
+    })
   }
 
-  const updateStatus = async (status: 'confirmed' | 'cancelled') => {
-    if (!confirm(`Are you sure you want to ${status === 'confirmed' ? 'confirm' : 'cancel'} this booking?`)) return
-    setUpdating(true)
-    setError('')
-    try {
-      const updated = await bookingsService.updateStatus(params.id, status)
-      setBooking(updated)
-    } catch (err: any) {
-      setError(err.message || 'Failed to update status')
-    } finally {
-      setUpdating(false)
-    }
+  const updateStatus = (status: 'confirmed' | 'cancelled') => {
+    const label = status === 'confirmed' ? 'confirm' : 'cancel'
+    setConfirmDialog({
+      message: `Are you sure you want to ${label} this booking?`,
+      variant: status === 'cancelled' ? 'danger' : 'default',
+      confirmLabel: status === 'confirmed' ? 'Confirm' : 'Cancel Booking',
+      onConfirm: () => {
+        setConfirmDialog(null)
+        doAction(() => bookingsService.updateStatus(params.id, status), 'Failed to update status')
+      },
+    })
   }
 
   if (loading) {
@@ -369,6 +383,16 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         )}
 
       </div>
+
+      {confirmDialog && (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          variant={confirmDialog.variant}
+          confirmLabel={confirmDialog.confirmLabel}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
     </div>
   )
 }

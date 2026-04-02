@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatCurrency } from '@/lib/formatCurrency'
 import { useTranslation } from '@/lib/i18n'
 
@@ -37,6 +38,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
   const [addingRoom, setAddingRoom] = useState(false)
   const [newRoomNumber, setNewRoomNumber] = useState('')
   const [newRoomFloor, setNewRoomFloor] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const category = room.category ? room.category.toLowerCase() : getCategoryFromName(room.name)
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES['standard']
 
@@ -60,10 +62,15 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
     }
   }
 
-  const handleDeleteRoom = async (roomId: string) => {
-    if (!confirm(t('rooms.deleteRoomConfirm'))) return
+  const handleDeleteRoom = (roomId: string) => {
+    setConfirmDelete(roomId)
+  }
+
+  const doDeleteRoom = async () => {
+    if (!confirmDelete) return
+    setConfirmDelete(null)
     try {
-      await individualRoomsService.delete(roomId)
+      await individualRoomsService.delete(confirmDelete)
       onRoomsChange()
     } catch (err: any) {
       alert(err.message || t('rooms.cannotDeleteRoom'))
@@ -239,6 +246,16 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
             </button>
           )}
         </div>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={t('rooms.deleteRoom')}
+          message={t('rooms.deleteRoomConfirm')}
+          confirmLabel={t('rooms.delete')}
+          variant="danger"
+          onConfirm={doDeleteRoom}
+          onCancel={() => setConfirmDelete(null)}
+        />
       )}
     </div>
   )

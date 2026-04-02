@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { channexService, ChannexSyncStatus, ChannexRoomTypeMapping, ChannexRatePlanMapping } from '@/services/channex'
 import { ArrowPathIcon, CheckCircleIcon, LinkIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 export default function ChannelManagerPage() {
   const { t } = useTranslation()
@@ -14,6 +15,7 @@ export default function ChannelManagerPage() {
   const [status, setStatus] = useState<ChannexSyncStatus | null>(null)
   const [enabling, setEnabling] = useState(false)
   const [disabling, setDisabling] = useState(false)
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false)
 
   // Mappings
   const [roomMappings, setRoomMappings] = useState<ChannexRoomTypeMapping[]>([])
@@ -79,7 +81,7 @@ export default function ChannelManagerPage() {
   }
 
   const handleDisable = async () => {
-    if (!confirm(t('channels.disableConfirm'))) return
+    setShowDisableConfirm(false)
     setDisabling(true)
     setError('')
     try {
@@ -312,7 +314,7 @@ export default function ChannelManagerPage() {
             {/* Disable */}
             <div className="pt-2">
               <button
-                onClick={handleDisable}
+                onClick={() => setShowDisableConfirm(true)}
                 disabled={disabling}
                 className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
@@ -322,6 +324,17 @@ export default function ChannelManagerPage() {
           </>
         )}
       </div>
+
+      {showDisableConfirm && (
+        <ConfirmDialog
+          title={t('channels.disable')}
+          message={t('channels.disableConfirm')}
+          confirmLabel={t('channels.disable')}
+          variant="danger"
+          onConfirm={handleDisable}
+          onCancel={() => setShowDisableConfirm(false)}
+        />
+      )}
     </div>
   )
 }
