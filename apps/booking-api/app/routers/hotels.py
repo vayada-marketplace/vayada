@@ -42,7 +42,7 @@ async def get_payment_settings(slug: str):
     if not hotel:
         raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
     from app.models.utils import parse_json
-    return {
+    result = {
         "payAtPropertyEnabled": hotel.get("pay_at_property_enabled", False),
         "payAtHotelMethods": parse_json(hotel.get("pay_at_hotel_methods"), default=["cash", "card"]),
         "onlineCardPayment": hotel.get("online_card_payment", False),
@@ -52,6 +52,14 @@ async def get_payment_settings(slug: str):
         "arrivalTimeEnabled": hotel.get("arrival_time_enabled", False),
         "guestCountEnabled": hotel.get("guest_count_enabled", False),
     }
+    if result["bankTransfer"]:
+        result["bankDetails"] = {
+            "accountHolder": hotel.get("payout_account_holder") or "",
+            "iban": hotel.get("payout_iban") or "",
+            "bankName": hotel.get("payout_bank_name") or "",
+            "swift": hotel.get("payout_swift") or "",
+        }
+    return result
 
 
 @router.get("/{slug}/validate-promo")
