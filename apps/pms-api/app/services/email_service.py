@@ -80,7 +80,7 @@ async def _send_email(to: str, subject: str, html_body: str):
             port=settings.SMTP_PORT,
             username=settings.SMTP_USERNAME or None,
             password=settings.SMTP_PASSWORD or None,
-            use_tls=settings.SMTP_USE_TLS,
+            start_tls=settings.SMTP_USE_TLS,
         )
         logger.info("Email sent to %s: %s", to, subject)
     except Exception as e:
