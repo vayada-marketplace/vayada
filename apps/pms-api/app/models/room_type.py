@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional, List, Dict
 
-MAX_ROOM_SIZE = 1000
+MAX_ROOM_SIZE = 15000
 
 
 def _validate_operating_periods(periods: list) -> list:
