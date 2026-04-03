@@ -226,16 +226,19 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
-async def send_guest_booking_rejected(guest_email: str, booking: dict):
+async def send_guest_booking_rejected(guest_email: str, booking: dict, reason: str | None = None):
     """Notify guest that their booking has been declined."""
     payment_method = booking.get("payment_method", "card")
     refund_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    from html import escape
+    reason_html = f"<p class='detail'><strong>Reason:</strong> {escape(reason)}</p>" if reason else ""
 
     subject = f"Booking Request Declined — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Declined</h2>
     <p class="detail">Unfortunately, your booking request at <strong>{booking['hotel_name']}</strong> was declined by the host.</p>
     {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
+    {reason_html}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">

@@ -598,7 +598,7 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
     return updated
 
 
-async def host_reject_booking(booking_id: str, user_id: str) -> dict:
+async def host_reject_booking(booking_id: str, user_id: str, reason: str | None = None) -> dict:
     """Host rejects a pending booking — releases hold if card, expires invoice if xendit."""
     hotel_id = await _get_hotel_id_for_user(user_id)
     booking = await BookingRepository.get_by_id(booking_id)
@@ -633,7 +633,7 @@ async def host_reject_booking(booking_id: str, user_id: str) -> dict:
     # Notify guest
     updated = await BookingRepository.get_by_id(booking_id)
     asyncio.create_task(
-        send_guest_booking_rejected(updated["guest_email"], updated)
+        send_guest_booking_rejected(updated["guest_email"], updated, reason=reason)
     )
 
     # Sync cancellation and availability to Channex (fire-and-forget)

@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel
 
 from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
@@ -295,13 +296,17 @@ async def accept_booking(
     return _booking_to_admin(updated)
 
 
+class RejectBookingRequest(BaseModel):
+    reason: str | None = None
+
 @router.post("/bookings/{booking_id}/reject", response_model=BookingAdminResponse)
 async def reject_booking(
     booking_id: str,
+    body: RejectBookingRequest = RejectBookingRequest(),
     user_id: str = Depends(require_hotel_admin),
 ):
     try:
-        updated = await host_reject_booking(booking_id, user_id)
+        updated = await host_reject_booking(booking_id, user_id, reason=body.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _booking_to_admin(updated)
