@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 
 const navItems = [
+  { label: 'Dashboard', href: '/dashboard/kpis', icon: DashboardIcon },
   { label: 'Users', href: '/dashboard', icon: UsersIcon },
   { label: 'Hotels', href: '/dashboard/hotels', icon: HotelsIcon },
   { label: 'Marketplace', href: '/dashboard/marketplace', icon: MarketplaceIcon },
@@ -47,7 +48,7 @@ export default function Sidebar() {
         {navItems.map((item) => {
           const isActive = item.href === '/dashboard'
             ? pathname === '/dashboard' || pathname.startsWith('/dashboard/users')
-            : pathname.startsWith(item.href)
+            : pathname === item.href || (item.href !== '/dashboard/kpis' && pathname.startsWith(item.href))
           return (
             <Link
               key={item.href}
@@ -149,6 +150,17 @@ function InviteCodesIcon({ className }: { className?: string }) {
       <path d="M15 5v2m0 4v2m0 4v2" />
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M3 12h18" />
+    </svg>
+  )
+}
+
+function DashboardIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
   )
 }
