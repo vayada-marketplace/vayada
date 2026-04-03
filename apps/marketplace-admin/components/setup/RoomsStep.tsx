@@ -1,7 +1,7 @@
 'use client'
 
 import { RefObject, useState } from 'react'
-import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline'
 import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 
 export interface RoomType {
@@ -242,6 +242,19 @@ export default function RoomsStep({
                     <span className="text-[12px] font-medium text-gray-900 truncate flex-1">
                       {r.name || `Room ${idx + 1}`}
                     </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const clone = { ...r, name: r.name + ' (Copy)', images: [...r.images], amenities: [...r.amenities], features: [...r.features], beds: r.beds.map(b => ({ ...b })), seasons: r.seasons.map(s => ({ ...s })), operatingPeriods: r.operatingPeriods.map(p => ({ ...p })) }
+                        setRooms((prev: RoomType[]) => [...prev, clone])
+                        setActiveRoomIndex(rooms.length)
+                        setActiveRoomTab('details')
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-primary-600 transition-all"
+                      title="Duplicate"
+                    >
+                      <DocumentDuplicateIcon className="w-3.5 h-3.5" />
+                    </button>
                     {rooms.length > 1 && (
                       <button
                         onClick={(e) => {
