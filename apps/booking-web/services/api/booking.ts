@@ -79,6 +79,7 @@ export const bookingService = {
     rateType?: string
     addonIds?: string[]
     addonQuantities?: Record<string, number>
+    promoCode?: string
   }): Promise<BookingRequestResponse> {
     const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings`, data)
     return handleResponse(res, 'Booking failed')
