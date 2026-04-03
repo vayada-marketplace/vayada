@@ -54,6 +54,8 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () =
   useEffect(() => {
     const listener = (e: MouseEvent) => {
       if (!ref.current || ref.current.contains(e.target as Node)) return
+      // Skip if element is hidden (e.g. inside a responsive display:none container)
+      if (ref.current.offsetParent === null) return
       handler()
     }
     document.addEventListener('mousedown', listener)

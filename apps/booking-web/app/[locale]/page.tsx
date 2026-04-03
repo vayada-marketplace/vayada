@@ -245,7 +245,7 @@ export default function HomePage() {
           <div className="relative flex-1 min-w-0">
             <button
               onClick={() => { setCalendarOpen(!calendarOpen); setGuestsOpen(false) }}
-              className="flex items-center gap-3 w-full justify-center md:justify-start text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
+              className="flex items-center gap-3 w-full text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -279,7 +279,7 @@ export default function HomePage() {
           <div className="relative w-full md:w-auto">
             <button
               onClick={() => { setGuestsOpen(!guestsOpen); setCalendarOpen(false) }}
-              className="flex items-center gap-3 w-full justify-center md:justify-start hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
+              className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
