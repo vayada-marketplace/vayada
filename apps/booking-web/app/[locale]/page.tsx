@@ -276,10 +276,10 @@ export default function HomePage() {
           <div className="hidden md:block w-px h-12 bg-gray-200" />
 
           {/* Guests — clickable to open selector */}
-          <div className="relative">
+          <div className="relative w-full md:w-auto">
             <button
               onClick={() => { setGuestsOpen(!guestsOpen); setCalendarOpen(false) }}
-              className="flex items-center gap-3 hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
+              className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -532,7 +532,7 @@ export default function HomePage() {
               >
                 <div className="flex flex-col md:flex-row">
                   {/* Image Carousel — fills full card height */}
-                  <div className="relative w-full md:w-[420px] md:min-h-[320px] flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}>
+                  <div className="relative w-full h-64 md:w-[420px] md:min-h-[320px] md:h-auto flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}>
                     <Image
                       src={room.images[imgIdx]}
                       alt={room.name}
@@ -595,9 +595,9 @@ export default function HomePage() {
                   {/* Room Details + Rates */}
                   <div className="flex-1 p-5 flex flex-col">
                     {/* Header row */}
-                    <div className="flex items-start justify-between mb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-2">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-xl font-bold text-gray-900">
                             {requiredRooms > 1 && <span className="text-primary-600">{requiredRooms}× </span>}
                             {room.name}
