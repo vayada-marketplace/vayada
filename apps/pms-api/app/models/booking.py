@@ -112,6 +112,7 @@ class BookingAdminResponse(BaseModel):
     affiliate_commission_amount: Optional[float] = None
     property_payout_amount: Optional[float] = None
     addon_ids: List[str] = []
+    addon_names: List[str] = []
     addon_total: float = 0
     addon_quantities: Dict[str, int] = {}
     guest_withdrawn: bool = False
@@ -123,6 +124,15 @@ class BookingAdminResponse(BaseModel):
     def parse_addon_ids(cls, v):
         if isinstance(v, str):
             return json.loads(v)
+        return v
+
+    @field_validator("addon_names", mode="before")
+    @classmethod
+    def parse_addon_names(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return []
         return v
 
     @field_validator("addon_quantities", mode="before")
