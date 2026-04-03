@@ -138,6 +138,17 @@ export default function CalendarPage() {
     return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase()
   }
 
+  // Group blocks by room type ID
+  const blocksByRoomType = useMemo(() => {
+    if (!data) return {}
+    const map: Record<string, CalendarBlock[]> = {}
+    for (const bl of data.blocks) {
+      if (!map[bl.roomTypeId]) map[bl.roomTypeId] = []
+      map[bl.roomTypeId].push(bl)
+    }
+    return map
+  }, [data])
+
   const allBookings = useMemo(() => data?.bookings || [], [data])
 
   return (
@@ -264,6 +275,24 @@ export default function CalendarPage() {
                           <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
                         ))}
                       </div>
+                      {/* Block bars */}
+                      {(blocksByRoomType[room.roomTypeId] || []).map((bl) => {
+                        const style = getBarStyle(bl.startDate, bl.endDate)
+                        if (!style) return null
+                        return (
+                          <div
+                            key={`block-${bl.id}`}
+                            className="absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[0] bg-red-100 border border-red-300 border-dashed text-red-600 flex items-center gap-1"
+                            style={style}
+                            title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}`}
+                          >
+                            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            <span className="truncate">{bl.reason || 'Blocked'}</span>
+                          </div>
+                        )
+                      })}
                       {/* Booking bars */}
                       {roomBookings.map((b) => {
                         const style = getBarStyle(b.checkIn, b.checkOut)
