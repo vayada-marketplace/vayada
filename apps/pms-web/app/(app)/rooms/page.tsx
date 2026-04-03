@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline'
 import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatCurrency } from '@/lib/formatCurrency'
@@ -32,7 +32,7 @@ function getCategoryLabel(name: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)
 }
 
-function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void }) {
+function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void; onDuplicate: (id: string) => void }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const [addingRoom, setAddingRoom] = useState(false)
@@ -133,7 +133,14 @@ function RoomTypeCard({ room, rooms, onRoomsChange }: { room: RoomType; rooms: R
           </span>
         </div>
 
-        {/* Configure button */}
+        {/* Duplicate + Configure buttons */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onDuplicate(room.id) }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+          title={t('rooms.duplicate')}
+        >
+          <DocumentDuplicateIcon className="w-3.5 h-3.5" />
+        </button>
         <Link
           href={`/rooms/${room.id}`}
           onClick={(e) => e.stopPropagation()}
@@ -281,6 +288,15 @@ export default function RoomsPage() {
     individualRoomsService.list().then(setIndividualRooms).catch(console.error)
   }
 
+  const handleDuplicate = async (id: string) => {
+    try {
+      await roomsService.duplicate(id)
+      loadData()
+    } catch (err: any) {
+      alert(err.message || t('rooms.failedToDuplicate'))
+    }
+  }
+
   const filteredRooms = useMemo(() => {
     if (!searchQuery.trim()) return rooms
     const q = searchQuery.toLowerCase()
@@ -352,7 +368,7 @@ export default function RoomsPage() {
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           {filteredRooms.map((room) => (
-            <RoomTypeCard key={room.id} room={room} rooms={individualRooms} onRoomsChange={refreshRooms} />
+            <RoomTypeCard key={room.id} room={room} rooms={individualRooms} onRoomsChange={refreshRooms} onDuplicate={handleDuplicate} />
           ))}
         </div>
       )}

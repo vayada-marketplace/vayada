@@ -127,4 +127,7 @@ export const roomsService = {
 
   delete: (id: string) =>
     pmsClient.delete(`/admin/room-types/${id}`),
+
+  duplicate: (id: string) =>
+    pmsClient.post<RoomType>(`/admin/room-types/${id}/duplicate`),
 }
