@@ -414,6 +414,13 @@ function PaymentPageContent() {
                 )}
               </div>
 
+              {/* Non-refundable hint */}
+              {isNonRefundable && (payAtPropertyEnabled || bankTransferEnabled) && (
+                <p className="text-xs text-gray-400 mb-4">
+                  {t('nonRefundablePaymentHint') || 'Pay at Property and Bank Transfer are not available for non-refundable rates.'}
+                </p>
+              )}
+
               {/* Payment method info */}
               {paymentMethod === 'card' ? (
                 <div className="space-y-3">
