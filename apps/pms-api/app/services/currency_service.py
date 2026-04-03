@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 OPEN_ER_API = "https://open.er-api.com/v6/latest"
 FRANKFURTER_API = "https://api.frankfurter.dev/v1/latest"
+FAWAZAHMED0_API = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
 
 
 async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
@@ -28,15 +29,33 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
             logger.warning("open.er-api failed for %s -> %s: %s", from_currency, to_currency, e)
 
         # Fallback to Frankfurter (ECB data, ~30 currencies)
-        resp = await client.get(
-            FRANKFURTER_API,
-            params={"from": from_currency, "to": to_currency},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        rate = data["rates"][to_currency]
-        logger.info("Exchange rate %s -> %s: %s (frankfurter)", from_currency, to_currency, rate)
-        return float(rate)
+        try:
+            resp = await client.get(
+                FRANKFURTER_API,
+                params={"from": from_currency, "to": to_currency},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            rate = data["rates"][to_currency]
+            logger.info("Exchange rate %s -> %s: %s (frankfurter)", from_currency, to_currency, rate)
+            return float(rate)
+        except Exception as e:
+            logger.warning("Frankfurter failed for %s -> %s: %s", from_currency, to_currency, e)
+
+        # Fallback to fawazahmed0 currency API (150+ currencies)
+        try:
+            from_lower = from_currency.lower()
+            to_lower = to_currency.lower()
+            resp = await client.get(f"{FAWAZAHMED0_API}/{from_lower}.json")
+            resp.raise_for_status()
+            data = resp.json()
+            rate = data[from_lower][to_lower]
+            logger.info("Exchange rate %s -> %s: %s (fawazahmed0)", from_currency, to_currency, rate)
+            return float(rate)
+        except Exception as e:
+            logger.warning("fawazahmed0 failed for %s -> %s: %s", from_currency, to_currency, e)
+
+        raise ValueError(f"All exchange rate APIs failed for {from_currency} -> {to_currency}")
 
 
 def convert_amount(amount: float, rate: float, decimals: int = 2) -> float:
