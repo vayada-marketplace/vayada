@@ -5,6 +5,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+OPEN_ER_API = "https://open.er-api.com/v6/latest"
 FRANKFURTER_API = "https://api.frankfurter.dev/v1/latest"
 
 
@@ -14,6 +15,19 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
         return 1.0
 
     async with httpx.AsyncClient(timeout=10) as client:
+        # Try open.er-api.com first (supports 150+ currencies)
+        try:
+            resp = await client.get(f"{OPEN_ER_API}/{from_currency}")
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("result") == "success" and to_currency in data.get("rates", {}):
+                rate = data["rates"][to_currency]
+                logger.info("Exchange rate %s -> %s: %s (open.er-api)", from_currency, to_currency, rate)
+                return float(rate)
+        except Exception as e:
+            logger.warning("open.er-api failed for %s -> %s: %s", from_currency, to_currency, e)
+
+        # Fallback to Frankfurter (ECB data, ~30 currencies)
         resp = await client.get(
             FRANKFURTER_API,
             params={"from": from_currency, "to": to_currency},
@@ -21,7 +35,7 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
         resp.raise_for_status()
         data = resp.json()
         rate = data["rates"][to_currency]
-        logger.info("Exchange rate %s -> %s: %s", from_currency, to_currency, rate)
+        logger.info("Exchange rate %s -> %s: %s (frankfurter)", from_currency, to_currency, rate)
         return float(rate)
 
 
