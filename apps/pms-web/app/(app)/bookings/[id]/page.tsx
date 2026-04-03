@@ -244,11 +244,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <h2 className="text-sm font-semibold text-gray-900 mb-4">Add-ons</h2>
             <div className="space-y-2 text-sm">
-              {booking.addonIds.map((addonId) => {
+              {booking.addonIds.map((addonId, idx) => {
                 const qty = booking.addonQuantities[addonId]
+                const name = booking.addonNames?.[idx] || addonId
                 return (
                   <div key={addonId} className="flex justify-between">
-                    <span className="text-gray-700 font-mono text-xs">{addonId}</span>
+                    <span className="text-gray-700">{name}</span>
                     {qty && (
                       <span className="text-gray-500">{qty} night{qty !== 1 ? 's' : ''}</span>
                     )}

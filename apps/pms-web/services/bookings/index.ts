@@ -30,6 +30,7 @@ export interface Booking {
   affiliateCommissionAmount: number | null
   propertyPayoutAmount: number | null
   addonIds: string[]
+  addonNames: string[]
   addonTotal: number
   addonQuantities: Record<string, number>
   estimatedArrivalTime: string | null
