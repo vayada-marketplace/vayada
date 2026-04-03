@@ -628,7 +628,7 @@ export default function BookingNavigation() {
             </div>
 
             {/* Mobile inline actions */}
-            <div className="md:hidden flex items-center gap-1.5">
+            <div className="md:hidden flex items-center gap-1.5 ml-auto">
               {hotel.referAGuestEnabled && (
                 <button
                   onClick={() => { closeAll(); setReferOpen(true) }}
