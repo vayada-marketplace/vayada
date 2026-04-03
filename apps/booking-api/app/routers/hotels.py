@@ -96,6 +96,18 @@ async def validate_promo_code(slug: str, code: str = Query(...)):
     }
 
 
+@router.post("/{slug}/increment-promo")
+async def increment_promo_usage(slug: str, code: str = Query(...)):
+    from app.repositories.promo_code_repo import PromoCodeRepository
+    hotel = await BookingHotelRepository.get_by_slug(slug)
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    promo = await PromoCodeRepository.get_by_code(code, str(hotel["id"]))
+    if promo:
+        await PromoCodeRepository.increment_use_count(str(promo["id"]))
+    return {"ok": True}
+
+
 @exchange_router.get("/exchange-rates")
 async def exchange_rates(base: str = Query(default="EUR")):
     rates = await get_rates(base)
