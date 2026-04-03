@@ -97,8 +97,8 @@ export const bookingsService = {
   acceptBooking: (id: string) =>
     pmsClient.post<Booking>(`/admin/bookings/${id}/accept`, {}),
 
-  rejectBooking: (id: string) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/reject`, {}),
+  rejectBooking: (id: string, reason?: string) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/reject`, { reason }),
 
   assignRoom: (id: string, roomId: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/assign-room`, { roomId }),

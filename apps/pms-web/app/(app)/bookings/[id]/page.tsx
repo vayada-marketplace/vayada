@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { bookingsService, Booking } from '@/services/bookings'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import Modal from '@/components/Modal'
 import { formatCurrency } from '@/lib/formatCurrency'
 import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from '@/lib/constants/statusStyles'
 
@@ -87,16 +88,17 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     })
   }
 
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+
   const handleReject = () => {
-    setConfirmDialog({
-      message: 'Are you sure you want to reject this booking? The card hold will be released.',
-      variant: 'danger',
-      confirmLabel: 'Reject',
-      onConfirm: () => {
-        setConfirmDialog(null)
-        doAction(() => bookingsService.rejectBooking(params.id), 'Failed to reject booking')
-      },
-    })
+    setRejectReason('')
+    setRejectOpen(true)
+  }
+
+  const confirmReject = () => {
+    setRejectOpen(false)
+    doAction(() => bookingsService.rejectBooking(params.id, rejectReason.trim() || undefined), 'Failed to reject booking')
   }
 
   const updateStatus = (status: 'confirmed' | 'cancelled') => {
@@ -393,6 +395,34 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
         />
+      )}
+
+      {rejectOpen && (
+        <Modal onClose={() => setRejectOpen(false)}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject Booking</h3>
+          <p className="text-sm text-gray-600 mb-4">Are you sure you want to reject this booking? The payment hold will be released.</p>
+          <textarea
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Reason for rejection (optional — will be included in the guest's email)"
+            rows={3}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+          />
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setRejectOpen(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmReject}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )
