@@ -119,6 +119,13 @@ async def update_payment_settings(
         if old_currency != new_currency:
             try:
                 rate = await get_exchange_rate(old_currency, new_currency)
+            except Exception as e:
+                logger.error("Failed to fetch exchange rate %s → %s: %s", old_currency, new_currency, e)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch exchange rate for {old_currency} → {new_currency}. Currency not updated.",
+                )
+            try:
                 # Determine decimal places: currencies like IDR, JPY, KRW use 0
                 zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
                 decimals = 0 if zero_decimal else 2
@@ -133,10 +140,10 @@ async def update_payment_settings(
                     len(room_types), old_currency, new_currency, rate,
                 )
             except Exception as e:
-                logger.error("Failed to convert room rates: %s", e)
+                logger.error("Failed to convert room rates %s → %s: %s", old_currency, new_currency, e)
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to fetch exchange rate for {old_currency} → {new_currency}. Currency not updated.",
+                    detail=f"Failed to convert room rates to {new_currency}. Currency not updated.",
                 )
 
     await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
