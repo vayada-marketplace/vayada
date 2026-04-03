@@ -89,7 +89,7 @@ export default function HomePage() {
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
-  const { rooms, loading: roomsLoading } = useRooms()
+  const { rooms, loading: roomsLoading, roomsLoading: roomsRefetching, refetchRooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const { slug } = useSlug()
@@ -113,6 +113,15 @@ export default function HomePage() {
   const [committedCheckOut, setCommittedCheckOut] = useState(checkOut)
   const [committedAdults, setCommittedAdults] = useState(2)
   const [committedChildren, setCommittedChildren] = useState(0)
+
+  // Fetch rooms with default dates on initial load so prices reflect seasonal rates
+  const [initialFetchDone, setInitialFetchDone] = useState(false)
+  useEffect(() => {
+    if (!roomsLoading && rooms.length > 0 && !initialFetchDone) {
+      setInitialFetchDone(true)
+      refetchRooms(checkIn, checkOut)
+    }
+  }, [roomsLoading, rooms.length])
 
   // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([])
@@ -364,7 +373,7 @@ export default function HomePage() {
 
           {/* Check Availability Button */}
           <button
-            onClick={() => {
+            onClick={async () => {
               setCalendarOpen(false)
               setGuestsOpen(false)
               setPromoOpen(false)
@@ -374,9 +383,10 @@ export default function HomePage() {
               setCommittedChildren(children)
               setSearching(true)
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
-              setTimeout(() => setSearching(false), 800)
+              await refetchRooms(checkIn, checkOut)
+              setSearching(false)
             }}
-            disabled={searching}
+            disabled={searching || roomsRefetching}
             className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap disabled:opacity-80 flex items-center justify-center gap-2"
           >
             {searching ? (

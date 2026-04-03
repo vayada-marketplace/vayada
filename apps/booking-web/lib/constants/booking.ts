@@ -1,10 +1,10 @@
 import { Addon } from '@/lib/types'
 
-/** Multiplier applied to base rate for non-refundable pricing (15% discount) */
+/** Fallback multiplier for non-refundable pricing (15% discount) — only used if server doesn't provide a rate */
 export const NON_REFUNDABLE_DISCOUNT = 0.85
 
 export function getNonRefundableRate(baseRate: number, nonRefundableRate?: number | null): number {
-  return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT)
+  return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT * 100) / 100
 }
 
 /** Calculate the discount amount from a promo code. */

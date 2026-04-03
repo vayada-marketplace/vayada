@@ -33,7 +33,7 @@ function BookPageContent() {
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
-  const { rooms } = useRooms()
+  const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const { slug } = useSlug()
@@ -41,6 +41,13 @@ function BookPageContent() {
   const roomId = searchParams.get('room') || ''
 
   useEffect(() => { trackEvent(slug, 'started_booking') }, [slug])
+
+  // Ensure rooms have date-resolved rates (in case of direct navigation)
+  useEffect(() => {
+    const ci = searchParams.get('checkIn')
+    const co = searchParams.get('checkOut')
+    if (ci && co) refetchRooms(ci, co)
+  }, [])
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const adultsParam = parseInt(searchParams.get('adults') || '2')

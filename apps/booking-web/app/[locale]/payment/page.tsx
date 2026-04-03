@@ -74,7 +74,7 @@ function PaymentPageContent() {
   const ts = useTranslations('steps')
   const tb = useTranslations('book')
   const { hotel } = useHotel()
-  const { rooms } = useRooms()
+  const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice } = useCurrency()
   const { slug } = useSlug()
@@ -83,6 +83,11 @@ function PaymentPageContent() {
   const roomId = searchParams.get('room') || ''
   const checkIn = searchParams.get('checkIn') || ''
   const checkOut = searchParams.get('checkOut') || ''
+
+  // Ensure rooms have date-resolved rates
+  useEffect(() => {
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut)
+  }, [])
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
   const roomsParam = parseInt(searchParams.get('rooms') || '1')

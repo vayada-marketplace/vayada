@@ -28,9 +28,11 @@ interface HotelContextValue {
   rooms: RoomType[]
   addons: Addon[]
   loading: boolean
+  roomsLoading: boolean
   error: string | null
   locale: string
   slug: string
+  refetchRooms: (checkIn?: string, checkOut?: string) => Promise<void>
 }
 
 const HotelContext = createContext<HotelContextValue>({
@@ -38,9 +40,11 @@ const HotelContext = createContext<HotelContextValue>({
   rooms: [],
   addons: [],
   loading: true,
+  roomsLoading: false,
   error: null,
   locale: 'en',
   slug: '',
+  refetchRooms: async () => {},
 })
 
 export function HotelProvider({ children, locale = 'en', slug: slugProp }: { children: ReactNode; locale?: string; slug?: string }) {
@@ -49,6 +53,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
   const [loading, setLoading] = useState(true)
+  const [roomsLoading, setRoomsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -69,6 +74,18 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
         setLoading(false)
       })
   }, [locale, slug])
+
+  const refetchRooms = async (checkIn?: string, checkOut?: string) => {
+    setRoomsLoading(true)
+    try {
+      const roomsData = await hotelService.getRooms(slug, checkIn, checkOut)
+      setRooms(roomsData)
+    } catch (err) {
+      console.error('Failed to refetch rooms', err)
+    } finally {
+      setRoomsLoading(false)
+    }
+  }
 
   // Apply branding colors as CSS variables
   useEffect(() => {
@@ -147,7 +164,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
   }
 
   return (
-    <HotelContext.Provider value={{ hotel, rooms, addons, loading, error, locale, slug }}>
+    <HotelContext.Provider value={{ hotel, rooms, addons, loading, roomsLoading, error, locale, slug, refetchRooms }}>
       {children}
     </HotelContext.Provider>
   )
@@ -159,8 +176,8 @@ export function useHotel() {
 }
 
 export function useRooms() {
-  const { rooms, loading, error } = useContext(HotelContext)
-  return { rooms, loading, error }
+  const { rooms, loading, roomsLoading, error, refetchRooms } = useContext(HotelContext)
+  return { rooms, loading, roomsLoading, error, refetchRooms }
 }
 
 export function useAddons() {
