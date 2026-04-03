@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { hotelService } from '@/services/api/hotel'
+import { useSlug } from '@/contexts/HotelContext'
 
 interface DatePickerCalendarProps {
   open: boolean
@@ -60,6 +62,7 @@ function MonthGrid({
   hoverDate,
   onDayClick,
   onDayHover,
+  unavailableDates,
 }: {
   year: number
   month: number
@@ -68,6 +71,7 @@ function MonthGrid({
   hoverDate: string | null
   onDayClick: (date: string) => void
   onDayHover: (date: string | null) => void
+  unavailableDates: Set<string>
 }) {
   const daysInMonth = getDaysInMonth(year, month)
   const firstDay = getFirstDayOfMonth(year, month)
@@ -133,13 +137,14 @@ function MonthGrid({
             checkIn && rangeEnd && !isBeforeDate(rangeEnd, checkIn)
               ? isBetween(cell.dateStr, checkIn, rangeEnd)
               : false
-          const isDisabled = isPast
+          const isUnavailable = unavailableDates.has(cell.dateStr)
+          const isDisabled = isPast || isUnavailable
 
           return (
             <div
               key={idx}
               className={`relative flex items-center justify-center ${
-                isInRange ? 'bg-primary-50' : ''
+                isInRange && !isUnavailable ? 'bg-primary-50' : ''
               } ${isCheckIn ? 'rounded-l-full bg-primary-50' : ''} ${
                 (isCheckOut || (checkIn && !checkOut && hoverDate && isSameDay(cell.dateStr, hoverDate)))
                   ? 'rounded-r-full bg-primary-50'
@@ -151,9 +156,12 @@ function MonthGrid({
                 onClick={() => !isDisabled && onDayClick(cell.dateStr)}
                 onMouseEnter={() => !isDisabled && onDayHover(cell.dateStr)}
                 onMouseLeave={() => onDayHover(null)}
+                title={isUnavailable ? 'Fully booked' : undefined}
                 className={`w-9 h-9 flex items-center justify-center text-sm rounded-full transition-colors relative z-10 ${
                   isDisabled
-                    ? 'text-gray-300 cursor-default line-through decoration-gray-400'
+                    ? isUnavailable
+                      ? 'text-gray-300 cursor-default bg-gray-100 line-through decoration-red-300'
+                      : 'text-gray-300 cursor-default line-through decoration-gray-400'
                     : isSelected
                     ? 'bg-primary-600 text-white font-bold'
                     : isToday
@@ -179,12 +187,14 @@ export default function DatePickerCalendar({
   onSelect,
 }: DatePickerCalendarProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const { slug } = useSlug()
   const [hoverDate, setHoverDate] = useState<string | null>(null)
   const [selectionState, setSelectionState] = useState<'selectCheckIn' | 'selectCheckOut'>(
     checkIn ? 'selectCheckOut' : 'selectCheckIn'
   )
   const [tempCheckIn, setTempCheckIn] = useState<string | null>(checkIn)
   const [tempCheckOut, setTempCheckOut] = useState<string | null>(checkOut)
+  const [unavailableDates, setUnavailableDates] = useState<Set<string>>(new Set())
 
   // Calendar months
   const now = new Date()
@@ -212,6 +222,19 @@ export default function DatePickerCalendar({
       }
     }
   }, [open, checkIn, checkOut])
+
+  // Fetch unavailable dates for the visible months
+  useEffect(() => {
+    if (!open || !slug) return
+    const start = toDateString(baseYear, baseMonth, 1)
+    const endMonth = baseMonth === 11 ? 0 : baseMonth + 1
+    const endYear = baseMonth === 11 ? baseYear + 1 : baseYear
+    const lastDay = getDaysInMonth(endYear, endMonth)
+    const end = toDateString(endYear, endMonth, lastDay)
+    hotelService.getUnavailableDates(slug, start, end).then((dates) => {
+      setUnavailableDates(new Set(dates))
+    }).catch(() => {})
+  }, [open, slug, baseMonth, baseYear])
 
   // Click outside to close
   useEffect(() => {
@@ -314,6 +337,7 @@ export default function DatePickerCalendar({
             hoverDate={selectionState === 'selectCheckOut' ? hoverDate : null}
             onDayClick={handleDayClick}
             onDayHover={setHoverDate}
+            unavailableDates={unavailableDates}
           />
           <MonthGrid
             year={secondYear}
@@ -323,6 +347,7 @@ export default function DatePickerCalendar({
             hoverDate={selectionState === 'selectCheckOut' ? hoverDate : null}
             onDayClick={handleDayClick}
             onDayHover={setHoverDate}
+            unavailableDates={unavailableDates}
           />
         </div>
 
