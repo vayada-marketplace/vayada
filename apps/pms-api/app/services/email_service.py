@@ -220,6 +220,7 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
+    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -378,6 +379,7 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
+    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
