@@ -201,6 +201,7 @@ function PaymentPageContent() {
         rateType,
         addonIds: selectedAddonIds,
         addonQuantities,
+        promoCode: promoCodeParam || undefined,
       })
 
       const booking = result.booking
