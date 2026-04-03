@@ -174,17 +174,22 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
-    # Resolve monthly rate for check-in month
-    resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, data.check_in)
+    # Resolve rate per night across the full stay
+    if data.rate_type == "nonrefundable" and data.payment_method == "pay_at_property":
+        raise ValueError("Non-refundable rate requires card payment")
 
-    # Rate-type dependent pricing
-    if data.rate_type == "nonrefundable":
-        if data.payment_method == "pay_at_property":
-            raise ValueError("Non-refundable rate requires card payment")
-        nightly_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
-    else:
-        nightly_rate = resolved_base
-    room_total = nightly_rate * nights * data.number_of_rooms
+    room_total = 0.0
+    for i in range(nights):
+        night_date = data.check_in + timedelta(days=i)
+        resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, night_date)
+        if data.rate_type == "nonrefundable":
+            night_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
+        else:
+            night_rate = resolved_base
+        room_total += night_rate
+    room_total = round(room_total * data.number_of_rooms, 2)
+    # Average nightly rate for display/record
+    nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
 
     # Calculate addon total from booking engine
     addon_total = 0.0
@@ -219,7 +224,34 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             addon_total += price
         addon_total = round(addon_total, 2)
 
-    total_amount = room_total + addon_total
+    subtotal = room_total + addon_total
+
+    # Validate and apply promo code
+    promo_discount = 0.0
+    promo_code_str = None
+    if data.promo_code:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/validate-promo",
+                    params={"code": data.promo_code},
+                )
+                resp.raise_for_status()
+                promo_result = resp.json()
+        except Exception as e:
+            logger.warning("Failed to validate promo for %s: %s", slug, e)
+            promo_result = {"valid": False}
+
+        if promo_result.get("valid"):
+            promo_code_str = promo_result["code"]
+            discount_type = promo_result["discountType"]
+            discount_value = float(promo_result["discountValue"])
+            if discount_type == "percentage":
+                promo_discount = round(subtotal * (discount_value / 100), 2)
+            else:
+                promo_discount = min(discount_value, subtotal)
+
+    total_amount = round(subtotal - promo_discount, 2)
 
     # Resolve affiliate
     affiliate_id = None
@@ -273,6 +305,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "addon_names": addon_names,
         "addon_total": addon_total,
         "addon_quantities": addon_quantities,
+        "promo_code": promo_code_str,
+        "promo_discount": promo_discount,
     }
     # Auto-assign an available room unit
     available_room = await Database.fetchrow(
@@ -299,6 +333,17 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
+
+    # Increment promo code use count
+    if promo_code_str:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/increment-promo",
+                    params={"code": promo_code_str},
+                )
+        except Exception as e:
+            logger.warning("Failed to increment promo use count: %s", e)
 
     client_secret = None
     xendit_invoice_url = None

@@ -240,9 +240,22 @@ class RoomTypeRepository:
         return min(rates) if rates else None
 
     @staticmethod
+    @staticmethod
+    def _parse_weekend_surcharge(raw: str) -> float:
+        """Parse weekend surcharge string like '+15%' into a multiplier (e.g. 0.15)."""
+        if not raw:
+            return 0.0
+        s = raw.strip().replace("+", "").replace("%", "")
+        try:
+            return float(s) / 100
+        except (ValueError, TypeError):
+            return 0.0
+
+    @staticmethod
     def resolve_rate(room: dict, check_in: date) -> Tuple[float, Optional[float]]:
-        """Return (base_rate, non_refundable_rate) using daily override, then monthly, then season, then base."""
-        # 1. Check daily rate override first (highest priority)
+        """Return (base_rate, non_refundable_rate) using daily override, then season, then base.
+        Applies weekend surcharge for Friday/Saturday nights."""
+        # 1. Check daily rate override first (highest priority) — no surcharge on explicit overrides
         daily_rates = room.get("daily_rates") or {}
         if isinstance(daily_rates, str):
             daily_rates = json.loads(daily_rates)
@@ -251,34 +264,34 @@ class RoomTypeRepository:
             nr = room.get("non_refundable_rate")
             return (float(daily_override), float(nr) if nr is not None else None)
 
-        # 2. Check monthly override
-        monthly_rates = room.get("monthly_rates") or {}
-        if isinstance(monthly_rates, str):
-            monthly_rates = json.loads(monthly_rates)
-
-        check_in_month = check_in.month
-        override = monthly_rates.get(str(check_in_month))
-        if override:
-            base = override.get("base_rate") if override.get("base_rate") is not None else float(room["base_rate"])
-            nr = room.get("non_refundable_rate")
-            nr_default = float(nr) if nr is not None else None
-            nr_resolved = override.get("non_refundable_rate") if override.get("non_refundable_rate") is not None else nr_default
-            return (float(base), float(nr_resolved) if nr_resolved is not None else None)
-
-        # Check seasons
+        # 2. Check seasons
         seasons = RoomTypeRepository._parse_seasons(room)
         season_rate = RoomTypeRepository._find_season_rate(seasons, check_in)
-        if season_rate is not None:
-            nr = room.get("non_refundable_rate")
-            return (season_rate, float(nr) if nr is not None else None)
 
-        if seasons:
-            logger.warning(
-                "Check-in date %s falls in a gap between seasons for room %s — "
-                "falling back to base rate",
-                check_in.isoformat(),
-                room.get("id", "unknown"),
+        if season_rate is not None:
+            base_rate = season_rate
+        else:
+            # Fallback: use base_rate, or lowest season rate if base_rate is 0
+            base_rate = float(room["base_rate"])
+            if base_rate == 0 and seasons:
+                lowest = RoomTypeRepository._get_lowest_season_rate(seasons)
+                if lowest is not None:
+                    base_rate = lowest
+                logger.warning(
+                    "Check-in date %s falls in a gap between seasons for room %s — "
+                    "using lowest season rate %.2f",
+                    check_in.isoformat(),
+                    room.get("id", "unknown"),
+                    base_rate,
+                )
+
+        # 3. Apply weekend surcharge (Friday=4, Saturday=5)
+        if check_in.weekday() in (4, 5):
+            surcharge = RoomTypeRepository._parse_weekend_surcharge(
+                room.get("weekend_surcharge") or ""
             )
+            if surcharge > 0:
+                base_rate = round(base_rate * (1 + surcharge), 2)
 
         nr = room.get("non_refundable_rate")
-        return (float(room["base_rate"]), float(nr) if nr is not None else None)
+        return (base_rate, float(nr) if nr is not None else None)

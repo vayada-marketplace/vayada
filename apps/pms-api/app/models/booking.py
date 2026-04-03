@@ -30,6 +30,7 @@ class BookingCreate(BaseModel):
     number_of_rooms: int = 1
     addon_ids: List[str] = []
     addon_quantities: Dict[str, int] = {}
+    promo_code: Optional[str] = None
 
 
 class BookingResponse(BaseModel):
