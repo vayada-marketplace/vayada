@@ -1,3 +1,4 @@
+import json
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -50,12 +51,19 @@ def _wrap_html(content: str) -> str:
 
 
 def _booking_details_html(booking: dict) -> str:
+    addon_names = booking.get("addon_names") or []
+    if isinstance(addon_names, str):
+        addon_names = json.loads(addon_names)
+    addons_html = ""
+    if addon_names:
+        addons_list = ", ".join(addon_names)
+        addons_html = f'\n    <p class="detail"><strong>Add-ons:</strong> {addons_list}</p>'
     return f"""
     <p class="detail"><strong>Reference:</strong> {booking['booking_reference']}</p>
-    <p class="detail"><strong>Room:</strong> {booking['room_name']}</p>
+    <p class="detail"><strong>Accommodation:</strong> {booking['room_name']}</p>
     <p class="detail"><strong>Check-in:</strong> {booking['check_in']}</p>
     <p class="detail"><strong>Check-out:</strong> {booking['check_out']}</p>
-    <p class="detail"><strong>Guests:</strong> {booking['adults']} adults, {booking['children']} children</p>
+    <p class="detail"><strong>Guests:</strong> {booking['adults']} adults, {booking['children']} children</p>{addons_html}
     <p class="detail"><strong>Total:</strong> {booking['currency']} {booking['total_amount']}</p>
     """
 

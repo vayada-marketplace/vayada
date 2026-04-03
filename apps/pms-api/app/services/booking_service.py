@@ -189,6 +189,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # Calculate addon total from booking engine
     addon_total = 0.0
     addon_ids = data.addon_ids or []
+    addon_names = []
     addon_quantities = data.addon_quantities or {}
     if addon_ids:
         try:
@@ -207,6 +208,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             addon = addon_map.get(aid)
             if not addon:
                 continue
+            addon_names.append(addon.get("name", "Unknown"))
             price = float(addon["price"])
             if addon.get("perPerson"):
                 price *= data.adults
@@ -268,6 +270,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "host_response_deadline": deadline,
         "rate_type": data.rate_type,
         "addon_ids": addon_ids,
+        "addon_names": addon_names,
         "addon_total": addon_total,
         "addon_quantities": addon_quantities,
     }
