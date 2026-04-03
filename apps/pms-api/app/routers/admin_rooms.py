@@ -152,6 +152,48 @@ async def update_room_type(
     return _room_to_admin(room)
 
 
+@router.post("/room-types/{room_type_id}/duplicate", response_model=RoomTypeAdminResponse, status_code=201)
+async def duplicate_room_type(
+    room_type_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    existing = await RoomTypeRepository.get_by_id(room_type_id)
+    if not existing or str(existing["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room type not found")
+
+    clone_data = {
+        "name": existing["name"] + " (Copy)",
+        "category": existing.get("category", ""),
+        "description": existing.get("description", ""),
+        "short_description": existing.get("short_description", ""),
+        "max_occupancy": existing["max_occupancy"],
+        "size": existing["size"],
+        "base_rate": float(existing["base_rate"]),
+        "non_refundable_rate": float(existing["non_refundable_rate"]) if existing.get("non_refundable_rate") is not None else None,
+        "currency": existing["currency"],
+        "amenities": parse_jsonb(existing["amenities"]),
+        "images": parse_jsonb(existing["images"]),
+        "bed_type": existing["bed_type"],
+        "features": parse_jsonb(existing["features"]),
+        "benefits": parse_jsonb(existing.get("benefits", [])),
+        "total_rooms": existing["total_rooms"],
+        "is_active": existing["is_active"],
+        "sort_order": existing["sort_order"],
+        "monthly_rates": parse_jsonb(existing.get("monthly_rates", {})),
+        "daily_rates": parse_jsonb(existing.get("daily_rates", {})),
+        "operating_periods": parse_jsonb(existing.get("operating_periods", [])),
+        "seasons": parse_jsonb(existing.get("seasons", [])),
+        "weekend_surcharge": existing.get("weekend_surcharge") or "+0%",
+        "cancellation_policy": existing.get("cancellation_policy") or "Free until 7 days before",
+        "flexible_rate_enabled": existing.get("flexible_rate_enabled", True),
+        "non_refundable_discount": existing.get("non_refundable_discount", 10),
+        "non_refundable_enabled": existing.get("non_refundable_enabled", False),
+    }
+    room = await RoomTypeRepository.create(hotel_id, clone_data)
+    return _room_to_admin(room)
+
+
 @router.delete("/room-types/{room_type_id}", status_code=204)
 async def delete_room_type(
     room_type_id: str,
