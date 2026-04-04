@@ -10,6 +10,7 @@ import {
   CreateAdminBookingPayload,
 } from '@/services/calendar'
 import BlockModal from '@/components/calendar/BlockModal'
+import BlockDetailModal from '@/components/calendar/BlockDetailModal'
 import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
 import MobileCalendar from '@/components/calendar/MobileCalendar'
@@ -43,6 +44,7 @@ export default function CalendarPage() {
   const [showBlockModal, setShowBlockModal] = useState(false)
   const [showNewBookingModal, setShowNewBookingModal] = useState(false)
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
+  const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
 
   const endDate = addDays(startDate, VIEW_DAYS)
   const dates = useMemo(
@@ -76,6 +78,25 @@ export default function CalendarPage() {
   }) => {
     await calendarService.createRoomBlock(blockData)
     setShowBlockModal(false)
+    fetchData()
+  }
+
+  const handleUpdateBlock = async (updates: {
+    startDate: string
+    endDate: string
+    blockedCount: number
+    reason: string
+  }) => {
+    if (!selectedBlock) return
+    await calendarService.updateRoomBlock(selectedBlock.id, updates)
+    setSelectedBlock(null)
+    fetchData()
+  }
+
+  const handleDeleteBlock = async () => {
+    if (!selectedBlock) return
+    await calendarService.deleteRoomBlock(selectedBlock.id)
+    setSelectedBlock(null)
     fetchData()
   }
 
@@ -282,9 +303,10 @@ export default function CalendarPage() {
                         return (
                           <div
                             key={`block-${bl.id}`}
-                            className="absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[0] bg-red-100 border border-red-300 border-dashed text-red-600 flex items-center gap-1"
+                            className="absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] bg-red-100 border border-red-300 border-dashed text-red-600 flex items-center gap-1 cursor-pointer hover:bg-red-200 transition-colors"
                             style={style}
-                            title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}`}
+                            title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}\nClick to edit or unblock`}
+                            onClick={() => setSelectedBlock(bl)}
                           >
                             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
@@ -375,6 +397,17 @@ export default function CalendarPage() {
           rooms={data.rooms}
           onSubmit={handleCreateBooking}
           onClose={() => setShowNewBookingModal(false)}
+        />
+      )}
+
+      {/* Block Detail Modal */}
+      {selectedBlock && data && (
+        <BlockDetailModal
+          block={selectedBlock}
+          roomTypes={data.roomTypes}
+          onSave={handleUpdateBlock}
+          onDelete={handleDeleteBlock}
+          onClose={() => setSelectedBlock(null)}
         />
       )}
 

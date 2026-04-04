@@ -59,6 +59,13 @@ export interface CreateRoomBlockPayload {
   reason: string
 }
 
+export interface UpdateRoomBlockPayload {
+  startDate?: string
+  endDate?: string
+  blockedCount?: number
+  reason?: string
+}
+
 export interface CreateAdminBookingPayload {
   roomId: string
   guestFirstName: string
@@ -80,6 +87,9 @@ export const calendarService = {
 
   createRoomBlock: (data: CreateRoomBlockPayload) =>
     pmsClient.post<CalendarBlock>('/admin/room-blocks', data),
+
+  updateRoomBlock: (blockId: string, data: UpdateRoomBlockPayload) =>
+    pmsClient.patch<CalendarBlock>(`/admin/room-blocks/${blockId}`, data),
 
   deleteRoomBlock: (blockId: string) =>
     pmsClient.delete(`/admin/room-blocks/${blockId}`),

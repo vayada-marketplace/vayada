@@ -1,0 +1,232 @@
+'use client'
+
+import { useState } from 'react'
+import { CalendarBlock, CalendarRoomType } from '@/services/calendar'
+import Modal from '@/components/Modal'
+
+interface BlockDetailModalProps {
+  block: CalendarBlock
+  roomTypes: CalendarRoomType[]
+  onSave: (updates: { startDate: string; endDate: string; blockedCount: number; reason: string }) => Promise<void>
+  onDelete: () => Promise<void>
+  onClose: () => void
+}
+
+export default function BlockDetailModal({
+  block,
+  roomTypes,
+  onSave,
+  onDelete,
+  onClose,
+}: BlockDetailModalProps) {
+  const [editing, setEditing] = useState(false)
+  const [startDate, setStartDate] = useState(block.startDate)
+  const [endDate, setEndDate] = useState(block.endDate)
+  const [blockedCount, setBlockedCount] = useState(block.blockedCount)
+  const [reason, setReason] = useState(block.reason || '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const roomType = roomTypes.find((rt) => rt.id === block.roomTypeId)
+  const maxRooms = roomType?.totalRooms || 1
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (!startDate || !endDate) {
+      setError('Please select both dates')
+      return
+    }
+    if (endDate <= startDate) {
+      setError('End date must be after start date')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await onSave({ startDate, endDate, blockedCount, reason })
+      setEditing(false)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update block')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setSubmitting(true)
+    try {
+      await onDelete()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to unblock')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold text-gray-900">
+          {editing ? 'Edit Block' : 'Blocked Rooms'}
+        </h2>
+        <span className="text-[11px] font-medium px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200">
+          Blocked
+        </span>
+      </div>
+
+      {!editing ? (
+        <div className="space-y-3">
+          <div>
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Room Type</div>
+            <div className="text-sm text-gray-900 mt-0.5">{roomType?.name || 'Unknown'}</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Start</div>
+              <div className="text-sm text-gray-900 mt-0.5">{block.startDate}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">End</div>
+              <div className="text-sm text-gray-900 mt-0.5">{block.endDate}</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Rooms Blocked</div>
+            <div className="text-sm text-gray-900 mt-0.5">{block.blockedCount}</div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Reason</div>
+            <div className="text-sm text-gray-900 mt-0.5">{block.reason || <span className="text-gray-400">No reason given</span>}</div>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-100">
+            {confirmDelete ? (
+              <>
+                <span className="text-sm text-gray-700">Unblock this period?</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    disabled={submitting}
+                    className="px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={submitting}
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {submitting ? 'Unblocking...' : 'Unblock'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  Unblock
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onClose}
+                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Room Type</label>
+            <div className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-500 bg-gray-50">
+              {roomType?.name || 'Unknown'}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rooms to Block</label>
+            <input
+              type="number"
+              min={1}
+              max={maxRooms}
+              value={blockedCount}
+              onChange={(e) => setBlockedCount(Number(e.target.value))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">Max: {maxRooms}</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Maintenance, Renovation"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {submitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  )
+}
