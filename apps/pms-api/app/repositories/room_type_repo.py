@@ -191,8 +191,9 @@ class RoomTypeRepository:
         return seasons
 
     @staticmethod
-    def _find_season_rate(seasons: list, check_in: date) -> Optional[float]:
-        """Find the season rate that covers the check-in date. Seasons repeat yearly."""
+    def _find_season_rate(seasons: list, check_in: date, adults: Optional[int] = None) -> Optional[float]:
+        """Find the season rate that covers the check-in date. Seasons repeat yearly.
+        If adults is provided and the season has occupancyRates, use the per-occupancy rate."""
         for season in seasons:
             rate = season.get("rate")
             if not rate:
@@ -214,12 +215,18 @@ class RoomTypeRepository:
                     s_to = date.fromisoformat(season_to)
                     s_to = s_to.replace(year=check_in.year)
                 # Handle seasons crossing year boundary (e.g., Nov-Feb)
+                matched = False
                 if s_from > s_to:
-                    if check_in >= s_from or check_in <= s_to:
-                        return float(rate)
+                    matched = check_in >= s_from or check_in <= s_to
                 else:
-                    if s_from <= check_in <= s_to:
-                        return float(rate)
+                    matched = s_from <= check_in <= s_to
+                if matched:
+                    if adults is not None:
+                        occupancy_rates = season.get("occupancyRates") or {}
+                        occ_rate = occupancy_rates.get(str(adults))
+                        if occ_rate is not None:
+                            return float(occ_rate)
+                    return float(rate)
             except (ValueError, TypeError):
                 continue
         return None
@@ -252,8 +259,9 @@ class RoomTypeRepository:
             return 0.0
 
     @staticmethod
-    def resolve_rate(room: dict, check_in: date) -> Tuple[float, Optional[float]]:
+    def resolve_rate(room: dict, check_in: date, adults: Optional[int] = None) -> Tuple[float, Optional[float]]:
         """Return (base_rate, non_refundable_rate) using daily override, then season, then base.
+        If adults is provided, uses per-occupancy rates from seasons when available.
         Applies weekend surcharge for Friday/Saturday nights."""
         # 1. Check daily rate override first (highest priority) — no surcharge on explicit overrides
         daily_rates = room.get("daily_rates") or {}
@@ -264,9 +272,9 @@ class RoomTypeRepository:
             nr = room.get("non_refundable_rate")
             return (float(daily_override), float(nr) if nr is not None else None)
 
-        # 2. Check seasons
+        # 2. Check seasons (with occupancy support)
         seasons = RoomTypeRepository._parse_seasons(room)
-        season_rate = RoomTypeRepository._find_season_rate(seasons, check_in)
+        season_rate = RoomTypeRepository._find_season_rate(seasons, check_in, adults)
 
         if season_rate is not None:
             base_rate = season_rate

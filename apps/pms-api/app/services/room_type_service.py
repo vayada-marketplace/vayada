@@ -21,6 +21,7 @@ async def get_rooms_for_guest(
     slug: str,
     check_in: Optional[date] = None,
     check_out: Optional[date] = None,
+    adults: Optional[int] = None,
 ) -> List[RoomTypeResponse]:
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
@@ -53,7 +54,7 @@ async def get_rooms_for_guest(
             remaining = total
 
         if check_in:
-            base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in)
+            base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in, adults)
         else:
             base_rate = float(room["base_rate"])
             nr = room.get("non_refundable_rate")

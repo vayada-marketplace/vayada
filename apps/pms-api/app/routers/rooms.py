@@ -18,9 +18,10 @@ async def get_rooms(
     slug: str,
     check_in: Optional[date] = Query(None),
     check_out: Optional[date] = Query(None),
+    adults: Optional[int] = Query(None),
 ):
     try:
-        rooms = await get_rooms_for_guest(slug, check_in, check_out)
+        rooms = await get_rooms_for_guest(slug, check_in, check_out, adults)
     except Exception as e:
         logger.error("Error fetching rooms for %s: %s", slug, e)
         raise HTTPException(status_code=500, detail="Internal server error")
