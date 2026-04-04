@@ -52,6 +52,27 @@ class RoomBlockRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def update(block_id: str, updates: dict) -> Optional[dict]:
+        if not updates:
+            return await RoomBlockRepository.get_by_id(block_id)
+
+        set_clauses = []
+        values = []
+        idx = 1
+        for col, val in updates.items():
+            set_clauses.append(f"{col} = ${idx}")
+            values.append(val)
+            idx += 1
+
+        query = (
+            f"UPDATE room_blocks SET {', '.join(set_clauses)} "
+            f"WHERE id = ${idx} RETURNING *"
+        )
+        values.append(block_id)
+        row = await Database.fetchrow(query, *values)
+        return dict(row) if row else None
+
+    @staticmethod
     async def delete(block_id: str) -> bool:
         result = await Database.execute(
             "DELETE FROM room_blocks WHERE id = $1", block_id

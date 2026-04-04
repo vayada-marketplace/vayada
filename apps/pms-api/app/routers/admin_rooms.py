@@ -18,7 +18,7 @@ from app.models.room_type import (
     MonthlyRate,
 )
 from app.models.room import RoomCreate, RoomUpdate, RoomResponse
-from app.models.room_block import RoomBlockCreate, RoomBlockResponse
+from app.models.room_block import RoomBlockCreate, RoomBlockUpdate, RoomBlockResponse
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +418,46 @@ async def create_room_block(
         blocked_count=block["blocked_count"],
         reason=block["reason"],
         created_at=block["created_at"].isoformat(),
+    )
+
+
+@router.patch("/room-blocks/{block_id}", response_model=RoomBlockResponse)
+async def update_room_block(
+    block_id: str,
+    data: RoomBlockUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    block = await RoomBlockRepository.get_by_id(block_id)
+    if not block or str(block["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room block not found")
+
+    updates = data.model_dump(exclude_unset=True)
+
+    # Validate date range against the (possibly updated) fields
+    new_start = updates.get("start_date", block["start_date"])
+    new_end = updates.get("end_date", block["end_date"])
+    if new_end <= new_start:
+        raise HTTPException(status_code=400, detail="end_date must be after start_date")
+
+    # Validate blocked_count against room type total
+    if "blocked_count" in updates:
+        room = await RoomTypeRepository.get_by_id(str(block["room_type_id"]))
+        if room and (updates["blocked_count"] < 1 or updates["blocked_count"] > room["total_rooms"]):
+            raise HTTPException(
+                status_code=400,
+                detail=f"blocked_count must be between 1 and {room['total_rooms']}",
+            )
+
+    updated = await RoomBlockRepository.update(block_id, updates)
+    return RoomBlockResponse(
+        id=str(updated["id"]),
+        room_type_id=str(updated["room_type_id"]),
+        start_date=str(updated["start_date"]),
+        end_date=str(updated["end_date"]),
+        blocked_count=updated["blocked_count"],
+        reason=updated["reason"],
+        created_at=updated["created_at"].isoformat(),
     )
 
 
