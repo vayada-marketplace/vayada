@@ -9,10 +9,11 @@ export const hotelService = {
     return apiClient.get<Hotel>(`/api/hotels/${slug}${langParam}`)
   },
 
-  async getRooms(slug: string, checkIn?: string, checkOut?: string): Promise<RoomType[]> {
+  async getRooms(slug: string, checkIn?: string, checkOut?: string, adults?: number): Promise<RoomType[]> {
     const params = new URLSearchParams()
     if (checkIn) params.set('check_in', checkIn)
     if (checkOut) params.set('check_out', checkOut)
+    if (adults) params.set('adults', String(adults))
     const qs = params.toString()
     const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
     const res = await fetch(`${base}/api/hotels/${slug}/rooms${qs ? `?${qs}` : ''}`)

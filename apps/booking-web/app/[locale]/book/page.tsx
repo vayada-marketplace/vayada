@@ -46,7 +46,8 @@ function BookPageContent() {
   useEffect(() => {
     const ci = searchParams.get('checkIn')
     const co = searchParams.get('checkOut')
-    if (ci && co) refetchRooms(ci, co)
+    const a = parseInt(searchParams.get('adults') || '2')
+    if (ci && co) refetchRooms(ci, co, a)
   }, [])
   const checkIn = searchParams.get('checkIn') || '2026-02-13'
   const checkOut = searchParams.get('checkOut') || '2026-02-18'

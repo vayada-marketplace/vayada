@@ -119,7 +119,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!roomsLoading && rooms.length > 0 && !initialFetchDone) {
       setInitialFetchDone(true)
-      refetchRooms(checkIn, checkOut)
+      refetchRooms(checkIn, checkOut, adults)
     }
   }, [roomsLoading, rooms.length])
 
@@ -240,9 +240,9 @@ export default function HomePage() {
 
       {/* Search Bar — sticky on scroll */}
       <div className="sticky top-4 z-30 max-w-5xl mx-auto px-4 -mt-10">
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-col md:flex-row items-center gap-4 md:gap-6">
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 md:p-6 flex flex-row flex-wrap items-center gap-4 md:gap-6">
           {/* Dates — clickable to open calendar */}
-          <div className="relative flex-1 min-w-0">
+          <div className="relative flex-1 min-w-[120px]">
             <button
               onClick={() => { setCalendarOpen(!calendarOpen); setGuestsOpen(false) }}
               className="flex items-center gap-3 w-full text-left hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
@@ -273,10 +273,10 @@ export default function HomePage() {
           </div>
 
           {/* Divider */}
-          <div className="hidden md:block w-px h-12 bg-gray-200" />
+          <div className="w-px h-12 bg-gray-200" />
 
           {/* Guests — clickable to open selector */}
-          <div className="relative w-full md:w-auto">
+          <div className="relative w-auto">
             <button
               onClick={() => { setGuestsOpen(!guestsOpen); setCalendarOpen(false) }}
               className="flex items-center gap-3 w-full hover:bg-gray-50 rounded-xl p-1 -m-1 transition-colors"
@@ -383,7 +383,7 @@ export default function HomePage() {
               setCommittedChildren(children)
               setSearching(true)
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
-              await refetchRooms(checkIn, checkOut)
+              await refetchRooms(checkIn, checkOut, adults)
               setSearching(false)
             }}
             disabled={searching || roomsRefetching}

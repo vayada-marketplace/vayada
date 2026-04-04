@@ -32,7 +32,7 @@ interface HotelContextValue {
   error: string | null
   locale: string
   slug: string
-  refetchRooms: (checkIn?: string, checkOut?: string) => Promise<void>
+  refetchRooms: (checkIn?: string, checkOut?: string, adults?: number) => Promise<void>
 }
 
 const HotelContext = createContext<HotelContextValue>({
@@ -75,10 +75,10 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
       })
   }, [locale, slug])
 
-  const refetchRooms = async (checkIn?: string, checkOut?: string) => {
+  const refetchRooms = async (checkIn?: string, checkOut?: string, adults?: number) => {
     setRoomsLoading(true)
     try {
-      const roomsData = await hotelService.getRooms(slug, checkIn, checkOut)
+      const roomsData = await hotelService.getRooms(slug, checkIn, checkOut, adults)
       setRooms(roomsData)
     } catch (err) {
       console.error('Failed to refetch rooms', err)

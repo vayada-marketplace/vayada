@@ -84,11 +84,12 @@ function PaymentPageContent() {
   const checkIn = searchParams.get('checkIn') || ''
   const checkOut = searchParams.get('checkOut') || ''
 
+  const adultsParam = parseInt(searchParams.get('adults') || '2')
+
   // Ensure rooms have date-resolved rates
   useEffect(() => {
-    if (checkIn && checkOut) refetchRooms(checkIn, checkOut)
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam)
   }, [])
-  const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
   const roomsParam = parseInt(searchParams.get('rooms') || '1')
   const currentStep = 4
