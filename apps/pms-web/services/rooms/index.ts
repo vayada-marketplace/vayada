@@ -28,7 +28,7 @@ export interface RoomType {
   monthlyRates: Record<string, MonthlyRate>
   dailyRates: Record<string, number>
   operatingPeriods: { from: string; to: string }[]
-  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
+  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number; occupancyRates?: Record<string, string> }[]
   weekendSurcharge: string
   cancellationPolicy: string
   flexibleRateEnabled: boolean
@@ -59,7 +59,7 @@ export interface RoomTypeCreate {
   monthlyRates?: Record<string, MonthlyRate>
   dailyRates?: Record<string, number>
   operatingPeriods?: { from: string; to: string }[]
-  seasons?: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
+  seasons?: { name: string; tier: string; from: string; to: string; rate: string; minStay: number; occupancyRates?: Record<string, string> }[]
   weekendSurcharge?: string
   cancellationPolicy?: string
   flexibleRateEnabled?: boolean
