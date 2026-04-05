@@ -170,6 +170,19 @@ export default function CalendarPage() {
     return map
   }, [data])
 
+  // Index of each room within its room type (for rendering blocks on only N rooms)
+  const roomIndexInType = useMemo(() => {
+    if (!data) return {}
+    const counts: Record<string, number> = {}
+    const map: Record<string, number> = {}
+    for (const room of data.rooms) {
+      const idx = counts[room.roomTypeId] || 0
+      map[room.id] = idx
+      counts[room.roomTypeId] = idx + 1
+    }
+    return map
+  }, [data])
+
   const allBookings = useMemo(() => data?.bookings || [], [data])
 
   return (
@@ -296,8 +309,10 @@ export default function CalendarPage() {
                           <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
                         ))}
                       </div>
-                      {/* Block bars */}
-                      {(blocksByRoomType[room.roomTypeId] || []).map((bl) => {
+                      {/* Block bars — only show on first N rooms of each type (N = blockedCount) */}
+                      {(blocksByRoomType[room.roomTypeId] || [])
+                        .filter((bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount)
+                        .map((bl) => {
                         const style = getBarStyle(bl.startDate, bl.endDate)
                         if (!style) return null
                         return (
