@@ -105,7 +105,7 @@ function MonthGrid({
   const rangeEnd = checkIn && !checkOut && hoverDate ? hoverDate : checkOut
 
   return (
-    <div>
+    <div className="w-[252px] mx-auto">
       {/* Month title */}
       <h3 className="text-sm font-semibold text-gray-900 text-center mb-3">
         {formatMonthYear(year, month)}
