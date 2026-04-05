@@ -315,12 +315,32 @@ export default function DatePickerCalendar({
         <p className="text-sm text-gray-500">Prices shown are starting rates per night</p>
       </div>
 
-      {/* Navigation + Calendars */}
-      <div className="flex items-start gap-6">
-        {/* Prev button */}
+      {/* Mobile nav bar */}
+      <div className="flex md:hidden items-center justify-between mb-3">
         <button
           onClick={handlePrev}
-          className="mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+          className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <button
+          onClick={handleNext}
+          className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Navigation + Calendars */}
+      <div className="flex items-start md:gap-6">
+        {/* Prev button - desktop only */}
+        <button
+          onClick={handlePrev}
+          className="hidden md:block mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
         >
           <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -328,7 +348,7 @@ export default function DatePickerCalendar({
         </button>
 
         {/* Two month grids */}
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           <MonthGrid
             year={baseYear}
             month={baseMonth}
@@ -351,10 +371,10 @@ export default function DatePickerCalendar({
           />
         </div>
 
-        {/* Next button */}
+        {/* Next button - desktop only */}
         <button
           onClick={handleNext}
-          className="mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+          className="hidden md:block mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
         >
           <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
