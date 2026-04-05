@@ -111,13 +111,13 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-5">
+      <div className="p-4 md:p-6">
+        <div className="animate-pulse space-y-4 md:space-y-5">
           <div className="h-8 bg-gray-200 rounded w-40" />
-          <div className="grid grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-28 bg-gray-200 rounded-xl" />)}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-24 md:h-28 bg-gray-200 rounded-xl" />)}
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
             <div className="h-56 bg-gray-200 rounded-xl" />
             <div className="h-56 bg-gray-200 rounded-xl" />
           </div>
@@ -137,15 +137,15 @@ export default function DashboardPage() {
   })
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-5">
       {/* Title */}
       <div>
-        <h1 className="text-xl font-bold text-gray-900">{t('dashboard.title')}</h1>
-        <p className="text-xs text-gray-400 mt-0.5">{dateLabel}</p>
+        <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('dashboard.title')}</h1>
+        <p className="text-xs text-gray-400 mt-1 md:mt-0.5">{dateLabel}</p>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           label={t('dashboard.occupancyTonight')}
           value={`${occupancyPct}%`}
@@ -177,7 +177,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Arrivals & Departures */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* Arrivals */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
@@ -187,7 +187,7 @@ export default function DashboardPage() {
                 {arrivalsToday.length}
               </span>
             </div>
-            <Link href="/bookings" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+            <Link href="/bookings" className="shrink-0 text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap">
               {t('dashboard.viewAll')} ↗
             </Link>
           </div>
@@ -196,16 +196,17 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {arrivalsToday.map(b => (
-                <div key={b.id} className="flex items-center gap-3 py-2">
+                <div key={b.id} className="flex items-center gap-3 py-2.5">
                   <Avatar first={b.guestFirstName} last={b.guestLastName} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">
+                    <p className="text-sm font-medium text-gray-900 truncate">
                       {b.guestFirstName} {b.guestLastName}
                     </p>
-                    <p className="text-xs text-gray-400">{b.roomName}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      <span className="text-gray-500">3:00 PM</span> · {b.roomName}
+                    </p>
                   </div>
-                  <span className="text-xs text-gray-500 shrink-0">3:00 PM</span>
-                  <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                  <span className="shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                     {t('dashboard.confirmed')}
                   </span>
                 </div>
@@ -223,7 +224,7 @@ export default function DashboardPage() {
                 {departuresToday.length}
               </span>
             </div>
-            <Link href="/bookings" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+            <Link href="/bookings" className="shrink-0 text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap">
               {t('dashboard.viewAll')} ↗
             </Link>
           </div>
@@ -232,16 +233,17 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {departuresToday.map(b => (
-                <div key={b.id} className="flex items-center gap-3 py-2">
+                <div key={b.id} className="flex items-center gap-3 py-2.5">
                   <Avatar first={b.guestFirstName} last={b.guestLastName} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">
+                    <p className="text-sm font-medium text-gray-900 truncate">
                       {b.guestFirstName} {b.guestLastName}
                     </p>
-                    <p className="text-xs text-gray-400">{b.roomName}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      <span className="text-gray-500">11:00 AM</span> · {b.roomName}
+                    </p>
                   </div>
-                  <span className="text-xs text-gray-500 shrink-0">11:00 AM</span>
-                  <span className="shrink-0 text-xs font-medium text-green-600">{t('dashboard.settled')} ✓</span>
+                  <span className="shrink-0 text-[11px] font-medium text-green-600">{t('dashboard.settled')} ✓</span>
                 </div>
               ))}
             </div>
@@ -283,15 +285,15 @@ function StatCard({
   icon: React.ReactNode
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <div className="flex items-start justify-between mb-2">
-        <p className="text-xs text-gray-500">{label}</p>
+    <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-4">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <p className="text-[11px] md:text-xs text-gray-500 leading-tight">{label}</p>
         <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center text-blue-500 shrink-0">
           {icon}
         </div>
       </div>
-      <p className="text-2xl font-bold text-gray-900 leading-none mb-1.5">{value}</p>
-      <p className="text-xs text-gray-400">{sub}</p>
+      <p className="text-xl md:text-2xl font-bold text-gray-900 leading-none mb-1.5 truncate">{value}</p>
+      <p className="text-[11px] md:text-xs text-gray-400 leading-tight line-clamp-2">{sub}</p>
     </div>
   )
 }
