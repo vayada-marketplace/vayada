@@ -307,7 +307,7 @@ export default function DatePickerCalendar({
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 md:p-6 z-50 w-[340px] md:w-[640px]"
+      className="absolute left-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 md:p-6 z-50 w-[calc(100vw-2rem)] md:w-[640px]"
     >
       {/* Header */}
       <div className="mb-4">
