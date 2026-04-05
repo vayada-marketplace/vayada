@@ -2,6 +2,7 @@ import json
 import logging
 from typing import List
 from datetime import date
+from app.database import Database
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -377,6 +378,41 @@ async def get_calendar(
 # ── Room Blocks ────────────────────────────────────────────────────
 
 
+async def _check_block_availability(
+    room_type_id: str,
+    total_rooms: int,
+    start_date: date,
+    end_date: date,
+    new_blocked_count: int,
+    exclude_block_id: str = None,
+) -> None:
+    """Raise 400 if adding a block of new_blocked_count rooms on the given
+    date range would cause total occupancy (bookings + blocks) to exceed
+    total_rooms on any day."""
+    from datetime import timedelta
+    current = start_date
+    while current < end_date:
+        next_day = current + timedelta(days=1)
+        booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
+        # Sum blocks overlapping this day, optionally excluding one block (for updates)
+        if exclude_block_id:
+            blocked = await Database.fetchval(
+                """
+                SELECT COALESCE(SUM(blocked_count), 0) FROM room_blocks
+                WHERE room_type_id = $1 AND start_date < $3 AND end_date > $2 AND id <> $4
+                """,
+                room_type_id, current, next_day, exclude_block_id,
+            ) or 0
+        else:
+            blocked = await RoomTypeRepository.count_blocked(room_type_id, current, next_day)
+        if booked + blocked + new_blocked_count > total_rooms:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough availability on {current.isoformat()}: {booked} booked, {blocked} blocked, {total_rooms} total. Cannot block {new_blocked_count} more room(s).",
+            )
+        current = next_day
+
+
 @router.post("/room-blocks", response_model=RoomBlockResponse, status_code=201)
 async def create_room_block(
     data: RoomBlockCreate,
@@ -399,6 +435,14 @@ async def create_room_block(
         raise HTTPException(
             status_code=400, detail="end_date must be after start_date"
         )
+
+    await _check_block_availability(
+        data.room_type_id,
+        room["total_rooms"],
+        data.start_date,
+        data.end_date,
+        data.blocked_count,
+    )
 
     block = await RoomBlockRepository.create(
         {
@@ -440,14 +484,24 @@ async def update_room_block(
     if new_end <= new_start:
         raise HTTPException(status_code=400, detail="end_date must be after start_date")
 
-    # Validate blocked_count against room type total
-    if "blocked_count" in updates:
-        room = await RoomTypeRepository.get_by_id(str(block["room_type_id"]))
-        if room and (updates["blocked_count"] < 1 or updates["blocked_count"] > room["total_rooms"]):
-            raise HTTPException(
-                status_code=400,
-                detail=f"blocked_count must be between 1 and {room['total_rooms']}",
-            )
+    # Validate blocked_count against room type total and availability
+    new_count = updates.get("blocked_count", block["blocked_count"])
+    room = await RoomTypeRepository.get_by_id(str(block["room_type_id"]))
+    if room and (new_count < 1 or new_count > room["total_rooms"]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"blocked_count must be between 1 and {room['total_rooms']}",
+        )
+
+    if room:
+        await _check_block_availability(
+            str(block["room_type_id"]),
+            room["total_rooms"],
+            new_start,
+            new_end,
+            new_count,
+            exclude_block_id=block_id,
+        )
 
     updated = await RoomBlockRepository.update(block_id, updates)
     return RoomBlockResponse(
