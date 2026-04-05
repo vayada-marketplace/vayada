@@ -62,7 +62,7 @@ function CurrencySelect({ value, onChange, t }: { value: string; onChange: (v: s
   const selectedLabel = CURRENCIES.find((c) => c.value === value)?.label ?? value
 
   return (
-    <div ref={ref} className="relative w-full max-w-xs">
+    <div ref={ref} className="relative w-full sm:max-w-xs">
       <button
         type="button"
         onClick={() => { setOpen(!open); setSearch('') }}
@@ -176,7 +176,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
           <div className="h-64 bg-gray-200 rounded" />
@@ -186,8 +186,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-6">{t('settings.title')}</h1>
+    <div className="p-4 md:p-6 max-w-3xl">
+      <h1 className="text-2xl md:text-xl font-bold text-gray-900 mb-5 md:mb-6">{t('settings.title')}</h1>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -200,26 +200,26 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="space-y-8">
+      <div className="space-y-5 md:space-y-8">
         {/* Currency */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.currency')}</h2>
           <p className="text-xs text-gray-500 mb-4">{t('settings.currencyDescription')}</p>
           <CurrencySelect value={currency} onChange={setCurrency} t={t} />
           <button
             onClick={saveCurrency}
             disabled={savingCurrency}
-            className="mt-3 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+            className="mt-4 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {savingCurrency ? t('common.saving') : t('common.save')}
           </button>
         </div>
 
         {/* Check-in / Check-out */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.checkInCheckOut')}</h2>
           <p className="text-xs text-gray-500 mb-4">{t('settings.checkInCheckOutDescription')}</p>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
             <div>
               <label className="block text-[12px] font-semibold text-gray-700 mb-2">{t('settings.checkInPeriod')}</label>
               <div className="flex items-center gap-2">
@@ -274,7 +274,7 @@ export default function SettingsPage() {
           <button
             onClick={saveTimes}
             disabled={savingTimes}
-            className="mt-4 block px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+            className="mt-5 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {savingTimes ? t('common.saving') : t('common.save')}
           </button>

@@ -91,17 +91,17 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
     <div className="border-b border-gray-100 last:border-b-0">
       {/* Room Type Header Row */}
       <div
-        className="flex items-center px-5 py-4 hover:bg-gray-50/50 transition-colors cursor-pointer"
+        className="flex items-center px-3 md:px-5 py-3 md:py-4 gap-2 md:gap-3 hover:bg-gray-50/50 transition-colors cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Expand arrow */}
         <ChevronDownIcon
-          className={`w-4 h-4 text-gray-400 mr-3 transition-transform shrink-0 ${expanded ? '' : '-rotate-90'}`}
+          className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded ? '' : '-rotate-90'}`}
         />
 
         {/* Room type icon */}
-        <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center mr-4 shrink-0">
-          <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
+          <svg className="w-4 h-4 md:w-5 md:h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 21V7a2 2 0 0 1 2-2h6v16" />
             <path d="M13 21V3h6a2 2 0 0 1 2 2v16" />
             <path d="M3 21h18" />
@@ -114,30 +114,28 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
 
         {/* Name + info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-semibold text-gray-900">{room.name}</span>
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${categoryStyle}`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[14px] font-semibold text-gray-900 truncate">{room.name}</span>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${categoryStyle}`}>
               {room.category || getCategoryLabel(room.name)}
             </span>
           </div>
-          <p className="text-[12px] text-gray-400 mt-0.5">
+          <p className="text-[12px] text-gray-400 mt-0.5 truncate">
             {typeRooms.length} room{typeRooms.length !== 1 ? 's' : ''}
             {room.maxOccupancy > 0 && <> &middot; {room.maxOccupancy} {t('rooms.occ')}</>}
             {room.size > 0 && <> &middot; {room.size}m&sup2;</>}
           </p>
         </div>
 
-        {/* Status badges */}
-        <div className="flex items-center gap-1.5 mr-6">
-          <span className={`w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`} title={`${available} available`}>
-            {typeRooms.length}
-          </span>
-        </div>
+        {/* Count badge */}
+        <span className={`shrink-0 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`} title={`${available} available`}>
+          {typeRooms.length}
+        </span>
 
         {/* Duplicate + Configure buttons */}
         <button
           onClick={(e) => { e.stopPropagation(); onDuplicate(room.id) }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+          className="flex items-center justify-center w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
           title={t('rooms.duplicate')}
         >
           <DocumentDuplicateIcon className="w-3.5 h-3.5" />
@@ -145,16 +143,17 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
         <Link
           href={`/rooms/${room.id}`}
           onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+          className="flex items-center justify-center gap-1.5 w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+          title={t('rooms.configure')}
         >
           <Cog6ToothIcon className="w-3.5 h-3.5" />
-          {t('rooms.configure')}
+          <span className="hidden md:inline">{t('rooms.configure')}</span>
         </Link>
       </div>
 
       {/* Expanded: Derived Rates + Individual Rooms */}
       {expanded && (
-        <div className="pl-16 pr-5 pb-4">
+        <div className="pl-5 md:pl-16 pr-3 md:pr-5 pb-4">
           {/* Derived Rates */}
           {room.nonRefundableRate != null && room.nonRefundableRate > 0 && (
             <div className="flex items-center gap-2 mb-3">
@@ -214,13 +213,13 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
 
           {/* Add room form */}
           {addingRoom ? (
-            <div className="flex items-center gap-2 mt-2 pl-4 ml-1 border-l-2 border-primary-300">
+            <div className="flex flex-wrap items-center gap-2 mt-2 pl-4 ml-1 border-l-2 border-primary-300 py-2">
               <input
                 type="text"
                 value={newRoomNumber}
                 onChange={(e) => setNewRoomNumber(e.target.value)}
                 placeholder={t('rooms.roomNumberPlaceholder')}
-                className="w-32 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="flex-1 min-w-[120px] md:flex-initial md:w-32 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleAddRoom()}
               />
@@ -306,33 +305,35 @@ export default function RoomsPage() {
   }, [rooms, searchQuery])
 
   return (
-    <div className="p-6 pb-0">
+    <div className="p-4 md:p-6 pb-0">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{t('rooms.title')}</h1>
+      <div className="flex items-start justify-between gap-3 mb-5 md:mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('rooms.title')}</h1>
           <p className="text-sm text-gray-500 mt-1">{t('rooms.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <button
             onClick={() => setShowImportModal(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 border border-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+            title="Import Listing"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Listing
+            <span className="hidden md:inline">Import Listing</span>
           </button>
           <Link
             href="/rooms/new"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
-            {t('rooms.addRoomType')}
+            <span className="hidden md:inline">{t('rooms.addRoomType')}</span>
+            <span className="md:hidden">Add</span>
           </Link>
         </div>
       </div>
 
-      {/* Search + View Toggle */}
-      <div className="flex items-center justify-between mb-5">
+      {/* Search */}
+      <div className="mb-4 md:mb-5">
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -340,7 +341,7 @@ export default function RoomsPage() {
             placeholder={t('rooms.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-72 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            className="w-full md:w-72 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
           />
         </div>
       </div>

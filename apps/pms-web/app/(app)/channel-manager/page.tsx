@@ -149,7 +149,7 @@ export default function ChannelManagerPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
           <div className="h-64 bg-gray-200 rounded" />
@@ -159,8 +159,8 @@ export default function ChannelManagerPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-gray-900 mb-6">{t('channels.title')}</h1>
+    <div className="p-4 md:p-6 max-w-3xl">
+      <h1 className="text-2xl md:text-xl font-bold text-gray-900 mb-5 md:mb-6">{t('channels.title')}</h1>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -176,7 +176,7 @@ export default function ChannelManagerPage() {
       <div className="space-y-6">
         {!isEnabled ? (
           /* ── Not enabled ─────────────────────────────── */
-          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 md:p-6 text-center">
             <h2 className="text-sm font-semibold text-gray-900 mb-2">{t('channels.title')}</h2>
             <p className="text-sm text-gray-600 mb-5">
               {t('channels.enableDescription')}
@@ -193,15 +193,15 @@ export default function ChannelManagerPage() {
           /* ── Enabled ─────────────────────────────────── */
           <>
             {/* Status bar */}
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold text-gray-900">{t('channels.title')}</h2>
                   <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                     {t('channels.active')}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={handleSyncBookings}
                     disabled={syncingBookings}
@@ -245,21 +245,21 @@ export default function ChannelManagerPage() {
             </div>
 
             {/* OTA Channel Connections (iframe) */}
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
                 <h2 className="text-sm font-semibold text-gray-900">{t('channels.otaConnections')}</h2>
                 {!iframeUrl ? (
                   <button
                     onClick={handleOpenChannels}
                     disabled={loadingIframe}
-                    className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                    className="w-full md:w-auto px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
                   >
                     {loadingIframe ? t('channels.loading') : t('channels.manageChannels')}
                   </button>
                 ) : (
                   <button
                     onClick={() => setIframeUrl(null)}
-                    className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="w-full md:w-auto px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                   >
                     {t('channels.closeChannels')}
                   </button>
@@ -282,25 +282,25 @@ export default function ChannelManagerPage() {
 
             {/* Provisioned room types */}
             {roomMappings.length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl p-6">
+              <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
                 <h2 className="text-sm font-semibold text-gray-900 mb-4">{t('channels.provisionedRoomTypes')}</h2>
                 <div className="border border-gray-200 rounded-lg divide-y divide-gray-200">
                   {roomMappings.map((m) => {
                     const rateMapping = rateMappings.find((r) => r.roomTypeId === m.roomTypeId)
                     return (
-                      <div key={m.id} className="flex items-center justify-between px-4 py-3">
-                        <div className="flex items-center gap-3 text-sm min-w-0">
+                      <div key={m.id} className="flex items-center justify-between gap-2 px-3 md:px-4 py-3">
+                        <div className="flex items-center gap-2 md:gap-3 text-sm min-w-0 flex-1">
                           <CheckCircleIcon className="w-4 h-4 text-green-500 shrink-0" />
                           <span className="font-medium text-gray-900 truncate">
                             {m.roomTypeName || m.roomTypeId}
                           </span>
-                          <LinkIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                          <span className="text-gray-500 font-mono text-xs truncate">
+                          <LinkIcon className="w-3.5 h-3.5 text-gray-400 shrink-0 hidden md:inline-block" />
+                          <span className="text-gray-500 font-mono text-xs truncate hidden md:inline-block">
                             {m.channexRoomTypeId.slice(0, 8)}...
                           </span>
                         </div>
                         {rateMapping && (
-                          <span className="text-xs text-gray-400">
+                          <span className="shrink-0 text-xs text-gray-400">
                             {rateMapping.sellMode}
                           </span>
                         )}
@@ -316,7 +316,7 @@ export default function ChannelManagerPage() {
               <button
                 onClick={() => setShowDisableConfirm(true)}
                 disabled={disabling}
-                className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                className="w-full md:w-auto px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
                 {disabling ? t('channels.disabling') : t('channels.disableButton')}
               </button>

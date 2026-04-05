@@ -121,21 +121,21 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="p-6 max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Link href="/rooms" className="text-gray-400 hover:text-gray-600">
+    <div className="p-4 md:p-6 max-w-5xl">
+      <div className="flex items-center justify-between gap-3 mb-5 md:mb-6">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/rooms" className="text-gray-400 hover:text-gray-600 shrink-0">
             <ArrowLeftIcon className="w-5 h-5" />
           </Link>
-          <h1 className="text-xl font-bold text-gray-900">Edit: {room.name}</h1>
+          <h1 className="text-xl font-bold text-gray-900 truncate">Edit: {room.name}</h1>
         </div>
         <button
           onClick={() => setShowDeleteConfirm(true)}
           disabled={deleting}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 shrink-0"
         >
           <TrashIcon className="w-4 h-4" />
-          {deleting ? 'Deleting...' : 'Delete'}
+          <span className="hidden md:inline">{deleting ? 'Deleting...' : 'Delete'}</span>
         </button>
       </div>
 

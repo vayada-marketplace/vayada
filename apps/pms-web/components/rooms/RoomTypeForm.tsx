@@ -306,13 +306,13 @@ export default function RoomTypeForm({
       )}
 
       {/* Tabs */}
-      <div className="flex gap-6 mb-6 border-b border-gray-200">
+      <div className="flex gap-5 md:gap-6 mb-5 md:mb-6 border-b border-gray-200 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
         {ROOM_TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
-            className={`pb-2.5 text-[12px] font-medium transition-colors relative ${
+            className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
               activeTab === tab.key
                 ? 'text-gray-900'
                 : 'text-gray-400 hover:text-gray-600'
@@ -328,7 +328,7 @@ export default function RoomTypeForm({
 
       {/* Tab 1: Room Details */}
       {activeTab === 'details' && (
-        <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-5">
+        <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Room Type Basics</h3>
             <span className="text-[11px] font-medium text-red-500">Required</span>
@@ -424,7 +424,7 @@ export default function RoomTypeForm({
           </div>
 
           {/* Bedrooms, Bathrooms, Room Size, Total Rooms */}
-          <div className="grid grid-cols-4 gap-4 items-start">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 items-start">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Bedrooms</label>
@@ -513,7 +513,7 @@ export default function RoomTypeForm({
           </div>
 
           {/* Sort Order & Active */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <label className="text-[12px] font-semibold text-gray-900">Sort Order</label>
@@ -526,7 +526,7 @@ export default function RoomTypeForm({
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
               />
             </div>
-            <div className="flex items-end col-span-2">
+            <div className="flex items-end md:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <button
                   type="button"
@@ -556,7 +556,7 @@ export default function RoomTypeForm({
                   <p className="text-[11px] text-gray-400">Operating periods repeat every year — dates outside are automatically closed</p>
                 </div>
               </div>
-              <div className="ml-9">
+              <div className="ml-4 md:ml-9">
                 {/* Timeline Bar */}
                 <div className="mb-4">
                   <div className="flex text-[9px] text-gray-400 mb-1">
@@ -597,7 +597,7 @@ export default function RoomTypeForm({
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-4 space-y-3">
+                <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 md:px-5 py-4 space-y-3">
                   {operatingPeriods.map((period, idx) => {
                     const fromMonth = period.from ? parseInt(period.from.split('-')[0]) : 0
                     const fromDay = period.from ? parseInt(period.from.split('-')[1]) : 0
@@ -615,8 +615,8 @@ export default function RoomTypeForm({
                     }
                     return (
                       <div key={idx}>
-                        <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1 flex-1 min-w-[160px]">
                           <select
                             value={fromDay}
                             onChange={(e) => updatePeriod('from', fromMonth, parseInt(e.target.value) || 0)}
@@ -639,7 +639,7 @@ export default function RoomTypeForm({
                           </select>
                         </div>
                         <span className="text-[11px] text-gray-400">to</span>
-                        <div className="flex items-center gap-1 flex-1">
+                        <div className="flex items-center gap-1 flex-1 min-w-[160px]">
                           <select
                             value={toDay}
                             onChange={(e) => updatePeriod('to', toMonth, parseInt(e.target.value) || 0)}
@@ -697,9 +697,9 @@ export default function RoomTypeForm({
                   <p className="text-[11px] text-gray-400">Draw seasons on your operating period, then set a base rate per season</p>
                 </div>
               </div>
-              <div className="ml-9">
+              <div className="ml-4 md:ml-9">
                 {seasons.length === 0 ? (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-5 py-6 text-center">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-3 md:px-5 py-6 text-center">
                     <p className="text-[11px] text-gray-400">No seasons yet. Add one below.</p>
                   </div>
                 ) : (
@@ -735,7 +735,7 @@ export default function RoomTypeForm({
                               </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             {(() => {
                               const sFromMonth = season.from ? parseInt(season.from.split('-')[0]) : 0
                               const sFromDay = season.from ? parseInt(season.from.split('-')[1]) : 0
@@ -1019,7 +1019,7 @@ export default function RoomTypeForm({
                   <p className="text-[11px] text-gray-400">Select at least one rate plan</p>
                 </div>
               </div>
-              <div className="ml-9 space-y-2.5">
+              <div className="ml-4 md:ml-9 space-y-2.5">
                 {/* Flexible Rate */}
                 <div className={`rounded-xl border px-4 py-3.5 transition-colors ${flexibleRateEnabled ? 'border-primary-200 bg-primary-50/30' : 'border-gray-200 bg-gray-50'}`}>
                   <div className="flex items-center gap-3">
@@ -1137,7 +1137,7 @@ export default function RoomTypeForm({
                   <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
                 </div>
               </div>
-              <div className="ml-9 flex flex-wrap items-center gap-2">
+              <div className="ml-4 md:ml-9 flex flex-wrap items-center gap-2">
                 {['+0%', '+10%', '+15%', '+20%'].map((opt) => (
                   <button
                     key={opt}
@@ -1365,7 +1365,7 @@ export default function RoomTypeForm({
       {activeTab === 'media' && (
         <div className="space-y-4">
           {/* Room Images Section */}
-          <div className="bg-white rounded-xl border border-gray-200 px-6 py-6">
+          <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6">
             <ImageUpload
               images={form.images || []}
               onChange={(urls) => updateForm({ images: urls })}
@@ -1375,14 +1375,14 @@ export default function RoomTypeForm({
           </div>
 
           {/* Features Section */}
-          <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+          <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
                 <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Features</h3>
-                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Room card tags</span>
-                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal highlights</span>
+                <span className="hidden md:inline-block text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Room card tags</span>
+                <span className="hidden md:inline-block text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal highlights</span>
               </div>
-              <span className="text-[11px] font-medium text-primary-600">{(form.features || []).length} selected</span>
+              <span className="shrink-0 text-[11px] font-medium text-primary-600">{(form.features || []).length} selected</span>
             </div>
             <p className="text-[10px] text-gray-400">What makes this room special — guests see these tags directly on the room listing. Choose the 3–6 most compelling highlights.</p>
 
@@ -1442,13 +1442,13 @@ export default function RoomTypeForm({
           </div>
 
           {/* Amenities Section */}
-          <div className="bg-white rounded-xl border border-gray-200 px-6 py-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+          <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
                 <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">Amenities</h3>
-                <span className="text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal full list</span>
+                <span className="hidden md:inline-block text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">&rarr; Modal full list</span>
               </div>
-              <span className="text-[11px] font-medium text-primary-600">{(form.amenities || []).length} selected</span>
+              <span className="shrink-0 text-[11px] font-medium text-primary-600">{(form.amenities || []).length} selected</span>
             </div>
             <p className="text-[10px] text-gray-400">What&apos;s included — guests see these after clicking &quot;View Details&quot;. Group by category for easy scanning.</p>
 
@@ -1607,18 +1607,18 @@ export default function RoomTypeForm({
         </div>
       )}
 
-      {/* Submit / Cancel */}
-      <div className="mt-6 flex items-center justify-end gap-3">
+      {/* Submit / Cancel — sticky on mobile, inline on desktop */}
+      <div className="mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
         <Link
           href={cancelHref}
-          className="px-4 py-2 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          className="flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors"
         >
           Cancel
         </Link>
         <button
           type="submit"
           disabled={saving || overlappingSeasonIndices.size > 0 || seasonGaps.length > 0 || operatingPeriods.some(p => p.from && p.to && p.to < p.from)}
-          className="px-6 py-2 bg-primary-600 text-white text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          className="flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : submitLabel}
         </button>
