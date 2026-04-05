@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import List
@@ -7,6 +8,7 @@ from app.database import Database
 from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
+from app.services.channex_sync_service import push_availability_for_room_type
 from app.utils import parse_jsonb, get_hotel_id
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
@@ -454,6 +456,15 @@ async def create_room_block(
             "reason": data.reason,
         }
     )
+
+    # Push updated availability to Channex
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id, data.room_type_id,
+            start_date=data.start_date, end_date=data.end_date,
+        )
+    )
+
     return RoomBlockResponse(
         id=str(block["id"]),
         room_type_id=str(block["room_type_id"]),
@@ -504,6 +515,17 @@ async def update_room_block(
         )
 
     updated = await RoomBlockRepository.update(block_id, updates)
+
+    # Push updated availability to Channex — cover union of old and new date ranges
+    sync_start = min(block["start_date"], new_start)
+    sync_end = max(block["end_date"], new_end)
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id, str(block["room_type_id"]),
+            start_date=sync_start, end_date=sync_end,
+        )
+    )
+
     return RoomBlockResponse(
         id=str(updated["id"]),
         room_type_id=str(updated["room_type_id"]),
@@ -525,3 +547,11 @@ async def delete_room_block(
     if not block or str(block["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Room block not found")
     await RoomBlockRepository.delete(block_id)
+
+    # Push updated availability to Channex
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id, str(block["room_type_id"]),
+            start_date=block["start_date"], end_date=block["end_date"],
+        )
+    )
