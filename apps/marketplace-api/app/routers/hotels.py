@@ -56,7 +56,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id_al
     """
     try:
         # Verify user is a hotel
-        user = await UserRepository.get_by_id(user_id, columns="id, type")
+        user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
             raise HTTPException(
@@ -75,10 +75,14 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id_al
             user_id, columns="id, name, location, website, about, picture, phone"
         )
 
+        # Lazy-create a hotel profile for hotel users that don't have one yet
+        # (e.g. users who registered via the booking engine, which only writes
+        # to the shared auth DB). This lets them complete onboarding in the
+        # marketplace without hitting a 404.
         if not hotel:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Hotel profile not found"
+            await HotelRepository.create_profile(user_id, user.get('name') or 'Hotel')
+            hotel = await HotelRepository.get_profile_by_user_id(
+                user_id, columns="id, name, location, website, about, picture, phone"
             )
 
         # Check for listings
@@ -160,7 +164,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
     Get the complete profile data for the currently authenticated hotel user.
     """
     try:
-        user = await UserRepository.get_by_id(user_id, columns="id, type, email, status")
+        user = await UserRepository.get_by_id(user_id, columns="id, type, email, name, status")
         if not user:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -175,10 +179,13 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
         hotel = await HotelRepository.get_profile_by_user_id(
             user_id, columns="id, user_id, name, location, about, website, phone, picture, status, created_at, updated_at"
         )
+        # Lazy-create a hotel profile for hotel users that don't have one yet
+        # (e.g. users who registered via the booking engine, which only writes
+        # to the shared auth DB).
         if not hotel:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Hotel profile not found"
+            await HotelRepository.create_profile(user_id, user.get('name') or 'Hotel')
+            hotel = await HotelRepository.get_profile_by_user_id(
+                user_id, columns="id, user_id, name, location, about, website, phone, picture, status, created_at, updated_at"
             )
 
         listings_data = await HotelRepository.get_listings_by_profile_id(hotel["id"])
