@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import { getCurrencySymbol } from '@/lib/utils'
@@ -829,6 +829,7 @@ export default function RoomTypeForm({
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-gray-100">
+                          <th className="text-left px-4 py-2 text-gray-500 font-medium w-8"></th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Season</th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Flex Rate</th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Min Stay</th>
@@ -842,6 +843,60 @@ export default function RoomTypeForm({
                           return (
                             <React.Fragment key={idx}>
                               <tr className="border-b border-gray-50">
+                                <td className="px-2 py-2.5 align-middle">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (idx === 0) return
+                                        const u = [...seasons]
+                                        const tmp = u[idx - 1]
+                                        u[idx - 1] = u[idx]
+                                        u[idx] = tmp
+                                        setSeasons(u)
+                                        setExpandedOccupancy(prev => {
+                                          const next = { ...prev }
+                                          const a = prev[idx - 1]
+                                          const b = prev[idx]
+                                          if (b !== undefined) next[idx - 1] = b; else delete next[idx - 1]
+                                          if (a !== undefined) next[idx] = a; else delete next[idx]
+                                          return next
+                                        })
+                                      }}
+                                      disabled={idx === 0}
+                                      className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${idx === 0 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
+                                      title="Move up"
+                                      aria-label="Move season up"
+                                    >
+                                      <ChevronUpIcon className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (idx === seasons.length - 1) return
+                                        const u = [...seasons]
+                                        const tmp = u[idx + 1]
+                                        u[idx + 1] = u[idx]
+                                        u[idx] = tmp
+                                        setSeasons(u)
+                                        setExpandedOccupancy(prev => {
+                                          const next = { ...prev }
+                                          const a = prev[idx]
+                                          const b = prev[idx + 1]
+                                          if (b !== undefined) next[idx] = b; else delete next[idx]
+                                          if (a !== undefined) next[idx + 1] = a; else delete next[idx + 1]
+                                          return next
+                                        })
+                                      }}
+                                      disabled={idx === seasons.length - 1}
+                                      className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${idx === seasons.length - 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
+                                      title="Move down"
+                                      aria-label="Move season down"
+                                    >
+                                      <ChevronDownIcon className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </td>
                                 <td className="px-4 py-2.5">
                                   <div className="flex items-center gap-2">
                                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
@@ -906,7 +961,7 @@ export default function RoomTypeForm({
                               </tr>
                               {isOccExpanded && maxOcc > 1 && (
                                 <tr className="border-b border-gray-50 bg-gray-50/50">
-                                  <td colSpan={3} className="px-4 py-2.5 pl-10">
+                                  <td colSpan={4} className="px-4 py-2.5 pl-10">
                                     <div className="space-y-1.5">
                                       <span className="text-[10px] text-gray-400 font-medium">Rate per number of guests</span>
                                       {Array.from({ length: maxOcc }, (_, i) => i + 1).map(guestCount => {
