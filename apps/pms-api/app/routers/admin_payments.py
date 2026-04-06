@@ -130,14 +130,25 @@ async def update_payment_settings(
                 zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
                 decimals = 0 if zero_decimal else 2
                 room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
+                converted_count = 0
                 for rt in room_types:
+                    room_currency = rt.get("currency", "EUR")
+                    if room_currency == new_currency:
+                        # Room is already in the target currency — just update
+                        # the currency field, do NOT apply exchange-rate math.
+                        # This prevents re-converting rates that were set up in
+                        # the correct currency before the payment settings row
+                        # existed (which defaults to EUR).
+                        await RoomTypeRepository.update(str(rt["id"]), {"currency": new_currency})
+                        continue
                     rt_updates = await convert_room_type_rates(rt, rate, decimals)
                     rt_updates["currency"] = new_currency
                     if rt_updates:
                         await RoomTypeRepository.update(str(rt["id"]), rt_updates)
+                    converted_count += 1
                 logger.info(
-                    "Converted %d room type rates from %s to %s (rate=%.6f)",
-                    len(room_types), old_currency, new_currency, rate,
+                    "Converted %d/%d room type rates from %s to %s (rate=%.6f)",
+                    converted_count, len(room_types), old_currency, new_currency, rate,
                 )
             except Exception as e:
                 logger.error("Failed to convert room rates %s → %s: %s", old_currency, new_currency, e)

@@ -247,7 +247,6 @@ class RoomTypeRepository:
         return min(rates) if rates else None
 
     @staticmethod
-    @staticmethod
     def _parse_weekend_surcharge(raw: str) -> float:
         """Parse weekend surcharge string like '+15%' into a multiplier (e.g. 0.15)."""
         if not raw:
