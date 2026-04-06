@@ -140,11 +140,23 @@ export default function HomePage() {
   const [searching, setSearching] = useState(false)
   const roomsSectionRef = useRef<HTMLDivElement>(null)
 
-  // Default non-refundable rate expanded for all rooms
+  // Auto-expand rate: if only one rate exists, expand it so the
+  // "Select This Rate" button is immediately visible without a click.
+  // When both rates exist, default to non-refundable expanded.
   useEffect(() => {
     if (rooms.length > 0 && Object.keys(expandedRates).length === 0) {
       const defaults: Record<string, string> = {}
-      rooms.forEach((room) => { defaults[room.id] = 'nonrefundable' })
+      rooms.forEach((room) => {
+        const hasNonRefundable = room.nonRefundableRate != null
+        const hasFlexible = room.flexibleRateEnabled !== false
+        if (hasNonRefundable && hasFlexible) {
+          defaults[room.id] = 'nonrefundable'
+        } else if (hasNonRefundable) {
+          defaults[room.id] = 'nonrefundable'
+        } else if (hasFlexible) {
+          defaults[room.id] = 'flexible'
+        }
+      })
       setExpandedRates(defaults)
     }
   }, [rooms])
