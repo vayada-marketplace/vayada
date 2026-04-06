@@ -169,7 +169,8 @@ export default function ReservationsPage() {
       </div>
 
       {/* Status Tabs */}
-      <div className="flex items-center gap-1 mb-4 md:mb-6 border-b border-gray-200 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+      <div className="relative border-b border-gray-200 mb-4 md:mb-6">
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
         {visibleTabs.map((tab) => {
           const isActive = statusFilter === tab.value
           return (
@@ -192,6 +193,8 @@ export default function ReservationsPage() {
             </button>
           )
         })}
+      </div>
+      <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
       </div>
 
       {/* Table */}

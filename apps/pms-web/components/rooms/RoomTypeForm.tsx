@@ -306,24 +306,27 @@ export default function RoomTypeForm({
       )}
 
       {/* Tabs */}
-      <div className="flex gap-5 md:gap-6 mb-5 md:mb-6 border-b border-gray-200 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-        {ROOM_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
-              activeTab === tab.key
-                ? 'text-gray-900'
-                : 'text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            {tab.label}
-            {activeTab === tab.key && (
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gray-900 rounded-full" />
-            )}
-          </button>
-        ))}
+      <div className="relative border-b border-gray-200 mb-5 md:mb-6">
+        <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+          {ROOM_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
+                activeTab === tab.key
+                  ? 'text-gray-900'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {tab.label}
+              {activeTab === tab.key && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gray-900 rounded-full" />
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
       </div>
 
       {/* Tab 1: Room Details */}
