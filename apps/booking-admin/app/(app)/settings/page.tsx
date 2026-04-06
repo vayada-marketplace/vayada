@@ -388,26 +388,28 @@ export default function SettingsPage() {
   ]
 
   return (
-    <div className="p-6 max-w-3xl">
-          <h1 className="text-xl font-bold text-gray-900">Settings</h1>
+    <div className="p-4 md:p-6 max-w-3xl">
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">Settings</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage your property and account preferences</p>
 
           {/* Tab bar */}
-          <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-5">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-[13px] transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            ))}
+          <div className="mt-4 md:mt-5 overflow-x-auto scrollbar-hide">
+            <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 md:py-1.5 rounded-md text-[12px] md:text-[13px] whitespace-nowrap transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-white text-gray-900 font-semibold shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <tab.icon className="w-4 h-4 shrink-0" />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Feedback banner */}
@@ -425,7 +427,7 @@ export default function SettingsPage() {
               ) : (
                 <>
                   {/* Property Information card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                     <h2 className="text-sm font-semibold text-gray-900">Property Information</h2>
                     <p className="text-[13px] text-gray-500 mt-0.5 mb-3">Basic details about your property</p>
                     <div className="space-y-3">
@@ -460,7 +462,7 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Contact Information card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <PhoneIcon className="w-4 h-4 text-gray-700" />
                       <h2 className="text-sm font-semibold text-gray-900">Contact Information</h2>
@@ -516,7 +518,7 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Social Media card */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <GlobeAltIcon className="w-4 h-4 text-gray-700" />
                       <h2 className="text-sm font-semibold text-gray-900">Social Media</h2>
@@ -579,7 +581,7 @@ export default function SettingsPage() {
           {activeTab === 'booking' && (
             <div className="mt-5 space-y-4">
                   {/* Refer a Guest */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                     <ToggleSwitch
                       enabled={settings.refer_a_guest_enabled ?? false}
                       onChange={() => updateSetting('refer_a_guest_enabled', !settings.refer_a_guest_enabled)}
@@ -589,7 +591,7 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Custom Domain */}
-                  <div className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                     <h2 className="text-sm font-semibold text-gray-900">Custom Domain</h2>
                     {domainStatus?.configured ? (
                       <div className="space-y-4 mt-3">
@@ -673,7 +675,7 @@ export default function SettingsPage() {
           {/* Notifications tab */}
           {activeTab === 'notifications' && (
             <div className="mt-5 space-y-4">
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <EnvelopeIcon className="w-4 h-4 text-gray-700" />
                   <h2 className="text-sm font-semibold text-gray-900">Email Notifications</h2>
@@ -716,7 +718,7 @@ export default function SettingsPage() {
           {activeTab === 'security' && (
             <div className="mt-5 space-y-4">
               {/* Change Email card */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <EnvelopeIcon className="w-4 h-4 text-gray-700" />
                   <h2 className="text-sm font-semibold text-gray-900">Change Email</h2>
@@ -764,7 +766,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Change Password card */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <LockClosedIcon className="w-4 h-4 text-gray-700" />
                   <h2 className="text-sm font-semibold text-gray-900">Change Password</h2>
@@ -813,7 +815,7 @@ export default function SettingsPage() {
           {/* Billing tab */}
           {activeTab === 'billing' && (
             <div className="mt-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Commission Plan */}
                 <div className={`bg-white rounded-lg border-2 p-5 transition-all ${
                   settings.billing_active_plan === 'commission' && !settings.billing_pending_switch
@@ -926,10 +928,10 @@ export default function SettingsPage() {
               )}
 
               {/* Payment Methods */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
                 <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which payment options are available to guests. Enable multiple to give guests flexibility.</p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Online Card Payment */}
                   <button
                     onClick={() => updateSetting('online_card_payment', !settings.online_card_payment)}
@@ -1071,7 +1073,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Payments — Stripe Connect / Xendit */}
-              {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-5">
+              {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
                 <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
                   {paymentProvider === 'xendit'
@@ -1088,7 +1090,7 @@ export default function SettingsPage() {
 
                 {paymentProvider === 'xendit' ? (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
                         <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
@@ -1150,13 +1152,13 @@ export default function SettingsPage() {
               </div>}
 
               {/* Payout Details */}
-              {(settings.pay_at_property_enabled || settings.bank_transfer) && <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
+              {(settings.pay_at_property_enabled || settings.bank_transfer) && <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">Payout Details</h2>
                   <p className="text-[12px] text-gray-500 mt-0.5">Bank account where guests and vayada pay you.</p>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
                     <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
                     <input
                       type="text"
@@ -1166,7 +1168,7 @@ export default function SettingsPage() {
                       placeholder="e.g. Sunrise Beach Resort Ltd"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
                     <input
                       type="text"
