@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { RoomType } from '@/lib/types'
 import { useCurrency } from '@/contexts/CurrencyContext'
@@ -34,6 +34,15 @@ export default function RoomDetailModal({
   const [selectedRate, setSelectedRate] = useState<'flexible' | 'nonrefundable'>('flexible')
   const { formatPrice } = useCurrency()
 
+  // Lock body scroll when modal is open to prevent background scroll-bleed on mobile
+  useEffect(() => {
+    if (open) {
+      const original = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => { document.body.style.overflow = original }
+    }
+  }, [open])
+
   if (!open) return null
 
   const flexibleTotal = room.baseRate * nights
@@ -42,8 +51,8 @@ export default function RoomDetailModal({
   const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-5xl max-h-[95vh] md:max-h-[92vh] overflow-hidden flex flex-col overscroll-contain">
         {/* Top bar with nav */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3 pb-1 flex-shrink-0">
           <button onClick={onPrev} className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 text-gray-500">
@@ -58,7 +67,7 @@ export default function RoomDetailModal({
           </button>
         </div>
 
-        <div className="flex flex-col md:flex-row overflow-hidden flex-1 min-h-0">
+        <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
           <div className="md:w-1/2 flex-shrink-0 flex flex-col min-h-0">
             <div className="relative flex-1 min-h-[300px]">
