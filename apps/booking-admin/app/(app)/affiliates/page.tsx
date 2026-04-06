@@ -157,32 +157,30 @@ export default function AffiliatesPage() {
   }, [affiliates, search])
 
   return (
-    <div className="p-8 max-w-[1400px]">
+    <div className="p-4 md:p-8 max-w-[1400px]">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Affiliates</h1>
-          <p className="text-[13px] text-gray-500 mt-1">
-            Manage referrals, track performance, and process payouts
-          </p>
-        </div>
+      <div className="mb-5 md:mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Affiliates</h1>
+        <p className="text-[13px] text-gray-500 mt-1">
+          Manage referrals, track performance, and process payouts
+        </p>
       </div>
 
       {/* Revenue Banner */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-4">
-        <div className="flex items-start justify-between mb-4">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 mb-4">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
           <div>
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
               Revenue Generated via Affiliates
             </p>
-            <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.totalRevenue)}</p>
+            <p className="text-2xl md:text-3xl font-bold text-gray-900">{formatCurrency(stats.totalRevenue)}</p>
           </div>
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
+          <div className="flex bg-gray-100 rounded-lg p-0.5 w-full md:w-auto">
             {TIME_RANGES.map((range) => (
               <button
                 key={range}
                 onClick={() => setTimeRange(range)}
-                className={`px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
+                className={`flex-1 md:flex-initial px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
                   timeRange === range
                     ? 'bg-white text-gray-900 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700'
@@ -193,7 +191,7 @@ export default function AffiliatesPage() {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-4 text-[13px] text-gray-500">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-gray-500">
           <span>
             <span className="font-semibold text-gray-900">{stats.totalBookings}</span> Bookings
             referred
@@ -212,8 +210,8 @@ export default function AffiliatesPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-5 md:mb-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Total Affiliates
           </p>
@@ -223,7 +221,7 @@ export default function AffiliatesPage() {
           </p>
           <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Revenue via Affiliates
           </p>
@@ -231,7 +229,7 @@ export default function AffiliatesPage() {
           <p className="text-[11px] text-gray-500 mt-1">Last 30 days</p>
           <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Bookings Referred
           </p>
@@ -241,7 +239,7 @@ export default function AffiliatesPage() {
           </p>
           <p className="text-[11px] text-gray-400 font-medium mt-2">0% vs last month</p>
         </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Commissions Paid
           </p>
@@ -256,13 +254,13 @@ export default function AffiliatesPage() {
       </div>
 
       {/* Main Tabs */}
-      <div className="border-b border-gray-200 mb-5">
-        <div className="flex gap-6">
+      <div className="border-b border-gray-200 mb-4 md:mb-5 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+        <div className="flex gap-4 md:gap-6">
           {MAIN_TABS.map((tab) => (
             <button
               key={tab}
               onClick={() => setMainTab(tab)}
-              className={`pb-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+              className={`shrink-0 whitespace-nowrap pb-2.5 text-[13px] font-medium border-b-2 transition-colors ${
                 mainTab === tab
                   ? 'border-gray-900 text-gray-900'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -283,7 +281,7 @@ export default function AffiliatesPage() {
       {mainTab === 'Applications' && (
         <>
           {/* Type filter pills + search */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div className="flex gap-2">
               {TYPE_FILTERS.map((type) => (
                 <button
@@ -304,7 +302,7 @@ export default function AffiliatesPage() {
               placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-64 px-3 py-2 text-[13px] border border-gray-200 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full sm:w-64 px-3 py-2 text-[13px] border border-gray-200 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
             />
           </div>
 
@@ -317,28 +315,59 @@ export default function AffiliatesPage() {
               <p className="text-[13px] text-gray-500">No pending applications found.</p>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <>
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-2.5">
+              {pendingAffiliates.map((a) => (
+                <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3.5">
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-500 shrink-0">
+                        {getInitials(a.fullName)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{a.fullName}</p>
+                        <p className="text-[11px] text-gray-500 truncate">{a.email}</p>
+                      </div>
+                    </div>
+                    <span className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}>
+                      {a.userType}
+                    </span>
+                  </div>
+                  <div className="text-[12px] text-gray-500 space-y-0.5 border-t border-gray-100 pt-2 mb-3">
+                    {a.socialMedia && <p>Channel: <span className="text-gray-700">{a.socialMedia}</span></p>}
+                    <p>Payout: <span className="text-gray-700">{getPayoutLabel(a.paymentMethod)}</span></p>
+                    <p>Applied: <span className="text-gray-700">{formatDate(a.createdAt)}</span></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleApprove(a.id)}
+                      className="flex-1 py-2 text-[12px] font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleReject(a.id)}
+                      className="flex-1 py-2 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/80">
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Applicant
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Type
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Channel
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Payout method
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Applied
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Applicant</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Channel</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Payout method</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Applied</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -346,9 +375,7 @@ export default function AffiliatesPage() {
                     <tr key={a.id} className="hover:bg-gray-50/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-500 shrink-0">
-                            {getInitials(a.fullName)}
-                          </div>
+                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-500 shrink-0">{getInitials(a.fullName)}</div>
                           <div>
                             <p className="font-medium text-gray-900">{a.fullName}</p>
                             <p className="text-[11px] text-gray-500">{a.email}</p>
@@ -356,35 +383,15 @@ export default function AffiliatesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}
-                        >
-                          {a.userType}
-                        </span>
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}>{a.userType}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        {a.socialMedia ? (
-                          <p className="text-gray-600 text-[12px]">{a.socialMedia}</p>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </td>
+                      <td className="px-4 py-3">{a.socialMedia ? <p className="text-gray-600 text-[12px]">{a.socialMedia}</p> : <span className="text-gray-400">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{getPayoutLabel(a.paymentMethod)}</td>
                       <td className="px-4 py-3 text-gray-500">{formatDate(a.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => handleApprove(a.id)}
-                            className="px-3 py-1.5 text-[12px] font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleReject(a.id)}
-                            className="px-3 py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                          >
-                            Reject
-                          </button>
+                          <button onClick={() => handleApprove(a.id)} className="px-3 py-1.5 text-[12px] font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">Approve</button>
+                          <button onClick={() => handleReject(a.id)} className="px-3 py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Reject</button>
                         </div>
                       </td>
                     </tr>
@@ -392,6 +399,7 @@ export default function AffiliatesPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </>
       )}
@@ -405,7 +413,7 @@ export default function AffiliatesPage() {
               placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-64 px-3 py-2 text-[13px] border border-gray-200 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full sm:w-64 px-3 py-2 text-[13px] border border-gray-200 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
             />
           </div>
 
@@ -418,43 +426,74 @@ export default function AffiliatesPage() {
               <p className="text-[13px] text-gray-500">No affiliates found.</p>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <>
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-2.5">
+              {allAffiliatesFiltered.map((a) => (
+                <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3.5">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-500 shrink-0">{getInitials(a.fullName)}</div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{a.fullName}</p>
+                        <p className="text-[11px] text-gray-500 truncate">{a.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}>
+                        {a.status === 'suspended' ? 'Blocked' : a.status}
+                      </span>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}>{a.userType}</span>
+                    </div>
+                  </div>
+                  <div className="border-t border-gray-100 pt-2 mb-2">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="font-mono text-[11px] bg-gray-100 px-2 py-0.5 rounded">{a.referralCode}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-[10px] text-gray-400">Clicks</p>
+                        <p className="text-sm font-semibold text-gray-900">{a.clickCount}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-400">Bookings</p>
+                        <p className="text-sm font-semibold text-gray-900">{a.bookingCount}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-400">Revenue</p>
+                        <p className="text-sm font-semibold text-gray-900">{a.totalRevenue > 0 ? formatCurrency(a.totalRevenue) : '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {(a.status === 'approved' || a.status === 'suspended') && (
+                    <div className="border-t border-gray-100 pt-2">
+                      {a.status === 'approved' ? (
+                        <button onClick={() => handleBlock(a.id)} className="w-full py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
+                      ) : (
+                        <button onClick={() => handleUnblock(a.id)} className="w-full py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/80">
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Code
-                    </th>
-                    <th className="text-center px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Type
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Clicks
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Bookings
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Conv. Rate
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Revenue
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Commission
-                    </th>
-                    <th className="text-center px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Email</th>
+                    <th className="text-left px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Code</th>
+                    <th className="text-center px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Clicks</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Bookings</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Conv. Rate</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Revenue</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Commission</th>
+                    <th className="text-center px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="text-right px-4 py-3 font-medium text-[11px] text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -462,63 +501,24 @@ export default function AffiliatesPage() {
                     <tr key={a.id} className="hover:bg-gray-50/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-semibold text-gray-500 shrink-0">
-                            {getInitials(a.fullName)}
-                          </div>
+                          <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-semibold text-gray-500 shrink-0">{getInitials(a.fullName)}</div>
                           <p className="font-medium text-gray-900">{a.fullName}</p>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600">{a.email}</td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-[11px] bg-gray-100 px-2 py-0.5 rounded">
-                          {a.referralCode}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}
-                        >
-                          {a.userType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">
-                        {a.clickCount}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">
-                        {a.bookingCount}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">
-                        {a.conversionRate > 0 ? `${a.conversionRate}%` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">
-                        {a.totalRevenue > 0 ? formatCurrency(a.totalRevenue) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">
-                        {a.totalCommission > 0 ? formatCurrency(a.totalCommission) : '—'}
-                        <span className="text-[11px] text-gray-500 ml-1">({a.commissionPct}%)</span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}
-                        >
-                          {a.status === 'suspended' ? 'Blocked' : a.status}
-                        </span>
-                      </td>
+                      <td className="px-4 py-3"><span className="font-mono text-[11px] bg-gray-100 px-2 py-0.5 rounded">{a.referralCode}</span></td>
+                      <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${USER_TYPE_STYLES[a.userType] || ''}`}>{a.userType}</span></td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.clickCount}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.bookingCount}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.conversionRate > 0 ? `${a.conversionRate}%` : '—'}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.totalRevenue > 0 ? formatCurrency(a.totalRevenue) : '—'}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.totalCommission > 0 ? formatCurrency(a.totalCommission) : '—'}<span className="text-[11px] text-gray-500 ml-1">({a.commissionPct}%)</span></td>
+                      <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}>{a.status === 'suspended' ? 'Blocked' : a.status}</span></td>
                       <td className="px-4 py-3 text-right">
                         {a.status === 'approved' ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }}
-                            className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                          >
-                            Block
-                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
                         ) : a.status === 'suspended' ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }}
-                            className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                          >
-                            Unblock
-                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
                         ) : null}
                       </td>
                     </tr>
@@ -526,6 +526,7 @@ export default function AffiliatesPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </>
       )}

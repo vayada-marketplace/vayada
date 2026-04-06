@@ -460,16 +460,16 @@ export default function BookingFlowPage() {
 
   if (loading) {
     return (
-      <div className="p-6 h-full flex items-center justify-center">
+      <div className="p-4 md:p-6 h-full flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-4 md:p-6 h-full flex flex-col">
       <div className="shrink-0">
-        <h1 className="text-xl font-bold text-gray-900">{t('bookingFlow.title')}</h1>
+        <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('bookingFlow.title')}</h1>
         <p className="text-sm text-gray-500 mt-0.5">{t('bookingFlow.subtitle')}</p>
       </div>
 
@@ -479,21 +479,24 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-5 bg-gray-100 rounded-lg p-1 grid grid-cols-6 shrink-0 max-w-2xl">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center justify-center gap-1 py-1.5 rounded-md text-[12px] transition-all ${
-              activeTab === tab.id
-                ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <tab.icon className="w-3.5 h-3.5" />
-            {tab.label}
-          </button>
-        ))}
+      <div className="mt-4 md:mt-5 shrink-0 overflow-x-auto scrollbar-hide">
+        <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0 md:max-w-2xl">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1 px-3 py-2 md:py-1.5 rounded-md text-[12px] whitespace-nowrap transition-all ${
+                activeTab === tab.id
+                  ? 'bg-white text-gray-900 font-semibold shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden text-[11px]">{tab.label.replace('Promo Codes', 'Promos').replace('Guest Form', 'Form')}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab content */}
@@ -549,14 +552,14 @@ export default function BookingFlowPage() {
         )}
 
         {activeTab === 'localization' && (
-          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-4">
             <div className="flex items-center gap-1.5">
               <GlobeAltIcon className="w-4 h-4 text-gray-700" />
               <h2 className="text-sm font-semibold text-gray-900">{t('bookingFlow.localization.title')}</h2>
             </div>
 
             {/* Default Currency & Language */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('bookingFlow.localization.defaultCurrency')} <span className="text-gray-700">*</span></label>
                 <FlagSelect<CurrencyOption>
@@ -635,7 +638,7 @@ export default function BookingFlowPage() {
         )}
 
         {activeTab === 'guest-form' && (
-          <div className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <h2 className="text-sm font-semibold text-gray-900">{t('bookingFlow.guestForm.title')}</h2>
             <p className="text-[12px] text-gray-500 mt-0.5 mb-3">{t('bookingFlow.guestForm.subtitle')}</p>
             <div className="space-y-2">

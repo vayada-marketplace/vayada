@@ -127,16 +127,14 @@ export default function DashboardPage() {
   const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, false, 'EUR', t) : null
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-5 md:space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
       </div>
 
       {/* Time Range Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">
         {([
           { key: 'today' as TimeRange, label: t('dashboard.timeRange.today') },
           { key: 'week' as TimeRange, label: t('dashboard.timeRange.week') },
@@ -145,7 +143,7 @@ export default function DashboardPage() {
           <button
             key={key}
             onClick={() => setTimeRange(key)}
-            className={`px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
+            className={`flex-1 sm:flex-initial px-4 py-2 sm:py-1.5 rounded-md text-[13px] font-medium transition-colors ${
               timeRange === key
                 ? 'bg-white text-gray-900 border border-gray-200 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
@@ -159,14 +157,14 @@ export default function DashboardPage() {
       {/* Stats Cards */}
       <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 ${loading ? 'opacity-60' : ''}`}>
         {/* Revenue */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <div className="flex items-start justify-between">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.revenue')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrencyWithCode(stats.revenue, currency) : '--'}</p>
+          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate">{stats ? formatCurrencyWithCode(stats.revenue, currency) : '--'}</p>
           {revenueDiff && (
             <p className={`text-[13px] mt-1 ${revenueDiff.positive === true ? 'text-green-600' : revenueDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {revenueDiff.text}
@@ -176,14 +174,14 @@ export default function DashboardPage() {
         </div>
 
         {/* New Bookings */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <div className="flex items-start justify-between">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.newBookings')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? stats.bookings : '--'}</p>
+          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate">{stats ? stats.bookings : '--'}</p>
           {bookingsDiff && (
             <p className={`text-[13px] mt-1 ${bookingsDiff.positive === true ? 'text-green-600' : bookingsDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {bookingsDiff.text}
@@ -198,7 +196,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Avg. Nightly Rate */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <div className="flex items-start justify-between">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.avgNightlyRate')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -206,7 +204,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? formatCurrencyWithCode(stats.avg_nightly_rate, currency) : '--'}</p>
+          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate">{stats ? formatCurrencyWithCode(stats.avg_nightly_rate, currency) : '--'}</p>
           {rateDiff && (
             <p className={`text-[13px] mt-1 ${rateDiff.positive === true ? 'text-green-600' : rateDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {rateDiff.text}
@@ -216,7 +214,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Page Views */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
           <div className="flex items-start justify-between">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.pageViews')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -224,7 +222,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
           </div>
-          <p className="text-3xl font-bold text-gray-900 mt-3">{stats ? stats.page_views : '--'}</p>
+          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate">{stats ? stats.page_views : '--'}</p>
           {viewsDiff && (
             <p className={`text-[13px] mt-1 ${viewsDiff.positive === null ? 'text-gray-500' : viewsDiff.positive ? 'text-green-600' : 'text-red-500'}`}>
               {viewsDiff.text}
@@ -242,19 +240,19 @@ export default function DashboardPage() {
       {/* Bookings by Source + Conversion Funnel */}
       <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 ${loading ? 'opacity-60' : ''}`}>
         {/* Bookings by Source */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
           <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-6">{t('dashboard.bookingsBySource.title')}</h3>
 
           {/* Donut Chart */}
           <div className="flex justify-center mb-6">
-            <div className="relative w-48 h-48">
+            <div className="relative w-40 h-40 md:w-48 md:h-48">
               <div
                 className="w-full h-full rounded-full"
                 style={{ background: donutGradient }}
               />
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-28 h-28 rounded-full bg-white flex flex-col items-center justify-center">
-                  <span className="text-2xl font-bold text-gray-900">
+                <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white flex flex-col items-center justify-center">
+                  <span className="text-lg md:text-2xl font-bold text-gray-900">
                     {sources ? formatCurrencyWithCode(sources.total_revenue, currency) : '--'}
                   </span>
                   <span className="text-[11px] text-gray-500">{t('dashboard.bookingsBySource.totalRevenue')}</span>
@@ -299,7 +297,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Conversion Funnel */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
           <div className="flex items-center gap-2 mb-6">
             <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
               {t('dashboard.conversionFunnel.title')} &middot; {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}

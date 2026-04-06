@@ -123,7 +123,7 @@ export default function DesignStudioPage() {
 
   if (loading) {
     return (
-      <div className="p-6 h-full flex items-center justify-center">
+      <div className="p-4 md:p-6 h-full flex items-center justify-center">
         <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
@@ -131,11 +131,11 @@ export default function DesignStudioPage() {
   }
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-4 md:p-6 h-full flex flex-col">
       {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
       <div className="shrink-0">
-        <h1 className="text-xl font-bold text-gray-900">Design Studio</h1>
+        <h1 className="text-2xl md:text-xl font-bold text-gray-900">Design Studio</h1>
         <p className="text-sm text-gray-500 mt-0.5">Customize your booking engine&apos;s look and feel</p>
       </div>
 
@@ -145,10 +145,10 @@ export default function DesignStudioPage() {
       )}
 
       {/* Main split layout */}
-      <div className="mt-5 flex gap-5 flex-1 min-h-0">
+      <div className="mt-4 md:mt-5 flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
 
         {/* LEFT: Controls panel */}
-        <div className="w-[380px] shrink-0 flex flex-col min-h-0">
+        <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col min-h-0">
           {/* Tab bar */}
           <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0">
             {tabs.map((tab) => (
@@ -162,7 +162,8 @@ export default function DesignStudioPage() {
                 }`}
               >
                 <tab.icon className="w-3.5 h-3.5" />
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
               </button>
             ))}
           </div>
@@ -204,7 +205,7 @@ export default function DesignStudioPage() {
         </div>
 
         {/* RIGHT: Live website preview */}
-        <div className="flex-1 min-w-0 bg-white rounded-lg border border-gray-200 flex flex-col min-h-0">
+        <div className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col">
           {/* Browser chrome bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">

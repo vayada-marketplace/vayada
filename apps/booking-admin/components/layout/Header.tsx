@@ -12,7 +12,7 @@ import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
-export default function Header() {
+export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter()
   const { t, locale, setLocale } = useTranslation()
   const [hotels, setHotels] = useState<(HotelSummary | SuperAdminHotel)[]>([])
@@ -75,8 +75,18 @@ export default function Header() {
 
   return (
     <header className="h-12 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
-      {/* Left section: Property Selector + Super Admin Badge + Search */}
-      <div className="flex items-center gap-4">
+      {/* Left section: Hamburger + Property Selector + Super Admin Badge */}
+      <div className="flex items-center gap-2 md:gap-4">
+        {/* Mobile hamburger */}
+        <button
+          onClick={onMenuToggle}
+          className="lg:hidden p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+          aria-label="Toggle menu"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+        </button>
         {/* Property Selector Dropdown */}
         <div className="relative" ref={dropdownRef}>
           {hotels.length <= 1 && !isSuperAdmin ? (
@@ -175,7 +185,7 @@ export default function Header() {
           className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-          {t('layout.header.preview')}
+          <span className="hidden md:inline">{t('layout.header.preview')}</span>
         </button>
 
         {/* Notification Bell + Dropdown */}
