@@ -255,8 +255,9 @@ export default function DatePickerCalendar({
       setTempCheckOut(null)
       setSelectionState('selectCheckOut')
     } else {
-      // If clicked date is before check-in, restart selection
-      if (tempCheckIn && isBeforeDate(date, tempCheckIn)) {
+      // If clicked date is before or equal to check-in, restart selection.
+      // Same-day check-in/check-out (0 nights) is not allowed.
+      if (tempCheckIn && (date === tempCheckIn || isBeforeDate(date, tempCheckIn))) {
         setTempCheckIn(date)
         setTempCheckOut(null)
         setSelectionState('selectCheckOut')
