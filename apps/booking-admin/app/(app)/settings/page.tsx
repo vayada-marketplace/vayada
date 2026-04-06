@@ -393,23 +393,26 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-500 mt-0.5">Manage your property and account preferences</p>
 
           {/* Tab bar */}
-          <div className="mt-4 md:mt-5 overflow-x-auto scrollbar-hide">
-            <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 md:py-1.5 rounded-md text-[12px] md:text-[13px] whitespace-nowrap transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4 shrink-0" />
-                  {tab.label}
-                </button>
-              ))}
+          <div className="mt-4 md:mt-5 relative">
+            <div className="overflow-x-auto scrollbar-hide">
+              <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 md:py-1.5 rounded-md text-[12px] md:text-[13px] whitespace-nowrap transition-all ${
+                      activeTab === tab.id
+                        ? 'bg-white text-gray-900 font-semibold shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <tab.icon className="w-4 h-4 shrink-0" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
+            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
           </div>
 
           {/* Feedback banner */}

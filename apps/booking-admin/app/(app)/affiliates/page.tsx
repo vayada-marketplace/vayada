@@ -254,7 +254,8 @@ export default function AffiliatesPage() {
       </div>
 
       {/* Main Tabs */}
-      <div className="border-b border-gray-200 mb-4 md:mb-5 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+      <div className="relative border-b border-gray-200 mb-4 md:mb-5">
+        <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
         <div className="flex gap-4 md:gap-6">
           {MAIN_TABS.map((tab) => (
             <button
@@ -275,6 +276,8 @@ export default function AffiliatesPage() {
             </button>
           ))}
         </div>
+        </div>
+        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
       </div>
 
       {/* Applications Tab */}

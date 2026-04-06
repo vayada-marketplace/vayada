@@ -479,24 +479,27 @@ export default function BookingFlowPage() {
       )}
 
       {/* Tab bar */}
-      <div className="mt-4 md:mt-5 shrink-0 overflow-x-auto scrollbar-hide">
-        <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0 md:max-w-2xl">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1 px-3 py-2 md:py-1.5 rounded-md text-[12px] whitespace-nowrap transition-all ${
-                activeTab === tab.id
-                  ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <tab.icon className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">{tab.label}</span>
-              <span className="sm:hidden text-[11px]">{tab.label.replace('Promo Codes', 'Promos').replace('Guest Form', 'Form')}</span>
-            </button>
-          ))}
+      <div className="mt-4 md:mt-5 shrink-0 relative">
+        <div className="overflow-x-auto scrollbar-hide">
+          <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0 md:max-w-2xl">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1 px-3 py-2 md:py-1.5 rounded-md text-[12px] whitespace-nowrap transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-white text-gray-900 font-semibold shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <tab.icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden text-[11px]">{tab.label.replace('Promo Codes', 'Promos').replace('Guest Form', 'Form')}</span>
+              </button>
+            ))}
+          </div>
         </div>
+        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
       </div>
 
       {/* Tab content */}
