@@ -42,6 +42,41 @@ const CURRENCY_OPTIONS = [
 
 const CURRENCIES = CURRENCY_OPTIONS.map(c => ({ value: c.code, label: `${c.flag} ${c.name} (${c.code})` }))
 
+const PROPERTY_TYPES = [
+  { value: 'apart_hotel', label: 'Apart Hotel' },
+  { value: 'apartment', label: 'Apartment' },
+  { value: 'boat', label: 'Boat' },
+  { value: 'camping', label: 'Camping' },
+  { value: 'capsule_hotel', label: 'Capsule Hotel' },
+  { value: 'chalet', label: 'Chalet' },
+  { value: 'country_house', label: 'Country House' },
+  { value: 'farm_stay', label: 'Farm Stay' },
+  { value: 'guest_house', label: 'Guest House' },
+  { value: 'holiday_home', label: 'Holiday Home' },
+  { value: 'holiday_park', label: 'Holiday Park' },
+  { value: 'homestay', label: 'Homestay' },
+  { value: 'hostel', label: 'Hostel' },
+  { value: 'hotel', label: 'Hotel' },
+  { value: 'inn', label: 'Inn' },
+  { value: 'lodge', label: 'Lodge' },
+  { value: 'motel', label: 'Motel' },
+  { value: 'resort', label: 'Resort' },
+  { value: 'riad', label: 'Riad' },
+  { value: 'ryokan', label: 'Ryokan' },
+  { value: 'tent', label: 'Tent' },
+  { value: 'villa', label: 'Villa' },
+]
+
+const TIMEZONE_OPTIONS = [
+  'Pacific/Midway', 'Pacific/Honolulu', 'America/Anchorage', 'America/Los_Angeles',
+  'America/Denver', 'America/Chicago', 'America/New_York', 'America/Sao_Paulo',
+  'Atlantic/Azores', 'Europe/London', 'Europe/Paris', 'Europe/Istanbul',
+  'Asia/Dubai', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka',
+  'Asia/Bangkok', 'Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura',
+  'Asia/Singapore', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul',
+  'Australia/Sydney', 'Pacific/Auckland',
+]
+
 function CurrencySelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: (key: string) => string }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -119,6 +154,19 @@ export default function SettingsPage() {
   const [checkOutUntil, setCheckOutUntil] = useState('11:00')
   const [savingTimes, setSavingTimes] = useState(false)
 
+  // Property details
+  const [propertyType, setPropertyType] = useState('guest_house')
+  const [timezone, setTimezone] = useState('Asia/Makassar')
+  const [country, setCountry] = useState('')
+  const [state, setState] = useState('')
+  const [city, setCity] = useState('')
+  const [address, setAddress] = useState('')
+  const [zipCode, setZipCode] = useState('')
+  const [phone, setPhone] = useState('')
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
+  const [savingProperty, setSavingProperty] = useState(false)
+
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {
@@ -135,6 +183,21 @@ export default function SettingsPage() {
         if (s.check_out_from) setCheckOutFrom(s.check_out_from)
         if (s.check_out_until) setCheckOutUntil(s.check_out_until)
         else if (s.check_out_time) setCheckOutUntil(s.check_out_time)
+      })
+      .catch(() => {})
+
+    apiClient.get<any>('/admin/hotel')
+      .then((h) => {
+        if (h.propertyType) setPropertyType(h.propertyType)
+        if (h.timezone) setTimezone(h.timezone)
+        if (h.country) setCountry(h.country)
+        if (h.state) setState(h.state)
+        if (h.city) setCity(h.city)
+        if (h.address) setAddress(h.address)
+        if (h.zipCode) setZipCode(h.zipCode)
+        if (h.phone) setPhone(h.phone)
+        if (h.latitude != null) setLatitude(String(h.latitude))
+        if (h.longitude != null) setLongitude(String(h.longitude))
       })
       .catch(() => {})
   }, [])
@@ -157,6 +220,31 @@ export default function SettingsPage() {
       setError(err.message || t('settings.failedToSaveTimes'))
     } finally {
       setSavingTimes(false)
+    }
+  }
+
+  const savePropertyDetails = async () => {
+    setSavingProperty(true)
+    setError('')
+    setSuccess('')
+    try {
+      await apiClient.patch('/admin/hotel', {
+        property_type: propertyType,
+        timezone,
+        country,
+        state,
+        city,
+        address,
+        zip_code: zipCode,
+        phone,
+        latitude: latitude ? parseFloat(latitude) : null,
+        longitude: longitude ? parseFloat(longitude) : null,
+      })
+      setSuccess('Property details saved')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save property details')
+    } finally {
+      setSavingProperty(false)
     }
   }
 
@@ -201,6 +289,129 @@ export default function SettingsPage() {
       )}
 
       <div className="space-y-5 md:space-y-8">
+        {/* Property Details */}
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Property Details</h2>
+          <p className="text-xs text-gray-500 mb-4">Required for channel manager (OTA connections).</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Property Type</label>
+              <select
+                value={propertyType}
+                onChange={(e) => setPropertyType(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+              >
+                {PROPERTY_TYPES.map((pt) => (
+                  <option key={pt.value} value={pt.value}>{pt.label}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">Affects channel manager billing. Only select &quot;Hotel&quot; for actual hotels.</p>
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Timezone</label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+              >
+                {TIMEZONE_OPTIONS.map((tz) => (
+                  <option key={tz} value={tz}>{tz}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Country (ISO code)</label>
+              <input
+                type="text"
+                value={country}
+                onChange={(e) => setCountry(e.target.value.toUpperCase())}
+                placeholder="ID"
+                maxLength={2}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">State / Province</label>
+              <input
+                type="text"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                placeholder="Bali"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">City</label>
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Seminyak"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Zip Code</label>
+              <input
+                type="text"
+                value={zipCode}
+                onChange={(e) => setZipCode(e.target.value)}
+                placeholder="80361"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Address</label>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Jl. Raya Seminyak No. 123"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Phone</label>
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+62 812 3456 7890"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-[12px] font-semibold text-gray-700 mb-1">Latitude</label>
+                <input
+                  type="text"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  placeholder="-8.6917"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[12px] font-semibold text-gray-700 mb-1">Longitude</label>
+                <input
+                  type="text"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  placeholder="115.1683"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={savePropertyDetails}
+            disabled={savingProperty}
+            className="mt-5 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {savingProperty ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+
         {/* Currency */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.currency')}</h2>
