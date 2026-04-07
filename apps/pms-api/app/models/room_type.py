@@ -37,7 +37,12 @@ def _validate_no_season_overlap(seasons: list) -> list:
     for i, a in enumerate(seasons):
         for b in seasons[i + 1:]:
             if a.get("from") and a.get("to") and b.get("from") and b.get("to"):
-                if a["from"] <= b["to"] and b["from"] <= a["to"]:
+                # Normalize to YYYY-MM-DD for correct string comparison
+                af = _normalize_season_date(a["from"])
+                at = _normalize_season_date(a["to"])
+                bf = _normalize_season_date(b["from"])
+                bt = _normalize_season_date(b["to"])
+                if af <= bt and bf <= at:
                     raise ValueError(
                         f"Season date ranges overlap: "
                         f"{a.get('name', 'Unnamed')} ({a['from']} – {a['to']}) and "
@@ -62,14 +67,20 @@ def _validate_no_season_gaps(seasons: list) -> list:
     """Raise ValueError if there are gaps between consecutive seasons."""
     from datetime import date, timedelta
 
+    def _parse_date(d: str) -> date:
+        """Parse YYYY-MM-DD or MM-DD (normalized to 2024-MM-DD)."""
+        if len(d) == 5 and d[2] == '-':
+            return date(2024, int(d[:2]), int(d[3:]))
+        return date.fromisoformat(d)
+
     valid = [s for s in seasons if s.get("from") and s.get("to")]
     if len(valid) < 2:
         return seasons
-    sorted_seasons = sorted(valid, key=lambda s: s["from"])
+    sorted_seasons = sorted(valid, key=lambda s: _normalize_season_date(s["from"]))
     gaps = []
     for i in range(len(sorted_seasons) - 1):
-        end = date.fromisoformat(sorted_seasons[i]["to"])
-        next_start = date.fromisoformat(sorted_seasons[i + 1]["from"])
+        end = _parse_date(sorted_seasons[i]["to"])
+        next_start = _parse_date(sorted_seasons[i + 1]["from"])
         if end + timedelta(days=1) < next_start:
             gap_from = end + timedelta(days=1)
             gap_to = next_start - timedelta(days=1)
