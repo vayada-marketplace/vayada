@@ -92,30 +92,60 @@ class BookingHotelRepository:
         supported_languages: list,
         user_id: str,
         *,
+        default_language: str = 'en',
         supported_currencies: list | None = None,
         contact_whatsapp: str = '',
         contact_address: str = '',
+        check_in_time: str = '15:00',
+        check_out_time: str = '11:00',
+        pay_at_property_enabled: bool = False,
+        online_card_payment: bool = False,
+        bank_transfer: bool = False,
+        free_cancellation_days: int = 7,
         email_notifications: bool = True,
         new_booking_alerts: bool = True,
         payment_alerts: bool = True,
         weekly_reports: bool = False,
+        special_requests_enabled: bool = True,
+        arrival_time_enabled: bool = False,
+        guest_count_enabled: bool = False,
+        refer_a_guest_enabled: bool = False,
         social_instagram: str = '',
         social_facebook: str = '',
         social_tiktok: str = '',
         social_youtube: str = '',
+        payout_account_holder: str = '',
+        payout_iban: str = '',
+        payout_bank_name: str = '',
+        payout_swift: str = '',
     ) -> dict:
         query = """
-            INSERT INTO booking_hotels (name, slug, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, user_id, email_notifications, new_booking_alerts, payment_alerts, weekly_reports, social_instagram, social_facebook, social_tiktok, social_youtube)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-            RETURNING *
+            INSERT INTO booking_hotels (
+                name, slug, contact_email, contact_phone, contact_whatsapp, contact_address,
+                timezone, currency, default_language, supported_currencies, supported_languages, user_id,
+                check_in_time, check_out_time,
+                pay_at_property_enabled, online_card_payment, bank_transfer, free_cancellation_days,
+                email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
+                special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
+                social_instagram, social_facebook, social_tiktok, social_youtube,
+                payout_account_holder, payout_iban, payout_bank_name, payout_swift
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
+                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+                $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
+            ) RETURNING *
         """
         row = await Database.fetchrow(
             query,
             name, slug, contact_email, contact_phone, contact_whatsapp, contact_address,
-            timezone, currency, json.dumps(supported_currencies or []),
-            json.dumps(supported_languages), user_id,
+            timezone, currency, default_language,
+            json.dumps(supported_currencies or []), json.dumps(supported_languages), user_id,
+            check_in_time, check_out_time,
+            pay_at_property_enabled, online_card_payment, bank_transfer, free_cancellation_days,
             email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
+            special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
             social_instagram, social_facebook, social_tiktok, social_youtube,
+            payout_account_holder, payout_iban, payout_bank_name, payout_swift,
         )
         return dict(row)
 
