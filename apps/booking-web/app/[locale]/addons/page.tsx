@@ -171,7 +171,7 @@ export default function AddonsPage() {
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{addon.description}</p>
                   <div className="flex items-center justify-between">
                     <p className="text-lg font-bold text-gray-900">
-                      {formatPrice(addon.price, hotel?.currency || addon.currency)}
+                      {formatPrice(addon.price, addon.currency)}
                       {addon.perNight && <span className="text-xs font-normal text-gray-500"> /night</span>}
                       {addon.perPerson && <span className="text-xs font-normal text-gray-500"> /person</span>}
                     </p>
@@ -280,7 +280,7 @@ export default function AddonsPage() {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {formatPrice(computedPrice, hotel?.currency || addon.currency)}
+                      {formatPrice(computedPrice, addon.currency)}
                     </p>
                     <button
                       onClick={() => toggleAddon(addon.id)}
@@ -304,7 +304,7 @@ export default function AddonsPage() {
                     let price = addon.price
                     if (addon.perPerson) price *= adultsParam
                     price *= qty
-                    total += convertPrice(price, hotel?.currency || addon.currency)
+                    total += convertPrice(price, addon.currency)
                   }
                   return formatPrice(total, selectedCurrency)
                 })()}
