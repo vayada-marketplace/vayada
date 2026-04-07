@@ -679,15 +679,16 @@ export default function HomePage() {
                       <div className="space-y-3">
                         {/* Non-Refundable Rate */}
                         {room.nonRefundableRate != null && (
-                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200'}`}>
+                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${soldOut ? 'opacity-50 pointer-events-none' : ''} ${expandedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200'}`}>
                           <button
                             onClick={() =>
-                              setExpandedRates((prev) => ({
+                              !soldOut && setExpandedRates((prev) => ({
                                 ...prev,
                                 [room.id]: prev[room.id] === 'nonrefundable' ? null : 'nonrefundable',
                               }))
                             }
-                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors"
+                            disabled={soldOut}
+                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors disabled:cursor-not-allowed"
                           >
                             <div className="flex items-center gap-3">
                               <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -741,15 +742,16 @@ export default function HomePage() {
 
                         {/* Flexible Rate */}
                         {room.flexibleRateEnabled !== false && (
-                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
+                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${soldOut ? 'opacity-50 pointer-events-none' : ''} ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
                           <button
                             onClick={() =>
-                              setExpandedRates((prev) => ({
+                              !soldOut && setExpandedRates((prev) => ({
                                 ...prev,
                                 [room.id]: prev[room.id] === 'flexible' ? null : 'flexible',
                               }))
                             }
-                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors"
+                            disabled={soldOut}
+                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors disabled:cursor-not-allowed"
                           >
                             <div className="flex items-center gap-3">
                               <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
