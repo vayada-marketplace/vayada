@@ -84,6 +84,16 @@ async def get_hotel(user_id: str = Depends(require_hotel_admin)):
         "slug": row["slug"],
         "name": row["name"],
         "contact_email": row["contact_email"],
+        "property_type": row.get("property_type", "guest_house"),
+        "timezone": row.get("timezone", ""),
+        "country": row.get("country", ""),
+        "state": row.get("state", ""),
+        "city": row.get("city", ""),
+        "address": row.get("address", ""),
+        "zip_code": row.get("zip_code", ""),
+        "phone": row.get("phone", ""),
+        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
+        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
         "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
     }
 
@@ -104,7 +114,9 @@ async def update_hotel(
     set_clauses = []
     values = []
     idx = 1
-    for field in ("slug", "name", "contact_email", "last_minute_discount"):
+    for field in ("slug", "name", "contact_email", "last_minute_discount",
+                   "property_type", "timezone", "country", "state", "city",
+                   "address", "zip_code", "phone", "latitude", "longitude"):
         if field in data:
             val = data[field]
             if field == "last_minute_discount":
@@ -129,6 +141,16 @@ async def update_hotel(
         "slug": row["slug"],
         "name": row["name"],
         "contact_email": row.get("contact_email", ""),
+        "property_type": row.get("property_type", "guest_house"),
+        "timezone": row.get("timezone", ""),
+        "country": row.get("country", ""),
+        "state": row.get("state", ""),
+        "city": row.get("city", ""),
+        "address": row.get("address", ""),
+        "zip_code": row.get("zip_code", ""),
+        "phone": row.get("phone", ""),
+        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
+        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
         "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
     }
 

@@ -15,6 +15,14 @@ class HotelRegister(BaseModel):
     contact_email: str
 
 
+PROPERTY_TYPES = [
+    "apart_hotel", "apartment", "boat", "camping", "capsule_hotel",
+    "chalet", "country_house", "farm_stay", "guest_house", "holiday_home",
+    "holiday_park", "homestay", "hostel", "hotel", "inn", "lodge",
+    "motel", "resort", "riad", "ryokan", "tent", "villa",
+]
+
+
 class HotelResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -22,6 +30,16 @@ class HotelResponse(BaseModel):
     slug: str
     name: str
     contact_email: str
+    property_type: str = "guest_house"
+    timezone: str = ""
+    country: str = ""
+    state: str = ""
+    city: str = ""
+    address: str = ""
+    zip_code: str = ""
+    phone: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     user_id: str
     created_at: str
 

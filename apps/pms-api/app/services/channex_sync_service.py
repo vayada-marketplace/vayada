@@ -50,7 +50,17 @@ async def provision_property(hotel_id: str) -> dict:
             api_key,
             title=hotel["name"],
             currency=currency,
+            property_type=hotel.get("property_type") or "guest_house",
+            country=hotel.get("country") or None,
+            state=hotel.get("state") or None,
+            city=hotel.get("city") or None,
+            address=hotel.get("address") or None,
+            zip_code=hotel.get("zip_code") or None,
+            latitude=float(hotel["latitude"]) if hotel.get("latitude") is not None else None,
+            longitude=float(hotel["longitude"]) if hotel.get("longitude") is not None else None,
+            timezone=hotel.get("timezone") or None,
             email=hotel.get("contact_email") or None,
+            phone=hotel.get("phone") or None,
         )
         channex_property_id = prop["id"]
         await ChannexConnectionRepository.set_property_id(hotel_id, channex_property_id)

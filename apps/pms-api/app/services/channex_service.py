@@ -91,7 +91,9 @@ async def create_property(
     *,
     title: str,
     currency: str,
+    property_type: str = None,
     country: str = None,
+    state: str = None,
     city: str = None,
     address: str = None,
     zip_code: str = None,
@@ -103,8 +105,12 @@ async def create_property(
 ) -> dict:
     """Create a property in Channex. Returns the full property object."""
     payload = {"title": title, "currency": currency}
+    if property_type:
+        payload["property_type"] = property_type
     if country:
         payload["country"] = country
+    if state:
+        payload["state"] = state
     if city:
         payload["city"] = city
     if address:
