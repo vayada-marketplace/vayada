@@ -73,9 +73,17 @@ async def _get_party_email_and_name(
     return None, None
 
 
+VAYADA_COLLABORATIONS_EMAIL = "collaborations@vayada.com"
+
+
 def _send_email_background(to_email: str, subject: str, html_body: str):
     """Fire-and-forget email sending — never blocks the response."""
     asyncio.ensure_future(_send_email_safe(to_email, subject, html_body))
+
+
+def _notify_vayada_team(subject: str, html_body: str):
+    """Send a copy to the vayada collaborations team."""
+    _send_email_background(VAYADA_COLLABORATIONS_EMAIL, f"[Internal] {subject}", html_body)
 
 
 async def _send_email_safe(to_email: str, subject: str, html_body: str):
@@ -259,6 +267,7 @@ async def create_collaboration(
                 why_great_fit=request.why_great_fit,
             )
             _send_email_background(recipient_email, "New Collaboration Request on vayada", html)
+            _notify_vayada_team("New Collaboration Request on vayada", html)
 
         return CollaborationResponse(
             id=str(collaboration['id']),
@@ -427,6 +436,7 @@ async def respond_to_collaboration_request(
             )
             subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
             _send_email_background(initiator_email, subject, html)
+            _notify_vayada_team(subject, html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
@@ -873,6 +883,7 @@ async def approve_collaboration_terms(
                         affiliate_link=link_for_email,
                     )
                     _send_email_background(email, "Collaboration Confirmed!", html)
+                _notify_vayada_team("Collaboration Confirmed!", html)
         else:
             # Only one side approved — notify the other party to approve
             if is_creator:
@@ -1019,6 +1030,7 @@ async def cancel_collaboration(
                 reason=request.reason,
             )
             _send_email_background(other_email, "Collaboration Cancelled", html)
+            _notify_vayada_team("Collaboration Cancelled", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
