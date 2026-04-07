@@ -209,7 +209,17 @@ async def create_stripe_connect_account(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
-    account = await stripe_service.create_connect_account(data.email, data.country)
+    try:
+        account = await stripe_service.create_connect_account(data.email, data.country)
+    except Exception as e:
+        error_msg = str(e)
+        logger.error("Stripe Connect account creation failed: %s", error_msg)
+        if "signed up for Connect" in error_msg:
+            raise HTTPException(
+                status_code=502,
+                detail="Stripe Connect is not enabled on the platform account. Please activate it at https://dashboard.stripe.com/connect",
+            )
+        raise HTTPException(status_code=502, detail=f"Stripe error: {error_msg}")
     await HotelPaymentSettingsRepository.upsert(
         hotel_id, {"stripe_connect_account_id": account["id"]}
     )
