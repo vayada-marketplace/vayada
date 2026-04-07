@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "noreply@vayada.com"
     SMTP_USE_TLS: bool = True
-    VAYADA_OPS_EMAIL: str = "p.paetzold@vayada.com"
+    VAYADA_OPS_EMAIL: str = "bookings@vayada.com"
 
     # S3 / Image Upload
     AWS_REGION: str = "eu-west-1"
