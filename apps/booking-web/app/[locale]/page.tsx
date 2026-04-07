@@ -102,7 +102,7 @@ export default function HomePage() {
   })
   const [checkOut, setCheckOut] = useState(() => {
     const d = new Date()
-    d.setDate(d.getDate() + 4)
+    d.setDate(d.getDate() + 2)
     return d.toISOString().split('T')[0]
   })
   const [adults, setAdults] = useState(2)
