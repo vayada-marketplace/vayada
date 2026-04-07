@@ -261,7 +261,7 @@ function BookPageContent() {
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
                         <p className="text-sm text-gray-700">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights} nights)` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</p>
-                        <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPrice, hotel?.currency || addon.currency)}</p>
                       </div>
                     )
                   })}
@@ -479,7 +479,7 @@ function BookPageContent() {
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
-                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, hotel?.currency || addon.currency)}</span>
                     </div>
                   )
                 })}
