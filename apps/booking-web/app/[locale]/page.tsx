@@ -536,6 +536,8 @@ export default function HomePage() {
             const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms
             const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
             const soldOut = room.remainingRooms < requiredRooms
+            const hasLastMinuteDeal = room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
+            const originalFlexibleTotal = hasLastMinuteDeal && room.originalRate ? room.originalRate * nights * requiredRooms : null
 
             return (
               <div
@@ -659,6 +661,17 @@ export default function HomePage() {
                         </span>
                       )}
                     </div>
+
+                    {/* Last-minute deal badge */}
+                    {hasLastMinuteDeal && (
+                      <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                        <span className="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded">-{room.lastMinuteDiscountPercent}%</span>
+                        <span className="text-sm font-medium text-amber-800">Last-minute deal</span>
+                        {originalFlexibleTotal && (
+                          <span className="ml-auto text-sm text-gray-400 line-through">{formatPrice(originalFlexibleTotal, room.currency)}</span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Rate Options */}
                     <div className="border-t border-gray-100 pt-4">
