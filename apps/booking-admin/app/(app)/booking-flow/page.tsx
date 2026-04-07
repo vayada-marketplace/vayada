@@ -166,7 +166,7 @@ export default function BookingFlowPage() {
 
   const openCreateModal = () => {
     setEditingAddon(null)
-    setFormData({ ...emptyAddon, highlights: [], includedItems: [] })
+    setFormData({ ...emptyAddon, currency: defaultCurrency || 'EUR', highlights: [], includedItems: [] })
     setHighlightInput('')
     setIncludedItemInput('')
     setShowModal(true)
