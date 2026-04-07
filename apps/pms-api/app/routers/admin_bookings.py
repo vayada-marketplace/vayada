@@ -133,9 +133,12 @@ async def create_admin_booking(
     # Re-fetch with JOINs for full response
     full_booking = await BookingRepository.get_by_id(str(booking["id"]))
 
-    # Push updated availability to Channex
+    # Push updated availability to Channex (only affected dates)
     asyncio.create_task(
-        push_availability_for_room_type(hotel_id, str(room["room_type_id"]))
+        push_availability_for_room_type(
+            hotel_id, str(room["room_type_id"]),
+            start_date=data.check_in, end_date=data.check_out,
+        )
     )
 
     # Notify guest of their confirmed booking
@@ -196,10 +199,18 @@ async def update_booking_details(
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    # Push availability if dates changed
+    # Push availability if dates changed (cover both old and new date ranges)
     if data.check_in is not None or data.check_out is not None:
+        old_start = booking["check_in"]
+        old_end = booking["check_out"]
+        new_start = data.check_in or old_start
+        new_end = data.check_out or old_end
         asyncio.create_task(
-            push_availability_for_room_type(hotel_id, str(booking["room_type_id"]))
+            push_availability_for_room_type(
+                hotel_id, str(booking["room_type_id"]),
+                start_date=min(old_start, new_start),
+                end_date=max(old_end, new_end),
+            )
         )
 
     return _booking_to_admin(updated)
@@ -224,9 +235,12 @@ async def update_booking_status(
     await BookingRepository.update_status(booking_id, data.status)
     updated = await BookingRepository.get_by_id(booking_id)
 
-    # Push availability to Channex (cancellation frees rooms, confirmation reserves them)
+    # Push availability to Channex (only affected dates)
     asyncio.create_task(
-        push_availability_for_room_type(hotel_id, str(booking["room_type_id"]))
+        push_availability_for_room_type(
+            hotel_id, str(booking["room_type_id"]),
+            start_date=booking["check_in"], end_date=booking["check_out"],
+        )
     )
 
     # Fire-and-forget: notify guest of status change
