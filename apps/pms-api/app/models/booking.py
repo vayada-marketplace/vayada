@@ -116,6 +116,10 @@ class BookingAdminResponse(BaseModel):
     addon_total: float = 0
     addon_quantities: Dict[str, int] = {}
     guest_withdrawn: bool = False
+    promo_code: Optional[str] = None
+    promo_discount: float = 0
+    last_minute_discount_percent: float = 0
+    last_minute_discount_amount: float = 0
     created_at: str
     updated_at: str
 

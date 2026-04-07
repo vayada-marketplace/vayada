@@ -69,33 +69,68 @@ async def register_hotel(
     )
 
 
+@router.get("/hotel")
+async def get_hotel(user_id: str = Depends(require_hotel_admin)):
+    """Get the current user's hotel details including last-minute discount config."""
+    row = await Database.fetchrow(
+        "SELECT * FROM hotels WHERE user_id = $1", user_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    import json as _json
+    lm = row.get("last_minute_discount")
+    return {
+        "id": str(row["id"]),
+        "slug": row["slug"],
+        "name": row["name"],
+        "contact_email": row["contact_email"],
+        "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
+    }
+
+
 @router.patch("/hotel")
 async def update_hotel(
-    data: HotelRegister,
+    data: dict,
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Update hotel details (slug, name, email) for the current user's hotel."""
+    """Update hotel details (slug, name, email, last_minute_discount)."""
+    import json as _json
     hotel = await Database.fetchrow(
         "SELECT id FROM hotels WHERE user_id = $1", user_id
     )
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
+
+    set_clauses = []
+    values = []
+    idx = 1
+    for field in ("slug", "name", "contact_email", "last_minute_discount"):
+        if field in data:
+            val = data[field]
+            if field == "last_minute_discount":
+                set_clauses.append(f"{field} = ${idx}::jsonb")
+                values.append(_json.dumps(val) if val is not None else None)
+            else:
+                set_clauses.append(f"{field} = ${idx}")
+                values.append(val)
+            idx += 1
+
+    if not set_clauses:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    values.append(str(hotel["id"]))
     row = await Database.fetchrow(
-        """UPDATE hotels SET slug = $1, name = $2, contact_email = $3           WHERE id = $4
-           RETURNING id, slug, name, contact_email, user_id, created_at""",
-        data.slug,
-        data.name,
-        data.contact_email,
-        str(hotel["id"]),
+        f"UPDATE hotels SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *",
+        *values,
     )
-    return HotelResponse(
-        id=str(row["id"]),
-        slug=row["slug"],
-        name=row["name"],
-        contact_email=row["contact_email"],
-        user_id=str(row["user_id"]),
-        created_at=row["created_at"].isoformat(),
-    )
+    lm = row.get("last_minute_discount")
+    return {
+        "id": str(row["id"]),
+        "slug": row["slug"],
+        "name": row["name"],
+        "contact_email": row.get("contact_email", ""),
+        "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
+    }
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)

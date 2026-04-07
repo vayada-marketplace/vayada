@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional, List
 from datetime import date
@@ -8,6 +9,27 @@ from app.models.room_type import RoomTypeResponse
 from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_last_minute_discount(
+    hotel_config: Optional[dict],
+    room_config: Optional[dict],
+    days_before: int,
+) -> Optional[int]:
+    """Return the last-minute discount percent for the given days-before-check-in,
+    or None if no discount applies. Room-level config overrides hotel-level."""
+    config = room_config or hotel_config
+    if not config or not config.get("enabled"):
+        return None
+    for tier in config.get("tiers") or []:
+        tier_min = tier.get("daysBeforeMin", 0)
+        tier_max = tier.get("daysBeforeMax")
+        pct = tier.get("discountPercent", 0)
+        if pct <= 0:
+            continue
+        if days_before >= tier_min and (tier_max is None or days_before <= tier_max):
+            return int(pct)
+    return None
 
 
 async def get_hotel_id_by_slug(slug: str) -> Optional[str]:
@@ -27,11 +49,15 @@ async def get_rooms_for_guest(
     if not hotel_id:
         return []
 
-    # Load global benefits from hotel
+    # Load global benefits and last-minute discount config from hotel
     hotel_row = await Database.fetchrow(
-        "SELECT benefits FROM hotels WHERE id = $1", hotel_id
+        "SELECT benefits, last_minute_discount FROM hotels WHERE id = $1", hotel_id
     )
     hotel_benefits = parse_jsonb(hotel_row["benefits"]) if hotel_row else []
+    hotel_lm_config = None
+    if hotel_row and hotel_row.get("last_minute_discount"):
+        raw = hotel_row["last_minute_discount"]
+        hotel_lm_config = json.loads(raw) if isinstance(raw, str) else raw
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     result = []
@@ -80,6 +106,23 @@ async def get_rooms_for_guest(
             # NR only (no flexible): non-refundable rate is the base rate
             nr_rate = base_rate
 
+        # Apply last-minute discount (booking-time concern, not rate-definition)
+        original_rate = None
+        lm_discount_pct = None
+        if check_in:
+            days_before = (check_in - date.today()).days
+            room_lm_raw = room.get("last_minute_discount")
+            room_lm_config = None
+            if room_lm_raw:
+                room_lm_config = json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw
+            pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before)
+            if pct and pct > 0:
+                lm_discount_pct = pct
+                original_rate = base_rate
+                base_rate = round(base_rate * (1 - pct / 100), 2)
+                if nr_rate is not None:
+                    nr_rate = round(nr_rate * (1 - pct / 100), 2)
+
         result.append(
             RoomTypeResponse(
                 id=str(room["id"]),
@@ -91,6 +134,8 @@ async def get_rooms_for_guest(
                 size=room["size"],
                 base_rate=base_rate,
                 non_refundable_rate=nr_rate,
+                original_rate=original_rate,
+                last_minute_discount_percent=lm_discount_pct,
                 currency=room["currency"],
                 amenities=parse_jsonb(room["amenities"]),
                 images=parse_jsonb(room["images"]),

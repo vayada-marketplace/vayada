@@ -148,7 +148,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     Returns booking data + client_secret for Stripe.
     """
     hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
+        "SELECT id, name, contact_email, last_minute_discount FROM hotels WHERE slug = $1", slug
     )
     if not hotel:
         raise ValueError("Hotel not found")
@@ -188,6 +188,23 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             night_rate = resolved_base
         room_total += night_rate
     room_total = round(room_total * data.number_of_rooms, 2)
+
+    # Apply last-minute discount (based on days before check-in)
+    import json as _json
+    from app.services.room_type_service import resolve_last_minute_discount
+    lm_discount_pct = 0
+    lm_discount_amount = 0.0
+    days_before = (data.check_in - date.today()).days
+    hotel_lm_raw = hotel.get("last_minute_discount")
+    hotel_lm_config = _json.loads(hotel_lm_raw) if isinstance(hotel_lm_raw, str) else hotel_lm_raw if hotel_lm_raw else None
+    room_lm_raw = room.get("last_minute_discount")
+    room_lm_config = _json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw if room_lm_raw else None
+    pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before)
+    if pct and pct > 0:
+        lm_discount_pct = pct
+        lm_discount_amount = round(room_total * (pct / 100), 2)
+        room_total = round(room_total - lm_discount_amount, 2)
+
     # Average nightly rate for display/record
     nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
 
@@ -251,6 +268,22 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             else:
                 promo_discount = min(discount_value, subtotal)
 
+    # Handle promo vs last-minute stacking
+    stack_with_promo = (hotel_lm_config or {}).get("stackWithPromo", False)
+    if not stack_with_promo and lm_discount_amount > 0 and promo_discount > 0:
+        # Keep only the larger discount
+        if promo_discount > lm_discount_amount:
+            # Promo wins — undo last-minute discount
+            room_total = round(room_total + lm_discount_amount, 2)
+            nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
+            subtotal = room_total + addon_total
+            lm_discount_pct = 0
+            lm_discount_amount = 0.0
+        else:
+            # Last-minute wins — drop promo
+            promo_discount = 0.0
+            promo_code_str = None
+
     total_amount = round(subtotal - promo_discount, 2)
 
     # Resolve affiliate
@@ -307,6 +340,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "addon_quantities": addon_quantities,
         "promo_code": promo_code_str,
         "promo_discount": promo_discount,
+        "last_minute_discount_percent": lm_discount_pct,
+        "last_minute_discount_amount": lm_discount_amount,
     }
     # Auto-assign an available room unit
     available_room = await Database.fetchrow(

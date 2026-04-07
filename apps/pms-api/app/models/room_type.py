@@ -122,6 +122,7 @@ class RoomTypeCreate(BaseModel):
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
+    last_minute_discount: Optional[dict] = None
 
     @field_validator("size")
     @classmethod
@@ -173,6 +174,7 @@ class RoomTypeUpdate(BaseModel):
     flexible_rate_enabled: Optional[bool] = None
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
+    last_minute_discount: Optional[dict] = None
 
     @field_validator("size")
     @classmethod
@@ -212,6 +214,8 @@ class RoomTypeResponse(BaseModel):
     size: int
     base_rate: float
     non_refundable_rate: Optional[float] = None
+    original_rate: Optional[float] = None
+    last_minute_discount_percent: Optional[int] = None
     currency: str
     amenities: List[str]
     images: List[str]
@@ -253,5 +257,6 @@ class RoomTypeAdminResponse(BaseModel):
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
+    last_minute_discount: Optional[dict] = None
     created_at: str
     updated_at: str

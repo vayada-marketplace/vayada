@@ -37,13 +37,13 @@ class RoomTypeRepository:
                 total_rooms, is_active, sort_order, monthly_rates, daily_rates,
                 operating_periods, seasons, weekend_surcharge,
                 cancellation_policy, flexible_rate_enabled, non_refundable_discount,
-                non_refundable_enabled
+                non_refundable_enabled, last_minute_discount
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11::jsonb, $12::jsonb, $13, $14::jsonb, $15::jsonb,
                 $16, $17, $18, $19::jsonb, $20::jsonb,
                 $21::jsonb, $22::jsonb, $23, $24, $25, $26,
-                $27
+                $27, $28::jsonb
             ) RETURNING *
             """,
             hotel_id,
@@ -73,6 +73,7 @@ class RoomTypeRepository:
             data.get("flexible_rate_enabled", True),
             data.get("non_refundable_discount", 10),
             data.get("non_refundable_enabled", False),
+            json.dumps(data.get("last_minute_discount")) if data.get("last_minute_discount") else None,
         )
         return dict(row)
 
@@ -85,7 +86,7 @@ class RoomTypeRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col in ("amenities", "images", "features", "benefits", "monthly_rates", "daily_rates", "operating_periods", "seasons"):
+            if col in ("amenities", "images", "features", "benefits", "monthly_rates", "daily_rates", "operating_periods", "seasons", "last_minute_discount"):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
