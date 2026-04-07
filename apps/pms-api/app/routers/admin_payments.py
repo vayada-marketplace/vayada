@@ -169,6 +169,44 @@ async def update_payment_settings(
         except Exception as e:
             logger.warning("Failed to sync currency to booking engine: %s", e)
 
+        # Convert addon prices in the booking engine DB
+        if old_currency != new_currency:
+            try:
+                hotel_row = await BookingEngineDatabase.fetchrow(
+                    "SELECT id FROM booking_hotels WHERE user_id = $1", user_id,
+                )
+                if hotel_row:
+                    be_hotel_id = str(hotel_row["id"])
+                    addons = await BookingEngineDatabase.fetch(
+                        "SELECT id, price, currency FROM booking_addons WHERE hotel_id = $1",
+                        be_hotel_id,
+                    )
+                    zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
+                    addon_decimals = 0 if zero_decimal else 2
+                    converted_count = 0
+                    for addon in addons:
+                        addon_currency = addon["currency"]
+                        if addon_currency == new_currency:
+                            continue  # already in the right currency
+                        # Get rate from addon's currency to new currency
+                        try:
+                            if addon_currency == old_currency:
+                                addon_rate = rate  # reuse the rate we already fetched
+                            else:
+                                addon_rate = await get_exchange_rate(addon_currency, new_currency)
+                            new_price = round(float(addon["price"]) * addon_rate, addon_decimals)
+                            await BookingEngineDatabase.execute(
+                                "UPDATE booking_addons SET price = $1, currency = $2 WHERE id = $3",
+                                new_price, new_currency, str(addon["id"]),
+                            )
+                            converted_count += 1
+                        except Exception as ae:
+                            logger.warning("Failed to convert addon %s: %s", addon["id"], ae)
+                    if converted_count:
+                        logger.info("Converted %d addon prices to %s", converted_count, new_currency)
+            except Exception as e:
+                logger.warning("Failed to convert addon prices: %s", e)
+
     sync_fields = {
         "pay_at_property_enabled", "online_card_payment", "bank_transfer",
     }
