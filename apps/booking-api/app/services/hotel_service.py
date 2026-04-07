@@ -93,7 +93,6 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
     hotel = await BookingHotelRepository.get_by_slug(slug)
     if not hotel or not hotel.get("show_addons_step", True):
         return []
-    hotel_currency = hotel.get("currency", "EUR")
     rows = await BookingAddonRepository.list_by_hotel_id(str(hotel["id"]))
     def _parse_json_list(value) -> list[str]:
         if value is None:
@@ -114,7 +113,7 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
             name=row["name"],
             description=row["description"],
             price=float(row["price"]),
-            currency=hotel_currency,
+            currency=row["currency"],
             category=row["category"],
             image=row["image"],
             duration=row.get("duration"),
