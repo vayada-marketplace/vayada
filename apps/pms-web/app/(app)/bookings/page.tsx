@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { bookingsService, Booking, BookingListResponse } from '@/services/bookings'
 import { MagnifyingGlassIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
+import { formatCurrency } from '@/lib/formatCurrency'
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'border-yellow-200 text-yellow-700 bg-yellow-50',
@@ -278,7 +279,7 @@ export default function ReservationsPage() {
                       {source.letter}
                     </span>
                     <span className="text-sm font-semibold text-gray-900">
-                      ${b.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      {formatCurrency(b.totalAmount, b.currency)}
                     </span>
                   </div>
                   <span className={`shrink-0 inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${BALANCE_STYLES[balance] || BALANCE_STYLES['due']}`}>
@@ -392,7 +393,7 @@ export default function ReservationsPage() {
 
                     {/* Total */}
                     <td className="px-4 py-4 text-right text-[13px] font-semibold text-gray-900">
-                      ${b.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      {formatCurrency(b.totalAmount, b.currency)}
                     </td>
 
                     {/* Balance */}
