@@ -20,8 +20,9 @@ import RoomsTab from '@/components/booking-flow/RoomsTab'
 import AddonsTab from '@/components/booking-flow/AddonsTab'
 import BenefitsTab from '@/components/booking-flow/BenefitsTab'
 import PromoCodesTab from '@/components/booking-flow/PromoCodesTab'
+import LastMinuteTab from '@/components/booking-flow/LastMinuteTab'
 
-type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes' | 'localization' | 'guest-form'
+type Tab = 'rooms' | 'addons' | 'benefits' | 'promo-codes' | 'localization' | 'guest-form' | 'last-minute'
 
 const CATEGORIES = [
   { value: 'dining', label: 'Dining' },
@@ -456,6 +457,7 @@ export default function BookingFlowPage() {
     { id: 'benefits' as const, label: t('bookingFlow.tabs.benefits'), icon: BenefitsIcon },
     { id: 'localization' as const, label: t('bookingFlow.tabs.localization'), icon: LocalizationIcon },
     { id: 'guest-form' as const, label: t('bookingFlow.tabs.guestForm'), icon: GuestFormIcon },
+    { id: 'last-minute' as const, label: 'Last-Minute', icon: LastMinuteIcon },
   ]
 
   if (loading) {
@@ -676,6 +678,10 @@ export default function BookingFlowPage() {
               <SaveButton onClick={handleSaveGuestForm} saving={savingGuestForm} />
             </div>
           </div>
+        )}
+
+        {activeTab === 'last-minute' && (
+          <LastMinuteTab />
         )}
 
       </div>
@@ -1205,6 +1211,15 @@ function GuestFormIcon({ className }: { className?: string }) {
       <rect x="9" y="3" width="6" height="4" rx="1" />
       <path d="M9 12h6" />
       <path d="M9 16h6" />
+    </svg>
+  )
+}
+
+function LastMinuteIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   )
 }
