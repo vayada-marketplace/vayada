@@ -132,16 +132,27 @@ async def update_payment_settings(
                 room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
                 converted_count = 0
                 for rt in room_types:
-                    room_currency = rt.get("currency", "EUR")
+                    room_currency = rt.get("currency") or old_currency
                     if room_currency == new_currency:
                         # Room is already in the target currency — just update
                         # the currency field, do NOT apply exchange-rate math.
-                        # This prevents re-converting rates that were set up in
-                        # the correct currency before the payment settings row
-                        # existed (which defaults to EUR).
                         await RoomTypeRepository.update(str(rt["id"]), {"currency": new_currency})
                         continue
-                    rt_updates = await convert_room_type_rates(rt, rate, decimals)
+                    # If the room's currency differs from the old payment currency,
+                    # fetch the correct rate for this specific room
+                    if room_currency != old_currency:
+                        try:
+                            room_rate = await get_exchange_rate(room_currency, new_currency)
+                        except Exception:
+                            logger.warning(
+                                "Skipping conversion for room type %s: cannot get rate %s → %s",
+                                rt["id"], room_currency, new_currency,
+                            )
+                            await RoomTypeRepository.update(str(rt["id"]), {"currency": new_currency})
+                            continue
+                    else:
+                        room_rate = rate
+                    rt_updates = await convert_room_type_rates(rt, room_rate, decimals)
                     rt_updates["currency"] = new_currency
                     if rt_updates:
                         await RoomTypeRepository.update(str(rt["id"]), rt_updates)

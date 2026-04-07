@@ -110,6 +110,13 @@ async def create_room_type(
 ):
     hotel_id = await get_hotel_id(user_id)
     payload = data.model_dump()
+
+    # Auto-set currency to the hotel's payment currency instead of defaulting to EUR
+    from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+    pay_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    if pay_settings and pay_settings.get("default_currency"):
+        payload["currency"] = pay_settings["default_currency"]
+
     if payload.get("monthly_rates"):
         payload["monthly_rates"] = {
             k: v.model_dump(exclude_none=True) if hasattr(v, "model_dump") else {kk: vv for kk, vv in v.items() if vv is not None}
