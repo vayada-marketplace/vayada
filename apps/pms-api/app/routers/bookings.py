@@ -132,12 +132,30 @@ async def get_payment_settings(slug: str):
         "FROM hotels WHERE id = $1", hotel_id,
     )
 
-    pay_at_property = settings["pay_at_property_enabled"] if settings else False
-    bank_transfer = settings.get("bank_transfer", False) if settings else False
+    # Read payment method flags from booking engine DB (authoritative source —
+    # the booking admin settings page writes there). Fall back to PMS settings
+    # if the booking engine DB is unavailable.
+    be_payment_flags = None
+    try:
+        be_payment_flags = await BookingEngineDatabase.fetchrow(
+            "SELECT pay_at_property_enabled, online_card_payment, bank_transfer "
+            "FROM booking_hotels WHERE slug = $1", slug,
+        )
+    except Exception:
+        pass
+
+    if be_payment_flags:
+        pay_at_property = be_payment_flags.get("pay_at_property_enabled", False)
+        online_card = be_payment_flags.get("online_card_payment", False)
+        bank_transfer = be_payment_flags.get("bank_transfer", False)
+    else:
+        pay_at_property = settings["pay_at_property_enabled"] if settings else False
+        online_card = settings.get("online_card_payment", False) if settings else False
+        bank_transfer = settings.get("bank_transfer", False) if settings else False
 
     result = {
         "payAtPropertyEnabled": pay_at_property,
-        "onlineCardPayment": settings.get("online_card_payment", False) if settings else False,
+        "onlineCardPayment": online_card,
         "bankTransfer": bank_transfer,
         "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False) if settings else False,
         "freeCancellationDays": policy["free_cancellation_days"] if policy else 7,
