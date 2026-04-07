@@ -76,7 +76,7 @@ function PaymentPageContent() {
   const { hotel } = useHotel()
   const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice } = useCurrency()
+  const { formatPrice, convertPrice } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
 
@@ -114,7 +114,22 @@ function PaymentPageContent() {
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
-  const addonTotal = calculateAddonTotal(addons, selectedAddonIds, adultsParam, nights, addonQuantities)
+  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
+  const addonTotal = (() => {
+    let total = 0
+    for (const addon of addons) {
+      if (!selectedAddonIds.includes(addon.id)) continue
+      const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
+      let price = addon.price
+      if (addon.perPerson) price *= adultsParam
+      price *= qty
+      if (addon.currency !== roomCurrency) {
+        price = convertPrice(price, addon.currency)
+      }
+      total += price
+    }
+    return Math.round(total * 100) / 100
+  })()
   const promoCodeParam = searchParams.get('promoCode') || ''
   const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
 
