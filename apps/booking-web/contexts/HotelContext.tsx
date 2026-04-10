@@ -75,15 +75,22 @@ function resolveSlug(slugProp?: string): string {
 }
 
 export function HotelProvider({ children, locale = 'en', slug: slugProp }: { children: ReactNode; locale?: string; slug?: string }) {
-  // Resolve once on mount so server and first client render match; subsequent
-  // changes (e.g. via ?slug=) update via the state setter below.
+  // Initial state uses the server-safe fallback so SSR and client
+  // hydration match. On the client, the effect below immediately
+  // resolves the real slug from ?slug=/localStorage and blocks the
+  // data fetch until that resolution has completed — otherwise the
+  // first render would fetch the wrong hotel, race with the second
+  // fetch, and produce mixed state.
   const [slug, setSlug] = useState<string>(
     () => slugProp || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
   )
+  // Server render skips the fetch; client sets this to true after
+  // resolving the slug so the fetch effect fires exactly once with
+  // the correct value.
+  const [slugResolved, setSlugResolved] = useState<boolean>(false)
   useEffect(() => {
-    const resolved = resolveSlug(slugProp)
-    if (resolved !== slug) setSlug(resolved)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSlug(resolveSlug(slugProp))
+    setSlugResolved(true)
   }, [slugProp])
   const [hotel, setHotel] = useState<Hotel | null>(null)
   const [rooms, setRooms] = useState<RoomType[]>([])
@@ -93,6 +100,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!slugResolved) return
     setLoading(true)
     Promise.all([
       hotelService.getHotel(slug, locale),
@@ -109,7 +117,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
         setError(err instanceof Error ? err.message : 'Failed to load hotel data')
         setLoading(false)
       })
-  }, [locale, slug])
+  }, [locale, slug, slugResolved])
 
   const refetchRooms = async (checkIn?: string, checkOut?: string, adults?: number) => {
     setRoomsLoading(true)
