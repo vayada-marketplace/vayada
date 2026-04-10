@@ -10,7 +10,7 @@ export default function Providers({
 }: {
   children: React.ReactNode
   locale: string
-  slug: string
+  slug?: string
 }) {
   return (
     <HotelProvider locale={locale} slug={slug}>

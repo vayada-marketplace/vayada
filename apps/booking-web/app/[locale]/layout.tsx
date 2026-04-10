@@ -29,10 +29,16 @@ export default async function LocaleLayout({
   const headersList = await headers()
   const hostname = headersList.get('host') || ''
   const parts = hostname.split('.')
-  const isKnown = hostname.endsWith('.booking.vayada.com') || hostname.includes('localhost')
+  const isLocalhost = hostname.includes('localhost') || hostname.startsWith('127.0.0.1')
+  const isKnown = hostname.endsWith('.booking.vayada.com') || isLocalhost
 
-  let slug: string
-  if (isKnown) {
+  // Local dev: pass empty slug so HotelProvider's client-side resolver
+  // can honor ?slug= query params and localStorage. Otherwise this
+  // server-rendered slug would always win and block multi-hotel testing.
+  let slug: string | undefined
+  if (isLocalhost) {
+    slug = undefined
+  } else if (isKnown) {
     slug = (parts.length >= 3 && parts[0] !== 'www' ? parts[0] : null)
       || (parts.length === 2 && !parts[0].includes('localhost') ? parts[0] : null)
       || process.env.NEXT_PUBLIC_HOTEL_SLUG
