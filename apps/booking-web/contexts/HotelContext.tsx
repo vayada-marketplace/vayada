@@ -47,8 +47,44 @@ const HotelContext = createContext<HotelContextValue>({
   refetchRooms: async () => {},
 })
 
+// Resolve the active hotel slug. In production this is fixed at build time
+// via NEXT_PUBLIC_HOTEL_SLUG (one frontend deployment per hotel, usually on
+// a dedicated domain/subdomain). For local development we let the slug be
+// overridden at runtime so a single dev container can serve any hotel:
+//   1. `?slug=<name>` query param (also persisted to localStorage)
+//   2. `dev-hotel-slug` localStorage key
+//   3. NEXT_PUBLIC_HOTEL_SLUG env var
+//   4. hardcoded fallback
+const DEV_SLUG_STORAGE_KEY = 'dev-hotel-slug'
+
+function resolveSlug(slugProp?: string): string {
+  if (slugProp) return slugProp
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search)
+    const querySlug = params.get('slug')
+    if (querySlug) {
+      try { localStorage.setItem(DEV_SLUG_STORAGE_KEY, querySlug) } catch {}
+      return querySlug
+    }
+    try {
+      const stored = localStorage.getItem(DEV_SLUG_STORAGE_KEY)
+      if (stored) return stored
+    } catch {}
+  }
+  return process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+}
+
 export function HotelProvider({ children, locale = 'en', slug: slugProp }: { children: ReactNode; locale?: string; slug?: string }) {
-  const slug = slugProp || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+  // Resolve once on mount so server and first client render match; subsequent
+  // changes (e.g. via ?slug=) update via the state setter below.
+  const [slug, setSlug] = useState<string>(
+    () => slugProp || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+  )
+  useEffect(() => {
+    const resolved = resolveSlug(slugProp)
+    if (resolved !== slug) setSlug(resolved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slugProp])
   const [hotel, setHotel] = useState<Hotel | null>(null)
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [addons, setAddons] = useState<Addon[]>([])
