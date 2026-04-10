@@ -226,7 +226,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             all_addons = []
 
         addon_map = {a["id"]: a for a in all_addons}
-        room_currency = room.get("currency") or "EUR"
+        room_currency = (room.get("currency") or "EUR").upper()
         from app.services.currency_service import get_exchange_rate
         rate_cache: dict = {}
         for aid in addon_ids:
@@ -245,7 +245,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             # matches what the frontend showed the guest. The booking
             # engine frontend does the same conversion in payment/page.tsx.
             addon_currency = (addon.get("currency") or room_currency).upper()
-            if addon_currency != room_currency.upper():
+            if addon_currency != room_currency:
                 if addon_currency not in rate_cache:
                     try:
                         rate_cache[addon_currency] = await get_exchange_rate(
