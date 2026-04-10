@@ -107,6 +107,27 @@ services:
     networks:
       - vayada-network
 
+  # ─── Auth DB Migrations ───────────────────────────────────────────────
+  # The auth DB is shared infra that no single backend owns, so it needs
+  # its own one-shot migration runner. Without this, fresh DB volumes
+  # have no `users` table and login/register fails with 500.
+
+  auth-db-migrate:
+    image: python:3.11-alpine
+    container_name: vayada-auth-db-migrate
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
+    volumes:
+      - ./auth-db:/auth-db
+    working_dir: /auth-db
+    command: sh -c "pip install -q asyncpg && python scripts/run_migrations.py"
+    networks:
+      - vayada-network
+    restart: "no"
+
   # ─── Object Storage (Marketplace) ─────────────────────────────────────
 
   minio:
@@ -163,6 +184,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      auth-db-migrate:
+        condition: service_completed_successfully
     env_file:
       - ./marketplace/vayada-creator-marketplace-backend/.env
     environment:
@@ -200,6 +223,8 @@ services:
         condition: service_healthy
       marketplace-postgres:
         condition: service_healthy
+      auth-db-migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@booking-postgres:5432/vayada_booking_db
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
@@ -229,11 +254,17 @@ services:
         condition: service_healthy
       auth-postgres:
         condition: service_healthy
+      booking-postgres:
+        condition: service_healthy
+      auth-db-migrate:
+        condition: service_completed_successfully
     env_file:
       - ./pms/vayada-pms-backend/.env
     environment:
       DATABASE_URL: postgresql://vayada_pms_user:vayada_pms_password@pms-postgres:5432/vayada_pms_db
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
+      BOOKING_ENGINE_DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@booking-postgres:5432/vayada_booking_db
+      BOOKING_ENGINE_API_URL: http://booking-backend:8001
       CORS_ORIGINS: http://localhost:3002,http://localhost:3003,http://localhost:3004
       API_HOST: "0.0.0.0"
       API_PORT: "8002"
