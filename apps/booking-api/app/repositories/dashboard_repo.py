@@ -35,27 +35,16 @@ def _date_range(range_key: str) -> tuple[date, date, date, date]:
 class DashboardRepository:
 
     @staticmethod
-    async def _get_pms_hotel_id(user_id: str):
-        """Find the PMS hotel_id (UUID) for a given user."""
-        if not settings.PMS_DATABASE_URL:
-            return None
-        row = await PmsDatabase.fetchrow(
-            "SELECT id FROM hotels WHERE user_id = $1 LIMIT 1", user_id
-        )
-        return row["id"] if row else None
+    async def get_stats(hotel: dict, range_key: str = "today") -> dict:
+        """
+        Stats for the given booking_hotels row.
 
-    @staticmethod
-    async def _get_hotel_slug(user_id: str) -> str | None:
-        """Find the booking engine hotel slug for a given user."""
-        row = await Database.fetchrow(
-            "SELECT slug FROM booking_hotels WHERE user_id = $1 LIMIT 1", user_id
-        )
-        return row["slug"] if row else None
-
-    @staticmethod
-    async def get_stats(user_id: str, range_key: str = "today") -> dict:
-        hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
-        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
+        After the multi-hotel-ids unification, booking_hotels.id ==
+        pms.hotels.id, so the same UUID can be used to query both
+        databases — no separate _get_pms_hotel_id lookup is needed.
+        """
+        hotel_id = str(hotel["id"]) if hotel else None
+        hotel_slug = hotel.get("slug") if hotel else None
         if not hotel_id:
             return {
                 "revenue": 0, "revenue_previous": 0,
@@ -134,8 +123,8 @@ class DashboardRepository:
         }
 
     @staticmethod
-    async def get_bookings_by_source(user_id: str, range_key: str = "month") -> dict:
-        hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
+    async def get_bookings_by_source(hotel: dict, range_key: str = "month") -> dict:
+        hotel_id = str(hotel["id"]) if hotel else None
         if not hotel_id:
             return {"total_revenue": 0, "sources": []}
 
@@ -171,9 +160,9 @@ class DashboardRepository:
         return {"total_revenue": total, "sources": sources}
 
     @staticmethod
-    async def get_conversion_funnel(user_id: str, range_key: str = "month") -> dict:
+    async def get_conversion_funnel(hotel: dict, range_key: str = "month") -> dict:
         """Conversion funnel based on real tracked events."""
-        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
+        hotel_slug = hotel.get("slug") if hotel else None
         if not hotel_slug:
             return {"steps": []}
 
@@ -202,10 +191,10 @@ class DashboardRepository:
         ]}
 
     @staticmethod
-    async def get_sparklines(user_id: str, range_key: str = "today") -> dict:
+    async def get_sparklines(hotel: dict, range_key: str = "today") -> dict:
         """Return 7-point sparkline data for each stat."""
-        hotel_id = await DashboardRepository._get_pms_hotel_id(user_id)
-        hotel_slug = await DashboardRepository._get_hotel_slug(user_id)
+        hotel_id = str(hotel["id"]) if hotel else None
+        hotel_slug = hotel.get("slug") if hotel else None
         if not hotel_id:
             return {
                 "revenue": [0] * 7,
