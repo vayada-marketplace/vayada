@@ -29,13 +29,85 @@ async def register_hotel(
     data: HotelRegister,
     user_id: str = Depends(require_hotel_admin),
 ):
-    # Idempotent: update slug/name if hotel already registered
+    """
+    Create or update the PMS row for a hotel.
+
+    Two modes:
+
+    1. With `booking_hotel_id` (the correct, multi-hotel-safe mode): look
+       up the PMS row by `id = booking_hotel_id` and either insert a new
+       row using that id as the PK, or update the existing row's
+       slug/name/contact_email. This is the mode used by the setup
+       wizard after the multi-hotel-ids migration.
+
+    2. Without `booking_hotel_id` (legacy, single-hotel-per-user mode):
+       look up the PMS row by `user_id` and upsert. Preserved only for
+       back-compat with callers that predate the multi-hotel migration;
+       emits a warning when hit. Do not add new callers that rely on
+       this mode — it silently reuses the first hotel if the user
+       already has one, which is the old bug we're trying to kill.
+    """
+    if data.booking_hotel_id:
+        existing = await Database.fetchrow(
+            "SELECT id, slug, name, contact_email, user_id, created_at FROM hotels WHERE id = $1",
+            data.booking_hotel_id,
+        )
+        if existing:
+            if str(existing["user_id"]) != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This booking_hotel_id belongs to a different user",
+                )
+            if (
+                existing["slug"] != data.slug
+                or existing["name"] != data.name
+                or existing["contact_email"] != data.contact_email
+            ):
+                await Database.execute(
+                    "UPDATE hotels SET slug = $1, name = $2, contact_email = $3 WHERE id = $4",
+                    data.slug, data.name, data.contact_email, str(existing["id"]),
+                )
+            return HotelResponse(
+                id=str(existing["id"]),
+                slug=data.slug,
+                name=data.name,
+                contact_email=data.contact_email,
+                user_id=str(existing["user_id"]),
+                created_at=existing["created_at"].isoformat(),
+            )
+
+        row = await Database.fetchrow(
+            """INSERT INTO hotels (id, slug, name, contact_email, user_id)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id, slug, name, contact_email, user_id, created_at""",
+            data.booking_hotel_id,
+            data.slug,
+            data.name,
+            data.contact_email,
+            user_id,
+        )
+        return HotelResponse(
+            id=str(row["id"]),
+            slug=row["slug"],
+            name=row["name"],
+            contact_email=row["contact_email"],
+            user_id=str(row["user_id"]),
+            created_at=row["created_at"].isoformat(),
+        )
+
+    # Legacy path — no booking_hotel_id. Warn and fall back to the
+    # single-hotel-per-user behavior.
+    logger.warning(
+        "register_hotel called without booking_hotel_id for user_id=%s slug=%s. "
+        "This is the legacy single-hotel path and will be removed; callers "
+        "must be updated to pass booking_hotel_id.",
+        user_id, data.slug,
+    )
     existing = await Database.fetchrow(
         "SELECT id, slug, name, contact_email, user_id, created_at FROM hotels WHERE user_id = $1",
         user_id,
     )
     if existing:
-        # Keep slug in sync with booking engine
         if existing["slug"] != data.slug or existing["name"] != data.name:
             await Database.execute(
                 "UPDATE hotels SET slug = $1, name = $2, contact_email = $3 WHERE id = $4",
