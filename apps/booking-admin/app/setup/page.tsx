@@ -169,9 +169,14 @@ export default function SetupPage() {
     checkAuth()
   }, [router])
 
-  // Default room currency to property currency
+  // Sync room and addon currency to property currency.
+  // The property currency is the single source of truth in setup —
+  // rooms/addons must always follow it, otherwise prices entered by
+  // the user in the visible currency get stored under a stale currency
+  // and then double-converted when the booking engine displays them.
   useEffect(() => {
-    setRooms(prev => prev.map(r => r.currency ? r : { ...r, currency }))
+    setRooms(prev => prev.map(r => ({ ...r, currency })))
+    setSetupAddons(prev => prev.map(a => ({ ...a, currency })))
   }, [currency])
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
