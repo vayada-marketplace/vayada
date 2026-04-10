@@ -10,6 +10,7 @@ interface CurrencyContextValue {
   rates: Record<string, number>
   loading: boolean
   convertPrice: (amount: number, fromCurrency: string) => number
+  convertBetween: (amount: number, fromCurrency: string, toCurrency: string) => number
   formatPrice: (amount: number, fromCurrency: string) => string
 }
 
@@ -19,6 +20,7 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   rates: {},
   loading: true,
   convertPrice: (amount) => amount,
+  convertBetween: (amount) => amount,
   formatPrice: (amount) => String(amount),
 })
 
@@ -107,6 +109,23 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [selectedCurrency, baseCurrency, rates]
   )
 
+  const convertBetween = useCallback(
+    (amount: number, fromCurrency: string, toCurrency: string): number => {
+      if (fromCurrency === toCurrency) return amount
+      let amountInBase = amount
+      if (fromCurrency !== baseCurrency) {
+        const fromRate = rates[fromCurrency]
+        if (!fromRate) return amount
+        amountInBase = amount / fromRate
+      }
+      if (toCurrency === baseCurrency) return amountInBase
+      const toRate = rates[toCurrency]
+      if (!toRate) return amount
+      return amountInBase * toRate
+    },
+    [baseCurrency, rates]
+  )
+
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
       // Check if we can actually perform the conversion
@@ -137,6 +156,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         rates,
         loading,
         convertPrice,
+        convertBetween,
         formatPrice,
       }}
     >

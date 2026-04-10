@@ -14,7 +14,7 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
-import { getNonRefundableRate, calculateAddonTotal, calculatePromoDiscount } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculatePromoDiscount } from '@/lib/constants/booking'
 import { hotelService } from '@/services/api/hotel'
 
 interface GuestDetails {
@@ -76,7 +76,7 @@ function PaymentPageContent() {
   const { hotel } = useHotel()
   const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice, convertPrice } = useCurrency()
+  const { formatPrice, convertBetween } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
 
@@ -123,10 +123,7 @@ function PaymentPageContent() {
       let price = addon.price
       if (addon.perPerson) price *= adultsParam
       price *= qty
-      if (addon.currency !== roomCurrency) {
-        price = convertPrice(price, addon.currency)
-      }
-      total += price
+      total += convertBetween(price, addon.currency, roomCurrency)
     }
     return Math.round(total * 100) / 100
   })()
