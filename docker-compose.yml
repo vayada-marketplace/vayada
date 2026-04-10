@@ -338,7 +338,7 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8001
       - NEXT_PUBLIC_PMS_URL=http://localhost:8002
-      - NEXT_PUBLIC_HOTEL_SLUG=hotel-alpenrose
+      - NEXT_PUBLIC_HOTEL_SLUG=testvayada
       - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_51T4q9fHPi3htfo3SVbB0UNZAFqwHGEwJrUmD90xdp5cLssb1t7G1JAv5k3WV3IAJjyTXqqgnCuAG2rEm1IqGx6bF00dLXvkm1P
     volumes:
       - ./booking-engine/vayada-booking-engine-frontend:/app
