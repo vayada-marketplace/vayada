@@ -226,6 +226,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             all_addons = []
 
         addon_map = {a["id"]: a for a in all_addons}
+        room_currency = room.get("currency") or "EUR"
+        from app.services.currency_service import get_exchange_rate
+        rate_cache: dict = {}
         for aid in addon_ids:
             addon = addon_map.get(aid)
             if not addon:
@@ -238,6 +241,23 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                 qty = addon_quantities.get(aid, nights)
                 qty = max(1, min(qty, nights))
                 price *= qty
+            # Convert addon price to room currency so the booking total
+            # matches what the frontend showed the guest. The booking
+            # engine frontend does the same conversion in payment/page.tsx.
+            addon_currency = (addon.get("currency") or room_currency).upper()
+            if addon_currency != room_currency.upper():
+                if addon_currency not in rate_cache:
+                    try:
+                        rate_cache[addon_currency] = await get_exchange_rate(
+                            addon_currency, room_currency
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to fetch addon exchange rate %s -> %s: %s",
+                            addon_currency, room_currency, e,
+                        )
+                        rate_cache[addon_currency] = 1.0
+                price = price * rate_cache[addon_currency]
             addon_total += price
         addon_total = round(addon_total, 2)
 
