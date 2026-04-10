@@ -1,6 +1,11 @@
 import { apiClient } from '../api/client'
 
 export interface PropertySettings {
+  // booking_hotels.id — unified across both backend databases after
+  // the multi-hotel-ids migration. Populated by POST /admin/hotels
+  // and by GET /admin/settings/property. Used to set selectedHotelId
+  // and to pass bookingHotelId to the PMS register-hotel endpoint.
+  id?: string
   slug: string
   property_name: string
   reservation_email: string
@@ -166,6 +171,15 @@ export const settingsService = {
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
     apiClient.patch<PropertySettings>('/admin/settings/property', data),
+
+  // Explicit create endpoint for the setup wizard — unlike
+  // updatePropertySettings (which silently updates the user's existing
+  // hotel when no X-Hotel-Id header is present), this always creates
+  // a new property and returns its id. That id must then be written
+  // to localStorage.selectedHotelId so subsequent wizard calls carry
+  // the correct X-Hotel-Id header.
+  createHotel: (data: PropertySettingsUpdate) =>
+    apiClient.post<PropertySettings>('/admin/hotels', data),
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post('/auth/change-password', { current_password, new_password }),
