@@ -111,11 +111,29 @@ async def create_room_type(
     hotel_id = await get_hotel_id(user_id)
     payload = data.model_dump()
 
-    # Auto-set currency to the hotel's payment currency instead of defaulting to EUR
+    # Force the room currency to the hotel's authoritative currency so a
+    # buggy or stale frontend payload can never create rooms with a
+    # different currency than the property. Order of preference:
+    #   1. PMS payment_settings.default_currency (if set)
+    #   2. booking_hotels.currency from the booking engine DB
+    # The fallback in (2) is critical during initial setup, where rooms
+    # are created BEFORE payment settings exist.
     from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+    from app.database import BookingEngineDatabase
+    from app.config import settings as app_settings
     pay_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if pay_settings and pay_settings.get("default_currency"):
         payload["currency"] = pay_settings["default_currency"]
+    elif app_settings.BOOKING_ENGINE_DATABASE_URL:
+        try:
+            be_currency = await BookingEngineDatabase.fetchval(
+                "SELECT currency FROM booking_hotels WHERE user_id = $1",
+                user_id,
+            )
+            if be_currency:
+                payload["currency"] = be_currency
+        except Exception as e:
+            logger.warning("Failed to fetch booking engine currency for room creation: %s", e)
 
     if payload.get("monthly_rates"):
         payload["monthly_rates"] = {
