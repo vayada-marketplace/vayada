@@ -143,9 +143,15 @@ async def register_hotel(
 
 @router.get("/hotel")
 async def get_hotel(user_id: str = Depends(require_hotel_admin)):
-    """Get the current user's hotel details including last-minute discount config."""
+    """Get the current hotel's details including last-minute discount config.
+
+    Scoped by X-Hotel-Id via get_hotel_id (falls back to the user's
+    oldest hotel when no header is present — same multi-hotel rules
+    as every other admin endpoint).
+    """
+    hotel_id = await get_hotel_id(user_id)
     row = await Database.fetchrow(
-        "SELECT * FROM hotels WHERE user_id = $1", user_id
+        "SELECT * FROM hotels WHERE id = $1", hotel_id
     )
     if not row:
         raise HTTPException(status_code=404, detail="Hotel not found")
@@ -177,11 +183,8 @@ async def update_hotel(
 ):
     """Update hotel details (slug, name, email, last_minute_discount)."""
     import json as _json
-    hotel = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE user_id = $1", user_id
-    )
-    if not hotel:
-        raise HTTPException(status_code=404, detail="Hotel not found")
+    hotel_id = await get_hotel_id(user_id)
+    hotel = {"id": hotel_id}
 
     set_clauses = []
     values = []
@@ -231,34 +234,57 @@ async def update_hotel(
 async def get_setup_status(
     user_id: str = Depends(require_hotel_admin),
 ):
-    hotel = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE user_id = $1", user_id
-    )
+    """Setup status for the selected hotel (or the user's oldest).
 
-    # Auto-register: if no PMS hotel exists yet, create one from the auth profile
-    if not hotel:
-        try:
-            user = await AuthDatabase.fetchrow(
-                "SELECT name, email FROM users WHERE id = $1", user_id
+    This endpoint also auto-creates an empty PMS hotel for users who
+    log into the PMS without yet having one — but only when no
+    X-Hotel-Id header is present, since a header explicitly targets
+    an existing hotel and "no hotel" there should be a 403, not
+    silent auto-creation of a new one.
+    """
+    from app.utils import _current_hotel_id_override
+
+    header_id = _current_hotel_id_override.get()
+    if header_id:
+        # Header mode: find the specific hotel, don't auto-create.
+        hotel = await Database.fetchrow(
+            "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
+            header_id, user_id,
+        )
+        if not hotel:
+            raise HTTPException(
+                status_code=403,
+                detail="X-Hotel-Id does not match any hotel owned by this user",
             )
-            if user and user["name"]:
-                import re
-                import uuid
-                base_slug = re.sub(r'[^a-z0-9]+', '-', user["name"].lower()).strip('-')
-                slug = base_slug or "hotel"
-                # Append short suffix to avoid slug collisions
-                slug = f"{slug}-{uuid.uuid4().hex[:6]}"
-                hotel = await Database.fetchrow(
-                    """INSERT INTO hotels (slug, name, contact_email, user_id)
-                       VALUES ($1, $2, $3, $4)
-                       RETURNING id""",
-                    slug,
-                    user["name"],
-                    user["email"],
-                    user_id,
+    else:
+        hotel = await Database.fetchrow(
+            "SELECT id FROM hotels WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",
+            user_id,
+        )
+        # Auto-register: if no PMS hotel exists yet, create one from the auth profile
+        if not hotel:
+            try:
+                user = await AuthDatabase.fetchrow(
+                    "SELECT name, email FROM users WHERE id = $1", user_id
                 )
-        except Exception as e:
-            logger.error(f"Auto-register hotel failed for user {user_id}: {e}")
+                if user and user["name"]:
+                    import re
+                    import uuid
+                    base_slug = re.sub(r'[^a-z0-9]+', '-', user["name"].lower()).strip('-')
+                    slug = base_slug or "hotel"
+                    # Append short suffix to avoid slug collisions
+                    slug = f"{slug}-{uuid.uuid4().hex[:6]}"
+                    hotel = await Database.fetchrow(
+                        """INSERT INTO hotels (slug, name, contact_email, user_id)
+                           VALUES ($1, $2, $3, $4)
+                           RETURNING id""",
+                        slug,
+                        user["name"],
+                        user["email"],
+                        user_id,
+                    )
+            except Exception as e:
+                logger.error(f"Auto-register hotel failed for user {user_id}: {e}")
 
     if not hotel:
         return SetupStatusResponse(registered=False, setup_complete=False, room_count=0)

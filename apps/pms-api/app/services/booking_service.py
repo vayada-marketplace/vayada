@@ -935,9 +935,13 @@ async def get_booking_status(slug: str, booking_reference: str, guest_email: str
 
 
 async def _get_hotel_id_for_user(user_id: str) -> str:
-    row = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE user_id = $1", user_id
-    )
-    if not row:
+    """Delegate to the central get_hotel_id helper so that the
+    X-Hotel-Id header is honored for admin-created bookings too.
+    Previously this bypassed the helper and always picked the
+    first hotel row — fine for single-hotel accounts, a silent
+    data-routing bug for multi-hotel accounts."""
+    from app.utils import get_hotel_id
+    try:
+        return await get_hotel_id(user_id)
+    except Exception:
         raise ValueError("No hotel found for this account")
-    return str(row["id"])
