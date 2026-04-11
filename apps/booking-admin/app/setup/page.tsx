@@ -245,13 +245,13 @@ export default function SetupPage() {
     setError('')
     setSaving(true)
     try {
-      // Clear any stale hotel selection so the API client doesn't send
-      // an invalid X-Hotel-Id header during setup
+      // Clear any stale hotel selection so the explicit create below
+      // doesn't accidentally carry an X-Hotel-Id header pointing at
+      // some other hotel.
       localStorage.removeItem('selectedHotelId')
       const failedRooms: string[] = []
 
-      // 1. Save property settings (returns hotel data including slug)
-      const savedSettings = await settingsService.updatePropertySettings({
+      const propertyPayload = {
         property_name: propertyName,
         reservation_email: reservationEmail,
         phone_number: phoneNumber,
@@ -284,7 +284,17 @@ export default function SetupPage() {
         arrival_time_enabled: estimatedArrivalTime,
         guest_count_enabled: numberOfGuests,
         refer_a_guest_enabled: enableReferAGuest,
-      })
+      }
+
+      // 1. Explicitly create a new hotel (multi-hotel-safe). This
+      // returns the new hotel's id, which we immediately persist so
+      // every subsequent step in the wizard carries the right
+      // X-Hotel-Id header and the PMS register call gets the same id
+      // as the booking-engine row.
+      const savedSettings = await settingsService.createHotel(propertyPayload)
+      if (savedSettings?.id) {
+        localStorage.setItem('selectedHotelId', savedSettings.id)
+      }
 
       // 2. Save design settings
       await settingsService.updateDesignSettings({
@@ -295,7 +305,7 @@ export default function SetupPage() {
         booking_filters: bookingFilters,
       })
 
-      // 3. Register hotel in PMS (use the same slug as the booking engine)
+      // 3. Register hotel in PMS with the SAME id as booking-engine
       if (selectedPms === 'vayada') {
         const pmsSlug = savedSettings?.slug || propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
         try {
@@ -303,6 +313,11 @@ export default function SetupPage() {
             name: propertyName,
             slug: pmsSlug,
             contactEmail: reservationEmail,
+            // Passing the booking_hotel_id unifies the PMS and booking
+            // engine ids for this hotel. Without it, PMS would
+            // generate its own UUID and we'd be back to the two-id
+            // problem the multi-hotel migration was built to fix.
+            bookingHotelId: savedSettings?.id,
           })
         } catch {
           // Non-fatal: hotel may already be registered (idempotent)
