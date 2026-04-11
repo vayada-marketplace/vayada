@@ -124,23 +124,24 @@ export default function ChoosePropertyPage() {
               <div className="flex items-start gap-3">
                 <div className="shrink-0 w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center group-hover:bg-primary-100">
                   <svg
-                    width="18"
-                    height="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="1.5"
+                    strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     className="text-gray-500 group-hover:text-primary-600"
                   >
-                    <path d="M3 21h18" />
-                    <path d="M5 21V7l8-4v18" />
-                    <path d="M19 21V11l-6-4" />
-                    <path d="M9 9v.01" />
-                    <path d="M9 12v.01" />
-                    <path d="M9 15v.01" />
-                    <path d="M9 18v.01" />
+                    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+                    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+                    <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+                    <path d="M10 6h4" />
+                    <path d="M10 10h4" />
+                    <path d="M10 14h4" />
+                    <path d="M10 18h4" />
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
