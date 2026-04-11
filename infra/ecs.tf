@@ -83,6 +83,11 @@ locals {
       secrets = [
         { name = "DATABASE_URL", valueFrom = "/vayada/prod/db-pms-url" },
         { name = "AUTH_DATABASE_URL", valueFrom = "/vayada/prod/db-auth-url" },
+        # Booking-engine DB is read by the PMS backend for:
+        #  - multi-hotel ID mapping (dashboard + booking-engine cross-DB joins)
+        #  - currency sync during payment settings updates
+        #  - room-creation fallback when PMS payment settings don't exist yet
+        { name = "BOOKING_ENGINE_DATABASE_URL", valueFrom = "/vayada/prod/db-booking-url" },
         { name = "JWT_SECRET_KEY", valueFrom = "/vayada/prod/jwt-secret-key" },
         { name = "SMTP_USERNAME", valueFrom = "/vayada/prod/smtp-username" },
         { name = "SMTP_PASSWORD", valueFrom = "/vayada/prod/smtp-password" },
