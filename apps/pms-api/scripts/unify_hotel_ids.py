@@ -68,7 +68,7 @@ async def fetch_mapping(
 
     Returns:
         mapping: list of (old_pms_id, new_id) tuples, one per PMS hotel
-        pms_orphans: PMS hotels with no booking counterpart (BLOCKER)
+        pms_orphans: PMS hotels with no booking counterpart
         booking_orphans: booking_hotels with no PMS counterpart (informational)
     """
     pms_rows = await pms_conn.fetch(
@@ -109,6 +109,41 @@ async def fetch_mapping(
 
     booking_orphans = [b for k, b in booking_by_key.items() if k not in pms_by_key]
     return mapping, pms_orphans, booking_orphans
+
+
+async def reconcile_orphans(
+    booking_conn: asyncpg.Connection,
+    orphans: List[dict],
+) -> None:
+    """
+    Create a matching booking_hotels row for each PMS orphan.
+
+    These orphans exist because get_setup_status auto-registers a PMS
+    hotel row whenever a user logs into the PMS for the first time —
+    but if that user never completes the booking-engine setup wizard,
+    they end up with a PMS hotel and no booking_hotels counterpart.
+
+    Rather than delete the PMS rows (some have rooms / payment
+    settings attached), create a minimal booking_hotels row with the
+    SAME id, user_id, slug and name. Everything else defaults to
+    empty/sane values from the column DEFAULT definitions.
+
+    After this, the PMS orphan becomes a regular "unified id" pair
+    and the normal migration path handles it (with new_id == old_id,
+    i.e. a no-op id change).
+    """
+    for o in orphans:
+        await booking_conn.execute(
+            """
+            INSERT INTO booking_hotels (id, user_id, slug, name)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            str(o["id"]),
+            str(o["user_id"]) if o.get("user_id") else None,
+            o["slug"],
+            o["name"] or "Untitled Property",
+        )
 
 
 async def run_migration(
@@ -235,27 +270,43 @@ async def main() -> None:
             pms_conn, booking_conn
         )
 
-        print(f"  Total mappable hotels: {len(mapping)}")
+        print(f"  Initial mappable hotels: {len(mapping)}")
         print(f"  PMS orphans (no booking_hotels match): {len(pms_orphans)}")
         print(f"  Booking orphans (no PMS match, ignored): {len(booking_orphans)}")
 
         if pms_orphans:
             print()
-            print("BLOCKER — the following PMS hotels have no matching booking_hotels row:")
-            for o in pms_orphans:
-                print(
-                    f"  id={o['id']}  user_id={o['user_id']}  "
-                    f"slug={o['slug']}  name={o['name']}"
-                )
-            print()
             print(
-                "Cannot proceed. Each PMS hotel needs a booking_hotels counterpart "
-                "before this migration can run. Options:"
+                f"Reconciling {len(pms_orphans)} PMS orphans by inserting "
+                "matching booking_hotels rows (same id, user_id, slug, name)..."
             )
-            print("  1. Create the missing booking_hotels row manually")
-            print("  2. Delete the orphan PMS hotel if it's garbage")
-            print("  3. Investigate how these orphans came to exist")
-            sys.exit(1)
+            for o in pms_orphans[:10]:
+                print(
+                    f"  will stub id={o['id']} slug={o['slug']} "
+                    f"name={o['name']!r}"
+                )
+            if len(pms_orphans) > 10:
+                print(f"  ... and {len(pms_orphans) - 10} more")
+
+            if args.execute:
+                await reconcile_orphans(booking_conn, pms_orphans)
+                # Re-fetch the mapping now that the orphans have partners
+                mapping, still_orphaned, _ = await fetch_mapping(
+                    pms_conn, booking_conn
+                )
+                if still_orphaned:
+                    raise RuntimeError(
+                        f"After reconciliation, {len(still_orphaned)} PMS orphans "
+                        "still lack a booking_hotels row. Check INSERT logs."
+                    )
+                print(
+                    f"  Reconciled. New mapping size: {len(mapping)}"
+                )
+            else:
+                print(
+                    "  (dry-run: would reconcile these, "
+                    "pass --execute to actually INSERT)"
+                )
 
         if booking_orphans:
             print()
