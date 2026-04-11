@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import { checkPmsSetupStatus } from '@/lib/utils/setupStatus'
+import { pmsSettingsService } from '@/services/settings'
 import LoginForm from '@/components/auth/LoginForm'
 import { useTranslation } from '@/lib/i18n'
 
@@ -30,10 +31,29 @@ export default function LoginPage() {
       if (!status || !status.registered || !status.setupComplete) {
         localStorage.setItem('pmsSetupComplete', 'false')
         router.push('/setup')
-      } else {
-        localStorage.setItem('pmsSetupComplete', 'true')
-        router.push('/dashboard')
+        return
       }
+
+      localStorage.setItem('pmsSetupComplete', 'true')
+
+      // Multi-hotel users get the property picker so they explicitly
+      // choose which property to manage instead of being dropped into
+      // an arbitrary "last-used" dashboard. Single-hotel users skip it.
+      try {
+        const hotels = await pmsSettingsService.listHotels()
+        if (hotels.length > 1) {
+          localStorage.removeItem('selectedHotelId')
+          router.push('/choose-property')
+          return
+        }
+        if (hotels.length === 1) {
+          localStorage.setItem('selectedHotelId', hotels[0].id)
+        }
+      } catch {
+        // If the hotel list fails, fall through to dashboard — the
+        // header's own listHotels call will re-populate state there.
+      }
+      router.push('/dashboard')
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
