@@ -3,6 +3,11 @@ from typing import Optional
 
 
 class PropertySettingsResponse(BaseModel):
+    # booking_hotels.id — the canonical hotel identifier. After the
+    # multi-hotel-ids migration this is the same UUID as the PMS
+    # hotels.id for this property. Clients use it for the
+    # X-Hotel-Id header and for passing to POST /admin/register-hotel.
+    id: Optional[str] = None
     slug: str
     property_name: str
     reservation_email: str

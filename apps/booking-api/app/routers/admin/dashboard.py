@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, Query
-from app.dependencies import require_hotel_admin
+from app.dependencies import require_hotel_admin, require_current_hotel
 from app.repositories.dashboard_repo import DashboardRepository
 from app.models.dashboard import (
     StatsResponse,
@@ -15,33 +15,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# All four dashboard endpoints scope by the currently-selected hotel
+# (X-Hotel-Id header) instead of WHERE user_id LIMIT 1. Without this,
+# a user with multiple properties would always see stats for whichever
+# hotel happened to come back first in an unordered query.
+
 @router.get("/dashboard/stats", response_model=StatsResponse)
 async def get_dashboard_stats(
     range: str = Query("today", pattern="^(today|week|month)$"),
-    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
-    return await DashboardRepository.get_stats(user_id, range)
+    return await DashboardRepository.get_stats(hotel, range)
 
 
 @router.get("/dashboard/bookings-by-source", response_model=BookingsBySourceResponse)
 async def get_bookings_by_source(
     range: str = Query("month", pattern="^(today|week|month)$"),
-    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
-    return await DashboardRepository.get_bookings_by_source(user_id, range)
+    return await DashboardRepository.get_bookings_by_source(hotel, range)
 
 
 @router.get("/dashboard/conversion-funnel", response_model=ConversionFunnelResponse)
 async def get_conversion_funnel(
     range: str = Query("month", pattern="^(today|week|month)$"),
-    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
-    return await DashboardRepository.get_conversion_funnel(user_id, range)
+    return await DashboardRepository.get_conversion_funnel(hotel, range)
 
 
 @router.get("/dashboard/sparklines", response_model=SparklineResponse)
 async def get_sparklines(
     range: str = Query("today", pattern="^(today|week|month)$"),
-    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
-    return await DashboardRepository.get_sparklines(user_id, range)
+    return await DashboardRepository.get_sparklines(hotel, range)

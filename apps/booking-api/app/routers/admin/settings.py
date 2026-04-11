@@ -123,6 +123,7 @@ _PROPERTY_FIELD_MAP = {
 
 def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
     return PropertySettingsResponse(
+        id=str(hotel.get('id')) if hotel.get('id') else None,
         slug=hotel.get('slug') or '',
         property_name=hotel.get('name') or '',
         reservation_email=hotel.get('contact_email') or '',
@@ -195,6 +196,90 @@ async def get_property_settings(
     return _hotel_to_property_settings(full_hotel)
 
 
+async def _create_hotel_from_settings(
+    data: PropertySettingsUpdate,
+    user_id: str,
+) -> dict:
+    """Create a new booking_hotels row from a PropertySettingsUpdate payload.
+
+    Raises HTTPException(409) on slug collision. Used by both the
+    explicit POST /admin/hotels endpoint (multi-hotel-safe) and the
+    legacy auto-create branch in PATCH /admin/settings/property.
+    """
+    name = data.property_name or ''
+    slug = slugify(name) if name else f"hotel-{user_id[:8]}"
+    try:
+        return await BookingHotelRepository.create(
+            name=name,
+            slug=slug,
+            contact_email=data.reservation_email or '',
+            contact_phone=data.phone_number or '',
+            timezone=data.timezone or 'UTC',
+            currency=data.default_currency or 'EUR',
+            default_language=data.default_language or 'en',
+            supported_languages=data.supported_languages or ['en'],
+            user_id=user_id,
+            supported_currencies=data.supported_currencies or [],
+            contact_whatsapp=data.whatsapp_number or '',
+            contact_address=data.address or '',
+            check_in_time=data.check_in_time or '15:00',
+            check_out_time=data.check_out_time or '11:00',
+            pay_at_property_enabled=data.pay_at_property_enabled if data.pay_at_property_enabled is not None else False,
+            online_card_payment=data.online_card_payment if data.online_card_payment is not None else False,
+            bank_transfer=data.bank_transfer if data.bank_transfer is not None else False,
+            free_cancellation_days=data.free_cancellation_days if data.free_cancellation_days is not None else 7,
+            email_notifications=data.email_notifications if data.email_notifications is not None else True,
+            new_booking_alerts=data.new_booking_alerts if data.new_booking_alerts is not None else True,
+            payment_alerts=data.payment_alerts if data.payment_alerts is not None else True,
+            weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
+            special_requests_enabled=data.special_requests_enabled if data.special_requests_enabled is not None else True,
+            arrival_time_enabled=data.arrival_time_enabled if data.arrival_time_enabled is not None else False,
+            guest_count_enabled=data.guest_count_enabled if data.guest_count_enabled is not None else False,
+            refer_a_guest_enabled=data.refer_a_guest_enabled if data.refer_a_guest_enabled is not None else False,
+            social_instagram=data.instagram or '',
+            social_facebook=data.facebook or '',
+            social_tiktok=data.tiktok or '',
+            social_youtube=data.youtube or '',
+            payout_account_holder=data.payout_account_holder or '',
+            payout_iban=data.payout_iban or '',
+            payout_bank_name=data.payout_bank_name or '',
+            payout_swift=data.payout_swift or '',
+        )
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A property with this name already exists. Please choose a different name.",
+        )
+
+
+@router.post("/hotels", response_model=PropertySettingsResponse, status_code=status.HTTP_201_CREATED)
+async def create_hotel(
+    data: PropertySettingsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Explicitly create a new property for the authenticated user.
+
+    This is the multi-hotel-safe creation path used by the setup
+    wizard when adding a new property. Unlike PATCH /settings/property
+    (which auto-creates only when no current hotel is selected and
+    silently updates the existing one otherwise), this endpoint
+    always creates a new booking_hotels row and returns its id so
+    the caller can then pass that id to the PMS register-hotel
+    endpoint and to X-Hotel-Id headers going forward.
+    """
+    try:
+        result = await _create_hotel_from_settings(data, user_id)
+        return _hotel_to_property_settings(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create hotel: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create property. Please try again.",
+        )
+
+
 @router.patch("/settings/property", response_model=PropertySettingsResponse)
 async def update_property_settings(
     data: PropertySettingsUpdate,
@@ -214,51 +299,11 @@ async def update_property_settings(
             else:
                 result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
         else:
-            name = data.property_name or ''
-            slug = slugify(name) if name else f"hotel-{user_id[:8]}"
-
-            try:
-                result = await BookingHotelRepository.create(
-                    name=name,
-                    slug=slug,
-                    contact_email=data.reservation_email or '',
-                    contact_phone=data.phone_number or '',
-                    timezone=data.timezone or 'UTC',
-                    currency=data.default_currency or 'EUR',
-                    default_language=data.default_language or 'en',
-                    supported_languages=data.supported_languages or ['en'],
-                    user_id=user_id,
-                    supported_currencies=data.supported_currencies or [],
-                    contact_whatsapp=data.whatsapp_number or '',
-                    contact_address=data.address or '',
-                    check_in_time=data.check_in_time or '15:00',
-                    check_out_time=data.check_out_time or '11:00',
-                    pay_at_property_enabled=data.pay_at_property_enabled if data.pay_at_property_enabled is not None else False,
-                    online_card_payment=data.online_card_payment if data.online_card_payment is not None else False,
-                    bank_transfer=data.bank_transfer if data.bank_transfer is not None else False,
-                    free_cancellation_days=data.free_cancellation_days if data.free_cancellation_days is not None else 7,
-                    email_notifications=data.email_notifications if data.email_notifications is not None else True,
-                    new_booking_alerts=data.new_booking_alerts if data.new_booking_alerts is not None else True,
-                    payment_alerts=data.payment_alerts if data.payment_alerts is not None else True,
-                    weekly_reports=data.weekly_reports if data.weekly_reports is not None else False,
-                    special_requests_enabled=data.special_requests_enabled if data.special_requests_enabled is not None else True,
-                    arrival_time_enabled=data.arrival_time_enabled if data.arrival_time_enabled is not None else False,
-                    guest_count_enabled=data.guest_count_enabled if data.guest_count_enabled is not None else False,
-                    refer_a_guest_enabled=data.refer_a_guest_enabled if data.refer_a_guest_enabled is not None else False,
-                    social_instagram=data.instagram or '',
-                    social_facebook=data.facebook or '',
-                    social_tiktok=data.tiktok or '',
-                    social_youtube=data.youtube or '',
-                    payout_account_holder=data.payout_account_holder or '',
-                    payout_iban=data.payout_iban or '',
-                    payout_bank_name=data.payout_bank_name or '',
-                    payout_swift=data.payout_swift or '',
-                )
-            except asyncpg.UniqueViolationError:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A property with this name already exists. Please choose a different name.",
-                )
+            # Legacy auto-create branch: only reachable when the user
+            # has no hotels at all (otherwise get_current_hotel would
+            # have returned one). New callers should use the explicit
+            # POST /admin/hotels endpoint above.
+            result = await _create_hotel_from_settings(data, user_id)
 
         return _hotel_to_property_settings(result)
     except HTTPException:

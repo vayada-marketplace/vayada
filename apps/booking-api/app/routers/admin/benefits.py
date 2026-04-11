@@ -1,21 +1,11 @@
 import json
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from app.dependencies import require_hotel_admin
+from app.dependencies import require_hotel_admin, require_current_hotel
 from app.database import PmsDatabase
 from app.config import settings
 
 router = APIRouter()
-
-
-async def _get_pms_hotel_id(user_id: str):
-    """Find the PMS hotel_id (UUID) for a given user."""
-    if not settings.PMS_DATABASE_URL:
-        return None
-    row = await PmsDatabase.fetchrow(
-        "SELECT id FROM hotels WHERE user_id = $1 LIMIT 1", user_id
-    )
-    return row["id"] if row else None
 
 
 def _parse_jsonb(val):
@@ -32,11 +22,16 @@ class BenefitsUpdate(BaseModel):
     benefits: list[str]
 
 
+# Benefits are stored on PMS hotels.benefits JSONB column. After the
+# multi-hotel-ids unification, hotel["id"] from require_current_hotel
+# is the same UUID as the PMS hotel row, so no separate lookup is
+# needed — query PMS by id directly.
+
 @router.get("/benefits", response_model=BenefitsResponse)
-async def get_benefits(user_id: str = Depends(require_hotel_admin)):
-    hotel_id = await _get_pms_hotel_id(user_id)
-    if not hotel_id:
+async def get_benefits(hotel: dict = Depends(require_current_hotel)):
+    if not settings.PMS_DATABASE_URL:
         return BenefitsResponse(benefits=[])
+    hotel_id = str(hotel["id"])
     row = await PmsDatabase.fetchrow(
         "SELECT benefits FROM hotels WHERE id = $1", hotel_id
     )
@@ -48,11 +43,11 @@ async def get_benefits(user_id: str = Depends(require_hotel_admin)):
 @router.put("/benefits", response_model=BenefitsResponse)
 async def update_benefits(
     data: BenefitsUpdate,
-    user_id: str = Depends(require_hotel_admin),
+    hotel: dict = Depends(require_current_hotel),
 ):
-    hotel_id = await _get_pms_hotel_id(user_id)
-    if not hotel_id:
+    if not settings.PMS_DATABASE_URL:
         return BenefitsResponse(benefits=data.benefits)
+    hotel_id = str(hotel["id"])
     await PmsDatabase.execute(
         "UPDATE hotels SET benefits = $1::jsonb WHERE id = $2",
         json.dumps(data.benefits),
