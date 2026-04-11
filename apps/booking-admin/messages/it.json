@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Errore di validazione.",
   "auth.login.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
   "auth.login.errorSessionExpired": "La tua sessione è scaduta. Effettua nuovamente l'accesso.",
-
   "auth.register.fullNameLabel": "Nome completo",
   "auth.register.fullNamePlaceholder": "Mario Rossi",
   "auth.register.emailLabel": "Indirizzo email",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Esiste già un account con questo indirizzo email.",
   "auth.register.errorValidation": "Errore di validazione.",
   "auth.register.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
-
   "auth.forgotPassword.emailLabel": "Indirizzo email",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Inserisci un indirizzo email valido",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Prova un'altra email",
   "auth.forgotPassword.title": "Motore di prenotazione",
   "auth.forgotPassword.subtitle": "Reimposta la tua password",
-
   "auth.resetPassword.newPasswordLabel": "Nuova password",
   "auth.resetPassword.newPasswordPlaceholder": "Almeno 8 caratteri",
   "auth.resetPassword.confirmPasswordLabel": "Conferma password",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Imposta la tua nuova password",
   "auth.resetPassword.errorExpiredToken": "Token di ripristino non valido o scaduto. Richiedine uno nuovo.",
   "auth.resetPassword.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
-
   "auth.verifyEmail.title": "Motore di prenotazione",
   "auth.verifyEmail.loading": "Verifica del cambio email in corso...",
   "auth.verifyEmail.successDefault": "Email aggiornata con successo!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Verifica fallita. Il link potrebbe essere non valido o scaduto.",
   "auth.verifyEmail.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
   "auth.verifyEmail.goToLogin": "Vai all'accesso",
-
   "layout.header.noProperties": "Nessuna struttura",
   "layout.header.switchProperty": "Cambia struttura",
   "layout.header.viewAllHotels": "Visualizza tutti gli hotel...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Impostazioni account",
   "layout.header.signOut": "Esci",
   "layout.header.language": "Lingua",
-
   "layout.sidebar.bookingEngine": "Motore di prenotazione",
   "layout.sidebar.bookingEngineDescription": "Prenotazioni dirette e ricavi",
   "layout.sidebar.switchApp": "Cambia app",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Impostazioni",
   "layout.sidebar.manageHotels": "Gestione hotel",
   "layout.sidebar.collapse": "Comprimi",
-
   "dashboard.title": "Motore di prenotazione",
   "dashboard.timeRange.today": "Oggi",
   "dashboard.timeRange.week": "Questa settimana",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Funnel di conversione",
   "dashboard.conversionFunnel.noData": "Nessun dato sulle prenotazioni per questo periodo",
-
   "affiliates.title": "Affiliati",
   "affiliates.subtitle": "Gestisci i referral, monitora le prestazioni e processa i pagamenti",
   "affiliates.stats.totalAffiliates": "Totale affiliati",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Bonifico bancario",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Personalizza l'aspetto del tuo motore di prenotazione",
   "designStudio.tabs.media": "Media e contenuti",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Preset rapidi",
   "designStudio.fonts.title": "Tipografia",
   "designStudio.fonts.subtitle": "Seleziona un abbinamento di caratteri",
-
   "bookingFlow.title": "Flusso di prenotazione",
   "bookingFlow.subtitle": "Configura ogni fase dell'esperienza di prenotazione dei tuoi ospiti",
   "bookingFlow.tabs.filters": "Filtri",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Numero di ospiti",
   "bookingFlow.guestForm.feedback.saveSuccess": "Impostazioni modulo ospite salvate",
   "bookingFlow.guestForm.feedback.saveError": "Impossibile salvare le impostazioni del modulo ospite",
-
   "settings.title": "Impostazioni",
   "settings.subtitle": "Gestisci la tua struttura e le preferenze dell'account",
   "settings.tabs.property": "Struttura",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Cerca paese...",
   "settings.billing.noResults": "Nessun risultato",
   "settings.billing.paymentSettingsSaved": "Impostazioni di pagamento salvate",
-
   "manageHotels.title": "Gestione hotel",
   "manageHotels.subtitle": "Sfoglia, configura e imposta le tariffe per ogni hotel.",
   "manageHotels.searchPlaceholder": "Cerca per nome hotel, località, proprietario...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Configura",
   "manageHotels.table.save": "Salva",
   "manageHotels.table.cancel": "Annulla",
-
   "setup.title": "Configurazione struttura",
   "setup.steps.yourProperty": "La tua struttura",
   "setup.steps.brandMedia": "Brand e media",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Codice invito non valido",
   "setup.policies.launchProperty": "Lancia la struttura",
   "setup.policies.launching": "Lancio in corso...",
-
   "common.save": "Salva modifiche",
   "common.cancel": "Annulla",
   "common.back": "Indietro",
@@ -515,5 +501,11 @@
   "common.select": "Seleziona...",
   "common.popularChoices": "Scelte popolari",
   "common.added": "Aggiunto",
-  "common.noResultsFound": "Nessun risultato trovato"
+  "common.noResultsFound": "Nessun risultato trovato",
+  "auth.chooseProperty.welcome": "Benvenuto",
+  "auth.chooseProperty.welcomeBack": "Bentornato",
+  "auth.chooseProperty.subtitle": "Quale proprietà vuoi gestire?",
+  "auth.chooseProperty.addProperty": "Aggiungi una nuova proprietà",
+  "auth.chooseProperty.loadError": "Impossibile caricare le proprietà",
+  "auth.chooseProperty.retry": "Riprova"
 }

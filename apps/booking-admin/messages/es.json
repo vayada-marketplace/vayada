@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Error de validación.",
   "auth.login.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
   "auth.login.errorSessionExpired": "Su sesión ha expirado. Por favor, inicie sesión de nuevo.",
-
   "auth.register.fullNameLabel": "Nombre completo",
   "auth.register.fullNamePlaceholder": "Juan García",
   "auth.register.emailLabel": "Correo electrónico",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Ya existe una cuenta con este correo electrónico.",
   "auth.register.errorValidation": "Error de validación.",
   "auth.register.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
-
   "auth.forgotPassword.emailLabel": "Correo electrónico",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Por favor, introduzca un correo electrónico válido",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Probar con otro correo electrónico",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "Restablecer su contraseña",
-
   "auth.resetPassword.newPasswordLabel": "Nueva contraseña",
   "auth.resetPassword.newPasswordPlaceholder": "Al menos 8 caracteres",
   "auth.resetPassword.confirmPasswordLabel": "Confirmar contraseña",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Establezca su nueva contraseña",
   "auth.resetPassword.errorExpiredToken": "Token de restablecimiento no válido o expirado. Por favor, solicite uno nuevo.",
   "auth.resetPassword.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "Verificando el cambio de correo electrónico...",
   "auth.verifyEmail.successDefault": "¡Correo electrónico actualizado con éxito!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "La verificación ha fallado. El enlace puede ser no válido o haber expirado.",
   "auth.verifyEmail.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
   "auth.verifyEmail.goToLogin": "Ir al inicio de sesión",
-
   "layout.header.noProperties": "Sin propiedades",
   "layout.header.switchProperty": "Cambiar propiedad",
   "layout.header.viewAllHotels": "Ver todos los hoteles...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Configuración de cuenta",
   "layout.header.signOut": "Cerrar sesión",
   "layout.header.language": "Idioma",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Reservas directas e ingresos",
   "layout.sidebar.switchApp": "Cambiar aplicación",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Configuración",
   "layout.sidebar.manageHotels": "Gestionar hoteles",
   "layout.sidebar.collapse": "Contraer",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "Hoy",
   "dashboard.timeRange.week": "Esta semana",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Embudo de conversión",
   "dashboard.conversionFunnel.noData": "Sin datos de reservas para este período",
-
   "affiliates.title": "Afiliados",
   "affiliates.subtitle": "Gestione referencias, siga el rendimiento y procese pagos",
   "affiliates.stats.totalAffiliates": "Total de afiliados",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Transferencia bancaria",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Personalice la apariencia de su Booking Engine",
   "designStudio.tabs.media": "Medios y contenido",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Preajustes rápidos",
   "designStudio.fonts.title": "Tipografía",
   "designStudio.fonts.subtitle": "Seleccione una combinación de fuentes",
-
   "bookingFlow.title": "Flujo de reservas",
   "bookingFlow.subtitle": "Configure cada paso de la experiencia de reserva de sus huéspedes",
   "bookingFlow.tabs.filters": "Filtros",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Número de huéspedes",
   "bookingFlow.guestForm.feedback.saveSuccess": "Configuración del formulario del huésped guardada",
   "bookingFlow.guestForm.feedback.saveError": "No se pudo guardar la configuración del formulario del huésped",
-
   "settings.title": "Configuración",
   "settings.subtitle": "Gestione las preferencias de su propiedad y cuenta",
   "settings.tabs.property": "Propiedad",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Buscar país...",
   "settings.billing.noResults": "Sin resultados",
   "settings.billing.paymentSettingsSaved": "Configuración de pago guardada",
-
   "manageHotels.title": "Gestionar hoteles",
   "manageHotels.subtitle": "Explore, configure y establezca las tarifas de facturación de cada hotel.",
   "manageHotels.searchPlaceholder": "Buscar por nombre de hotel, ubicación, propietario...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Configurar",
   "manageHotels.table.save": "Guardar",
   "manageHotels.table.cancel": "Cancelar",
-
   "setup.title": "Configuración de la propiedad",
   "setup.steps.yourProperty": "Su propiedad",
   "setup.steps.brandMedia": "Marca y medios",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Código de invitación no válido",
   "setup.policies.launchProperty": "Lanzar propiedad",
   "setup.policies.launching": "Lanzando...",
-
   "common.save": "Guardar cambios",
   "common.cancel": "Cancelar",
   "common.back": "Atrás",
@@ -515,5 +501,11 @@
   "common.select": "Seleccionar...",
   "common.popularChoices": "Opciones populares",
   "common.added": "Añadido",
-  "common.noResultsFound": "No se encontraron resultados"
+  "common.noResultsFound": "No se encontraron resultados",
+  "auth.chooseProperty.welcome": "Bienvenido",
+  "auth.chooseProperty.welcomeBack": "Bienvenido de nuevo",
+  "auth.chooseProperty.subtitle": "¿Qué propiedad te gustaría gestionar?",
+  "auth.chooseProperty.addProperty": "Añadir una nueva propiedad",
+  "auth.chooseProperty.loadError": "Error al cargar las propiedades",
+  "auth.chooseProperty.retry": "Reintentar"
 }

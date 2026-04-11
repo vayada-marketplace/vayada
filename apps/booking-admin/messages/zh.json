@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "验证错误。",
   "auth.login.errorUnexpected": "发生意外错误，请重试。",
   "auth.login.errorSessionExpired": "您的会话已过期，请重新登录。",
-
   "auth.register.fullNameLabel": "姓名",
   "auth.register.fullNamePlaceholder": "张三",
   "auth.register.emailLabel": "电子邮箱",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "该邮箱已注册账户。",
   "auth.register.errorValidation": "验证错误。",
   "auth.register.errorUnexpected": "发生意外错误，请重试。",
-
   "auth.forgotPassword.emailLabel": "电子邮箱",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "请输入有效的电子邮箱地址",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "尝试其他邮箱",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "重置您的密码",
-
   "auth.resetPassword.newPasswordLabel": "新密码",
   "auth.resetPassword.newPasswordPlaceholder": "至少8个字符",
   "auth.resetPassword.confirmPasswordLabel": "确认密码",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "设置新密码",
   "auth.resetPassword.errorExpiredToken": "重置令牌无效或已过期，请重新申请。",
   "auth.resetPassword.errorUnexpected": "发生意外错误，请重试。",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "正在验证您的邮箱变更...",
   "auth.verifyEmail.successDefault": "邮箱更新成功！",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "验证失败，链接可能无效或已过期。",
   "auth.verifyEmail.errorUnexpected": "发生意外错误，请重试。",
   "auth.verifyEmail.goToLogin": "前往登录",
-
   "layout.header.noProperties": "暂无物业",
   "layout.header.switchProperty": "切换物业",
   "layout.header.viewAllHotels": "查看所有酒店...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "账户设置",
   "layout.header.signOut": "退出登录",
   "layout.header.language": "语言",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "直接预订与收入",
   "layout.sidebar.switchApp": "切换应用",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "设置",
   "layout.sidebar.manageHotels": "管理酒店",
   "layout.sidebar.collapse": "收起",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "今天",
   "dashboard.timeRange.week": "本周",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "转化漏斗",
   "dashboard.conversionFunnel.noData": "该时段暂无预订数据",
-
   "affiliates.title": "分销联盟",
   "affiliates.subtitle": "管理推荐、追踪业绩、处理佣金支付",
   "affiliates.stats.totalAffiliates": "分销商总数",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "银行转账",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "自定义预订引擎的外观和风格",
   "designStudio.tabs.media": "媒体与内容",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "快速预设",
   "designStudio.fonts.title": "字体排版",
   "designStudio.fonts.subtitle": "选择字体搭配",
-
   "bookingFlow.title": "预订流程",
   "bookingFlow.subtitle": "配置客人预订体验的每个步骤",
   "bookingFlow.tabs.filters": "筛选",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "客人人数",
   "bookingFlow.guestForm.feedback.saveSuccess": "客人表单设置已保存",
   "bookingFlow.guestForm.feedback.saveError": "客人表单设置保存失败",
-
   "settings.title": "设置",
   "settings.subtitle": "管理您的物业和账户偏好",
   "settings.tabs.property": "物业",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "搜索国家...",
   "settings.billing.noResults": "无结果",
   "settings.billing.paymentSettingsSaved": "支付设置已保存",
-
   "manageHotels.title": "管理酒店",
   "manageHotels.subtitle": "浏览、配置并设置每家酒店的计费费率。",
   "manageHotels.searchPlaceholder": "按酒店名称、位置、业主搜索...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "配置",
   "manageHotels.table.save": "保存",
   "manageHotels.table.cancel": "取消",
-
   "setup.title": "物业设置",
   "setup.steps.yourProperty": "您的物业",
   "setup.steps.brandMedia": "品牌与媒体",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "邀请码无效",
   "setup.policies.launchProperty": "发布物业",
   "setup.policies.launching": "发布中...",
-
   "common.save": "保存更改",
   "common.cancel": "取消",
   "common.back": "返回",
@@ -515,5 +501,11 @@
   "common.select": "选择...",
   "common.popularChoices": "热门选项",
   "common.added": "已添加",
-  "common.noResultsFound": "未找到结果"
+  "common.noResultsFound": "未找到结果",
+  "auth.chooseProperty.welcome": "欢迎",
+  "auth.chooseProperty.welcomeBack": "欢迎回来",
+  "auth.chooseProperty.subtitle": "您想管理哪个物业？",
+  "auth.chooseProperty.addProperty": "添加新物业",
+  "auth.chooseProperty.loadError": "加载物业失败",
+  "auth.chooseProperty.retry": "重试"
 }

@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Validatiefout.",
   "auth.login.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.login.errorSessionExpired": "Je sessie is verlopen. Log opnieuw in.",
-
   "auth.register.fullNameLabel": "Volledige naam",
   "auth.register.fullNamePlaceholder": "Jan Jansen",
   "auth.register.emailLabel": "E-mailadres",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Er bestaat al een account met dit e-mailadres.",
   "auth.register.errorValidation": "Validatiefout.",
   "auth.register.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
-
   "auth.forgotPassword.emailLabel": "E-mailadres",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Voer een geldig e-mailadres in",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Probeer een ander e-mailadres",
   "auth.forgotPassword.title": "Boekingsmodule",
   "auth.forgotPassword.subtitle": "Herstel je wachtwoord",
-
   "auth.resetPassword.newPasswordLabel": "Nieuw wachtwoord",
   "auth.resetPassword.newPasswordPlaceholder": "Minimaal 8 tekens",
   "auth.resetPassword.confirmPasswordLabel": "Bevestig wachtwoord",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Stel je nieuwe wachtwoord in",
   "auth.resetPassword.errorExpiredToken": "Ongeldig of verlopen hersteltoken. Vraag een nieuwe aan.",
   "auth.resetPassword.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
-
   "auth.verifyEmail.title": "Boekingsmodule",
   "auth.verifyEmail.loading": "E-mailwijziging wordt geverifieerd...",
   "auth.verifyEmail.successDefault": "E-mailadres succesvol bijgewerkt!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Verificatie mislukt. De link is mogelijk ongeldig of verlopen.",
   "auth.verifyEmail.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.verifyEmail.goToLogin": "Ga naar inlogpagina",
-
   "layout.header.noProperties": "Geen accommodaties",
   "layout.header.switchProperty": "Wissel van accommodatie",
   "layout.header.viewAllHotels": "Alle hotels bekijken...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Accountinstellingen",
   "layout.header.signOut": "Uitloggen",
   "layout.header.language": "Taal",
-
   "layout.sidebar.bookingEngine": "Boekingsmodule",
   "layout.sidebar.bookingEngineDescription": "Directe boekingen en omzet",
   "layout.sidebar.switchApp": "Wissel van app",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Instellingen",
   "layout.sidebar.manageHotels": "Hotels beheren",
   "layout.sidebar.collapse": "Inklappen",
-
   "dashboard.title": "Boekingsmodule",
   "dashboard.timeRange.today": "Vandaag",
   "dashboard.timeRange.week": "Deze week",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Conversietrechter",
   "dashboard.conversionFunnel.noData": "Geen boekingsgegevens voor deze periode",
-
   "affiliates.title": "Affiliates",
   "affiliates.subtitle": "Beheer verwijzingen, volg prestaties en verwerk uitbetalingen",
   "affiliates.stats.totalAffiliates": "Totaal affiliates",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Bankoverschrijving",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Pas het uiterlijk van je boekingsmodule aan",
   "designStudio.tabs.media": "Media en inhoud",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Snelle presets",
   "designStudio.fonts.title": "Typografie",
   "designStudio.fonts.subtitle": "Selecteer een lettertypecombinatie",
-
   "bookingFlow.title": "Boekingsproces",
   "bookingFlow.subtitle": "Configureer elke stap van de boekingservaring van je gasten",
   "bookingFlow.tabs.filters": "Filters",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Aantal gasten",
   "bookingFlow.guestForm.feedback.saveSuccess": "Gastformulierinstellingen opgeslagen",
   "bookingFlow.guestForm.feedback.saveError": "Kon gastformulierinstellingen niet opslaan",
-
   "settings.title": "Instellingen",
   "settings.subtitle": "Beheer je accommodatie en accountvoorkeuren",
   "settings.tabs.property": "Accommodatie",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Zoek land...",
   "settings.billing.noResults": "Geen resultaten",
   "settings.billing.paymentSettingsSaved": "Betaalinstellingen opgeslagen",
-
   "manageHotels.title": "Hotels beheren",
   "manageHotels.subtitle": "Bekijk, configureer en stel tarieven in voor elk hotel.",
   "manageHotels.searchPlaceholder": "Zoek op hotelnaam, locatie, eigenaar...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Configureren",
   "manageHotels.table.save": "Opslaan",
   "manageHotels.table.cancel": "Annuleren",
-
   "setup.title": "Accommodatie instellen",
   "setup.steps.yourProperty": "Je accommodatie",
   "setup.steps.brandMedia": "Merk en media",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Ongeldige uitnodigingscode",
   "setup.policies.launchProperty": "Accommodatie lanceren",
   "setup.policies.launching": "Lanceren...",
-
   "common.save": "Wijzigingen opslaan",
   "common.cancel": "Annuleren",
   "common.back": "Terug",
@@ -515,5 +501,11 @@
   "common.select": "Selecteer...",
   "common.popularChoices": "Populaire keuzes",
   "common.added": "Toegevoegd",
-  "common.noResultsFound": "Geen resultaten gevonden"
+  "common.noResultsFound": "Geen resultaten gevonden",
+  "auth.chooseProperty.welcome": "Welkom",
+  "auth.chooseProperty.welcomeBack": "Welkom terug",
+  "auth.chooseProperty.subtitle": "Welk object wilt u beheren?",
+  "auth.chooseProperty.addProperty": "Nieuw object toevoegen",
+  "auth.chooseProperty.loadError": "Kon objecten niet laden",
+  "auth.chooseProperty.retry": "Opnieuw proberen"
 }

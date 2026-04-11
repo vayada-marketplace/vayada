@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Ошибка валидации.",
   "auth.login.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.login.errorSessionExpired": "Ваша сессия истекла. Пожалуйста, войдите снова.",
-
   "auth.register.fullNameLabel": "Полное имя",
   "auth.register.fullNamePlaceholder": "Иван Иванов",
   "auth.register.emailLabel": "Электронная почта",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Аккаунт с этим адресом электронной почты уже существует.",
   "auth.register.errorValidation": "Ошибка валидации.",
   "auth.register.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
-
   "auth.forgotPassword.emailLabel": "Электронная почта",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Пожалуйста, введите действительный адрес электронной почты",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Попробовать другой адрес",
   "auth.forgotPassword.title": "Система бронирования",
   "auth.forgotPassword.subtitle": "Сброс пароля",
-
   "auth.resetPassword.newPasswordLabel": "Новый пароль",
   "auth.resetPassword.newPasswordPlaceholder": "Минимум 8 символов",
   "auth.resetPassword.confirmPasswordLabel": "Подтвердите пароль",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Установите новый пароль",
   "auth.resetPassword.errorExpiredToken": "Недействительный или просроченный токен сброса. Пожалуйста, запросите новый.",
   "auth.resetPassword.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
-
   "auth.verifyEmail.title": "Система бронирования",
   "auth.verifyEmail.loading": "Подтверждение смены электронной почты...",
   "auth.verifyEmail.successDefault": "Электронная почта успешно обновлена!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Подтверждение не удалось. Ссылка может быть недействительной или просроченной.",
   "auth.verifyEmail.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.verifyEmail.goToLogin": "Перейти к входу",
-
   "layout.header.noProperties": "Нет объектов",
   "layout.header.switchProperty": "Сменить объект",
   "layout.header.viewAllHotels": "Просмотреть все отели...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Настройки аккаунта",
   "layout.header.signOut": "Выйти",
   "layout.header.language": "Язык",
-
   "layout.sidebar.bookingEngine": "Система бронирования",
   "layout.sidebar.bookingEngineDescription": "Прямые бронирования и доход",
   "layout.sidebar.switchApp": "Сменить приложение",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Настройки",
   "layout.sidebar.manageHotels": "Управление отелями",
   "layout.sidebar.collapse": "Свернуть",
-
   "dashboard.title": "Система бронирования",
   "dashboard.timeRange.today": "Сегодня",
   "dashboard.timeRange.week": "Эта неделя",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Воронка конверсии",
   "dashboard.conversionFunnel.noData": "Нет данных о бронированиях за этот период",
-
   "affiliates.title": "Партнёры",
   "affiliates.subtitle": "Управляйте рефералами, отслеживайте эффективность и обрабатывайте выплаты",
   "affiliates.stats.totalAffiliates": "Всего партнёров",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Банковский перевод",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Дизайн-студия",
   "designStudio.subtitle": "Настройте внешний вид вашей системы бронирования",
   "designStudio.tabs.media": "Медиа и контент",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Быстрые пресеты",
   "designStudio.fonts.title": "Типографика",
   "designStudio.fonts.subtitle": "Выберите сочетание шрифтов",
-
   "bookingFlow.title": "Процесс бронирования",
   "bookingFlow.subtitle": "Настройте каждый этап бронирования для ваших гостей",
   "bookingFlow.tabs.filters": "Фильтры",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Количество гостей",
   "bookingFlow.guestForm.feedback.saveSuccess": "Настройки формы гостя сохранены",
   "bookingFlow.guestForm.feedback.saveError": "Не удалось сохранить настройки формы гостя",
-
   "settings.title": "Настройки",
   "settings.subtitle": "Управляйте вашим объектом и настройками аккаунта",
   "settings.tabs.property": "Объект",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Поиск страны...",
   "settings.billing.noResults": "Нет результатов",
   "settings.billing.paymentSettingsSaved": "Настройки оплаты сохранены",
-
   "manageHotels.title": "Управление отелями",
   "manageHotels.subtitle": "Просматривайте, настраивайте и устанавливайте тарифы для каждого отеля.",
   "manageHotels.searchPlaceholder": "Поиск по названию отеля, местоположению, владельцу...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Настроить",
   "manageHotels.table.save": "Сохранить",
   "manageHotels.table.cancel": "Отмена",
-
   "setup.title": "Настройка объекта",
   "setup.steps.yourProperty": "Ваш объект",
   "setup.steps.brandMedia": "Бренд и медиа",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Недействительный код приглашения",
   "setup.policies.launchProperty": "Запустить объект",
   "setup.policies.launching": "Запуск...",
-
   "common.save": "Сохранить изменения",
   "common.cancel": "Отмена",
   "common.back": "Назад",
@@ -515,5 +501,11 @@
   "common.select": "Выберите...",
   "common.popularChoices": "Популярные варианты",
   "common.added": "Добавлено",
-  "common.noResultsFound": "Результатов не найдено"
+  "common.noResultsFound": "Результатов не найдено",
+  "auth.chooseProperty.welcome": "Добро пожаловать",
+  "auth.chooseProperty.welcomeBack": "С возвращением",
+  "auth.chooseProperty.subtitle": "Какой объектом вы хотите управлять?",
+  "auth.chooseProperty.addProperty": "Добавить новый объект",
+  "auth.chooseProperty.loadError": "Не удалось загрузить объекты",
+  "auth.chooseProperty.retry": "Повторить"
 }

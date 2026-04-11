@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Validation error.",
   "auth.login.errorUnexpected": "An unexpected error occurred. Please try again.",
   "auth.login.errorSessionExpired": "Your session has expired. Please sign in again.",
-
   "auth.register.fullNameLabel": "Full Name",
   "auth.register.fullNamePlaceholder": "John Doe",
   "auth.register.emailLabel": "Email address",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "An account with this email already exists.",
   "auth.register.errorValidation": "Validation error.",
   "auth.register.errorUnexpected": "An unexpected error occurred. Please try again.",
-
   "auth.forgotPassword.emailLabel": "Email address",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Please enter a valid email address",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Try a different email",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "Reset your password",
-
   "auth.resetPassword.newPasswordLabel": "New Password",
   "auth.resetPassword.newPasswordPlaceholder": "At least 8 characters",
   "auth.resetPassword.confirmPasswordLabel": "Confirm Password",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Set your new password",
   "auth.resetPassword.errorExpiredToken": "Invalid or expired reset token. Please request a new one.",
   "auth.resetPassword.errorUnexpected": "An unexpected error occurred. Please try again.",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "Verifying your email change...",
   "auth.verifyEmail.successDefault": "Email updated successfully!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Verification failed. The link may be invalid or expired.",
   "auth.verifyEmail.errorUnexpected": "An unexpected error occurred. Please try again.",
   "auth.verifyEmail.goToLogin": "Go to Login",
-
   "layout.header.noProperties": "No properties",
   "layout.header.switchProperty": "Switch Property",
   "layout.header.viewAllHotels": "View all hotels...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Account Settings",
   "layout.header.signOut": "Sign Out",
   "layout.header.language": "Language",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Direct bookings & revenue",
   "layout.sidebar.switchApp": "Switch App",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Settings",
   "layout.sidebar.manageHotels": "Manage Hotels",
   "layout.sidebar.collapse": "Collapse",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "Today",
   "dashboard.timeRange.week": "This week",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Conversion Funnel",
   "dashboard.conversionFunnel.noData": "No booking data for this period",
-
   "affiliates.title": "Affiliates",
   "affiliates.subtitle": "Manage referrals, track performance, and process payouts",
   "affiliates.stats.totalAffiliates": "Total Affiliates",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Bank Transfer",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Customize your booking engine's look and feel",
   "designStudio.tabs.media": "Media & Content",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Quick Presets",
   "designStudio.fonts.title": "Typography",
   "designStudio.fonts.subtitle": "Select a font pairing",
-
   "bookingFlow.title": "Booking Flow",
   "bookingFlow.subtitle": "Configure each step of your guest's booking experience",
   "bookingFlow.tabs.filters": "Filters",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Number of Guests",
   "bookingFlow.guestForm.feedback.saveSuccess": "Guest form settings saved",
   "bookingFlow.guestForm.feedback.saveError": "Failed to save guest form settings",
-
   "settings.title": "Settings",
   "settings.subtitle": "Manage your property and account preferences",
   "settings.tabs.property": "Property",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Search country...",
   "settings.billing.noResults": "No results",
   "settings.billing.paymentSettingsSaved": "Payment settings saved",
-
   "manageHotels.title": "Manage Hotels",
   "manageHotels.subtitle": "Browse, configure, and set billing rates for each hotel.",
   "manageHotels.searchPlaceholder": "Search by hotel name, location, owner...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Configure",
   "manageHotels.table.save": "Save",
   "manageHotels.table.cancel": "Cancel",
-
   "setup.title": "Property Setup",
   "setup.steps.yourProperty": "Your Property",
   "setup.steps.brandMedia": "Brand & Media",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Invalid invite code",
   "setup.policies.launchProperty": "Launch Property",
   "setup.policies.launching": "Launching...",
-
   "common.save": "Save Changes",
   "common.cancel": "Cancel",
   "common.back": "Back",
@@ -515,5 +501,11 @@
   "common.select": "Select...",
   "common.popularChoices": "Popular choices",
   "common.added": "Added",
-  "common.noResultsFound": "No results found"
+  "common.noResultsFound": "No results found",
+  "auth.chooseProperty.welcome": "Welcome",
+  "auth.chooseProperty.welcomeBack": "Welcome back",
+  "auth.chooseProperty.subtitle": "Which property would you like to manage?",
+  "auth.chooseProperty.addProperty": "Add a new property",
+  "auth.chooseProperty.loadError": "Failed to load properties",
+  "auth.chooseProperty.retry": "Retry"
 }

@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Validierungsfehler.",
   "auth.login.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
   "auth.login.errorSessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
-
   "auth.register.fullNameLabel": "Vollständiger Name",
   "auth.register.fullNamePlaceholder": "Max Mustermann",
   "auth.register.emailLabel": "E-Mail-Adresse",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Ein Konto mit dieser E-Mail-Adresse existiert bereits.",
   "auth.register.errorValidation": "Validierungsfehler.",
   "auth.register.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
-
   "auth.forgotPassword.emailLabel": "E-Mail-Adresse",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Bitte geben Sie eine gültige E-Mail-Adresse ein",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Andere E-Mail-Adresse versuchen",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "Passwort zurücksetzen",
-
   "auth.resetPassword.newPasswordLabel": "Neues Passwort",
   "auth.resetPassword.newPasswordPlaceholder": "Mindestens 8 Zeichen",
   "auth.resetPassword.confirmPasswordLabel": "Passwort bestätigen",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Neues Passwort festlegen",
   "auth.resetPassword.errorExpiredToken": "Ungültiger oder abgelaufener Token. Bitte fordern Sie einen neuen an.",
   "auth.resetPassword.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "E-Mail-Änderung wird überprüft...",
   "auth.verifyEmail.successDefault": "E-Mail erfolgreich aktualisiert!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Bestätigung fehlgeschlagen. Der Link ist möglicherweise ungültig oder abgelaufen.",
   "auth.verifyEmail.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
   "auth.verifyEmail.goToLogin": "Zur Anmeldung",
-
   "layout.header.noProperties": "Keine Unterkünfte",
   "layout.header.switchProperty": "Unterkunft wechseln",
   "layout.header.viewAllHotels": "Alle Hotels anzeigen...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Kontoeinstellungen",
   "layout.header.signOut": "Abmelden",
   "layout.header.language": "Sprache",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Direktbuchungen & Umsatz",
   "layout.sidebar.switchApp": "App wechseln",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Einstellungen",
   "layout.sidebar.manageHotels": "Hotels verwalten",
   "layout.sidebar.collapse": "Einklappen",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "Heute",
   "dashboard.timeRange.week": "Diese Woche",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Conversion-Trichter",
   "dashboard.conversionFunnel.noData": "Keine Buchungsdaten für diesen Zeitraum",
-
   "affiliates.title": "Affiliates",
   "affiliates.subtitle": "Empfehlungen verwalten, Leistung verfolgen und Auszahlungen bearbeiten",
   "affiliates.stats.totalAffiliates": "Affiliates gesamt",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Banküberweisung",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Passen Sie das Erscheinungsbild Ihrer Booking Engine an",
   "designStudio.tabs.media": "Medien & Inhalte",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Schnellvorlagen",
   "designStudio.fonts.title": "Typografie",
   "designStudio.fonts.subtitle": "Wählen Sie eine Schriftarten-Kombination",
-
   "bookingFlow.title": "Buchungsablauf",
   "bookingFlow.subtitle": "Konfigurieren Sie jeden Schritt des Buchungserlebnisses Ihrer Gäste",
   "bookingFlow.tabs.filters": "Filter",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Anzahl der Gäste",
   "bookingFlow.guestForm.feedback.saveSuccess": "Gästeformular-Einstellungen gespeichert",
   "bookingFlow.guestForm.feedback.saveError": "Gästeformular-Einstellungen konnten nicht gespeichert werden",
-
   "settings.title": "Einstellungen",
   "settings.subtitle": "Verwalten Sie Ihre Unterkunfts- und Kontoeinstellungen",
   "settings.tabs.property": "Unterkunft",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Land suchen...",
   "settings.billing.noResults": "Keine Ergebnisse",
   "settings.billing.paymentSettingsSaved": "Zahlungseinstellungen gespeichert",
-
   "manageHotels.title": "Hotels verwalten",
   "manageHotels.subtitle": "Hotels durchsuchen, konfigurieren und Abrechnungstarife festlegen.",
   "manageHotels.searchPlaceholder": "Nach Hotelname, Standort, Besitzer suchen...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Konfigurieren",
   "manageHotels.table.save": "Speichern",
   "manageHotels.table.cancel": "Abbrechen",
-
   "setup.title": "Unterkunft einrichten",
   "setup.steps.yourProperty": "Ihre Unterkunft",
   "setup.steps.brandMedia": "Marke & Medien",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Ungültiger Einladungscode",
   "setup.policies.launchProperty": "Unterkunft veröffentlichen",
   "setup.policies.launching": "Wird veröffentlicht...",
-
   "common.save": "Änderungen speichern",
   "common.cancel": "Abbrechen",
   "common.back": "Zurück",
@@ -515,5 +501,11 @@
   "common.select": "Auswählen...",
   "common.popularChoices": "Beliebte Optionen",
   "common.added": "Hinzugefügt",
-  "common.noResultsFound": "Keine Ergebnisse gefunden"
+  "common.noResultsFound": "Keine Ergebnisse gefunden",
+  "auth.chooseProperty.welcome": "Willkommen",
+  "auth.chooseProperty.welcomeBack": "Willkommen zurück",
+  "auth.chooseProperty.subtitle": "Welche Unterkunft möchtest du verwalten?",
+  "auth.chooseProperty.addProperty": "Neue Unterkunft hinzufügen",
+  "auth.chooseProperty.loadError": "Unterkünfte konnten nicht geladen werden",
+  "auth.chooseProperty.retry": "Erneut versuchen"
 }

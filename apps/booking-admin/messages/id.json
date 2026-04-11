@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Kesalahan validasi.",
   "auth.login.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
   "auth.login.errorSessionExpired": "Sesi Anda telah berakhir. Silakan masuk kembali.",
-
   "auth.register.fullNameLabel": "Nama Lengkap",
   "auth.register.fullNamePlaceholder": "John Doe",
   "auth.register.emailLabel": "Alamat email",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Akun dengan email ini sudah ada.",
   "auth.register.errorValidation": "Kesalahan validasi.",
   "auth.register.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
-
   "auth.forgotPassword.emailLabel": "Alamat email",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Silakan masukkan alamat email yang valid",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Coba email lain",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "Reset kata sandi Anda",
-
   "auth.resetPassword.newPasswordLabel": "Kata Sandi Baru",
   "auth.resetPassword.newPasswordPlaceholder": "Minimal 8 karakter",
   "auth.resetPassword.confirmPasswordLabel": "Konfirmasi Kata Sandi",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Atur kata sandi baru Anda",
   "auth.resetPassword.errorExpiredToken": "Token reset tidak valid atau sudah kedaluwarsa. Silakan minta yang baru.",
   "auth.resetPassword.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "Memverifikasi perubahan email Anda...",
   "auth.verifyEmail.successDefault": "Email berhasil diperbarui!",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "Verifikasi gagal. Tautan mungkin tidak valid atau sudah kedaluwarsa.",
   "auth.verifyEmail.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
   "auth.verifyEmail.goToLogin": "Ke Halaman Masuk",
-
   "layout.header.noProperties": "Tidak ada properti",
   "layout.header.switchProperty": "Ganti Properti",
   "layout.header.viewAllHotels": "Lihat semua hotel...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Pengaturan Akun",
   "layout.header.signOut": "Keluar",
   "layout.header.language": "Bahasa",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Pemesanan langsung & pendapatan",
   "layout.sidebar.switchApp": "Ganti Aplikasi",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Pengaturan",
   "layout.sidebar.manageHotels": "Kelola Hotel",
   "layout.sidebar.collapse": "Perkecil",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "Hari ini",
   "dashboard.timeRange.week": "Minggu ini",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Corong Konversi",
   "dashboard.conversionFunnel.noData": "Tidak ada data pemesanan untuk periode ini",
-
   "affiliates.title": "Afiliasi",
   "affiliates.subtitle": "Kelola referral, pantau kinerja, dan proses pembayaran",
   "affiliates.stats.totalAffiliates": "Total Afiliasi",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Transfer Bank",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Sesuaikan tampilan dan nuansa booking engine Anda",
   "designStudio.tabs.media": "Media & Konten",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Preset Cepat",
   "designStudio.fonts.title": "Tipografi",
   "designStudio.fonts.subtitle": "Pilih pasangan font",
-
   "bookingFlow.title": "Alur Pemesanan",
   "bookingFlow.subtitle": "Konfigurasi setiap langkah pengalaman pemesanan tamu Anda",
   "bookingFlow.tabs.filters": "Filter",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Jumlah Tamu",
   "bookingFlow.guestForm.feedback.saveSuccess": "Pengaturan formulir tamu disimpan",
   "bookingFlow.guestForm.feedback.saveError": "Gagal menyimpan pengaturan formulir tamu",
-
   "settings.title": "Pengaturan",
   "settings.subtitle": "Kelola properti dan preferensi akun Anda",
   "settings.tabs.property": "Properti",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Cari negara...",
   "settings.billing.noResults": "Tidak ada hasil",
   "settings.billing.paymentSettingsSaved": "Pengaturan pembayaran disimpan",
-
   "manageHotels.title": "Kelola Hotel",
   "manageHotels.subtitle": "Telusuri, konfigurasi, dan atur tarif tagihan untuk setiap hotel.",
   "manageHotels.searchPlaceholder": "Cari berdasarkan nama hotel, lokasi, pemilik...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Konfigurasi",
   "manageHotels.table.save": "Simpan",
   "manageHotels.table.cancel": "Batal",
-
   "setup.title": "Pengaturan Properti",
   "setup.steps.yourProperty": "Properti Anda",
   "setup.steps.brandMedia": "Merek & Media",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Kode undangan tidak valid",
   "setup.policies.launchProperty": "Luncurkan Properti",
   "setup.policies.launching": "Meluncurkan...",
-
   "common.save": "Simpan Perubahan",
   "common.cancel": "Batal",
   "common.back": "Kembali",
@@ -515,5 +501,11 @@
   "common.select": "Pilih...",
   "common.popularChoices": "Pilihan populer",
   "common.added": "Ditambahkan",
-  "common.noResultsFound": "Tidak ada hasil ditemukan"
+  "common.noResultsFound": "Tidak ada hasil ditemukan",
+  "auth.chooseProperty.welcome": "Selamat datang",
+  "auth.chooseProperty.welcomeBack": "Selamat datang kembali",
+  "auth.chooseProperty.subtitle": "Properti mana yang ingin Anda kelola?",
+  "auth.chooseProperty.addProperty": "Tambah properti baru",
+  "auth.chooseProperty.loadError": "Gagal memuat properti",
+  "auth.chooseProperty.retry": "Coba lagi"
 }

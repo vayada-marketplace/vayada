@@ -17,7 +17,6 @@
   "auth.login.errorValidation": "Erreur de validation.",
   "auth.login.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
   "auth.login.errorSessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
-
   "auth.register.fullNameLabel": "Nom complet",
   "auth.register.fullNamePlaceholder": "Jean Dupont",
   "auth.register.emailLabel": "Adresse e-mail",
@@ -42,7 +41,6 @@
   "auth.register.errorEmailExists": "Un compte avec cette adresse e-mail existe déjà.",
   "auth.register.errorValidation": "Erreur de validation.",
   "auth.register.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
-
   "auth.forgotPassword.emailLabel": "Adresse e-mail",
   "auth.forgotPassword.emailPlaceholder": "admin@example.com",
   "auth.forgotPassword.emailError": "Veuillez saisir une adresse e-mail valide",
@@ -55,7 +53,6 @@
   "auth.forgotPassword.tryDifferentEmail": "Essayer une autre adresse e-mail",
   "auth.forgotPassword.title": "Booking Engine",
   "auth.forgotPassword.subtitle": "Réinitialiser votre mot de passe",
-
   "auth.resetPassword.newPasswordLabel": "Nouveau mot de passe",
   "auth.resetPassword.newPasswordPlaceholder": "Au moins 8 caractères",
   "auth.resetPassword.confirmPasswordLabel": "Confirmer le mot de passe",
@@ -77,7 +74,6 @@
   "auth.resetPassword.subtitle": "Définir votre nouveau mot de passe",
   "auth.resetPassword.errorExpiredToken": "Jeton de réinitialisation invalide ou expiré. Veuillez en demander un nouveau.",
   "auth.resetPassword.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
-
   "auth.verifyEmail.title": "Booking Engine",
   "auth.verifyEmail.loading": "Vérification du changement d'e-mail...",
   "auth.verifyEmail.successDefault": "E-mail mis à jour avec succès !",
@@ -87,7 +83,6 @@
   "auth.verifyEmail.errorVerificationFailed": "La vérification a échoué. Le lien est peut-être invalide ou expiré.",
   "auth.verifyEmail.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
   "auth.verifyEmail.goToLogin": "Aller à la connexion",
-
   "layout.header.noProperties": "Aucun établissement",
   "layout.header.switchProperty": "Changer d'établissement",
   "layout.header.viewAllHotels": "Voir tous les hôtels...",
@@ -100,7 +95,6 @@
   "layout.header.accountSettings": "Paramètres du compte",
   "layout.header.signOut": "Se déconnecter",
   "layout.header.language": "Langue",
-
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Réservations directes et revenus",
   "layout.sidebar.switchApp": "Changer d'application",
@@ -113,7 +107,6 @@
   "layout.sidebar.settings": "Paramètres",
   "layout.sidebar.manageHotels": "Gérer les hôtels",
   "layout.sidebar.collapse": "Réduire",
-
   "dashboard.title": "Booking Engine",
   "dashboard.timeRange.today": "Aujourd'hui",
   "dashboard.timeRange.week": "Cette semaine",
@@ -138,7 +131,6 @@
   "dashboard.bookingsBySource.google": "Google Hotels",
   "dashboard.conversionFunnel.title": "Entonnoir de conversion",
   "dashboard.conversionFunnel.noData": "Aucune donnée de réservation pour cette période",
-
   "affiliates.title": "Affiliés",
   "affiliates.subtitle": "Gérez les parrainages, suivez les performances et traitez les paiements",
   "affiliates.stats.totalAffiliates": "Total des affiliés",
@@ -189,7 +181,6 @@
   "affiliates.payoutLabels.bank": "Virement bancaire",
   "affiliates.payoutLabels.stripe": "Stripe",
   "affiliates.payoutLabels.xendit": "Xendit",
-
   "designStudio.title": "Design Studio",
   "designStudio.subtitle": "Personnalisez l'apparence de votre Booking Engine",
   "designStudio.tabs.media": "Médias et contenu",
@@ -217,7 +208,6 @@
   "designStudio.colors.quickPresets": "Préréglages rapides",
   "designStudio.fonts.title": "Typographie",
   "designStudio.fonts.subtitle": "Sélectionnez une combinaison de polices",
-
   "bookingFlow.title": "Parcours de réservation",
   "bookingFlow.subtitle": "Configurez chaque étape de l'expérience de réservation de vos clients",
   "bookingFlow.tabs.filters": "Filtres",
@@ -358,7 +348,6 @@
   "bookingFlow.guestForm.numberOfGuests": "Nombre de clients",
   "bookingFlow.guestForm.feedback.saveSuccess": "Paramètres du formulaire client enregistrés",
   "bookingFlow.guestForm.feedback.saveError": "Échec de l'enregistrement des paramètres du formulaire client",
-
   "settings.title": "Paramètres",
   "settings.subtitle": "Gérez les préférences de votre établissement et de votre compte",
   "settings.tabs.property": "Établissement",
@@ -464,7 +453,6 @@
   "settings.billing.searchCountry": "Rechercher un pays...",
   "settings.billing.noResults": "Aucun résultat",
   "settings.billing.paymentSettingsSaved": "Paramètres de paiement enregistrés",
-
   "manageHotels.title": "Gérer les hôtels",
   "manageHotels.subtitle": "Parcourez, configurez et définissez les tarifs de facturation pour chaque hôtel.",
   "manageHotels.searchPlaceholder": "Rechercher par nom d'hôtel, lieu, propriétaire...",
@@ -479,7 +467,6 @@
   "manageHotels.table.configure": "Configurer",
   "manageHotels.table.save": "Enregistrer",
   "manageHotels.table.cancel": "Annuler",
-
   "setup.title": "Configuration de l'établissement",
   "setup.steps.yourProperty": "Votre établissement",
   "setup.steps.brandMedia": "Marque et médias",
@@ -500,7 +487,6 @@
   "setup.welcome.inviteError": "Code d'invitation invalide",
   "setup.policies.launchProperty": "Lancer l'établissement",
   "setup.policies.launching": "Lancement en cours...",
-
   "common.save": "Enregistrer les modifications",
   "common.cancel": "Annuler",
   "common.back": "Retour",
@@ -515,5 +501,11 @@
   "common.select": "Sélectionner...",
   "common.popularChoices": "Choix populaires",
   "common.added": "Ajouté",
-  "common.noResultsFound": "Aucun résultat trouvé"
+  "common.noResultsFound": "Aucun résultat trouvé",
+  "auth.chooseProperty.welcome": "Bienvenue",
+  "auth.chooseProperty.welcomeBack": "Bon retour",
+  "auth.chooseProperty.subtitle": "Quelle propriété souhaitez-vous gérer ?",
+  "auth.chooseProperty.addProperty": "Ajouter une nouvelle propriété",
+  "auth.chooseProperty.loadError": "Impossible de charger les propriétés",
+  "auth.chooseProperty.retry": "Réessayer"
 }
