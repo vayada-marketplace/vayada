@@ -9,6 +9,12 @@ interface Property {
   affiliateId: string
   hotelName: string
   paymentMethod: string
+  paypalEmail: string
+  bankIban: string
+  bankAccountHolder: string
+  bankSwiftBic: string
+  bankName: string
+  bankCountry: string
   xenditChannelCode: string | null
   xenditAccountNumber: string | null
   xenditAccountHolderName: string | null
@@ -34,6 +40,10 @@ export default function SettingsPage() {
   const [paymentMethod, setPaymentMethod] = useState('stripe')
   const [paypalEmail, setPaypalEmail] = useState('')
   const [bankIban, setBankIban] = useState('')
+  const [bankAccountHolder, setBankAccountHolder] = useState('')
+  const [bankSwiftBic, setBankSwiftBic] = useState('')
+  const [bankName, setBankName] = useState('')
+  const [bankCountry, setBankCountry] = useState('')
   const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
   const [xenditAccountNumber, setXenditAccountNumber] = useState('')
   const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
@@ -47,6 +57,12 @@ export default function SettingsPage() {
         const first = res.properties?.[0]
         if (first) {
           setPaymentMethod(first.paymentMethod || 'stripe')
+          setPaypalEmail(first.paypalEmail || '')
+          setBankIban(first.bankIban || '')
+          setBankAccountHolder(first.bankAccountHolder || '')
+          setBankSwiftBic(first.bankSwiftBic || '')
+          setBankName(first.bankName || '')
+          setBankCountry(first.bankCountry || '')
           setXenditChannelCode(first.xenditChannelCode || 'ID_BCA')
           setXenditAccountNumber(first.xenditAccountNumber || '')
           setXenditAccountHolderName(first.xenditAccountHolderName || '')
@@ -104,9 +120,12 @@ export default function SettingsPage() {
       setError('PayPal email is required')
       return
     }
-    if (paymentMethod === 'bank' && !bankIban.trim()) {
-      setError('Bank IBAN is required')
-      return
+    if (paymentMethod === 'bank') {
+      if (!bankAccountHolder.trim()) { setError('Account holder name is required'); return }
+      if (!bankIban.trim()) { setError('IBAN / account number is required'); return }
+      if (!bankSwiftBic.trim()) { setError('SWIFT / BIC is required'); return }
+      if (!bankName.trim()) { setError('Bank name is required'); return }
+      if (!bankCountry.trim()) { setError('Bank country is required'); return }
     }
 
     setSaving(true)
@@ -114,7 +133,13 @@ export default function SettingsPage() {
       await apiClient.patch('/affiliate/me', {
         paymentMethod,
         ...(paymentMethod === 'paypal' ? { paypalEmail } : {}),
-        ...(paymentMethod === 'bank' ? { bankIban } : {}),
+        ...(paymentMethod === 'bank' ? {
+          bankIban: bankIban.trim().toUpperCase(),
+          bankAccountHolder: bankAccountHolder.trim(),
+          bankSwiftBic: bankSwiftBic.trim().toUpperCase(),
+          bankName: bankName.trim(),
+          bankCountry: bankCountry.trim().toUpperCase(),
+        } : {}),
         ...(paymentMethod === 'xendit' ? {
           xenditChannelCode,
           xenditAccountNumber: xenditAccountNumber.trim(),
@@ -243,15 +268,63 @@ export default function SettingsPage() {
 
             {/* Bank fields */}
             {paymentMethod === 'bank' && (
-              <div className="pt-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">IBAN</label>
-                <input
-                  type="text"
-                  value={bankIban}
-                  onChange={(e) => setBankIban(e.target.value)}
-                  placeholder="AT89 3704 0044 0532 0130 00"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+              <div className="space-y-3 pt-2">
+                <p className="text-xs text-gray-500">
+                  International transfers need these details. Make sure they match your bank records exactly.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
+                  <input
+                    type="text"
+                    value={bankAccountHolder}
+                    onChange={(e) => setBankAccountHolder(e.target.value)}
+                    placeholder="Full name as on bank account"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">IBAN / Account Number</label>
+                  <input
+                    type="text"
+                    value={bankIban}
+                    onChange={(e) => setBankIban(e.target.value.toUpperCase())}
+                    placeholder="AT89 3704 0044 0532 0130 00"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">SWIFT / BIC</label>
+                    <input
+                      type="text"
+                      value={bankSwiftBic}
+                      onChange={(e) => setBankSwiftBic(e.target.value.toUpperCase())}
+                      placeholder="DEUTDEFF"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Country</label>
+                    <input
+                      type="text"
+                      value={bankCountry}
+                      onChange={(e) => setBankCountry(e.target.value.toUpperCase().slice(0, 2))}
+                      placeholder="DE"
+                      maxLength={2}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Bank Name</label>
+                  <input
+                    type="text"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    placeholder="Deutsche Bank"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
               </div>
             )}
 
