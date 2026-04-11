@@ -49,6 +49,12 @@ class PropertyStats(BaseModel):
     conversion_rate: float = 0.0
     payment_method: str = ""
     stripe_connect_onboarded: bool = False
+    paypal_email: str = ""
+    bank_iban: str = ""
+    bank_account_holder: str = ""
+    bank_swift_bic: str = ""
+    bank_name: str = ""
+    bank_country: str = ""
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
@@ -81,6 +87,10 @@ class ProfileUpdate(BaseModel):
     payment_method: Optional[str] = None
     paypal_email: Optional[str] = None
     bank_iban: Optional[str] = None
+    bank_account_holder: Optional[str] = None
+    bank_swift_bic: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_country: Optional[str] = None
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
@@ -111,6 +121,12 @@ def _build_property_stats(a: dict) -> PropertyStats:
         conversion_rate=conversion_rate,
         payment_method=a.get("payment_method", ""),
         stripe_connect_onboarded=a.get("stripe_connect_onboarded", False),
+        paypal_email=a.get("paypal_email", "") or "",
+        bank_iban=a.get("bank_iban", "") or "",
+        bank_account_holder=a.get("bank_account_holder", "") or "",
+        bank_swift_bic=a.get("bank_swift_bic", "") or "",
+        bank_name=a.get("bank_name", "") or "",
+        bank_country=a.get("bank_country", "") or "",
         xendit_channel_code=a.get("xendit_channel_code"),
         xendit_account_number=a.get("xendit_account_number"),
         xendit_account_holder_name=a.get("xendit_account_holder_name"),
@@ -196,6 +212,14 @@ async def update_profile(
         updates["paypal_email"] = data.paypal_email
     if data.bank_iban is not None:
         updates["bank_iban"] = data.bank_iban
+    if data.bank_account_holder is not None:
+        updates["bank_account_holder"] = data.bank_account_holder
+    if data.bank_swift_bic is not None:
+        updates["bank_swift_bic"] = data.bank_swift_bic.upper()
+    if data.bank_name is not None:
+        updates["bank_name"] = data.bank_name
+    if data.bank_country is not None:
+        updates["bank_country"] = data.bank_country.upper()
     if data.xendit_channel_code is not None:
         from app.models.payment import VALID_XENDIT_CHANNEL_CODES
         if data.xendit_channel_code not in VALID_XENDIT_CHANNEL_CODES:

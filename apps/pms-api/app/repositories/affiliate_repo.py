@@ -29,9 +29,10 @@ class AffiliateRepository:
             INSERT INTO affiliates (
                 hotel_id, referral_code, full_name, email,
                 social_media, user_type, payment_method,
-                paypal_email, bank_iban
+                paypal_email, bank_iban,
+                bank_account_holder, bank_swift_bic, bank_name, bank_country
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
             ) RETURNING *
             """,
             hotel_id,
@@ -43,6 +44,10 @@ class AffiliateRepository:
             data.get("payment_method", "paypal"),
             data.get("paypal_email", ""),
             data.get("bank_iban", ""),
+            data.get("bank_account_holder", ""),
+            data.get("bank_swift_bic", ""),
+            data.get("bank_name", ""),
+            data.get("bank_country", ""),
         )
         return dict(row)
 

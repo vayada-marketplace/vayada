@@ -17,6 +17,10 @@ class AffiliateRegister(BaseModel):
     payment_method: str = "stripe"  # 'stripe', 'paypal', or 'bank'
     paypal_email: str = ""
     bank_iban: str = ""
+    bank_account_holder: str = ""
+    bank_swift_bic: str = ""
+    bank_name: str = ""
+    bank_country: str = ""
 
 
 class AffiliateResponse(BaseModel):
@@ -31,6 +35,10 @@ class AffiliateResponse(BaseModel):
     payment_method: str
     paypal_email: str
     bank_iban: str
+    bank_account_holder: str = ""
+    bank_swift_bic: str = ""
+    bank_name: str = ""
+    bank_country: str = ""
     commission_pct: float
     status: str
     created_at: str
@@ -49,6 +57,10 @@ class AffiliateAdminResponse(BaseModel):
     payment_method: str
     paypal_email: str
     bank_iban: str
+    bank_account_holder: str = ""
+    bank_swift_bic: str = ""
+    bank_name: str = ""
+    bank_country: str = ""
     commission_pct: float
     status: str
     created_at: str
