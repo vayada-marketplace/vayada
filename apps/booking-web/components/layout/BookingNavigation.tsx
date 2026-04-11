@@ -154,14 +154,34 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
   const referralDomain = `${hotelSlug}.booking.vayada.com`
 
-  const handleContinueInfo = () => {
+  const handleContinueInfo = async () => {
     if (!fullName || !email) return
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setApiError('Please enter a valid email address')
       return
     }
+    setSubmitting(true)
     setApiError('')
-    setStep(2)
+    try {
+      const res = await fetch(
+        `${PMS_URL}/api/hotels/${hotelSlug}/affiliates/check-email?email=${encodeURIComponent(email.trim())}`,
+      )
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.exists) {
+          setApiError('An affiliate with this email already exists for this hotel')
+          return
+        }
+      }
+      setStep(2)
+    } catch {
+      // If the check call itself fails, fall through and let step 2
+      // surface any errors — better to let the user continue than
+      // block them on a transient network blip.
+      setStep(2)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleSubmitPayout = async () => {
@@ -392,10 +412,10 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
               <button
                 onClick={handleContinueInfo}
-                disabled={!fullName || !email}
+                disabled={submitting || !fullName || !email}
                 className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2 disabled:opacity-50"
               >
-                {tc('continue')}
+                {submitting ? '...' : tc('continue')}
               </button>
             </div>
           )}
@@ -543,13 +563,22 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
 
               <p className="text-sm text-gray-500 text-center" dangerouslySetInnerHTML={{ __html: (t.raw('pendingReview') as string).replace('{email}', email || 'your email') }} />
 
-              <button
-                onClick={handleSubmitPayout}
-                disabled={submitting}
-                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50"
-              >
-                {submitting ? '...' : tc('continue')}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setApiError(''); setStep(1) }}
+                  disabled={submitting}
+                  className="px-5 py-3 bg-white text-gray-700 font-semibold rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {tc('back')}
+                </button>
+                <button
+                  onClick={handleSubmitPayout}
+                  disabled={submitting}
+                  className="flex-1 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50"
+                >
+                  {submitting ? '...' : tc('continue')}
+                </button>
+              </div>
             </div>
           )}
 
