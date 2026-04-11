@@ -11,6 +11,7 @@ export default function HandoffPage() {
     const token = hashParams.get('token')
     const expiresAt = hashParams.get('expires_at')
     const userData = hashParams.get('user')
+    const handoffHotelId = hashParams.get('hotel_id')
 
     // Optional `?redirect=...` query param tells us where to go after
     // auth. Used by the PMS header's "Add Property" button which
@@ -26,6 +27,9 @@ export default function HandoffPage() {
     if (token && expiresAt) {
       localStorage.setItem('access_token', token)
       localStorage.setItem('token_expires_at', expiresAt)
+      if (handoffHotelId) {
+        localStorage.setItem('selectedHotelId', handoffHotelId)
+      }
       if (userData) {
         try {
           const user = JSON.parse(decodeURIComponent(userData))
@@ -57,6 +61,13 @@ export default function HandoffPage() {
           }
           if (!setupComplete) {
             window.location.href = '/setup'
+            return
+          }
+
+          // If the caller already told us which hotel to land on,
+          // honor it and skip the choose-property step.
+          if (handoffHotelId) {
+            window.location.href = '/dashboard'
             return
           }
 
