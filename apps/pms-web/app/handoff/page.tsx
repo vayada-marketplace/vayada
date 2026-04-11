@@ -11,6 +11,7 @@ export default function HandoffPage() {
     const token = hashParams.get('token')
     const expiresAt = hashParams.get('expires_at')
     const userData = hashParams.get('user')
+    const handoffHotelId = hashParams.get('hotel_id')
 
     // Optional `?redirect=...` query param — honored if it's a
     // same-origin relative path, else ignored. Used when another
@@ -26,6 +27,9 @@ export default function HandoffPage() {
     if (token && expiresAt) {
       localStorage.setItem('access_token', token)
       localStorage.setItem('token_expires_at', expiresAt)
+      if (handoffHotelId) {
+        localStorage.setItem('selectedHotelId', handoffHotelId)
+      }
       if (userData) {
         try {
           const user = JSON.parse(decodeURIComponent(userData))
@@ -44,8 +48,14 @@ export default function HandoffPage() {
       // > choose-property (if 2+ hotels) > dashboard (default).
       const pmsApiUrl = process.env.NEXT_PUBLIC_PMS_API_URL || 'https://pms-api.vayada.com'
       const bookingApiUrl = process.env.NEXT_PUBLIC_AUTH_API_URL || 'https://booking-api.vayada.com'
+      const setupStatusHeaders: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+      }
+      if (handoffHotelId) {
+        setupStatusHeaders['X-Hotel-Id'] = handoffHotelId
+      }
       fetch(`${pmsApiUrl}/admin/setup-status`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: setupStatusHeaders,
       })
         .then(res => res.ok ? res.json() : null)
         .then(async data => {
@@ -58,6 +68,13 @@ export default function HandoffPage() {
           }
           if (!setupComplete) {
             window.location.href = '/setup'
+            return
+          }
+
+          // If the caller already told us which hotel to land on,
+          // honor it and skip the choose-property step.
+          if (handoffHotelId) {
+            window.location.href = '/dashboard'
             return
           }
 
