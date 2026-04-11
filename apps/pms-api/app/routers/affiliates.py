@@ -35,6 +35,21 @@ def _affiliate_to_response(a: dict) -> AffiliateResponse:
     )
 
 
+@router.get("/{slug}/affiliates/check-email")
+async def check_affiliate_email(slug: str, email: str):
+    """Lightweight existence check so the Refer a Guest modal can fail
+    fast on step 1 instead of after the user has already filled in
+    payout details on step 2.
+    """
+    hotel_id = await get_hotel_id_by_slug(slug)
+    existing = await Database.fetchrow(
+        "SELECT id FROM affiliates WHERE hotel_id = $1 AND email = $2",
+        hotel_id,
+        email,
+    )
+    return {"exists": existing is not None}
+
+
 @router.post("/{slug}/affiliates", response_model=AffiliateResponse, status_code=201)
 async def register_affiliate(slug: str, data: AffiliateRegister):
     # Resolve hotel
