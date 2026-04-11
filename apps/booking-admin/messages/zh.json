@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "您想管理哪个物业？",
   "auth.chooseProperty.addProperty": "添加新物业",
   "auth.chooseProperty.loadError": "加载物业失败",
-  "auth.chooseProperty.retry": "重试"
+  "auth.chooseProperty.retry": "重试",
+  "layout.sidebar.affiliatePayouts": "推广员付款"
 }

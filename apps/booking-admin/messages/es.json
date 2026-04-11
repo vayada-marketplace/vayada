@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "¿Qué propiedad te gustaría gestionar?",
   "auth.chooseProperty.addProperty": "Añadir una nueva propiedad",
   "auth.chooseProperty.loadError": "Error al cargar las propiedades",
-  "auth.chooseProperty.retry": "Reintentar"
+  "auth.chooseProperty.retry": "Reintentar",
+  "layout.sidebar.affiliatePayouts": "Pagos a afiliados"
 }

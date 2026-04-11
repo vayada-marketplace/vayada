@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "Какой объектом вы хотите управлять?",
   "auth.chooseProperty.addProperty": "Добавить новый объект",
   "auth.chooseProperty.loadError": "Не удалось загрузить объекты",
-  "auth.chooseProperty.retry": "Повторить"
+  "auth.chooseProperty.retry": "Повторить",
+  "layout.sidebar.affiliatePayouts": "Выплаты партнёрам"
 }

@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "Welche Unterkunft möchtest du verwalten?",
   "auth.chooseProperty.addProperty": "Neue Unterkunft hinzufügen",
   "auth.chooseProperty.loadError": "Unterkünfte konnten nicht geladen werden",
-  "auth.chooseProperty.retry": "Erneut versuchen"
+  "auth.chooseProperty.retry": "Erneut versuchen",
+  "layout.sidebar.affiliatePayouts": "Affiliate-Auszahlungen"
 }

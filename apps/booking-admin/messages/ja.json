@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "どの宿泊施設を管理しますか？",
   "auth.chooseProperty.addProperty": "新しい宿泊施設を追加",
   "auth.chooseProperty.loadError": "宿泊施設を読み込めませんでした",
-  "auth.chooseProperty.retry": "再試行"
+  "auth.chooseProperty.retry": "再試行",
+  "layout.sidebar.affiliatePayouts": "アフィリエイト支払い"
 }

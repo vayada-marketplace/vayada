@@ -39,11 +39,18 @@ const baseNavItems = [
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: Cog6ToothIcon },
 ]
 
-const superAdminNavItem = {
-  labelKey: 'layout.sidebar.manageHotels',
-  href: '/manage-hotels',
-  icon: BuildingOffice2Icon,
-}
+const superAdminNavItems = [
+  {
+    labelKey: 'layout.sidebar.manageHotels',
+    href: '/manage-hotels',
+    icon: BuildingOffice2Icon,
+  },
+  {
+    labelKey: 'layout.sidebar.affiliatePayouts',
+    href: '/affiliate-payouts',
+    icon: AffiliatesIcon,
+  },
+]
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
@@ -52,7 +59,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const switcherRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
   const isSuperAdmin = authService.isSuperAdmin()
-  const navItems = isSuperAdmin ? [superAdminNavItem, ...baseNavItems] : baseNavItems
+  const navItems = isSuperAdmin ? [...superAdminNavItems, ...baseNavItems] : baseNavItems
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

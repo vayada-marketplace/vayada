@@ -210,6 +210,31 @@ export default function AffiliatesPage() {
         </div>
       </div>
 
+      {/* Pending applications banner */}
+      {stats.pending > 0 && (
+        <button
+          onClick={() => setMainTab('Applications')}
+          className="w-full mb-4 flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3.5 hover:bg-amber-100 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center text-sm font-bold shrink-0">
+              {stats.pending}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-amber-900 truncate">
+                {stats.pending === 1
+                  ? '1 affiliate application waiting for review'
+                  : `${stats.pending} affiliate applications waiting for review`}
+              </p>
+              <p className="text-[11px] text-amber-700 truncate">
+                Approve or reject pending referrers in the Applications tab
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 text-[12px] font-medium text-amber-800">Review →</span>
+        </button>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-5 md:mb-6">
         <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">

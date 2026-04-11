@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "Properti mana yang ingin Anda kelola?",
   "auth.chooseProperty.addProperty": "Tambah properti baru",
   "auth.chooseProperty.loadError": "Gagal memuat properti",
-  "auth.chooseProperty.retry": "Coba lagi"
+  "auth.chooseProperty.retry": "Coba lagi",
+  "layout.sidebar.affiliatePayouts": "Pembayaran Afiliasi"
 }

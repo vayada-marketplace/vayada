@@ -507,5 +507,6 @@
   "auth.chooseProperty.subtitle": "Welk object wilt u beheren?",
   "auth.chooseProperty.addProperty": "Nieuw object toevoegen",
   "auth.chooseProperty.loadError": "Kon objecten niet laden",
-  "auth.chooseProperty.retry": "Opnieuw proberen"
+  "auth.chooseProperty.retry": "Opnieuw proberen",
+  "layout.sidebar.affiliatePayouts": "Affiliate-uitbetalingen"
 }
