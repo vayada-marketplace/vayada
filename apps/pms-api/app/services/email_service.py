@@ -409,6 +409,53 @@ async def send_affiliate_approved(affiliate_email: str, affiliate_name: str, hot
     await _send_email(affiliate_email, subject, _wrap_html(content))
 
 
+async def send_affiliate_registration_received(
+    affiliate_email: str, affiliate_name: str, hotel_name: str
+):
+    """Confirm to a brand-new affiliate that their referral application
+    was received and is awaiting hotel approval."""
+    subject = f"Application Received — {hotel_name}"
+    content = f"""
+    <h2>Thanks, {affiliate_name}!</h2>
+    <p class="detail">Your referral application for <strong>{hotel_name}</strong> has been received.</p>
+    <p class="detail">The hotel team will review your application and get back to you. Once approved, you'll receive another email with a link to set up your affiliate dashboard and start sharing your referral link.</p>
+    <hr class="divider">
+    <p class="detail" style="font-size: 13px; color: #888;">No action is needed from your side right now — sit tight, we'll be in touch.</p>
+    """
+    await _send_email(affiliate_email, subject, _wrap_html(content))
+
+
+async def send_hotel_new_affiliate_application(
+    hotel_email: str,
+    hotel_name: str,
+    affiliate_name: str,
+    affiliate_email: str,
+    social_media: str,
+    user_type: str,
+    payment_method: str,
+):
+    """Notify the hotel admin that a new affiliate has applied and is
+    waiting for approval in the PMS dashboard."""
+    subject = f"New Affiliate Application — {affiliate_name}"
+    social_row = (
+        f"<p class=\"detail\"><strong>Channel:</strong> {social_media}</p>"
+        if social_media else ""
+    )
+    content = f"""
+    <h2>New affiliate application</h2>
+    <p class="detail">A new referrer has applied to promote <strong>{hotel_name}</strong> and is waiting for your approval.</p>
+    <hr class="divider">
+    <p class="detail"><strong>Name:</strong> {affiliate_name}</p>
+    <p class="detail"><strong>Email:</strong> {affiliate_email}</p>
+    <p class="detail"><strong>Type:</strong> {user_type.capitalize()}</p>
+    {social_row}
+    <p class="detail"><strong>Payout method:</strong> {payment_method.capitalize()}</p>
+    <hr class="divider">
+    <p class="detail">Open the Affiliates → Applications tab in your dashboard to approve or reject this request.</p>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
 async def send_affiliate_invite(affiliate_email: str, affiliate_name: str, hotel_name: str, set_password_url: str):
     """Send affiliate an invite email with a link to set their password and access the dashboard."""
     subject = f"Set Up Your Affiliate Dashboard — {hotel_name}"

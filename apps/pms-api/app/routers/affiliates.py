@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -8,6 +9,10 @@ from app.repositories.affiliate_repo import AffiliateRepository
 from app.utils import get_hotel_id_by_slug
 from app.models.affiliate import AffiliateRegister, AffiliateResponse
 from app.services import stripe_service
+from app.services.email_service import (
+    send_affiliate_registration_received,
+    send_hotel_new_affiliate_application,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +57,13 @@ async def check_affiliate_email(slug: str, email: str):
 
 @router.post("/{slug}/affiliates", response_model=AffiliateResponse, status_code=201)
 async def register_affiliate(slug: str, data: AffiliateRegister):
-    # Resolve hotel
-    hotel_id = await get_hotel_id_by_slug(slug)
+    # Resolve hotel — we need name + contact_email for the notification emails
+    hotel = await Database.fetchrow(
+        "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    hotel_id = str(hotel["id"])
 
     # Check if email already registered for this hotel
     existing = await Database.fetchrow(
@@ -69,10 +79,33 @@ async def register_affiliate(slug: str, data: AffiliateRegister):
 
     try:
         affiliate = await AffiliateRepository.create(hotel_id, data.model_dump())
-        return _affiliate_to_response(affiliate)
     except Exception as e:
         logger.error("Failed to create affiliate: %s", e)
         raise HTTPException(status_code=500, detail="Failed to create affiliate")
+
+    # Fire confirmation + admin notification in the background so we don't
+    # block the response on SMTP latency.
+    asyncio.create_task(
+        send_affiliate_registration_received(
+            affiliate_email=data.email,
+            affiliate_name=data.full_name,
+            hotel_name=hotel["name"],
+        )
+    )
+    if hotel["contact_email"]:
+        asyncio.create_task(
+            send_hotel_new_affiliate_application(
+                hotel_email=hotel["contact_email"],
+                hotel_name=hotel["name"],
+                affiliate_name=data.full_name,
+                affiliate_email=data.email,
+                social_media=data.social_media,
+                user_type=data.user_type,
+                payment_method=data.payment_method,
+            )
+        )
+
+    return _affiliate_to_response(affiliate)
 
 
 @router.post("/{slug}/affiliates/{referral_code}/click", status_code=204)
