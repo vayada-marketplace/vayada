@@ -60,6 +60,7 @@ export default function AffiliatesPage() {
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [currencySymbol, setCurrencySymbol] = useState('US$')
+  const [payoutModalAffiliate, setPayoutModalAffiliate] = useState<Affiliate | null>(null)
   const limit = 20
 
   useEffect(() => {
@@ -468,15 +469,14 @@ export default function AffiliatesPage() {
                       </div>
                     </div>
                   </div>
-                  {(a.status === 'approved' || a.status === 'suspended') && (
-                    <div className="border-t border-gray-100 pt-2">
-                      {a.status === 'approved' ? (
-                        <button onClick={() => handleBlock(a.id)} className="w-full py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
-                      ) : (
-                        <button onClick={() => handleUnblock(a.id)} className="w-full py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
-                      )}
-                    </div>
-                  )}
+                  <div className="border-t border-gray-100 pt-2 flex gap-2">
+                    <button onClick={() => setPayoutModalAffiliate(a)} className="flex-1 py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">View payout</button>
+                    {a.status === 'approved' ? (
+                      <button onClick={() => handleBlock(a.id)} className="flex-1 py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
+                    ) : a.status === 'suspended' ? (
+                      <button onClick={() => handleUnblock(a.id)} className="flex-1 py-1.5 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -518,11 +518,14 @@ export default function AffiliatesPage() {
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{a.totalCommission > 0 ? formatCurrency(a.totalCommission) : '—'}<span className="text-[11px] text-gray-500 ml-1">({a.commissionPct}%)</span></td>
                       <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}>{a.status === 'suspended' ? 'Blocked' : a.status}</span></td>
                       <td className="px-4 py-3 text-right">
-                        {a.status === 'approved' ? (
-                          <button onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
-                        ) : a.status === 'suspended' ? (
-                          <button onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
-                        ) : null}
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={(e) => { e.stopPropagation(); setPayoutModalAffiliate(a) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">View payout</button>
+                          {a.status === 'approved' ? (
+                            <button onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
+                          ) : a.status === 'suspended' ? (
+                            <button onClick={(e) => { e.stopPropagation(); handleUnblock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Unblock</button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -547,6 +550,94 @@ export default function AffiliatesPage() {
           <p className="text-[13px] text-gray-500">Performance analytics coming soon.</p>
         </div>
       )}
+
+      {payoutModalAffiliate && (
+        <PayoutDetailsModal
+          affiliate={payoutModalAffiliate}
+          onClose={() => setPayoutModalAffiliate(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function PayoutDetailsModal({ affiliate, onClose }: { affiliate: Affiliate; onClose: () => void }) {
+  const method = affiliate.paymentMethod
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 pt-6 pb-3 border-b border-gray-100">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Payout Details</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5">{affiliate.fullName}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <Field label="Method" value={
+            method === 'paypal' ? 'PayPal' :
+            method === 'bank' ? 'Bank Transfer' :
+            method === 'stripe' ? 'Stripe Connect' :
+            method === 'xendit' ? 'Xendit' : method
+          } />
+
+          {method === 'stripe' && (
+            <>
+              <Field label="Account ID" value={affiliate.stripeConnectAccountId || '—'} mono />
+              <Field label="Onboarded" value={affiliate.stripeConnectOnboarded ? 'Yes' : 'Not yet'} />
+            </>
+          )}
+
+          {method === 'paypal' && (
+            <Field label="PayPal Email" value={affiliate.paypalEmail || '—'} />
+          )}
+
+          {method === 'bank' && (
+            <>
+              <Field label="Account Holder" value={affiliate.bankAccountHolder || '—'} />
+              <Field label="IBAN / Account" value={affiliate.bankIban || '—'} mono />
+              <Field label="SWIFT / BIC" value={affiliate.bankSwiftBic || '—'} mono />
+              <Field label="Bank Name" value={affiliate.bankName || '—'} />
+              <Field label="Country" value={affiliate.bankCountry || '—'} />
+            </>
+          )}
+
+          {method === 'xendit' && (
+            <>
+              <Field label="Channel" value={affiliate.xenditChannelCode || '—'} />
+              <Field label="Account Number" value={affiliate.xenditAccountNumber || '—'} mono />
+              <Field label="Account Holder" value={affiliate.xenditAccountHolderName || '—'} />
+            </>
+          )}
+
+          <div className="pt-3 border-t border-gray-100 text-[11px] text-gray-400">
+            Contact email: <span className="text-gray-600">{affiliate.email}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{label}</p>
+      <p className={`text-sm text-gray-900 ${mono ? 'font-mono' : ''} break-all`}>{value}</p>
     </div>
   )
 }

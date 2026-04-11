@@ -11,6 +11,10 @@ export interface Affiliate {
   paymentMethod: 'paypal' | 'bank' | 'stripe' | 'xendit'
   paypalEmail: string
   bankIban: string
+  bankAccountHolder: string
+  bankSwiftBic: string
+  bankName: string
+  bankCountry: string
   commissionPct: number
   status: 'pending' | 'approved' | 'rejected' | 'suspended'
   createdAt: string
