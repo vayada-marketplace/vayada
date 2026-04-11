@@ -43,13 +43,13 @@ export default function BrandMediaStep({
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="max-w-6xl mx-auto px-6 pt-6 w-full shrink-0">{stepIndicators}</div>
-      <div className="max-w-6xl mx-auto px-6 pb-5 flex gap-5 flex-1 min-h-0 w-full">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto lg:overflow-visible">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 w-full shrink-0">{stepIndicators}</div>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-5 flex flex-col lg:flex-row gap-5 flex-1 min-h-0 w-full">
 
         {/* LEFT: Controls panel */}
-        <div className="w-[380px] shrink-0 flex flex-col min-h-0">
-          <div className="flex-1 overflow-y-auto space-y-3 pb-3">
+        <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col lg:min-h-0">
+          <div className="flex-1 lg:overflow-y-auto space-y-3 pb-3">
 
             {/* Hero Image */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -215,7 +215,7 @@ export default function BrandMediaStep({
         </div>
 
         {/* RIGHT: Live preview */}
-        <div className="flex-1 min-w-0 bg-white rounded-lg border border-gray-200 flex flex-col min-h-0">
+        <div className="flex-1 min-w-0 bg-white rounded-lg border border-gray-200 flex flex-col min-h-[500px] lg:min-h-0">
           {/* Browser chrome bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">

@@ -297,7 +297,7 @@ export default function PropertyStep({
 }: PropertyStepProps) {
   return (
     <div className="flex-1 overflow-auto">
-      <div className="max-w-2xl mx-auto px-6 py-6">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
         {stepIndicators}
         {prefilled && (
           <div className="mb-4 px-3 py-2.5 rounded-lg text-[13px] bg-blue-50 text-blue-800 border border-blue-200">
@@ -335,7 +335,7 @@ export default function PropertyStep({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] font-semibold text-gray-800 mb-1">
                 City <span className="text-gray-800">*</span>
@@ -388,7 +388,7 @@ export default function PropertyStep({
             <h3 className="text-[13px] font-bold text-gray-900">Contact Details</h3>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] font-semibold text-gray-800 mb-1">
                 Email <span className="text-gray-800">*</span>
@@ -443,7 +443,7 @@ export default function PropertyStep({
           </div>
           <p className="text-[11px] text-gray-400">Links shown in your booking site footer</p>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] text-gray-800 mb-1">
                 <span className="font-semibold">Instagram</span>
@@ -505,7 +505,7 @@ export default function PropertyStep({
           </div>
 
           {/* Default Currency & Language */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[12px] font-semibold text-gray-800 mb-1">Default Currency <span className="text-gray-800">*</span></label>
               <FlagSelect<CurrencyOption>

@@ -252,16 +252,16 @@ export default function RoomsStep({
 
   return (
     <div className="flex-1 overflow-auto">
-      <div className={`mx-auto px-6 py-6 ${activeRoomTab === 'pricing' ? 'max-w-6xl' : 'max-w-4xl'}`}>
+      <div className={`mx-auto px-4 sm:px-6 py-6 ${activeRoomTab === 'pricing' ? 'max-w-6xl' : 'max-w-4xl'}`}>
         {stepIndicators}
         <div className="mb-5">
           <h2 className="text-[18px] font-bold text-gray-900">Rooms & Rates</h2>
           <p className="text-[12px] text-gray-500 mt-1">Configure your room types. Each room maps directly to a card guests see on the booking page.</p>
         </div>
 
-        <div className="flex gap-6">
+        <div className="flex flex-col md:flex-row gap-6">
         {/* Room Sidebar */}
-        <div className="w-48 shrink-0">
+        <div className="w-full md:w-48 md:shrink-0">
           <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest mb-3">Your Rooms</h3>
           <div className="space-y-2 mb-3">
             {rooms.map((r, idx) => {
@@ -454,7 +454,7 @@ export default function RoomsStep({
             </div>
 
             {/* Bedrooms, Bathrooms, Room Size, Total Rooms */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="text-[12px] font-semibold text-gray-900">Bedrooms</label>

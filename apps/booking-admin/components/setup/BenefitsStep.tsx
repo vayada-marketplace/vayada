@@ -43,7 +43,7 @@ export default function BenefitsStep({
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-6">
+    <div className="mx-auto max-w-2xl px-4 sm:px-6 py-6">
       {stepIndicators}
 
       <h1 className="text-xl font-bold text-gray-900 mb-1">Book Direct Benefits</h1>

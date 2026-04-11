@@ -502,7 +502,7 @@ export default function SetupPage() {
   }
 
   const stepIndicators = (
-    <div className="flex items-center justify-center mb-8">
+    <div className="flex items-center justify-center mb-6 sm:mb-8">
       {STEPS.map((s, idx) => (
         <div key={s.number} className="flex items-center">
           <div className="flex items-center gap-1.5 shrink-0">
@@ -521,14 +521,14 @@ export default function SetupPage() {
                 idx + 1
               )}
             </div>
-            <span className={`text-[12px] font-medium whitespace-nowrap ${
+            <span className={`hidden sm:inline text-[12px] font-medium whitespace-nowrap ${
               step >= s.number ? 'text-gray-900' : 'text-gray-400'
             }`}>
               {s.label}
             </span>
           </div>
           {idx < STEPS.length - 1 && (
-            <div className={`w-12 h-px mx-3 shrink-0 ${step > s.number ? 'bg-primary-500' : 'bg-gray-300'}`} />
+            <div className={`w-6 sm:w-12 h-px mx-2 sm:mx-3 shrink-0 ${step > s.number ? 'bg-primary-500' : 'bg-gray-300'}`} />
           )}
         </div>
       ))}
@@ -670,7 +670,7 @@ export default function SetupPage() {
   if (!showWizard && !prefilled) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col">
-        <div className="bg-white border-b border-gray-200 px-8 py-3 shrink-0">
+        <div className="bg-white border-b border-gray-200 px-4 sm:px-8 py-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="6" fill="#4338CA" />
@@ -747,8 +747,8 @@ export default function SetupPage() {
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
       {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-8 py-3 shrink-0">
-        <div className="flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-8 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="6" fill="#4338CA" />
@@ -756,7 +756,7 @@ export default function SetupPage() {
             </svg>
             <span className="font-semibold text-gray-900 text-[15px]">Property Setup</span>
           </div>
-          <span className="text-[13px] text-gray-500">Step {STEPS.findIndex(s => s.number === step) + 1} of {STEPS.length}</span>
+          <span className="text-[12px] sm:text-[13px] text-gray-500 whitespace-nowrap">Step {STEPS.findIndex(s => s.number === step) + 1} of {STEPS.length}</span>
         </div>
       </div>
 

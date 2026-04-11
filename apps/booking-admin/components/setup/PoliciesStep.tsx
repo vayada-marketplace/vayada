@@ -49,7 +49,7 @@ export default function PoliciesStep({
 }: PoliciesStepProps) {
   return (
     <div className="flex-1 overflow-auto">
-      <div className="max-w-2xl mx-auto px-6 py-6">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
         {stepIndicators}
         <div className="text-center mb-6">
           <h2 className="text-lg font-bold text-gray-900">Policies & Operations</h2>
@@ -60,7 +60,7 @@ export default function PoliciesStep({
         <div className="bg-white rounded-lg border border-gray-200 p-5 mb-4">
           <h3 className="text-[13px] font-semibold text-gray-900 mb-1">Check-in & Check-out</h3>
           <p className="text-[11px] text-gray-500 mb-3">Set the time windows for guest arrivals and departures.</p>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <div>
               <label className="block text-[12px] font-semibold text-gray-700 mb-2">Check-in Period</label>
               <div className="flex items-center gap-2">
@@ -191,7 +191,7 @@ export default function PoliciesStep({
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
                 <input type="text" value={payoutIban} onChange={(e) => setPayoutIban(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. GB29 NWBK 6016 1331 9268 19" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>
                   <input type="text" value={payoutBankName} onChange={(e) => setPayoutBankName(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" placeholder="e.g. HSBC Bank" />
