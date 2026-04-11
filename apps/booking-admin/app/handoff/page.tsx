@@ -6,10 +6,22 @@ export default function HandoffPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    const params = new URLSearchParams(window.location.hash.slice(1))
-    const token = params.get('token')
-    const expiresAt = params.get('expires_at')
-    const userData = params.get('user')
+    // Auth data arrives in the URL hash so it never hits server logs.
+    const hashParams = new URLSearchParams(window.location.hash.slice(1))
+    const token = hashParams.get('token')
+    const expiresAt = hashParams.get('expires_at')
+    const userData = hashParams.get('user')
+
+    // Optional `?redirect=...` query param tells us where to go after
+    // auth. Used by the PMS header's "Add Property" button which
+    // needs to land on /setup?mode=add instead of /dashboard.
+    const queryParams = new URLSearchParams(window.location.search)
+    const redirectParam = queryParams.get('redirect')
+    // Only honor same-origin relative paths — never trust an arbitrary URL
+    const safeRedirect =
+      redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
+        ? redirectParam
+        : null
 
     if (token && expiresAt) {
       localStorage.setItem('access_token', token)
@@ -39,11 +51,11 @@ export default function HandoffPage() {
           } else {
             localStorage.setItem('setupComplete', 'false')
           }
-          window.location.href = '/dashboard'
+          window.location.href = safeRedirect || '/dashboard'
         })
         .catch(() => {
           localStorage.setItem('setupComplete', 'true')
-          window.location.href = '/dashboard'
+          window.location.href = safeRedirect || '/dashboard'
         })
     } else {
       window.location.href = '/login'

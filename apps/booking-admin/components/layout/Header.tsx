@@ -141,12 +141,14 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                   )
                 })}
               </div>
-              {/* Add Property */}
+              {/* Add Property — ?mode=add tells the setup page to
+                  skip its "setup_complete → redirect to /dashboard"
+                  guard, which otherwise bounces users right back. */}
               <div className="border-t border-gray-100 mt-1 pt-1 px-1.5">
                 <button
                   onClick={() => {
                     setDropdownOpen(false)
-                    router.push('/setup')
+                    router.push('/setup?mode=add')
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
                 >

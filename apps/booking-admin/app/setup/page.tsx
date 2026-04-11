@@ -149,20 +149,40 @@ export default function SetupPage() {
         router.replace('/login')
         return
       }
+
+      // Multi-hotel "Add Property" flow: the header's Add Property
+      // button routes to /setup?mode=add for users who already have
+      // >= 1 hotel. Skip the setup_complete redirect in that case
+      // — the user explicitly came here to create a NEW property.
+      // Also clear any stale selectedHotelId so the wizard's first
+      // API call (POST /admin/hotels) doesn't accidentally carry an
+      // X-Hotel-Id header pointing at an existing hotel.
+      const urlParams = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search)
+        : null
+      const addMode = urlParams?.get('mode') === 'add'
+      if (addMode) {
+        try { localStorage.removeItem('selectedHotelId') } catch {}
+      }
+
       const status = await checkSetupStatus()
-      if (status?.setup_complete) {
+      if (status?.setup_complete && !addMode) {
         localStorage.setItem('setupComplete', 'true')
         router.replace('/dashboard')
         return
       }
-      const prefill = status?.prefill_data
-      if (prefill) {
-        if (prefill.property_name) setPropertyName(prefill.property_name)
-        if (prefill.reservation_email) setReservationEmail(prefill.reservation_email)
-        if (prefill.phone_number) setPhoneNumber(prefill.phone_number)
-        if (prefill.address) setAddress(prefill.address)
-        if (prefill.hero_image) setHeroImage(prefill.hero_image)
-        setPrefilled(true)
+      // In add mode we intentionally DON'T prefill from the existing
+      // setup — the user is creating a fresh property, so start blank.
+      if (!addMode) {
+        const prefill = status?.prefill_data
+        if (prefill) {
+          if (prefill.property_name) setPropertyName(prefill.property_name)
+          if (prefill.reservation_email) setReservationEmail(prefill.reservation_email)
+          if (prefill.phone_number) setPhoneNumber(prefill.phone_number)
+          if (prefill.address) setAddress(prefill.address)
+          if (prefill.hero_image) setHeroImage(prefill.hero_image)
+          setPrefilled(true)
+        }
       }
       setLoading(false)
     }
