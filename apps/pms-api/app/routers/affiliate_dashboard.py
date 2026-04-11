@@ -162,19 +162,36 @@ async def get_properties(user_id: str = Depends(require_affiliate)):
 async def get_dashboard(user_id: str = Depends(require_affiliate)):
     affiliates = await AffiliateRepository.list_by_user_id(user_id)
 
-    total_earned = 0.0
     total_bookings = 0
     total_clicks = 0
-    outstanding = 0.0
-
     for a in affiliates:
-        revenue = float(a.get("total_revenue", 0) or 0)
-        commission_pct = float(a["commission_pct"])
-        commission = revenue * commission_pct / 100
-        total_earned += commission
         total_bookings += int(a.get("booking_count", 0) or 0)
         total_clicks += int(a.get("click_count", 0) or 0)
-        outstanding += commission  # simplified — full payout tracking TBD
+
+    # The payouts table is the source of truth for both earnings and
+    # paid status — `affiliate_commission` is computed at booking time
+    # using min(commission_pct, total_fee), which we'd otherwise have
+    # to recompute here. Aggregate per affiliate id and sum.
+    affiliate_ids = [str(a["id"]) for a in affiliates]
+    total_earned = 0.0
+    outstanding = 0.0
+    if affiliate_ids:
+        rows = await Database.fetch(
+            """
+            SELECT
+                COALESCE(SUM(amount) FILTER (WHERE status = 'completed'),                         0)::numeric AS paid,
+                COALESCE(SUM(amount) FILTER (WHERE status IN ('scheduled','processing','failed')), 0)::numeric AS unpaid
+            FROM payouts
+            WHERE recipient_type = 'affiliate'
+              AND recipient_id = ANY($1::uuid[])
+            """,
+            affiliate_ids,
+        )
+        if rows:
+            paid_total = float(rows[0]["paid"] or 0)
+            unpaid_total = float(rows[0]["unpaid"] or 0)
+            total_earned = paid_total + unpaid_total
+            outstanding = unpaid_total
 
     conversion_rate = round(total_bookings / total_clicks * 100, 2) if total_clicks > 0 else 0.0
 
@@ -190,8 +207,48 @@ async def get_dashboard(user_id: str = Depends(require_affiliate)):
 
 @router.get("/payouts")
 async def get_payouts(user_id: str = Depends(require_affiliate)):
-    # Payout tracking tables don't exist yet — return empty list for now
-    return {"payouts": []}
+    """Return completed payouts for this affiliate, grouped by the
+    batch they were sent in (matched on completed_at + payment_method
+    + external_reference so a single Vayada transfer that covered
+    several bookings shows up as one row)."""
+    affiliates = await AffiliateRepository.list_by_user_id(user_id)
+    if not affiliates:
+        return {"payouts": []}
+
+    affiliate_ids = [str(a["id"]) for a in affiliates]
+    rows = await Database.fetch(
+        """
+        SELECT
+            DATE_TRUNC('second', completed_at) AS completed_at,
+            payment_method,
+            external_reference,
+            SUM(amount)::numeric AS amount,
+            MIN(currency)        AS currency,
+            COUNT(*)             AS booking_count
+        FROM payouts
+        WHERE recipient_type = 'affiliate'
+          AND recipient_id = ANY($1::uuid[])
+          AND status = 'completed'
+        GROUP BY DATE_TRUNC('second', completed_at), payment_method, external_reference
+        ORDER BY DATE_TRUNC('second', completed_at) DESC
+        """,
+        affiliate_ids,
+    )
+
+    payouts = [
+        {
+            "id": f"{r['completed_at'].isoformat()}-{r['payment_method'] or ''}-{r['external_reference'] or ''}",
+            "date": r["completed_at"].isoformat(),
+            "amount": float(r["amount"]),
+            "currency": r["currency"] or "EUR",
+            "method": r["payment_method"] or "manual",
+            "reference": r["external_reference"],
+            "bookingCount": int(r["booking_count"]),
+            "status": "completed",
+        }
+        for r in rows
+    ]
+    return {"payouts": payouts}
 
 
 @router.patch("/me")
