@@ -39,19 +39,48 @@ export default function HandoffPage() {
         } catch { /* ignore */ }
       }
 
-      // Check setup status before redirecting
+      // Check setup status before redirecting.
+      // Precedence: explicit safeRedirect > setup (if incomplete)
+      // > choose-property (if 2+ hotels) > dashboard (default).
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://booking-api.vayada.com'
       fetch(`${apiUrl}/admin/settings/setup-status`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data && data.setup_complete) {
-            localStorage.setItem('setupComplete', 'true')
-          } else {
-            localStorage.setItem('setupComplete', 'false')
+        .then(async data => {
+          const setupComplete = !!(data && data.setup_complete)
+          localStorage.setItem('setupComplete', setupComplete ? 'true' : 'false')
+
+          if (safeRedirect) {
+            window.location.href = safeRedirect
+            return
           }
-          window.location.href = safeRedirect || '/dashboard'
+          if (!setupComplete) {
+            window.location.href = '/setup'
+            return
+          }
+
+          // Check how many hotels the user owns. Multi-hotel users
+          // get the picker so cross-domain handoff doesn't silently
+          // drop them into an arbitrary dashboard.
+          try {
+            const listRes = await fetch(`${apiUrl}/admin/hotels`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            const hotels = listRes.ok ? await listRes.json() : []
+            if (Array.isArray(hotels) && hotels.length > 1) {
+              localStorage.removeItem('selectedHotelId')
+              window.location.href = '/choose-property'
+              return
+            }
+            if (Array.isArray(hotels) && hotels.length === 1) {
+              localStorage.setItem('selectedHotelId', hotels[0].id)
+            }
+          } catch {
+            // If the list call fails, fall through to dashboard —
+            // the dashboard will use its own fallback logic.
+          }
+          window.location.href = '/dashboard'
         })
         .catch(() => {
           localStorage.setItem('setupComplete', 'true')

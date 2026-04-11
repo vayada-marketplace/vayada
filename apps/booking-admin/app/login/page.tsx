@@ -39,16 +39,23 @@ export default function LoginPage() {
         return
       }
 
-      // Pre-load hotel selection
+      // Pre-load the user's hotel list. Multi-hotel users are sent to
+      // a dedicated picker so they land in the property they actually
+      // want to work on, instead of an arbitrary "last-used" fallback.
+      // Single-hotel users skip the picker for speed.
       const hotelList = await settingsService.listHotels()
-      if (hotelList.length > 0) {
-        const savedId = localStorage.getItem('selectedHotelId')
-        if (!hotelList.find(h => h.id === savedId)) {
-          localStorage.setItem('selectedHotelId', hotelList[0].id)
-        }
+      localStorage.setItem('setupComplete', 'true')
+
+      if (hotelList.length > 1) {
+        // Clear any stale selection — the picker will set a fresh one.
+        localStorage.removeItem('selectedHotelId')
+        router.push('/choose-property')
+        return
       }
 
-      localStorage.setItem('setupComplete', 'true')
+      if (hotelList.length === 1) {
+        localStorage.setItem('selectedHotelId', hotelList[0].id)
+      }
       router.push('/dashboard')
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
