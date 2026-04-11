@@ -126,9 +126,12 @@ async def create_room_type(
         payload["currency"] = pay_settings["default_currency"]
     elif app_settings.BOOKING_ENGINE_DATABASE_URL:
         try:
+            # hotel_id here is already the current (unified) hotel id
+            # resolved by get_hotel_id above, so we can look up the
+            # matching booking_hotels row directly by id.
             be_currency = await BookingEngineDatabase.fetchval(
-                "SELECT currency FROM booking_hotels WHERE user_id = $1",
-                user_id,
+                "SELECT currency FROM booking_hotels WHERE id = $1",
+                hotel_id,
             )
             if be_currency:
                 payload["currency"] = be_currency

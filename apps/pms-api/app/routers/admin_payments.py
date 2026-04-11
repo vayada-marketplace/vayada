@@ -27,13 +27,21 @@ router = APIRouter(prefix="/admin", tags=["admin-payments"])
 
 
 async def _get_booking_engine_currency(user_id: str) -> str:
-    """Fetch the currency set during onboarding from the booking engine DB."""
+    """Fetch the currency set during onboarding from the booking engine DB.
+
+    Uses get_hotel_id() so that when X-Hotel-Id is set, we look up
+    the currency of the *selected* hotel, not whatever WHERE user_id
+    LIMIT 1 happened to return. Because PMS and booking-engine hotel
+    ids are unified after the multi-hotel-ids migration, we can join
+    directly by id across DBs.
+    """
     if not app_settings.BOOKING_ENGINE_DATABASE_URL:
         return "EUR"
     try:
+        hotel_id = await get_hotel_id(user_id)
         currency = await BookingEngineDatabase.fetchval(
-            "SELECT currency FROM booking_hotels WHERE user_id = $1",
-            user_id,
+            "SELECT currency FROM booking_hotels WHERE id = $1",
+            hotel_id,
         )
         return currency or "EUR"
     except Exception as e:
@@ -170,51 +178,48 @@ async def update_payment_settings(
 
     await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
 
-    # Sync currency to booking engine
+    # Sync currency to booking engine — scoped to the selected hotel
+    # (multi-hotel-safe). hotel_id here is already the unified id from
+    # earlier in this function.
     if new_currency and app_settings.BOOKING_ENGINE_DATABASE_URL:
         try:
             await BookingEngineDatabase.execute(
-                "UPDATE booking_hotels SET currency = $2 WHERE user_id = $1",
-                user_id, new_currency,
+                "UPDATE booking_hotels SET currency = $2 WHERE id = $1",
+                hotel_id, new_currency,
             )
         except Exception as e:
             logger.warning("Failed to sync currency to booking engine: %s", e)
 
-        # Convert addon prices in the booking engine DB
+        # Convert addon prices in the booking engine DB for the
+        # currently-selected hotel (unified id).
         if old_currency != new_currency:
             try:
-                hotel_row = await BookingEngineDatabase.fetchrow(
-                    "SELECT id FROM booking_hotels WHERE user_id = $1", user_id,
+                addons = await BookingEngineDatabase.fetch(
+                    "SELECT id, price, currency FROM booking_addons WHERE hotel_id = $1",
+                    hotel_id,
                 )
-                if hotel_row:
-                    be_hotel_id = str(hotel_row["id"])
-                    addons = await BookingEngineDatabase.fetch(
-                        "SELECT id, price, currency FROM booking_addons WHERE hotel_id = $1",
-                        be_hotel_id,
-                    )
-                    zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
-                    addon_decimals = 0 if zero_decimal else 2
-                    converted_count = 0
-                    for addon in addons:
-                        addon_currency = addon["currency"]
-                        if addon_currency == new_currency:
-                            continue  # already in the right currency
-                        # Get rate from addon's currency to new currency
-                        try:
-                            if addon_currency == old_currency:
-                                addon_rate = rate  # reuse the rate we already fetched
-                            else:
-                                addon_rate = await get_exchange_rate(addon_currency, new_currency)
-                            new_price = round(float(addon["price"]) * addon_rate, addon_decimals)
-                            await BookingEngineDatabase.execute(
-                                "UPDATE booking_addons SET price = $1, currency = $2 WHERE id = $3",
-                                new_price, new_currency, str(addon["id"]),
-                            )
-                            converted_count += 1
-                        except Exception as ae:
-                            logger.warning("Failed to convert addon %s: %s", addon["id"], ae)
-                    if converted_count:
-                        logger.info("Converted %d addon prices to %s", converted_count, new_currency)
+                zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
+                addon_decimals = 0 if zero_decimal else 2
+                converted_count = 0
+                for addon in addons:
+                    addon_currency = addon["currency"]
+                    if addon_currency == new_currency:
+                        continue  # already in the right currency
+                    try:
+                        if addon_currency == old_currency:
+                            addon_rate = rate  # reuse the rate we already fetched
+                        else:
+                            addon_rate = await get_exchange_rate(addon_currency, new_currency)
+                        new_price = round(float(addon["price"]) * addon_rate, addon_decimals)
+                        await BookingEngineDatabase.execute(
+                            "UPDATE booking_addons SET price = $1, currency = $2 WHERE id = $3",
+                            new_price, new_currency, str(addon["id"]),
+                        )
+                        converted_count += 1
+                    except Exception as ae:
+                        logger.warning("Failed to convert addon %s: %s", addon["id"], ae)
+                if converted_count:
+                    logger.info("Converted %d addon prices to %s", converted_count, new_currency)
             except Exception as e:
                 logger.warning("Failed to convert addon prices: %s", e)
 

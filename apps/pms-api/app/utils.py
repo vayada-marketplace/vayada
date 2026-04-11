@@ -1,10 +1,30 @@
 import json
 import secrets
 import string
-from typing import Callable, Awaitable
+from contextvars import ContextVar
+from typing import Callable, Awaitable, Optional
 
 from fastapi import HTTPException
 from app.database import Database
+
+
+# Per-request override for the "current hotel" resolution. Populated
+# by the capture_hotel_header dependency (see dependencies.py), read
+# by get_hotel_id below. Using a contextvar lets us keep the existing
+# get_hotel_id(user_id) signature unchanged across ~50 call sites
+# while still honoring the X-Hotel-Id header when it's present.
+#
+# Contextvars are task-local in asyncio, so each FastAPI request runs
+# in isolation — no cross-request leakage.
+_current_hotel_id_override: ContextVar[Optional[str]] = ContextVar(
+    "_current_hotel_id_override", default=None
+)
+
+
+def set_current_hotel_id_override(hotel_id: Optional[str]) -> None:
+    """Set the per-request X-Hotel-Id override. Called by the global
+    capture_hotel_header dependency at the start of each admin request."""
+    _current_hotel_id_override.set(hotel_id)
 
 
 def parse_jsonb(val):
@@ -15,9 +35,33 @@ def parse_jsonb(val):
 
 
 async def get_hotel_id(user_id: str) -> str:
-    """Look up hotel ID from user_id, raising 404 if not found."""
+    """
+    Resolve the hotel id for the current request.
+
+    Priority:
+      1. X-Hotel-Id header (via contextvar), validated to be owned by
+         the authenticated user. Raises 403 on mismatch.
+      2. Fallback: user's oldest hotel. Single-hotel legacy behavior.
+         Preserved so callers that don't (yet) send the header still
+         work in the one-hotel case, which is how every PMS endpoint
+         used to work before multi-hotel support landed.
+    """
+    override = _current_hotel_id_override.get()
+    if override:
+        row = await Database.fetchrow(
+            "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
+            override, user_id,
+        )
+        if not row:
+            raise HTTPException(
+                status_code=403,
+                detail="X-Hotel-Id does not match any hotel owned by this user",
+            )
+        return str(row["id"])
+
     row = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE user_id = $1", user_id
+        "SELECT id FROM hotels WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",
+        user_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="No hotel found for this account")

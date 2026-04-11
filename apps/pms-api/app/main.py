@@ -1,11 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Database, AuthDatabase, BookingEngineDatabase
+from app.dependencies import capture_hotel_header
 from app.routers.rooms import router as rooms_router
 from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
@@ -87,14 +88,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Admin routers honor the X-Hotel-Id header for multi-hotel support.
+# The capture_hotel_header dependency runs once per request and stores
+# the header value in a contextvar that get_hotel_id() reads — this
+# lets ~50 endpoints use `await get_hotel_id(user_id)` unchanged while
+# still scoping to the header-selected hotel when present. Non-admin
+# routers (rooms, bookings, upload, webhooks, etc.) don't need this.
+_admin_deps = [Depends(capture_hotel_header)]
+
 app.include_router(rooms_router)
 app.include_router(bookings_router)
-app.include_router(admin_router)
-app.include_router(admin_rooms_router)
-app.include_router(admin_bookings_router)
-app.include_router(admin_payments_router)
-app.include_router(admin_affiliates_router)
-app.include_router(admin_channex_router)
+app.include_router(admin_router, dependencies=_admin_deps)
+app.include_router(admin_rooms_router, dependencies=_admin_deps)
+app.include_router(admin_bookings_router, dependencies=_admin_deps)
+app.include_router(admin_payments_router, dependencies=_admin_deps)
+app.include_router(admin_affiliates_router, dependencies=_admin_deps)
+app.include_router(admin_channex_router, dependencies=_admin_deps)
 app.include_router(upload_router)
 app.include_router(affiliates_router)
 app.include_router(webhooks_router)

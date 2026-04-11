@@ -13,6 +13,13 @@ class HotelRegister(BaseModel):
     name: str
     slug: str
     contact_email: str
+    # booking_hotels.id from the booking-engine DB. When present, this
+    # value becomes the PMS hotels.id primary key, so the same hotel
+    # shares a single UUID across both databases. Callers (setup
+    # wizard) must POST to booking-engine /admin/hotels first to get
+    # the id, then pass it here. Optional only for backward compat
+    # during the rollout — every new caller must supply it.
+    booking_hotel_id: Optional[str] = None
 
 
 PROPERTY_TYPES = [
