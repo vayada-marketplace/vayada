@@ -9,6 +9,18 @@ export const hotelService = {
     return apiClient.get<Hotel>(`/api/hotels/${slug}${langParam}`)
   },
 
+  async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
+    const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
+    try {
+      await fetch(`${base}/api/hotels/${slug}/affiliates/${referralCode}/click`, {
+        method: 'POST',
+        keepalive: true,
+      })
+    } catch {
+      // Click tracking is best-effort — never block UX on it.
+    }
+  },
+
   async getRooms(slug: string, checkIn?: string, checkOut?: string, adults?: number): Promise<RoomType[]> {
     const params = new URLSearchParams()
     if (checkIn) params.set('check_in', checkIn)
