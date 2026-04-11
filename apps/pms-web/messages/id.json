@@ -522,5 +522,11 @@
   "setup.redirecting": "Mengalihkan ke pengaturan...",
   "pagination.showing": "Menampilkan {from}-{to} dari {total}",
   "pagination.previous": "Sebelumnya",
-  "pagination.next": "Berikutnya"
+  "pagination.next": "Berikutnya",
+  "auth.chooseProperty.welcome": "Selamat datang",
+  "auth.chooseProperty.welcomeBack": "Selamat datang kembali",
+  "auth.chooseProperty.subtitle": "Properti mana yang ingin Anda kelola?",
+  "auth.chooseProperty.addProperty": "Tambah properti baru",
+  "auth.chooseProperty.loadError": "Gagal memuat properti",
+  "auth.chooseProperty.retry": "Coba lagi"
 }

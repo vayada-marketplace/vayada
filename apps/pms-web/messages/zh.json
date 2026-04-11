@@ -522,5 +522,11 @@
   "setup.redirecting": "正在跳转到设置...",
   "pagination.showing": "显示 {from}-{to}，共 {total}",
   "pagination.previous": "上一页",
-  "pagination.next": "下一页"
+  "pagination.next": "下一页",
+  "auth.chooseProperty.welcome": "欢迎",
+  "auth.chooseProperty.welcomeBack": "欢迎回来",
+  "auth.chooseProperty.subtitle": "您想管理哪个物业？",
+  "auth.chooseProperty.addProperty": "添加新物业",
+  "auth.chooseProperty.loadError": "加载物业失败",
+  "auth.chooseProperty.retry": "重试"
 }

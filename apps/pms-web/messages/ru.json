@@ -522,5 +522,11 @@
   "setup.redirecting": "Перенаправление на настройку...",
   "pagination.showing": "Показано {from}-{to} из {total}",
   "pagination.previous": "Назад",
-  "pagination.next": "Далее"
+  "pagination.next": "Далее",
+  "auth.chooseProperty.welcome": "Добро пожаловать",
+  "auth.chooseProperty.welcomeBack": "С возвращением",
+  "auth.chooseProperty.subtitle": "Какой объектом вы хотите управлять?",
+  "auth.chooseProperty.addProperty": "Добавить новый объект",
+  "auth.chooseProperty.loadError": "Не удалось загрузить объекты",
+  "auth.chooseProperty.retry": "Повторить"
 }

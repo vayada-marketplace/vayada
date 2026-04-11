@@ -65,9 +65,7 @@ export default function PmsChoosePropertyPage() {
       } catch (e) {
         if (!cancelled) {
           setError(
-            e instanceof Error
-              ? e.message
-              : t('auth.chooseProperty.loadError') || 'Failed to load properties'
+            e instanceof Error ? e.message : t('auth.chooseProperty.loadError')
           )
         }
       }
@@ -94,7 +92,7 @@ export default function PmsChoosePropertyPage() {
             onClick={() => window.location.reload()}
             className="text-[13px] text-primary-600 hover:text-primary-700 font-medium"
           >
-            {t('auth.chooseProperty.retry') || 'Retry'}
+            {t('auth.chooseProperty.retry')}
           </button>
         </div>
       </div>
@@ -126,12 +124,11 @@ export default function PmsChoosePropertyPage() {
           </div>
           <h1 className="text-xl font-bold text-gray-900">
             {userName
-              ? (t('auth.chooseProperty.welcomeBack') || 'Welcome back') + ', ' + userName
-              : t('auth.chooseProperty.welcome') || 'Welcome'}
+              ? `${t('auth.chooseProperty.welcomeBack')}, ${userName}`
+              : t('auth.chooseProperty.welcome')}
           </h1>
           <p className="text-[13px] text-gray-500 mt-1">
-            {t('auth.chooseProperty.subtitle') ||
-              'Which property would you like to manage?'}
+            {t('auth.chooseProperty.subtitle')}
           </p>
         </div>
 
@@ -202,7 +199,7 @@ export default function PmsChoosePropertyPage() {
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            {t('auth.chooseProperty.addProperty') || 'Add a new property'}
+            {t('auth.chooseProperty.addProperty')}
           </button>
         </div>
       </div>

@@ -48,7 +48,6 @@
   "common.coverLabel": "Cover",
   "common.uploading": "Uploading...",
   "common.uploadFailed": "Upload failed",
-
   "auth.login.title": "vayada PMS",
   "auth.login.subtitle": "Sign in to manage your property",
   "auth.login.emailLabel": "Email address",
@@ -68,7 +67,6 @@
   "auth.login.unexpectedError": "An unexpected error occurred. Please try again.",
   "auth.login.sessionExpiredBanner": "Your session has expired. Please sign in again.",
   "auth.login.signOut": "Sign Out",
-
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Create your property management account",
   "auth.register.fullNameLabel": "Full Name",
@@ -92,12 +90,10 @@
   "auth.register.passwordsMismatch": "Passwords do not match",
   "auth.register.emailExists": "An account with this email already exists.",
   "auth.register.unexpectedError": "An unexpected error occurred. Please try again.",
-
   "layout.header.switchProperty": "Switch Property",
   "layout.header.addProperty": "Add Property",
   "layout.header.arrivals": "arrivals",
   "layout.header.departures": "departures",
-
   "layout.sidebar.propertyManager": "Property Manager",
   "layout.sidebar.operationsAndInventory": "Operations & Inventory",
   "layout.sidebar.switchApp": "Switch App",
@@ -111,13 +107,11 @@
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Settings",
   "layout.sidebar.collapse": "Collapse",
-
   "search.placeholder": "Search reservations, guests, rooms...",
   "search.noResults": "No results for \"{query}\"",
   "search.startTyping": "Start typing to search...",
   "search.categoryReservations": "Reservations",
   "search.categoryRoomTypes": "Room Types",
-
   "dashboard.title": "Dashboard",
   "dashboard.occupancyTonight": "Occupancy Tonight",
   "dashboard.occupancySub": "{occupied} of {total} rooms occupied",
@@ -134,7 +128,6 @@
   "dashboard.settled": "Settled",
   "dashboard.occupancyForecast": "Occupancy Forecast",
   "dashboard.next14Days": "Next 14 days",
-
   "bookings.title": "Reservations",
   "bookings.subtitle": "Master ledger of all bookings",
   "bookings.searchPlaceholder": "Search by guest, reservation ID, or room...",
@@ -158,7 +151,6 @@
   "bookings.balancePartial": "Partial",
   "bookings.balanceRefunded": "Refunded",
   "bookings.balanceDue": "Due",
-
   "bookings.detail.title": "Booking {reference}",
   "bookings.detail.notFound": "Booking not found.",
   "bookings.detail.actionRequired": "Action Required",
@@ -203,7 +195,6 @@
   "bookings.detail.failedToAccept": "Failed to accept booking",
   "bookings.detail.failedToReject": "Failed to reject booking",
   "bookings.detail.failedToUpdate": "Failed to update status",
-
   "bookings.modal.notFound": "Booking not found",
   "bookings.modal.editBooking": "Edit Booking",
   "bookings.modal.checkInLabel": "Check-in",
@@ -235,7 +226,6 @@
   "bookings.modal.confirmButton": "Confirm",
   "bookings.modal.cancelButton": "Cancel",
   "bookings.modal.cancelBookingButton": "Cancel Booking",
-
   "calendar.title": "Calendar",
   "calendar.today": "Today",
   "calendar.blockRoom": "Block Room",
@@ -252,7 +242,6 @@
   "calendar.noBookingsOnDay": "No bookings on this day",
   "calendar.selectDay": "Select a day",
   "calendar.newShort": "+ New",
-
   "calendar.newBookingModal.title": "New Booking",
   "calendar.newBookingModal.roomLabel": "Room",
   "calendar.newBookingModal.checkInLabel": "Check-in",
@@ -277,7 +266,6 @@
   "calendar.newBookingModal.errorEmailRequired": "Guest email is required",
   "calendar.newBookingModal.errorRoomRequired": "Please select a room",
   "calendar.newBookingModal.maxOccupancyWarning": "This room type has a max occupancy of {max} guests. You have {selected} selected.",
-
   "calendar.blockModal.title": "Block Rooms",
   "calendar.blockModal.roomTypeLabel": "Room Type",
   "calendar.blockModal.startDateLabel": "Start Date",
@@ -291,7 +279,6 @@
   "calendar.blockModal.errorBothDates": "Please select both start and end dates",
   "calendar.blockModal.errorEndAfterStart": "End date must be after start date",
   "calendar.blockModal.failedToCreate": "Failed to create block",
-
   "rooms.title": "Rooms & Rates",
   "rooms.subtitle": "Manage room inventory and daily pricing",
   "rooms.addRoomType": "Add Room Type",
@@ -313,14 +300,12 @@
   "rooms.derivedRates": "Derived Rates:",
   "rooms.nonRefundable": "Non-Refundable:",
   "rooms.occ": "occ",
-
   "rooms.new.title": "New Room Type",
   "rooms.new.submitLabel": "Create Room Type",
   "rooms.new.nameRequired": "Name is required",
   "rooms.new.seasonRateRequired": "At least one season with a rate greater than 0 is required",
   "rooms.new.everySeasonRateRequired": "Every season must have a rate greater than 0",
   "rooms.new.failedToCreate": "Failed to create room type",
-
   "rooms.edit.title": "Edit: {name}",
   "rooms.edit.submitLabel": "Save Changes",
   "rooms.edit.success": "Room type updated successfully",
@@ -328,7 +313,6 @@
   "rooms.edit.deleteConfirm": "Are you sure you want to delete this room type?",
   "rooms.edit.cannotDelete": "Cannot delete - room type may have bookings",
   "rooms.edit.notFound": "Room type not found.",
-
   "rooms.form.tabDetails": "Room Details",
   "rooms.form.tabPricing": "Pricing & Rates",
   "rooms.form.tabMedia": "Images & Amenities",
@@ -344,7 +328,7 @@
   "rooms.form.maxOccupancyHint": "Shows as \"Up to X guests\" on room card",
   "rooms.form.bedrooms": "Bedrooms",
   "rooms.form.bathrooms": "Bathrooms",
-  "rooms.form.roomSize": "Room Size (m\u00B2)",
+  "rooms.form.roomSize": "Room Size (m²)",
   "rooms.form.totalRooms": "Total Rooms",
   "rooms.form.totalRoomsHint": "Number of units available for this room type",
   "rooms.form.roomDescription": "Room Description",
@@ -354,7 +338,6 @@
   "rooms.form.roomCategoryTagHint": "(shown to guests in Booking Engine)",
   "rooms.form.selectCategory": "Select category",
   "rooms.form.sortOrder": "Sort Order",
-
   "rooms.form.bedTypeKing": "King Bed",
   "rooms.form.bedTypeQueen": "Queen Bed",
   "rooms.form.bedTypeDouble": "Double Bed",
@@ -362,7 +345,6 @@
   "rooms.form.bedTypeSingle": "Single Bed",
   "rooms.form.bedTypeBunk": "Bunk Bed",
   "rooms.form.bedTypeSofa": "Sofa Bed",
-
   "rooms.form.categoryStandard": "Standard",
   "rooms.form.categoryDeluxe": "Deluxe",
   "rooms.form.categorySuperior": "Superior",
@@ -371,14 +353,12 @@
   "rooms.form.categoryBungalow": "Bungalow",
   "rooms.form.categoryStudio": "Studio",
   "rooms.form.categoryPenthouse": "Penthouse",
-
   "rooms.form.pricingStep1Title": "When are you open?",
   "rooms.form.pricingStep1Desc": "Operating periods repeat every year - dates outside are automatically closed",
   "rooms.form.yearRound": "Year Round",
   "rooms.form.period": "Period {num}",
   "rooms.form.addPeriod": "Add period",
   "rooms.form.endDateAfterStart": "End date must be after start date",
-
   "rooms.form.pricingStep2Title": "How does your pricing change across the year?",
   "rooms.form.pricingStep2Desc": "Draw seasons on your operating period, then set a base rate per season",
   "rooms.form.noSeasonsYet": "No seasons yet. Add one below.",
@@ -395,7 +375,6 @@
   "rooms.form.seasonColumn": "Season",
   "rooms.form.flexRateColumn": "Flex Rate",
   "rooms.form.minStayColumn": "Min Stay",
-
   "rooms.form.pricingStep3Title": "What can guests book?",
   "rooms.form.pricingStep3Desc": "Select at least one rate plan",
   "rooms.form.flexibleRate": "Flexible rate",
@@ -412,10 +391,8 @@
   "rooms.form.nonRefundableDesc": "(discount for no cancellation)",
   "rooms.form.discount": "Discount:",
   "rooms.form.offFlexibleRate": "off flexible rate",
-
   "rooms.form.pricingStep4Title": "Do weekends cost more?",
   "rooms.form.pricingStep4Desc": "Weekend pricing applies to Friday & Saturday nights across all seasons",
-
   "rooms.form.liveRatePreview": "Live Rate Preview",
   "rooms.form.noPrice": "no price",
   "rooms.form.dailyOverrideHint": "Click a date to set a daily price override. Right-click an override to remove it.",
@@ -423,7 +400,6 @@
   "rooms.form.closed": "Closed",
   "rooms.form.weekendPlus": "Weekend +",
   "rooms.form.override": "Override",
-
   "rooms.form.roomImages": "Room Images",
   "rooms.form.uploadRoomImages": "Upload room images",
   "rooms.form.addMoreImages": "Add more images",
@@ -431,7 +407,6 @@
   "rooms.form.maxImagesAllowed": "Maximum {max} images allowed",
   "rooms.form.onlyImageFiles": "Only image files are allowed (JPG, PNG, WebP)",
   "rooms.form.imageSizeLimit": "Each image must be under {maxSize}MB",
-
   "rooms.form.features": "Features",
   "rooms.form.featuresRoomCardTags": "Room card tags",
   "rooms.form.featuresModalHighlights": "Modal highlights",
@@ -440,15 +415,12 @@
   "rooms.form.featuresPreviewEmpty": "Select features below to preview card tags...",
   "rooms.form.featuresMore": "+{count} more",
   "rooms.form.featuresCount": "{count} features selected - First 5 shown on card",
-
   "rooms.form.amenities": "Amenities",
   "rooms.form.amenitiesModalFullList": "Modal full list",
   "rooms.form.amenitiesHint": "What's included - guests see these after clicking \"View Details\". Group by category for easy scanning.",
-
   "rooms.form.featureCategoryViewsLocation": "VIEWS & LOCATION",
   "rooms.form.featureCategoryOutdoorRecreation": "OUTDOOR & RECREATION",
   "rooms.form.featureCategorySpaceType": "SPACE & TYPE",
-
   "rooms.form.amenityCategoryInternetTech": "Internet & Tech",
   "rooms.form.amenityCategoryKitchen": "Kitchen",
   "rooms.form.amenityCategoryBathroom": "Bathroom",
@@ -457,14 +429,12 @@
   "rooms.form.amenityCategoryLaundry": "Laundry",
   "rooms.form.amenityCategorySafetyAccess": "Safety & Access",
   "rooms.form.amenityCategoryServices": "Services",
-
   "rooms.form.monthlyPricing": "Monthly Pricing",
   "rooms.form.monthlyPricingOverrides": "{count} override(s)",
   "rooms.form.monthlyPricingHint": "Set seasonal rates per month. Empty fields use the default rate above.",
   "rooms.form.monthColumn": "Month",
   "rooms.form.baseRateColumn": "Base Rate",
   "rooms.form.nonRefundableColumn": "Non-Refundable",
-
   "channels.title": "Channel Manager",
   "channels.enableDescription": "Connect your property to Booking.com, Airbnb, Expedia, and other OTAs. Availability, rates, and bookings will sync automatically.",
   "channels.enableButton": "Enable Channel Manager",
@@ -497,7 +467,6 @@
   "channels.disabled": "Channel manager disabled",
   "channels.failedToDisable": "Failed to disable",
   "channels.disableConfirm": "Disable the channel manager? This will stop all OTA syncing.",
-
   "settings.title": "Settings",
   "settings.currency": "Currency",
   "settings.currencyDescription": "Choose the display currency for prices across your dashboard.",
@@ -512,7 +481,6 @@
   "settings.checkOutExample": "e.g. 07:00 - 11:00",
   "settings.timesSaved": "Check-in/out times saved",
   "settings.failedToSaveTimes": "Failed to save times",
-
   "inbox.title": "Inbox",
   "inbox.searchPlaceholder": "Search conversations...",
   "inbox.statusAll": "All",
@@ -531,10 +499,14 @@
   "inbox.channelBookingCom": "Booking.com",
   "inbox.channelChannex": "Channex",
   "inbox.channelEmail": "Email",
-
   "setup.redirecting": "Redirecting to setup...",
-
   "pagination.showing": "Showing {from}-{to} of {total}",
   "pagination.previous": "Previous",
-  "pagination.next": "Next"
+  "pagination.next": "Next",
+  "auth.chooseProperty.welcome": "Welcome",
+  "auth.chooseProperty.welcomeBack": "Welcome back",
+  "auth.chooseProperty.subtitle": "Which property would you like to manage?",
+  "auth.chooseProperty.addProperty": "Add a new property",
+  "auth.chooseProperty.loadError": "Failed to load properties",
+  "auth.chooseProperty.retry": "Retry"
 }

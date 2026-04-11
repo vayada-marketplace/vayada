@@ -522,5 +522,11 @@
   "setup.redirecting": "Redirigiendo a la configuracion...",
   "pagination.showing": "Mostrando {from}-{to} de {total}",
   "pagination.previous": "Anterior",
-  "pagination.next": "Siguiente"
+  "pagination.next": "Siguiente",
+  "auth.chooseProperty.welcome": "Bienvenido",
+  "auth.chooseProperty.welcomeBack": "Bienvenido de nuevo",
+  "auth.chooseProperty.subtitle": "¿Qué propiedad te gustaría gestionar?",
+  "auth.chooseProperty.addProperty": "Añadir una nueva propiedad",
+  "auth.chooseProperty.loadError": "Error al cargar las propiedades",
+  "auth.chooseProperty.retry": "Reintentar"
 }

@@ -522,5 +522,11 @@
   "setup.redirecting": "Weiterleitung zur Einrichtung...",
   "pagination.showing": "Zeige {from}-{to} von {total}",
   "pagination.previous": "Zurueck",
-  "pagination.next": "Weiter"
+  "pagination.next": "Weiter",
+  "auth.chooseProperty.welcome": "Willkommen",
+  "auth.chooseProperty.welcomeBack": "Willkommen zurück",
+  "auth.chooseProperty.subtitle": "Welche Unterkunft möchtest du verwalten?",
+  "auth.chooseProperty.addProperty": "Neue Unterkunft hinzufügen",
+  "auth.chooseProperty.loadError": "Unterkünfte konnten nicht geladen werden",
+  "auth.chooseProperty.retry": "Erneut versuchen"
 }

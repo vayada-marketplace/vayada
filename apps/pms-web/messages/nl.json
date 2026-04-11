@@ -522,5 +522,11 @@
   "setup.redirecting": "Doorsturen naar instellingen...",
   "pagination.showing": "Weergave {from}-{to} van {total}",
   "pagination.previous": "Vorige",
-  "pagination.next": "Volgende"
+  "pagination.next": "Volgende",
+  "auth.chooseProperty.welcome": "Welkom",
+  "auth.chooseProperty.welcomeBack": "Welkom terug",
+  "auth.chooseProperty.subtitle": "Welk object wilt u beheren?",
+  "auth.chooseProperty.addProperty": "Nieuw object toevoegen",
+  "auth.chooseProperty.loadError": "Kon objecten niet laden",
+  "auth.chooseProperty.retry": "Opnieuw proberen"
 }
