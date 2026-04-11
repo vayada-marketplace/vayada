@@ -115,6 +115,21 @@ function ContactPopover({ open, onClose, phone, whatsapp, email }: { open: boole
 // --- Refer a Guest Modal (3 steps) ---
 const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
 
+function formatApiError(err: any, fallback: string): string {
+  const detail = err?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d: any) => {
+        const field = Array.isArray(d?.loc) ? d.loc[d.loc.length - 1] : ''
+        const msg = d?.msg || 'Invalid value'
+        return field ? `${field}: ${msg}` : msg
+      })
+      .join(', ')
+  }
+  return fallback
+}
+
 function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () => void; hotelSlug: string }) {
   const t = useTranslations('refer')
   const tc = useTranslations('common')
@@ -123,18 +138,44 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
   const [email, setEmail] = useState('')
   const [social, setSocial] = useState('')
   const [userType, setUserType] = useState<'guest' | 'creator'>('guest')
+  const [paymentMethod, setPaymentMethod] = useState<'stripe' | 'paypal' | 'bank'>('stripe')
+  const [paypalEmail, setPaypalEmail] = useState('')
+  const [bankIban, setBankIban] = useState('')
+  const [bankAccountHolder, setBankAccountHolder] = useState('')
+  const [bankSwiftBic, setBankSwiftBic] = useState('')
+  const [bankName, setBankName] = useState('')
+  const [bankCountry, setBankCountry] = useState('')
   const [copied, setCopied] = useState(false)
   const [referralCode, setReferralCode] = useState('')
   const [affiliateId, setAffiliateId] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [stripeLoading, setStripeLoading] = useState(false)
   const [stripeConnected, setStripeConnected] = useState(false)
   const [apiError, setApiError] = useState('')
 
   const referralDomain = `${hotelSlug}.booking.vayada.com`
 
-  const handleSubmitInfo = async () => {
+  const handleContinueInfo = () => {
     if (!fullName || !email) return
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setApiError('Please enter a valid email address')
+      return
+    }
+    setApiError('')
+    setStep(2)
+  }
+
+  const handleSubmitPayout = async () => {
+    if (paymentMethod === 'paypal' && !paypalEmail) {
+      setApiError('Please enter your PayPal email')
+      return
+    }
+    if (paymentMethod === 'bank') {
+      if (!bankAccountHolder) { setApiError('Please enter the account holder name'); return }
+      if (!bankIban) { setApiError('Please enter your IBAN or account number'); return }
+      if (!bankSwiftBic) { setApiError('Please enter the SWIFT/BIC code'); return }
+      if (!bankName) { setApiError('Please enter the bank name'); return }
+      if (!bankCountry) { setApiError('Please enter the bank country'); return }
+    }
     setSubmitting(true)
     setApiError('')
     try {
@@ -146,46 +187,43 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
           email,
           socialMedia: social,
           userType,
-          paymentMethod: 'stripe',
-          paypalEmail: '',
-          bankIban: '',
+          paymentMethod,
+          paypalEmail: paymentMethod === 'paypal' ? paypalEmail : '',
+          bankIban: paymentMethod === 'bank' ? bankIban : '',
+          bankAccountHolder: paymentMethod === 'bank' ? bankAccountHolder : '',
+          bankSwiftBic: paymentMethod === 'bank' ? bankSwiftBic : '',
+          bankName: paymentMethod === 'bank' ? bankName : '',
+          bankCountry: paymentMethod === 'bank' ? bankCountry : '',
         }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Registration failed' }))
-        throw new Error(err.detail || 'Registration failed')
+        throw new Error(formatApiError(err, 'Registration failed'))
       }
       const data = await res.json()
       setReferralCode(data.referralCode)
       setAffiliateId(data.id)
-      setStep(2)
+
+      if (paymentMethod === 'stripe') {
+        try {
+          const stripeRes = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates/${data.id}/stripe/connect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          })
+          if (stripeRes.ok) {
+            const stripeData = await stripeRes.json()
+            setStripeConnected(true)
+            window.open(stripeData.onboardingUrl, '_blank')
+          }
+        } catch {}
+      }
+
+      setStep(3)
     } catch (err: any) {
       setApiError(err.message || 'Failed to register')
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  const handleStripeConnect = async () => {
-    setStripeLoading(true)
-    setApiError('')
-    try {
-      const res = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates/${affiliateId}/stripe/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Failed to connect Stripe' }))
-        throw new Error(err.detail || 'Failed to connect Stripe')
-      }
-      const data = await res.json()
-      setStripeConnected(true)
-      window.open(data.onboardingUrl, '_blank')
-    } catch (err: any) {
-      setApiError(err.message || 'Failed to connect Stripe')
-    } finally {
-      setStripeLoading(false)
     }
   }
 
@@ -201,6 +239,13 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
     setEmail('')
     setSocial('')
     setUserType('guest')
+    setPaymentMethod('stripe')
+    setPaypalEmail('')
+    setBankIban('')
+    setBankAccountHolder('')
+    setBankSwiftBic('')
+    setBankName('')
+    setBankCountry('')
     setCopied(false)
     setReferralCode('')
     setAffiliateId('')
@@ -346,11 +391,11 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
               )}
 
               <button
-                onClick={handleSubmitInfo}
-                disabled={submitting || !fullName || !email}
+                onClick={handleContinueInfo}
+                disabled={!fullName || !email}
                 className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors mt-2 disabled:opacity-50"
               >
-                {submitting ? '...' : tc('continue')}
+                {tc('continue')}
               </button>
             </div>
           )}
@@ -362,36 +407,135 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
                 <p className="text-sm font-semibold text-gray-900 mb-1">{t('paymentMethod')}</p>
                 <p className="text-xs text-gray-500 mb-3">{t('step2Desc')}</p>
 
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => { setPaymentMethod('stripe'); setApiError('') }}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-xs font-semibold transition-colors ${
+                      paymentMethod === 'stripe'
+                        ? 'border-primary-500 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z" />
+                    </svg>
+                    Stripe
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPaymentMethod('paypal'); setApiError('') }}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-xs font-semibold transition-colors ${
+                      paymentMethod === 'paypal'
+                        ? 'border-primary-500 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944.901C5.026.382 5.474 0 5.998 0h7.46c2.57 0 4.578.543 5.69 1.81 1.01 1.15 1.304 2.42 1.012 4.287-.023.143-.047.288-.077.437-.983 5.05-4.349 6.797-8.647 6.797h-2.19c-.524 0-.968.382-1.05.9l-1.12 7.106zm14.146-14.42a3.35 3.35 0 0 0-.607-.541c-.013.076-.026.175-.041.254-.59 3.025-2.566 5.517-6.86 5.517h-1.91l-.903 5.733h4.726c.459 0 .85-.334.922-.788.038-.236.785-4.982.857-5.442.072-.459.458-.788.917-.788h.577c3.735 0 6.662-1.519 7.518-5.918.357-1.839.174-3.37-.774-4.45z" />
+                    </svg>
+                    {t('paypal')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPaymentMethod('bank'); setApiError('') }}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-xs font-semibold transition-colors ${
+                      paymentMethod === 'bank'
+                        ? 'border-primary-500 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3" />
+                    </svg>
+                    {t('bankTransfer')}
+                  </button>
+                </div>
+
                 {apiError && (
                   <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 mb-3">
                     {apiError}
                   </div>
                 )}
 
-                {stripeConnected ? (
-                  <div className="flex items-center gap-2 text-sm text-green-700 font-medium">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                {paymentMethod === 'stripe' && (
+                  <div className="flex items-center gap-2 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg p-3">
+                    <svg className="w-4 h-4 text-[#635bff] flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z" />
                     </svg>
-                    {t('stripeOnboardingOpened')}
+                    <span>Stripe onboarding will open in a new tab after you continue.</span>
                   </div>
-                ) : (
-                  <button
-                    onClick={handleStripeConnect}
-                    disabled={stripeLoading}
-                    className="w-full flex items-center justify-center gap-2 py-3 bg-[#635bff] text-white font-semibold rounded-xl hover:bg-[#5851db] transition-colors disabled:opacity-50"
-                  >
-                    {stripeLoading ? (
-                      '...'
-                    ) : (
-                      <>
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z" />
-                        </svg>
-                        {t('connectWithStripe')}
-                      </>
-                    )}
-                  </button>
+                )}
+
+                {paymentMethod === 'paypal' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('paypalEmail')}</label>
+                    <input
+                      type="email"
+                      value={paypalEmail}
+                      onChange={(e) => setPaypalEmail(e.target.value)}
+                      placeholder="you@paypal.com"
+                      className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                )}
+
+                {paymentMethod === 'bank' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('accountHolder')}</label>
+                      <input
+                        type="text"
+                        value={bankAccountHolder}
+                        onChange={(e) => setBankAccountHolder(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('iban')}</label>
+                      <input
+                        type="text"
+                        value={bankIban}
+                        onChange={(e) => setBankIban(e.target.value.toUpperCase())}
+                        placeholder="DE89 3704 0044 0532 0130 00"
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('swiftBic')}</label>
+                        <input
+                          type="text"
+                          value={bankSwiftBic}
+                          onChange={(e) => setBankSwiftBic(e.target.value.toUpperCase())}
+                          placeholder="DEUTDEFF"
+                          className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('bankCountry')}</label>
+                        <input
+                          type="text"
+                          value={bankCountry}
+                          onChange={(e) => setBankCountry(e.target.value.toUpperCase().slice(0, 2))}
+                          placeholder="DE"
+                          maxLength={2}
+                          className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('bankName')}</label>
+                      <input
+                        type="text"
+                        value={bankName}
+                        onChange={(e) => setBankName(e.target.value)}
+                        placeholder="Deutsche Bank"
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -400,10 +544,11 @@ function ReferModal({ open, onClose, hotelSlug }: { open: boolean; onClose: () =
               <p className="text-sm text-gray-500 text-center" dangerouslySetInnerHTML={{ __html: (t.raw('pendingReview') as string).replace('{email}', email || 'your email') }} />
 
               <button
-                onClick={() => setStep(3)}
-                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors"
+                onClick={handleSubmitPayout}
+                disabled={submitting}
+                className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50"
               >
-                {tc('continue')}
+                {submitting ? '...' : tc('continue')}
               </button>
             </div>
           )}
