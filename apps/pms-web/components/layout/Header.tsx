@@ -143,12 +143,15 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                   )
                 })}
               </div>
-              {/* Add Property */}
+              {/* Add Property — ?mode=add tells the booking-admin setup
+                  page to skip the "setup_complete → /dashboard" guard,
+                  which would otherwise instantly redirect a user who
+                  already has one hotel back to the dashboard. */}
               <div className="border-t border-gray-100 mt-1 pt-1 px-1.5">
                 <button
                   onClick={() => {
                     setPropertyOpen(false)
-                    window.location.href = buildHandoffUrl(BOOKING_ADMIN_URL, '/setup')
+                    window.location.href = buildHandoffUrl(BOOKING_ADMIN_URL, '/setup?mode=add')
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
                 >
