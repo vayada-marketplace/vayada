@@ -100,21 +100,16 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
       </button>
       {/* Left: property switcher + date */}
       <div className="flex items-center gap-4 shrink-0">
-        {/* Property Selector */}
+        {/* Property Selector — always shown so single-hotel users can
+            still reach the "Add Property" action that lives inside it. */}
         <div className="relative" ref={propertyRef}>
-          {hotels.length <= 1 ? (
-            <span className="text-[13px] font-medium text-gray-700">
-              {selectedHotel?.name || t('layout.header.noProperties')}
-            </span>
-          ) : (
-            <button
-              onClick={() => setPropertyOpen(!propertyOpen)}
-              className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
-            >
-              <span className="font-medium">{selectedHotel?.name || t('layout.header.noProperties')}</span>
-              <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${propertyOpen ? 'rotate-180' : ''}`} />
-            </button>
-          )}
+          <button
+            onClick={() => setPropertyOpen(!propertyOpen)}
+            className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+          >
+            <span className="font-medium">{selectedHotel?.name || t('layout.header.noProperties')}</span>
+            <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${propertyOpen ? 'rotate-180' : ''}`} />
+          </button>
 
           {propertyOpen && (
             <div className="absolute top-full left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-lg py-1.5 z-50">
