@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 
-from app.database import Database
+from app.database import AuthDatabase, Database
 from app.repositories.affiliate_repo import AffiliateRepository
 from app.utils import get_hotel_id_by_slug
 from app.models.affiliate import AffiliateRegister, AffiliateResponse
@@ -59,11 +59,21 @@ async def check_affiliate_email(slug: str, email: str):
 async def register_affiliate(slug: str, data: AffiliateRegister):
     # Resolve hotel — we need name + contact_email for the notification emails
     hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
+        "SELECT id, name, contact_email, user_id FROM hotels WHERE slug = $1", slug
     )
     if not hotel:
         raise HTTPException(status_code=404, detail="Hotel not found")
     hotel_id = str(hotel["id"])
+
+    # Fall back to the owning user's email if contact_email isn't set —
+    # otherwise the hotel admin gets no heads-up about new applications.
+    notify_email = hotel["contact_email"]
+    if not notify_email and hotel["user_id"]:
+        owner = await AuthDatabase.fetchrow(
+            "SELECT email FROM users WHERE id = $1", hotel["user_id"]
+        )
+        if owner:
+            notify_email = owner["email"]
 
     # Check if email already registered for this hotel
     existing = await Database.fetchrow(
@@ -92,10 +102,10 @@ async def register_affiliate(slug: str, data: AffiliateRegister):
             hotel_name=hotel["name"],
         )
     )
-    if hotel["contact_email"]:
+    if notify_email:
         asyncio.create_task(
             send_hotel_new_affiliate_application(
-                hotel_email=hotel["contact_email"],
+                hotel_email=notify_email,
                 hotel_name=hotel["name"],
                 affiliate_name=data.full_name,
                 affiliate_email=data.email,
