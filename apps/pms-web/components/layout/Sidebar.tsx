@@ -17,11 +17,13 @@ function buildHandoffUrl(baseUrl: string): string {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
   const expiresAt = typeof window !== 'undefined' ? localStorage.getItem('token_expires_at') : null
   const user = typeof window !== 'undefined' ? localStorage.getItem('user') : null
+  const hotelId = typeof window !== 'undefined' ? localStorage.getItem('selectedHotelId') : null
   if (!token || !expiresAt) return baseUrl
   const params = new URLSearchParams({
     token,
     expires_at: expiresAt,
     ...(user ? { user: encodeURIComponent(user) } : {}),
+    ...(hotelId ? { hotel_id: hotelId } : {}),
   })
   return `${baseUrl}/handoff#${params.toString()}`
 }
