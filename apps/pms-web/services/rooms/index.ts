@@ -13,6 +13,8 @@ export interface RoomType {
   description: string
   shortDescription: string
   maxOccupancy: number
+  bedrooms: number
+  bathrooms: number
   size: number
   baseRate: number
   nonRefundableRate: number | null
@@ -44,6 +46,8 @@ export interface RoomTypeCreate {
   description?: string
   shortDescription?: string
   maxOccupancy?: number
+  bedrooms?: number
+  bathrooms?: number
   size?: number
   baseRate?: number
   nonRefundableRate?: number | null

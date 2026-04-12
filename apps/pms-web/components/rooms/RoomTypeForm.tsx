@@ -171,8 +171,8 @@ export default function RoomTypeForm({
   const [editingDayValue, setEditingDayValue] = useState('')
   const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState(form.category || '')
-  const [bedrooms, setBedrooms] = useState(1)
-  const [bathrooms, setBathrooms] = useState(1)
+  const [bedrooms, setBedrooms] = useState(form.bedrooms ?? 1)
+  const [bathrooms, setBathrooms] = useState(form.bathrooms ?? 1)
 
   // Sync beds -> form.bedType
   useEffect(() => {
@@ -182,6 +182,14 @@ export default function RoomTypeForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beds])
+
+  // Sync bedrooms/bathrooms -> form
+  useEffect(() => {
+    if (bedrooms !== form.bedrooms || bathrooms !== form.bathrooms) {
+      onChange({ ...form, bedrooms, bathrooms })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bedrooms, bathrooms])
 
   // Sync pricing fields -> form
   useEffect(() => {
