@@ -36,6 +36,7 @@ export interface RoomType {
   flexibleRateEnabled: boolean
   nonRefundableEnabled: boolean
   nonRefundableDiscount: number
+  minimumAdvanceDays: number
   createdAt: string
   updatedAt: string
 }
@@ -69,6 +70,7 @@ export interface RoomTypeCreate {
   flexibleRateEnabled?: boolean
   nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
+  minimumAdvanceDays?: number
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>
