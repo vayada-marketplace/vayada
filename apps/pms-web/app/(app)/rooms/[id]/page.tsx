@@ -31,6 +31,8 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           description: r.description,
           shortDescription: r.shortDescription,
           maxOccupancy: r.maxOccupancy,
+          bedrooms: r.bedrooms ?? 1,
+          bathrooms: r.bathrooms ?? 1,
           size: r.size,
           baseRate: r.baseRate,
           nonRefundableRate: r.nonRefundableRate,
