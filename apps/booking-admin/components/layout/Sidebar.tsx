@@ -8,10 +8,9 @@ import {
   ChevronDownIcon,
   CheckIcon,
   Cog6ToothIcon,
-  BuildingOffice2Icon,
+
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
-import { authService } from '@/services/auth'
 import { useTranslation } from '@/lib/i18n'
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || 'https://pms.vayada.com'
@@ -39,18 +38,6 @@ const baseNavItems = [
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: Cog6ToothIcon },
 ]
 
-const superAdminNavItems = [
-  {
-    labelKey: 'layout.sidebar.manageHotels',
-    href: '/manage-hotels',
-    icon: BuildingOffice2Icon,
-  },
-  {
-    labelKey: 'layout.sidebar.affiliatePayouts',
-    href: '/affiliate-payouts',
-    icon: AffiliatesIcon,
-  },
-]
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
@@ -58,8 +45,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [showSwitcher, setShowSwitcher] = useState(false)
   const switcherRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
-  const isSuperAdmin = authService.isSuperAdmin()
-  const navItems = isSuperAdmin ? [...superAdminNavItems, ...baseNavItems] : baseNavItems
+  const navItems = baseNavItems
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
