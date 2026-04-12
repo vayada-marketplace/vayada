@@ -12,6 +12,7 @@ const navItems = [
   { label: 'Marketplace', href: '/dashboard/marketplace', icon: MarketplaceIcon },
   { label: 'Collaborations', href: '/dashboard/collaborations', icon: CollaborationsIcon },
   { label: 'Invite Codes', href: '/dashboard/invite-codes', icon: InviteCodesIcon },
+  { label: 'Affiliate Payouts', href: '/dashboard/affiliate-payouts', icon: AffiliatePayoutsIcon },
 ]
 
 export default function Sidebar() {
@@ -161,6 +162,14 @@ function DashboardIcon({ className }: { className?: string }) {
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  )
+}
+
+function AffiliatePayoutsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
     </svg>
   )
 }
