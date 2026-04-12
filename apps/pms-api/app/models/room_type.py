@@ -112,6 +112,8 @@ class RoomTypeCreate(BaseModel):
     description: str = ""
     short_description: str = ""
     max_occupancy: int = 2
+    bedrooms: int = 1
+    bathrooms: int = 1
     size: int = 0
     base_rate: float = 0
     non_refundable_rate: Optional[float] = None
@@ -164,6 +166,8 @@ class RoomTypeUpdate(BaseModel):
     description: Optional[str] = None
     short_description: Optional[str] = None
     max_occupancy: Optional[int] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[int] = None
     size: Optional[int] = None
     base_rate: Optional[float] = None
     non_refundable_rate: Optional[float] = None
@@ -222,6 +226,8 @@ class RoomTypeResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
+    bedrooms: int = 1
+    bathrooms: int = 1
     size: int
     base_rate: float
     non_refundable_rate: Optional[float] = None
@@ -247,6 +253,8 @@ class RoomTypeAdminResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
+    bedrooms: int = 1
+    bathrooms: int = 1
     size: int
     base_rate: float
     non_refundable_rate: Optional[float] = None

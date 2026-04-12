@@ -131,6 +131,8 @@ async def get_rooms_for_guest(
                 description=room["description"],
                 short_description=room["short_description"],
                 max_occupancy=room["max_occupancy"],
+                bedrooms=room.get("bedrooms", 1),
+                bathrooms=room.get("bathrooms", 1),
                 size=room["size"],
                 base_rate=base_rate,
                 non_refundable_rate=nr_rate,

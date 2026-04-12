@@ -51,6 +51,8 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         description=room["description"],
         short_description=room["short_description"],
         max_occupancy=room["max_occupancy"],
+        bedrooms=room.get("bedrooms", 1),
+        bathrooms=room.get("bathrooms", 1),
         size=room["size"],
         base_rate=float(room["base_rate"]),
         non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
