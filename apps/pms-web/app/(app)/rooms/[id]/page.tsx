@@ -54,6 +54,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           flexibleRateEnabled: r.flexibleRateEnabled ?? true,
           nonRefundableEnabled: r.nonRefundableEnabled ?? false,
           nonRefundableDiscount: r.nonRefundableDiscount ?? 10,
+          minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
         })
       })
       .catch(console.error)
