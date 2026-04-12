@@ -43,15 +43,21 @@ async def get_unavailable_dates(
     if not rooms:
         return {"dates": []}
 
+    today = date.today()
     unavailable = []
     current = start
     while current < end:
         next_day = current + timedelta(days=1)
         all_full = True
+        days_until = (current - today).days
         for room in rooms:
             total = room["total_rooms"]
             if not RoomTypeRepository.is_date_in_operating_periods(room, current):
                 continue  # not operating = skip, don't count as available
+            # Check minimum advance days requirement
+            min_advance = room.get("minimum_advance_days") or 0
+            if min_advance > 0 and days_until < min_advance:
+                continue  # too soon for this room type, skip
             booked = await RoomTypeRepository.count_booked(str(room["id"]), current, next_day)
             blocked = await RoomTypeRepository.count_blocked(str(room["id"]), current, next_day)
             remaining = total - booked - blocked

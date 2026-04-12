@@ -63,6 +63,13 @@ async def get_rooms_for_guest(
     result = []
 
     for room in rooms:
+        # Skip rooms that require more advance notice than available
+        min_advance = room.get("minimum_advance_days") or 0
+        if check_in and min_advance > 0:
+            days_until = (check_in - date.today()).days
+            if days_until < min_advance:
+                continue
+
         total = room["total_rooms"]
         if check_in and check_out:
             # Check if the stay falls within operating periods

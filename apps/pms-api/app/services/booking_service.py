@@ -174,6 +174,15 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
+    # Check minimum advance booking days
+    min_advance = room.get("minimum_advance_days") or 0
+    if min_advance > 0:
+        days_until_checkin = (data.check_in - date.today()).days
+        if days_until_checkin < min_advance:
+            raise ValueError(
+                f"This room requires booking at least {min_advance} days in advance"
+            )
+
     # Resolve rate per night across the full stay
     if data.rate_type == "nonrefundable" and data.payment_method == "pay_at_property":
         raise ValueError("Non-refundable rate requires card payment")

@@ -136,6 +136,7 @@ class RoomTypeCreate(BaseModel):
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
     last_minute_discount: Optional[dict] = None
+    minimum_advance_days: int = 0
 
     @field_validator("size")
     @classmethod
@@ -190,6 +191,7 @@ class RoomTypeUpdate(BaseModel):
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
     last_minute_discount: Optional[dict] = None
+    minimum_advance_days: Optional[int] = None
 
     @field_validator("size")
     @classmethod
@@ -277,5 +279,6 @@ class RoomTypeAdminResponse(BaseModel):
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
     last_minute_discount: Optional[dict] = None
+    minimum_advance_days: int = 0
     created_at: str
     updated_at: str
