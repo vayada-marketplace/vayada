@@ -177,24 +177,20 @@ export default function RoomTypeForm({
   // Sync beds -> form.bedType
   useEffect(() => {
     const summary = bedsToSummary(beds)
-    if (summary !== form.bedType) {
-      onChange({ ...form, bedType: summary })
-    }
+    onChange((prev: any) => prev.bedType === summary ? prev : { ...prev, bedType: summary })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beds])
 
   // Sync bedrooms/bathrooms -> form
   useEffect(() => {
-    if (bedrooms !== form.bedrooms || bathrooms !== form.bathrooms) {
-      onChange({ ...form, bedrooms, bathrooms })
-    }
+    onChange((prev: any) => prev.bedrooms === bedrooms && prev.bathrooms === bathrooms ? prev : { ...prev, bedrooms, bathrooms })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bedrooms, bathrooms])
 
   // Sync pricing fields -> form
   useEffect(() => {
-    onChange({
-      ...form,
+    onChange((prev: any) => ({
+      ...prev,
       operatingPeriods,
       seasons,
       weekendSurcharge,
@@ -203,7 +199,7 @@ export default function RoomTypeForm({
       nonRefundableEnabled,
       nonRefundableDiscount,
       dailyRates,
-    })
+    }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, dailyRates])
 
