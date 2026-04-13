@@ -419,40 +419,54 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         if hotel_settings and hotel_settings.get("stripe_connect_account_id"):
             if hotel_settings.get("stripe_connect_onboarded"):
                 stripe_account = hotel_settings["stripe_connect_account_id"]
-        if not stripe_account:
-            # Fall back to pay_at_property if the hotel supports it
-            if hotel_settings and hotel_settings.get("pay_at_property_enabled"):
-                payment_method = "pay_at_property"
-                await Database.execute(
-                    "UPDATE bookings SET payment_method = 'pay_at_property', payment_status = 'pay_at_property' WHERE id = $1",
-                    booking_id,
+
+        if stripe_account:
+            # Create Stripe PaymentIntent (manual capture = authorization hold)
+            amount_cents = int(math.ceil(total_amount * 100))
+            try:
+                pi = await stripe_service.create_payment_intent(
+                    amount=amount_cents,
+                    currency=room["currency"],
+                    metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+                    stripe_account=stripe_account,
                 )
-            else:
-                raise ValueError("This hotel has not set up online payments yet. Please contact the hotel.")
+            except Exception:
+                # Clean up the booking if Stripe fails
+                await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+                raise
+            client_secret = pi["client_secret"]
 
-        # Create Stripe PaymentIntent (manual capture = authorization hold)
-        amount_cents = int(math.ceil(total_amount * 100))
-        try:
-            pi = await stripe_service.create_payment_intent(
-                amount=amount_cents,
+            # Create payment record
+            await PaymentRepository.create(
+                booking_id=booking_id,
+                amount=total_amount,
                 currency=room["currency"],
-                metadata={"booking_id": booking_id, "hotel_id": hotel_id},
-                stripe_account=stripe_account,
+                payment_method="card",
+                stripe_pi_id=pi["id"],
             )
-        except Exception:
-            # Clean up the booking if Stripe fails
-            await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
-            raise
-        client_secret = pi["client_secret"]
-
-        # Create payment record
-        await PaymentRepository.create(
-            booking_id=booking_id,
-            amount=total_amount,
-            currency=room["currency"],
-            payment_method="card",
-            stripe_pi_id=pi["id"],
-        )
+        elif hotel_settings and hotel_settings.get("pay_at_property_enabled"):
+            # Fall back to pay_at_property if the hotel supports it. We must
+            # mirror the pay_at_property branch below — create the payment
+            # row with the right method and fire the host notification —
+            # otherwise the booking lands in the DB but the hotel never
+            # learns about it.
+            payment_method = "pay_at_property"
+            await Database.execute(
+                "UPDATE bookings SET payment_method = 'pay_at_property', payment_status = 'pay_at_property' WHERE id = $1",
+                booking_id,
+            )
+            await PaymentRepository.create(
+                booking_id=booking_id,
+                amount=total_amount,
+                currency=room["currency"],
+                payment_method="pay_at_property",
+            )
+            booking = await BookingRepository.get_by_id(booking_id)
+            asyncio.create_task(
+                send_booking_request_notification(hotel["contact_email"], booking)
+            )
+        else:
+            raise ValueError("This hotel has not set up online payments yet. Please contact the hotel.")
 
     elif payment_method == "xendit":
         # Create Xendit Invoice — supports QRIS, e-wallets, VA, cards
