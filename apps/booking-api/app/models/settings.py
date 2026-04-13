@@ -21,6 +21,10 @@ class PropertySettingsResponse(BaseModel):
     supported_languages: list[str]
     check_in_time: str
     check_out_time: str
+    check_in_from: str = ''
+    check_in_until: str = ''
+    check_out_from: str = ''
+    check_out_until: str = ''
     custom_domain: str | None
     pay_at_property_enabled: bool
     pay_at_hotel_methods: list[str]
@@ -64,6 +68,10 @@ class PropertySettingsUpdate(BaseModel):
     supported_languages: Optional[list[str]] = None
     check_in_time: Optional[str] = None
     check_out_time: Optional[str] = None
+    check_in_from: Optional[str] = None
+    check_in_until: Optional[str] = None
+    check_out_from: Optional[str] = None
+    check_out_until: Optional[str] = None
     custom_domain: Optional[str] = None
     pay_at_property_enabled: Optional[bool] = None
     pay_at_hotel_methods: Optional[list[str]] = None
