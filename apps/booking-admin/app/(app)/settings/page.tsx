@@ -311,7 +311,7 @@ export default function SettingsPage() {
           pmsClient.patch('/admin/hotel', {
             slug: data.slug,
             name: data.property_name,
-            contactEmail: data.reservation_email,
+            contact_email: data.reservation_email,
           }),
           pmsClient.patch('/admin/payment-settings', {
             payAtPropertyEnabled: data.pay_at_property_enabled,
