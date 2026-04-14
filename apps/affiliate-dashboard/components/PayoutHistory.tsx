@@ -1,21 +1,52 @@
-import { CheckCircleIcon, ClockIcon } from '@heroicons/react/24/solid'
+'use client'
+
+import { useEffect, useState } from 'react'
+import { CheckCircleIcon } from '@heroicons/react/24/solid'
+import { apiClient } from '@/services/api/client'
 
 interface Payout {
   id: string
   date: string
   amount: number
-  status: 'paid' | 'pending'
+  currency: string
   method: string
+  reference: string | null
+  bookingCount: number
+  status: string
 }
 
-const payouts: Payout[] = [
-  { id: '1', date: 'Mar 1, 2026', amount: 520, status: 'paid', method: 'Bank Transfer' },
-  { id: '2', date: 'Feb 1, 2026', amount: 380, status: 'paid', method: 'Bank Transfer' },
-  { id: '3', date: 'Jan 1, 2026', amount: 260, status: 'paid', method: 'PayPal' },
-  { id: '4', date: 'Apr 1, 2026', amount: 1260, status: 'pending', method: 'Bank Transfer' },
-]
+const METHOD_LABELS: Record<string, string> = {
+  bank: 'Bank Transfer',
+  paypal: 'PayPal',
+  stripe: 'Stripe',
+  xendit: 'Xendit',
+  manual: 'Manual',
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function formatAmount(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
+  } catch {
+    return `${currency} ${amount.toLocaleString()}`
+  }
+}
 
 export default function PayoutHistory() {
+  const [payouts, setPayouts] = useState<Payout[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    apiClient
+      .get<{ payouts: Payout[] }>('/affiliate/payouts')
+      .then((res) => setPayouts(res.payouts))
+      .catch(() => setError(true))
+  }, [])
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -25,35 +56,43 @@ export default function PayoutHistory() {
         </a>
       </div>
 
-      <div className="space-y-3">
-        {payouts.map((payout) => (
-          <div
-            key={payout.id}
-            className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0"
-          >
-            <div className="flex items-center gap-3">
-              {payout.status === 'paid' ? (
-                <CheckCircleIcon className="w-5 h-5 text-success-500" />
-              ) : (
-                <ClockIcon className="w-5 h-5 text-warning-500" />
-              )}
-              <div>
-                <p className="text-sm font-medium text-gray-900">${payout.amount.toLocaleString()}</p>
-                <p className="text-xs text-muted">{payout.date} &middot; {payout.method}</p>
-              </div>
-            </div>
-            <span
-              className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                payout.status === 'paid'
-                  ? 'bg-success-50 text-success-700'
-                  : 'bg-warning-50 text-warning-700'
-              }`}
+      {payouts === null && !error && (
+        <p className="text-sm text-muted py-4">Loading payouts…</p>
+      )}
+
+      {error && (
+        <p className="text-sm text-muted py-4">Couldn&apos;t load payouts.</p>
+      )}
+
+      {payouts && payouts.length === 0 && (
+        <p className="text-sm text-muted py-4">No payouts yet.</p>
+      )}
+
+      {payouts && payouts.length > 0 && (
+        <div className="space-y-3">
+          {payouts.map((payout) => (
+            <div
+              key={payout.id}
+              className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0"
             >
-              {payout.status === 'paid' ? 'Paid' : 'Pending'}
-            </span>
-          </div>
-        ))}
-      </div>
+              <div className="flex items-center gap-3">
+                <CheckCircleIcon className="w-5 h-5 text-success-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {formatAmount(payout.amount, payout.currency)}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {formatDate(payout.date)} &middot; {METHOD_LABELS[payout.method] || payout.method}
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-success-50 text-success-700">
+                Paid
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
