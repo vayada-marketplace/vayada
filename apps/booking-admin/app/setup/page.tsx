@@ -368,6 +368,7 @@ export default function SetupPage() {
               operatingPeriods: r.operatingPeriods,
               seasons: r.seasons,
               weekendSurcharge: r.weekendSurcharge,
+              minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
               cancellationPolicy: r.cancellationPolicy,
               flexibleRateEnabled: r.flexibleRateEnabled,
             })

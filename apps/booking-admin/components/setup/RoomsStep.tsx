@@ -23,6 +23,7 @@ export interface RoomType {
   operatingPeriods: { from: string; to: string }[]
   seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
   weekendSurcharge: string
+  minimumAdvanceDays: number
   currency: string
   images: string[]
   amenities: string[]
@@ -48,6 +49,7 @@ export const createEmptyRoom = (): RoomType => ({
   operatingPeriods: [{ from: '01-01', to: '12-31' }],
   seasons: [],
   weekendSurcharge: '+0%',
+  minimumAdvanceDays: 0,
   currency: '',
   images: [],
   amenities: [],
@@ -1008,6 +1010,29 @@ export default function RoomsStep({
                     Custom
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* Section 5: Minimum advance booking */}
+            <div>
+              <div className="flex items-start gap-3 mb-2">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">Minimum advance booking</h3>
+                  <p className="text-[11px] text-gray-400">Require guests to book a minimum number of days before check-in</p>
+                </div>
+              </div>
+              <div className="ml-9 flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  value={room.minimumAdvanceDays ?? 0}
+                  onChange={(e) => updateRoom({ minimumAdvanceDays: Math.max(0, parseInt(e.target.value) || 0) })}
+                  className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[12px] text-center font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <span className="text-[11px] text-gray-500">days before check-in</span>
+                <span className="text-[10px] text-gray-400 ml-2">(0 = no restriction)</span>
               </div>
             </div>
 
