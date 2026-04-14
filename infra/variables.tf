@@ -117,6 +117,13 @@ variable "cloudflare_api_token" {
   default     = ""
 }
 
+variable "channex_api_key" {
+  description = "Channex channel manager production API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "cloudflare_zone_id" {
   description = "Cloudflare zone ID for vayada.com"
   type        = string

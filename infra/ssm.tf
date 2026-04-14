@@ -17,6 +17,7 @@ resource "aws_ssm_parameter" "secrets" {
     "stripe-secret-key"     = var.stripe_secret_key
     "stripe-webhook-secret" = var.stripe_webhook_secret
     "cloudflare-api-token"  = var.cloudflare_api_token
+    "channex-api-key"       = var.channex_api_key
   }
 
   name  = "/vayada/prod/${each.key}"

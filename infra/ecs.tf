@@ -77,6 +77,7 @@ locals {
         { name = "SMTP_FROM", value = "noreply@vayada.com" },
         { name = "STRIPE_PLATFORM_ACCOUNT_ID", value = var.stripe_platform_account_id },
         { name = "BOOKING_ENGINE_API_URL", value = "https://booking-api.vayada.com" },
+        { name = "CHANNEX_API_BASE_URL", value = "https://app.channex.io" },
         { name = "ENVIRONMENT", value = "production" },
         { name = "DEBUG", value = "false" },
       ]
@@ -93,6 +94,7 @@ locals {
         { name = "SMTP_PASSWORD", valueFrom = "/vayada/prod/smtp-password" },
         { name = "STRIPE_SECRET_KEY", valueFrom = "/vayada/prod/stripe-secret-key" },
         { name = "STRIPE_WEBHOOK_SECRET", valueFrom = "/vayada/prod/stripe-webhook-secret" },
+        { name = "CHANNEX_API_KEY", valueFrom = "/vayada/prod/channex-api-key" },
       ]
     }
     pms-frontend = {
