@@ -119,7 +119,9 @@ class BookingHotelRepository:
         social_tiktok: str = '',
         social_youtube: str = '',
         payout_account_holder: str = '',
+        payout_account_type: str = 'iban',
         payout_iban: str = '',
+        payout_account_number: str = '',
         payout_bank_name: str = '',
         payout_swift: str = '',
     ) -> dict:
@@ -133,12 +135,13 @@ class BookingHotelRepository:
                 email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
                 special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
                 social_instagram, social_facebook, social_tiktok, social_youtube,
-                payout_account_holder, payout_iban, payout_bank_name, payout_swift
+                payout_account_holder, payout_account_type, payout_iban, payout_account_number,
+                payout_bank_name, payout_swift
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
                 $13, $14, $15, $16, $17, $18,
                 $19, $20, $21, $22, $23, $24, $25, $26,
-                $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38
+                $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40
             ) RETURNING *
         """
         row = await Database.fetchrow(
@@ -152,7 +155,8 @@ class BookingHotelRepository:
             email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
             special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
             social_instagram, social_facebook, social_tiktok, social_youtube,
-            payout_account_holder, payout_iban, payout_bank_name, payout_swift,
+            payout_account_holder, payout_account_type, payout_iban, payout_account_number,
+            payout_bank_name, payout_swift,
         )
         return dict(row)
 

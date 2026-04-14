@@ -55,7 +55,9 @@ async def get_payment_settings(slug: str):
     if result["bankTransfer"]:
         result["bankDetails"] = {
             "accountHolder": hotel.get("payout_account_holder") or "",
+            "accountType": hotel.get("payout_account_type") or "iban",
             "iban": hotel.get("payout_iban") or "",
+            "accountNumber": hotel.get("payout_account_number") or "",
             "bankName": hotel.get("payout_bank_name") or "",
             "swift": hotel.get("payout_swift") or "",
         }

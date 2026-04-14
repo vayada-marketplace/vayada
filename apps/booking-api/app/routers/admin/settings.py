@@ -118,7 +118,9 @@ _PROPERTY_FIELD_MAP = {
     "billing_fixed_fee": "billing_fixed_fee",
     "billing_pending_switch": "billing_pending_switch",
     "payout_account_holder": "payout_account_holder",
+    "payout_account_type": "payout_account_type",
     "payout_iban": "payout_iban",
+    "payout_account_number": "payout_account_number",
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
     "refer_a_guest_enabled": "refer_a_guest_enabled",
@@ -168,7 +170,9 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         billing_fixed_fee=float(hotel.get('billing_fixed_fee') or 49),
         billing_pending_switch=hotel.get('billing_pending_switch'),
         payout_account_holder=hotel.get('payout_account_holder') or '',
+        payout_account_type=hotel.get('payout_account_type') or 'iban',
         payout_iban=hotel.get('payout_iban') or '',
+        payout_account_number=hotel.get('payout_account_number') or '',
         payout_bank_name=hotel.get('payout_bank_name') or '',
         payout_swift=hotel.get('payout_swift') or '',
     )
@@ -191,7 +195,8 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     instagram='', facebook='', tiktok='', youtube='',
     billing_active_plan='commission', billing_commission_rate=5,
     billing_fixed_fee=49, billing_pending_switch=None,
-    payout_account_holder='', payout_iban='', payout_bank_name='', payout_swift='',
+    payout_account_holder='', payout_account_type='iban', payout_iban='', payout_account_number='',
+    payout_bank_name='', payout_swift='',
 )
 
 
@@ -255,7 +260,9 @@ async def _create_hotel_from_settings(
             social_tiktok=data.tiktok or '',
             social_youtube=data.youtube or '',
             payout_account_holder=data.payout_account_holder or '',
+            payout_account_type=data.payout_account_type or 'iban',
             payout_iban=data.payout_iban or '',
+            payout_account_number=data.payout_account_number or '',
             payout_bank_name=data.payout_bank_name or '',
             payout_swift=data.payout_swift or '',
         )
