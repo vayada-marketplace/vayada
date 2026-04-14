@@ -2,9 +2,10 @@
 Affiliate-facing dashboard routes — requires affiliate auth.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.dependencies import require_affiliate
@@ -203,6 +204,147 @@ async def get_dashboard(user_id: str = Depends(require_affiliate)):
         property_count=len(affiliates),
         outstanding_balance=round(outstanding, 2),
     )
+
+
+_PERIOD_MONTHS = {"1m": 1, "3m": 3, "6m": 6, "12m": 12}
+
+
+@router.get("/earnings")
+async def get_earnings(
+    period: str = Query("6m", pattern="^(1m|3m|6m|12m)$"),
+    user_id: str = Depends(require_affiliate),
+):
+    """Return monthly affiliate earnings for the chart.
+
+    Sums payouts grouped by the month they were (or will be) paid out —
+    includes completed, scheduled, and processing payouts so the chart
+    reflects everything the affiliate has earned, not just what's cleared.
+    Missing months in the range are zero-filled so the chart has a
+    consistent x-axis.
+    """
+    affiliates = await AffiliateRepository.list_by_user_id(user_id)
+    if not affiliates:
+        return {"months": [], "currency": "EUR"}
+
+    months = _PERIOD_MONTHS[period]
+    now = datetime.now(timezone.utc)
+    # Walk back `months - 1` month boundaries so 6m = current + 5 prior = 6 buckets
+    start_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    for _ in range(months - 1):
+        start_month = (start_month - timedelta(days=1)).replace(day=1)
+
+    affiliate_ids = [str(a["id"]) for a in affiliates]
+    rows = await Database.fetch(
+        """
+        SELECT DATE_TRUNC('month', COALESCE(completed_at, scheduled_for))::date AS month,
+               SUM(amount)::numeric AS earnings,
+               MIN(currency) AS currency
+        FROM payouts
+        WHERE recipient_type = 'affiliate'
+          AND recipient_id = ANY($1::uuid[])
+          AND status IN ('scheduled', 'processing', 'completed')
+          AND COALESCE(completed_at, scheduled_for) >= $2
+        GROUP BY DATE_TRUNC('month', COALESCE(completed_at, scheduled_for))
+        ORDER BY month
+        """,
+        affiliate_ids,
+        start_month,
+    )
+
+    by_month: dict[str, float] = {}
+    currency = "EUR"
+    for r in rows:
+        key = r["month"].strftime("%Y-%m")
+        by_month[key] = float(r["earnings"] or 0)
+        if r["currency"]:
+            currency = r["currency"]
+
+    # Zero-fill the full range
+    result = []
+    cursor = start_month
+    for _ in range(months):
+        key = cursor.strftime("%Y-%m")
+        result.append({
+            "month": key,
+            "label": cursor.strftime("%b"),
+            "earnings": round(by_month.get(key, 0.0), 2),
+        })
+        # Advance one month
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1)
+
+    return {"months": result, "currency": currency}
+
+
+@router.get("/activity")
+async def get_activity(
+    limit: int = Query(10, ge=1, le=50),
+    user_id: str = Depends(require_affiliate),
+):
+    """Return a merged recent-activity feed: bookings + click batches.
+
+    Bookings are emitted individually. Clicks are aggregated per
+    (affiliate, day) so the feed shows "N new link clicks" entries
+    instead of spamming one event per click.
+    """
+    affiliates = await AffiliateRepository.list_by_user_id(user_id)
+    if not affiliates:
+        return {"activities": []}
+
+    affiliate_ids = [str(a["id"]) for a in affiliates]
+
+    booking_rows = await Database.fetch(
+        """
+        SELECT b.created_at AS ts,
+               h.name AS property
+        FROM bookings b
+        JOIN hotels h ON h.id = b.hotel_id
+        WHERE b.affiliate_id = ANY($1::uuid[])
+          AND b.status = 'confirmed'
+        ORDER BY b.created_at DESC
+        LIMIT $2
+        """,
+        affiliate_ids,
+        limit,
+    )
+
+    click_rows = await Database.fetch(
+        """
+        SELECT DATE_TRUNC('day', ac.created_at) AS ts,
+               h.name AS property,
+               COUNT(*) AS count
+        FROM affiliate_clicks ac
+        JOIN affiliates a ON a.id = ac.affiliate_id
+        JOIN hotels h ON h.id = a.hotel_id
+        WHERE ac.affiliate_id = ANY($1::uuid[])
+        GROUP BY DATE_TRUNC('day', ac.created_at), h.name
+        ORDER BY ts DESC
+        LIMIT $2
+        """,
+        affiliate_ids,
+        limit,
+    )
+
+    events: list[dict] = []
+    for r in booking_rows:
+        events.append({
+            "type": "booking",
+            "ts": r["ts"].isoformat(),
+            "property": r["property"],
+            "count": 1,
+        })
+    for r in click_rows:
+        events.append({
+            "type": "click",
+            "ts": r["ts"].isoformat(),
+            "property": r["property"],
+            "count": int(r["count"]),
+        })
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    return {"activities": events[:limit]}
 
 
 @router.get("/payouts")
