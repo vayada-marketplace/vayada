@@ -43,6 +43,24 @@ export default function RoomDetailModal({
     }
   }, [open])
 
+  // Map browser back button to closing the modal instead of leaving the page
+  useEffect(() => {
+    if (!open) return
+    let closedByPop = false
+    window.history.pushState({ vayRoomModal: true }, '')
+    const onPop = () => {
+      closedByPop = true
+      onClose()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (!closedByPop && typeof window !== 'undefined' && (window.history.state as { vayRoomModal?: boolean } | null)?.vayRoomModal) {
+        window.history.back()
+      }
+    }
+  }, [open, onClose])
+
   if (!open) return null
 
   const flexibleTotal = room.baseRate * nights

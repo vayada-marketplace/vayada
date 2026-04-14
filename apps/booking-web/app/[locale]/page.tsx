@@ -140,6 +140,13 @@ export default function HomePage() {
   const [searching, setSearching] = useState(false)
   const roomsSectionRef = useRef<HTMLDivElement>(null)
 
+  // Reset stale modal index if the underlying room list shrinks (e.g. after a refetch)
+  useEffect(() => {
+    if (detailModalIndex !== null && detailModalIndex >= rooms.length) {
+      setDetailModalIndex(null)
+    }
+  }, [rooms.length, detailModalIndex])
+
   // Auto-expand rate: if only one rate exists, expand it so the
   // "Select This Rate" button is immediately visible without a click.
   // When both rates exist, default to non-refundable expanded.
@@ -810,7 +817,7 @@ export default function HomePage() {
       </div>
 
       {/* Room Detail Modal */}
-      {detailModalIndex !== null && (
+      {detailModalIndex !== null && filteredRooms[detailModalIndex] && (
         <RoomDetailModal
           room={filteredRooms[detailModalIndex]}
           nights={nights}
