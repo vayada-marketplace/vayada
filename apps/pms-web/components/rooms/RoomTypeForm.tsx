@@ -972,13 +972,13 @@ export default function RoomTypeForm({
                                     <div className="space-y-1.5">
                                       <span className="text-[10px] text-gray-400 font-medium">Rate per number of guests</span>
                                       {Array.from({ length: maxOcc }, (_, i) => i + 1).map(guestCount => {
-                                        const isMax = guestCount === maxOcc
+                                        const isAnchor = guestCount === 1
                                         const occRate = (season.occupancyRates || {})[String(guestCount)] || ''
                                         return (
                                           <div key={guestCount} className="flex items-center gap-2">
                                             <span className="text-[11px] text-gray-500 w-16">{guestCount} {guestCount === 1 ? 'guest' : 'guests'}</span>
                                             <span className="text-gray-400 text-[11px]">{getCurrencySymbol(form.currency || 'EUR')}</span>
-                                            {isMax ? (
+                                            {isAnchor ? (
                                               <span className="text-[11px] text-gray-400 px-2 py-1">{season.rate || '—'} (season rate)</span>
                                             ) : (
                                               <input
