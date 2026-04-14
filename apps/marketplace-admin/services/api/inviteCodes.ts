@@ -60,6 +60,7 @@ export interface InviteData {
     operatingPeriods: Array<{ from: string; to: string }>
     seasons: Array<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }>
     weekendSurcharge: string
+    minimumAdvanceDays: number
   }>
   internal?: {
     active_plan: 'commission' | 'fixed'
