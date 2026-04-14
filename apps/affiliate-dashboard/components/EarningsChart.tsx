@@ -1,29 +1,50 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { apiClient } from '@/services/api/client'
 
 interface MonthData {
   month: string
+  label: string
   earnings: number
 }
 
-const data: MonthData[] = [
-  { month: 'Oct', earnings: 120 },
-  { month: 'Nov', earnings: 340 },
-  { month: 'Dec', earnings: 480 },
-  { month: 'Jan', earnings: 260 },
-  { month: 'Feb', earnings: 520 },
-  { month: 'Mar', earnings: 920 },
-]
+interface EarningsResponse {
+  months: MonthData[]
+  currency: string
+}
 
 type Period = '6m' | '3m' | '1m'
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  EUR: '€',
+  USD: '$',
+  GBP: '£',
+  IDR: 'Rp',
+}
+
 export default function EarningsChart() {
   const [period, setPeriod] = useState<Period>('6m')
-  const maxEarnings = Math.max(...data.map((d) => d.earnings))
+  const [data, setData] = useState<MonthData[]>([])
+  const [currency, setCurrency] = useState('EUR')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
-  const filteredData =
-    period === '1m' ? data.slice(-1) : period === '3m' ? data.slice(-3) : data
+  useEffect(() => {
+    setLoading(true)
+    setError(false)
+    apiClient
+      .get<EarningsResponse>(`/affiliate/earnings?period=${period}`)
+      .then((res) => {
+        setData(res.months)
+        setCurrency(res.currency)
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
+  }, [period])
+
+  const maxEarnings = data.length > 0 ? Math.max(...data.map((d) => d.earnings), 1) : 1
+  const symbol = CURRENCY_SYMBOLS[currency] || currency + ' '
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -46,20 +67,35 @@ export default function EarningsChart() {
         </div>
       </div>
 
-      <div className="flex items-end gap-3 h-40">
-        {filteredData.map((d) => (
-          <div key={d.month} className="flex-1 flex flex-col items-center gap-1.5">
-            <span className="text-xs font-medium text-gray-700">
-              ${d.earnings}
-            </span>
-            <div
-              className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
-              style={{ height: `${(d.earnings / maxEarnings) * 100}%` }}
-            />
-            <span className="text-xs text-muted">{d.month}</span>
-          </div>
-        ))}
-      </div>
+      {loading && (
+        <div className="h-40 flex items-center justify-center text-sm text-muted">
+          Loading…
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="h-40 flex items-center justify-center text-sm text-muted">
+          Couldn&apos;t load earnings.
+        </div>
+      )}
+
+      {!loading && !error && data.length > 0 && (
+        <div className="flex items-end gap-3 h-40">
+          {data.map((d) => (
+            <div key={d.month} className="flex-1 flex flex-col items-center gap-1.5">
+              <span className="text-xs font-medium text-gray-700">
+                {symbol}
+                {Math.round(d.earnings).toLocaleString()}
+              </span>
+              <div
+                className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
+                style={{ height: `${(d.earnings / maxEarnings) * 100}%` }}
+              />
+              <span className="text-xs text-muted">{d.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,20 +1,17 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import { CursorArrowRaysIcon, CreditCardIcon, UserPlusIcon } from '@heroicons/react/24/outline'
+import { apiClient } from '@/services/api/client'
+
+type ActivityType = 'click' | 'booking' | 'signup'
 
 interface Activity {
-  id: string
-  type: 'click' | 'booking' | 'signup'
-  message: string
-  time: string
+  type: ActivityType
+  ts: string
   property: string
+  count: number
 }
-
-const activities: Activity[] = [
-  { id: '1', type: 'booking', message: 'New booking confirmed', time: '2 hours ago', property: 'Sundancer Lombok' },
-  { id: '2', type: 'click', message: '12 new link clicks', time: '5 hours ago', property: 'Coral Bay Resort' },
-  { id: '3', type: 'booking', message: 'New booking confirmed', time: '1 day ago', property: 'Sundancer Lombok' },
-  { id: '4', type: 'click', message: '8 new link clicks', time: '1 day ago', property: 'Sundancer Lombok' },
-  { id: '5', type: 'signup', message: 'Guest created an account via your link', time: '2 days ago', property: 'Coral Bay Resort' },
-]
 
 const iconMap = {
   click: CursorArrowRaysIcon,
@@ -28,7 +25,39 @@ const colorMap = {
   signup: 'bg-purple-50 text-purple-600',
 }
 
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'} ago`
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function message(a: Activity): string {
+  if (a.type === 'booking') return 'New booking confirmed'
+  if (a.type === 'click')
+    return `${a.count} new link click${a.count === 1 ? '' : 's'}`
+  return 'Guest created an account via your link'
+}
+
 export default function RecentActivity() {
+  const [activities, setActivities] = useState<Activity[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    apiClient
+      .get<{ activities: Activity[] }>('/affiliate/activity?limit=10')
+      .then((res) => setActivities(res.activities))
+      .catch(() => setError(true))
+  }, [])
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -38,25 +67,39 @@ export default function RecentActivity() {
         </a>
       </div>
 
-      <div className="space-y-3">
-        {activities.map((activity) => {
-          const Icon = iconMap[activity.type]
-          return (
-            <div
-              key={activity.id}
-              className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
-            >
-              <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}>
-                <Icon className="w-4 h-4" />
+      {activities === null && !error && (
+        <p className="text-sm text-muted py-4">Loading activity…</p>
+      )}
+
+      {error && (
+        <p className="text-sm text-muted py-4">Couldn&apos;t load activity.</p>
+      )}
+
+      {activities && activities.length === 0 && (
+        <p className="text-sm text-muted py-4">No activity yet. Share your referral link to get started.</p>
+      )}
+
+      {activities && activities.length > 0 && (
+        <div className="space-y-3">
+          {activities.map((activity, i) => {
+            const Icon = iconMap[activity.type]
+            return (
+              <div
+                key={`${activity.type}-${activity.ts}-${i}`}
+                className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
+              >
+                <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{message(activity)}</p>
+                  <p className="text-xs text-muted mt-0.5">{activity.property} &middot; {timeAgo(activity.ts)}</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">{activity.message}</p>
-                <p className="text-xs text-muted mt-0.5">{activity.property} &middot; {activity.time}</p>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
