@@ -11,7 +11,9 @@ export interface BookingRequestResponse {
 
 export interface BankDetails {
   accountHolder: string
+  accountType?: 'iban' | 'account_number'
   iban: string
+  accountNumber?: string
   bankName: string
   swift: string
 }

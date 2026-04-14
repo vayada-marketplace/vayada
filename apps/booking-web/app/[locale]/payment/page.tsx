@@ -149,7 +149,7 @@ function PaymentPageContent() {
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false)
   const [bankTransferEnabled, setBankTransferEnabled] = useState(false)
-  const [bankDetails, setBankDetails] = useState<{ accountHolder: string; iban: string; bankName: string; swift: string } | null>(null)
+  const [bankDetails, setBankDetails] = useState<{ accountHolder: string; accountType?: 'iban' | 'account_number'; iban: string; accountNumber?: string; bankName: string; swift: string } | null>(null)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -464,7 +464,7 @@ function PaymentPageContent() {
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
                     {t('bankTransferExplanation') || 'Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment.'}
                   </div>
-                  {bankDetails && (bankDetails.iban || bankDetails.accountHolder) && (
+                  {bankDetails && (bankDetails.iban || bankDetails.accountNumber || bankDetails.accountHolder) && (
                     <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
                       {bankDetails.bankName && (
                         <p className="text-sm text-gray-700"><strong>{t('bankName') || 'Bank'}:</strong> {bankDetails.bankName}</p>
@@ -472,9 +472,11 @@ function PaymentPageContent() {
                       {bankDetails.accountHolder && (
                         <p className="text-sm text-gray-700"><strong>{t('accountHolder') || 'Account Holder'}:</strong> {bankDetails.accountHolder}</p>
                       )}
-                      {bankDetails.iban && (
+                      {bankDetails.accountType === 'account_number' && bankDetails.accountNumber ? (
+                        <p className="text-sm text-gray-700"><strong>{t('accountNumber') || 'Account Number'}:</strong> {bankDetails.accountNumber}</p>
+                      ) : bankDetails.iban ? (
                         <p className="text-sm text-gray-700"><strong>IBAN:</strong> {bankDetails.iban}</p>
-                      )}
+                      ) : null}
                       {bankDetails.swift && (
                         <p className="text-sm text-gray-700"><strong>BIC/SWIFT:</strong> {bankDetails.swift}</p>
                       )}
