@@ -127,7 +127,9 @@ const DEFAULT_SETTINGS: PropertySettings = {
   billing_fixed_fee: 49,
   billing_pending_switch: null,
   payout_account_holder: '',
+  payout_account_type: 'iban',
   payout_iban: '',
+  payout_account_number: '',
   payout_bank_name: '',
   payout_swift: '',
   refer_a_guest_enabled: false,
@@ -1172,14 +1174,61 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
-                    <input
-                      type="text"
-                      value={settings.payout_iban || ''}
-                      onChange={e => updateSetting('payout_iban', e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. GB29 NWBK 6016 1331 9268 19"
-                    />
+                    <label className="block text-[12px] font-medium text-gray-700 mb-1">Account Format</label>
+                    <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+                      <button
+                        type="button"
+                        onClick={() => updateSetting('payout_account_type', 'iban')}
+                        className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                          (settings.payout_account_type || 'iban') === 'iban'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        IBAN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting('payout_account_type', 'account_number')}
+                        className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                          settings.payout_account_type === 'account_number'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        Account Number
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {(settings.payout_account_type || 'iban') === 'iban'
+                        ? 'Use IBAN if your bank is in Europe or another IBAN country.'
+                        : 'Use a plain account number for banks without IBAN (e.g. Indonesia, US).'}
+                    </p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    {(settings.payout_account_type || 'iban') === 'iban' ? (
+                      <>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
+                        <input
+                          type="text"
+                          value={settings.payout_iban || ''}
+                          onChange={e => updateSetting('payout_iban', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="e.g. GB29 NWBK 6016 1331 9268 19"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                        <input
+                          type="text"
+                          value={settings.payout_account_number || ''}
+                          onChange={e => updateSetting('payout_account_number', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          placeholder="e.g. 1234567890"
+                        />
+                      </>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>

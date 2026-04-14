@@ -45,7 +45,9 @@ export interface PropertySettings {
   billing_fixed_fee?: number
   billing_pending_switch?: string | null
   payout_account_holder?: string
+  payout_account_type?: 'iban' | 'account_number'
   payout_iban?: string
+  payout_account_number?: string
   payout_bank_name?: string
   payout_swift?: string
 }
