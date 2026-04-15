@@ -350,6 +350,7 @@ export default function SetupPage() {
             const bedSummary = r.beds.map((b) => `${b.count} ${b.type}`).join(', ')
             await pmsClient.post('/admin/room-types', {
               name: r.name,
+              category: r.category,
               bedType: bedSummary,
               maxOccupancy: r.maxOccupancy,
               bedrooms: r.bedrooms,
