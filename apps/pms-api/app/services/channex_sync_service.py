@@ -4,7 +4,8 @@ from typing import Optional, List
 
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
-from app.database import Database
+from app.database import Database, BookingEngineDatabase
+from app.config import settings as app_settings
 from app.repositories.channex_mapping_repo import (
     ChannexConnectionRepository,
     ChannexRoomTypeMappingRepository,
@@ -34,12 +35,21 @@ async def provision_property(hotel_id: str) -> dict:
     if not hotel:
         raise ValueError("Hotel not found")
 
-    # Get currency from payment settings
-    pay_settings = await Database.fetchrow(
-        "SELECT default_currency FROM hotel_payment_settings WHERE hotel_id = $1",
-        hotel_id,
-    )
-    currency = pay_settings["default_currency"] if pay_settings else "USD"
+    # Currency is owned by booking_db.booking_hotels (see
+    # memory/project_hotel_data_ownership.md). Fall back to USD only
+    # if the booking engine row is missing, which shouldn't happen in
+    # practice since hotel ids are unified across both DBs.
+    currency = "USD"
+    if app_settings.BOOKING_ENGINE_DATABASE_URL:
+        try:
+            be_currency = await BookingEngineDatabase.fetchval(
+                "SELECT currency FROM booking_hotels WHERE id = $1",
+                hotel_id,
+            )
+            if be_currency:
+                currency = be_currency
+        except Exception as e:
+            logger.warning("Failed to read currency from booking engine for Channex provisioning: %s", e)
 
     # Step 1: Create property in Channex (or skip if already exists)
     if conn.get("channex_property_id"):

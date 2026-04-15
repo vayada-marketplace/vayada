@@ -60,11 +60,10 @@ async def get_payment_settings(
     settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
 
-    # If no PMS payment settings exist yet, read currency from booking engine
-    if settings:
-        currency = settings.get("default_currency", "EUR")
-    else:
-        currency = await _get_booking_engine_currency(user_id)
+    # Currency is owned by the booking engine (booking_hotels.currency).
+    # PMS never reads it from its own hotel_payment_settings column; see
+    # memory/project_hotel_data_ownership.md.
+    currency = await _get_booking_engine_currency(user_id)
 
     return {
         "paymentSettings": HotelPaymentSettings(
@@ -119,11 +118,12 @@ async def update_payment_settings(
                 detail=f"Xendit bank details required: {', '.join(missing)}",
             )
 
-    # Convert room type rates when currency changes
+    # Convert room type rates when currency changes. Currency is owned by
+    # the booking engine, so the authoritative "old" value comes from
+    # booking_hotels.currency, not from hotel_payment_settings.
     new_currency = updates.get("default_currency")
     if new_currency:
-        existing = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-        old_currency = existing["default_currency"] if existing else await _get_booking_engine_currency(user_id)
+        old_currency = await _get_booking_engine_currency(user_id)
         if old_currency != new_currency:
             try:
                 rate = await get_exchange_rate(old_currency, new_currency)
@@ -176,11 +176,17 @@ async def update_payment_settings(
                     detail=f"Failed to convert room rates to {new_currency}. Currency not updated.",
                 )
 
-    await HotelPaymentSettingsRepository.upsert(hotel_id, updates)
+    # Currency is owned by booking_db, so never write it to pms_db.
+    # The column still exists until Stage 3 drops it, but Stage 1 keeps
+    # it dead so new writes can't re-introduce drift.
+    pms_updates = {k: v for k, v in updates.items() if k != "default_currency"}
+    if pms_updates:
+        await HotelPaymentSettingsRepository.upsert(hotel_id, pms_updates)
 
-    # Sync currency to booking engine — scoped to the selected hotel
-    # (multi-hotel-safe). hotel_id here is already the unified id from
-    # earlier in this function.
+    # Write currency to the authoritative store (booking_db). If this
+    # fails we raise, because the FX room-rate conversion above has
+    # already run — leaving rates converted but currency unchanged is
+    # exactly the drift we're trying to eliminate.
     if new_currency and app_settings.BOOKING_ENGINE_DATABASE_URL:
         try:
             await BookingEngineDatabase.execute(
@@ -188,7 +194,11 @@ async def update_payment_settings(
                 hotel_id, new_currency,
             )
         except Exception as e:
-            logger.warning("Failed to sync currency to booking engine: %s", e)
+            logger.error("Failed to write currency to booking engine: %s", e)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to update currency in booking engine. Room rates may be in an inconsistent state — please retry.",
+            )
 
         # Convert addon prices in the booking engine DB for the
         # currently-selected hotel (unified id).

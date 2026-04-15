@@ -116,22 +116,13 @@ async def create_room_type(
 
     # Force the room currency to the hotel's authoritative currency so a
     # buggy or stale frontend payload can never create rooms with a
-    # different currency than the property. Order of preference:
-    #   1. PMS payment_settings.default_currency (if set)
-    #   2. booking_hotels.currency from the booking engine DB
-    # The fallback in (2) is critical during initial setup, where rooms
-    # are created BEFORE payment settings exist.
-    from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+    # different currency than the property. Currency lives in
+    # booking_hotels.currency (booking_db is the single source of truth
+    # for hotel identity fields — see memory/project_hotel_data_ownership.md).
     from app.database import BookingEngineDatabase
     from app.config import settings as app_settings
-    pay_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-    if pay_settings and pay_settings.get("default_currency"):
-        payload["currency"] = pay_settings["default_currency"]
-    elif app_settings.BOOKING_ENGINE_DATABASE_URL:
+    if app_settings.BOOKING_ENGINE_DATABASE_URL:
         try:
-            # hotel_id here is already the current (unified) hotel id
-            # resolved by get_hotel_id above, so we can look up the
-            # matching booking_hotels row directly by id.
             be_currency = await BookingEngineDatabase.fetchval(
                 "SELECT currency FROM booking_hotels WHERE id = $1",
                 hotel_id,
