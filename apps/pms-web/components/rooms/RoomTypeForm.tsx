@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
-import { getCurrencySymbol } from '@/lib/utils'
+import { getCurrencySymbol, CURRENCY_SYMBOLS } from '@/lib/utils'
 
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Bed', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
@@ -830,8 +830,20 @@ export default function RoomTypeForm({
                 {/* Set rates per season table */}
                 {seasons.length > 0 && (
                   <div className="mt-4 rounded-xl border border-gray-200 bg-white overflow-hidden">
-                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-gray-700">Set rates per season</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-gray-500">Currency</span>
+                        <select
+                          value={form.currency || 'EUR'}
+                          onChange={(e) => onChange((prev: any) => ({ ...prev, currency: e.target.value }))}
+                          className="text-[11px] px-2 py-1 border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
+                        >
+                          {Object.entries(CURRENCY_SYMBOLS).map(([code, symbol]) => (
+                            <option key={code} value={code}>{code} ({symbol})</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     <table className="w-full text-[11px]">
                       <thead>
