@@ -386,7 +386,6 @@ export default function RoomsPage() {
       {showImportModal && (
         <ListingImportModal
           onClose={() => setShowImportModal(false)}
-          onImported={loadData}
         />
       )}
     </div>

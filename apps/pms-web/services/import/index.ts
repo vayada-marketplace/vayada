@@ -38,4 +38,7 @@ export const importService = {
 
   confirm: (roomTypes: ListingImportConfirmRoomType[]) =>
     pmsClient.post<ListingImportResult>('/admin/import/confirm', { roomTypes }),
+
+  importImages: (roomTypeId: string, sourceImageUrls: string[]) =>
+    pmsClient.post('/admin/import/images', { roomTypeId, sourceImageUrls }),
 }

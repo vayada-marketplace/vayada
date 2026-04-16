@@ -1,18 +1,21 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomTypeCreate } from '@/services/rooms'
 import { bookingsService } from '@/services/bookings'
+import { importService } from '@/services/import'
 import RoomTypeForm from '@/components/rooms/RoomTypeForm'
 
 export default function NewRoomPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [initialCurrency, setInitialCurrency] = useState('EUR')
+  const [sourceImageUrls, setSourceImageUrls] = useState<string[]>([])
   const [form, setForm] = useState<RoomTypeCreate>({
     name: '',
     description: '',
@@ -33,6 +36,35 @@ export default function NewRoomPage() {
     dailyRates: {},
   })
 
+  // Load prefill data from listing import
+  useEffect(() => {
+    if (searchParams.get('from') === 'import') {
+      try {
+        const raw = sessionStorage.getItem('importRoomType')
+        if (raw) {
+          const imported = JSON.parse(raw)
+          setForm(prev => ({
+            ...prev,
+            name: imported.name || '',
+            description: imported.description || '',
+            shortDescription: imported.shortDescription || '',
+            maxOccupancy: imported.maxOccupancy || 2,
+            size: imported.size || 0,
+            baseRate: imported.baseRate || 0,
+            currency: imported.currency || prev.currency,
+            bedType: imported.bedType || '',
+            amenities: imported.amenities || [],
+            features: imported.features || [],
+          }))
+          if (imported.sourceImageUrls?.length) {
+            setSourceImageUrls(imported.sourceImageUrls)
+          }
+          sessionStorage.removeItem('importRoomType')
+        }
+      } catch {}
+    }
+  }, [searchParams])
+
   // Inherit currency from payment settings (authoritative source)
   useEffect(() => {
     bookingsService.getPaymentSettings()
@@ -40,7 +72,11 @@ export default function NewRoomPage() {
         const c = res.paymentSettings.defaultCurrency
         if (c) {
           setInitialCurrency(c)
-          setForm((prev) => ({ ...prev, currency: c }))
+          // Only set currency if not already set by import
+          setForm((prev) => prev.currency && searchParams.get('from') === 'import' && prev.currency !== 'EUR'
+            ? prev
+            : { ...prev, currency: c }
+          )
         }
       })
       .catch(console.error)
@@ -66,7 +102,10 @@ export default function NewRoomPage() {
       if (form.currency && form.currency !== initialCurrency) {
         await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
       }
-      await roomsService.create(form)
+      const created = await roomsService.create(form)
+      if (sourceImageUrls.length > 0 && created.id) {
+        importService.importImages(created.id, sourceImageUrls).catch(console.error)
+      }
       router.push('/rooms')
     } catch (err: any) {
       setError(err.message || 'Failed to create room type')
