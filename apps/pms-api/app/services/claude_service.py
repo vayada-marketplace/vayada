@@ -105,14 +105,14 @@ EXTRACTION_TOOL = {
     },
 }
 
-SYSTEM_PROMPT = """You are a data extraction assistant. Extract structured hotel/property listing data from the provided HTML page content.
+SYSTEM_PROMPT = """You are a data extraction assistant. Extract structured hotel/property listing data from the provided page content (markdown format).
 
 Instructions:
 - Extract ALL room types you can find on the page.
 - For Booking.com pages, there are usually multiple room types listed in a table.
 - For Airbnb pages, there is typically one listing (treat it as a single room type).
 - Map amenities and features to the known values provided in the tool schema when there is a match. Use the exact label from the known values list. Only add custom values if no match exists.
-- Extract image URLs — look for high-resolution image URLs (not thumbnails). On Booking.com, look for data-highres or src attributes in image elements. On Airbnb, look for image URLs in JSON data or picture elements.
+- Extract image URLs from markdown image tags (![alt](url)) or raw URLs. Prefer high-resolution versions.
 - Convert room size to square meters if listed in square feet (1 sqft = 0.0929 m2).
 - Extract the nightly rate and currency if visible on the page. Use 0 for base_rate if pricing is not clearly shown.
 - For bed_type, describe the actual bed configuration (e.g. "1 King Bed", "2 Twin Beds", "1 Double Bed and 1 Sofa Bed").
@@ -120,14 +120,14 @@ Instructions:
 - Keep short_description under 150 characters."""
 
 
-async def extract_structured_data(html_content: str) -> dict:
-    """Send HTML to Claude and extract structured listing data using tool-use."""
+async def extract_structured_data(content: str) -> dict:
+    """Send page content to Claude and extract structured listing data using tool-use."""
     client = _get_client()
 
-    # Truncate HTML to stay within context limits
-    max_chars = settings.LISTING_IMPORT_MAX_HTML_CHARS
-    if len(html_content) > max_chars:
-        html_content = html_content[:max_chars]
+    # Truncate to stay within context limits
+    max_chars = settings.LISTING_IMPORT_MAX_CHARS
+    if len(content) > max_chars:
+        content = content[:max_chars]
 
     response = await client.messages.create(
         model=settings.LISTING_IMPORT_MODEL,
@@ -139,7 +139,7 @@ async def extract_structured_data(html_content: str) -> dict:
         messages=[
             {
                 "role": "user",
-                "content": f"Extract the listing data from this page:\n\n{html_content}",
+                "content": f"Extract the listing data from this page:\n\n{content}",
             }
         ],
     )

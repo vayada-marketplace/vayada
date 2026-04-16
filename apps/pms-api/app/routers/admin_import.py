@@ -28,7 +28,7 @@ async def import_preview(
     user_id: str = Depends(require_hotel_admin),
 ):
     """Scrape a Booking.com or Airbnb listing and return extracted room type data."""
-    if not settings.ANTHROPIC_API_KEY:
+    if not settings.ANTHROPIC_API_KEY or not settings.FIRECRAWL_API_KEY:
         raise HTTPException(status_code=503, detail="Listing import is not configured")
 
     try:

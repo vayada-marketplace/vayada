@@ -1,10 +1,9 @@
 import asyncio
 import logging
-import re
-from typing import Tuple
 from urllib.parse import urlparse
 
 import httpx
+from firecrawl import FirecrawlApp
 
 from app.config import settings
 from app.image_processing import process_image, generate_thumbnail
@@ -23,9 +22,7 @@ BROWSER_HEADERS = {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "image/webp,image/*,*/*;q=0.8",
 }
 
 
@@ -47,35 +44,31 @@ def detect_platform(url: str) -> str:
     raise ValueError(f"Unsupported platform: {host}. Only Booking.com and Airbnb URLs are supported.")
 
 
-async def scrape_listing(url: str) -> Tuple[str, str]:
-    """Fetch listing page HTML. Returns (html, platform)."""
+async def scrape_listing(url: str) -> tuple[str, str]:
+    """Scrape listing page via Firecrawl. Returns (markdown, platform)."""
     url = _normalize_url(url)
     platform = detect_platform(url)
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=settings.LISTING_IMPORT_SCRAPE_TIMEOUT,
-    ) as client:
-        response = await client.get(url, headers=BROWSER_HEADERS)
-        response.raise_for_status()
+    app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
+    result = app.scrape_url(url, params={"formats": ["markdown"]})
 
-    return response.text, platform
+    markdown = result.get("markdown", "")
+    if not markdown:
+        raise ValueError("Firecrawl returned no content for this URL")
+
+    return markdown, platform
 
 
 async def extract_listing_data(url: str) -> ListingImportPreview:
     """Scrape a listing URL and extract structured data via Claude."""
-    html, platform = await scrape_listing(url)
+    content, platform = await scrape_listing(url)
 
-    # Strip <script> and <style> tags to reduce noise (keep <script type="application/ld+json">)
-    cleaned = re.sub(
-        r'<script(?!\s+type=["\']application/ld\+json)[^>]*>.*?</script>',
-        "",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    cleaned = re.sub(r"<style[^>]*>.*?</style>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    # Truncate to stay within context limits
+    max_chars = settings.LISTING_IMPORT_MAX_CHARS
+    if len(content) > max_chars:
+        content = content[:max_chars]
 
-    extracted = await extract_structured_data(cleaned)
+    extracted = await extract_structured_data(content)
 
     room_types = []
     for rt in extracted.get("room_types", []):
