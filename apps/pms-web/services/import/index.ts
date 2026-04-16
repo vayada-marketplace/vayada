@@ -12,6 +12,7 @@ export interface ExtractedRoomType {
   amenities: string[]
   features: string[]
   sourceImageUrls: string[]
+  cancellationPolicy: string
 }
 
 export interface ListingImportPreview {

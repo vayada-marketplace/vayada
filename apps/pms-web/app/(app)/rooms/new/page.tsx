@@ -43,6 +43,7 @@ export default function NewRoomPage() {
         const raw = sessionStorage.getItem('importRoomType')
         if (raw) {
           const imported = JSON.parse(raw)
+          const rate = imported.baseRate || 0
           setForm(prev => ({
             ...prev,
             name: imported.name || '',
@@ -50,11 +51,15 @@ export default function NewRoomPage() {
             shortDescription: imported.shortDescription || '',
             maxOccupancy: imported.maxOccupancy || 2,
             size: imported.size || 0,
-            baseRate: imported.baseRate || 0,
+            baseRate: rate,
             currency: imported.currency || prev.currency,
             bedType: imported.bedType || '',
             amenities: imported.amenities || [],
             features: imported.features || [],
+            seasons: rate > 0 ? [
+              { name: 'Default', tier: 'mid', from: '01-01', to: '12-31', rate: String(rate), minStay: 1 },
+            ] : [],
+            cancellationPolicy: imported.cancellationPolicy || prev.cancellationPolicy,
           }))
           if (imported.sourceImageUrls?.length) {
             setSourceImageUrls(imported.sourceImageUrls)
