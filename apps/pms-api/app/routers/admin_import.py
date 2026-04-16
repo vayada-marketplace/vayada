@@ -10,6 +10,7 @@ from app.models.listing_import import (
     ListingImportPreview,
     ListingImportConfirm,
     ListingImportResult,
+    ImportImagesRequest,
 )
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.listing_import_service import (
@@ -102,3 +103,22 @@ async def import_confirm(
         images_pending=has_images,
         message=f"{count} room type{'s' if count != 1 else ''} created.{img_msg}",
     )
+
+
+@router.post("/import/images", status_code=202)
+async def import_images(
+    data: ImportImagesRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Download images from source URLs and attach them to an existing room type."""
+    if not data.source_image_urls:
+        return {"message": "No images to import"}
+
+    background_tasks.add_task(
+        download_and_upload_images,
+        data.source_image_urls,
+        user_id,
+        data.room_type_id,
+    )
+    return {"message": f"Downloading {len(data.source_image_urls)} images in the background"}

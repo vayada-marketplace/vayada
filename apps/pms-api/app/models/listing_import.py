@@ -66,3 +66,10 @@ class ListingImportResult(BaseModel):
     room_type_ids: List[str]
     images_pending: bool
     message: str
+
+
+class ImportImagesRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    room_type_id: str
+    source_image_urls: List[str]
