@@ -124,6 +124,20 @@ variable "channex_api_key" {
   default     = ""
 }
 
+variable "anthropic_api_key" {
+  description = "Anthropic API key for Claude AI listing import"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "firecrawl_api_key" {
+  description = "Firecrawl API key for web scraping"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "cloudflare_zone_id" {
   description = "Cloudflare zone ID for vayada.com"
   type        = string
