@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     CHANNEX_FULL_SYNC_HOUR: int = 4
     CHANNEX_API_DELAY_SECONDS: float = 0.5
 
+    # Listing Import (Claude AI)
+    ANTHROPIC_API_KEY: str = ""
+    LISTING_IMPORT_MODEL: str = "claude-sonnet-4-20250514"
+    LISTING_IMPORT_MAX_HTML_CHARS: int = 180000
+    LISTING_IMPORT_SCRAPE_TIMEOUT: int = 30
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
