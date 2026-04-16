@@ -85,6 +85,7 @@ async def extract_listing_data(url: str) -> ListingImportPreview:
                 amenities=rt.get("amenities", []),
                 features=rt.get("features", []),
                 source_image_urls=rt.get("image_urls", []),
+                cancellation_policy=rt.get("cancellation_policy", ""),
             )
         )
 

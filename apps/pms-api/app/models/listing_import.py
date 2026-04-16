@@ -21,6 +21,7 @@ class ExtractedRoomType(BaseModel):
     amenities: List[str] = []
     features: List[str] = []
     source_image_urls: List[str] = []
+    cancellation_policy: str = ""
 
 
 class ListingImportRequest(BaseModel):

@@ -96,6 +96,10 @@ EXTRACTION_TOOL = {
                             "items": {"type": "string"},
                             "description": "Full URLs of room/property images found on the page",
                         },
+                        "cancellation_policy": {
+                            "type": "string",
+                            "description": "Cancellation policy summary, e.g. 'Free cancellation until 7 days before check-in' or 'Non-refundable'",
+                        },
                     },
                     "required": ["name"],
                 },
