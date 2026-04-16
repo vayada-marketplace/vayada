@@ -64,7 +64,7 @@ class HotelPaymentSettingsUpdate(BaseModel):
     online_card_payment: Optional[bool] = None
     bank_transfer: Optional[bool] = None
     xendit_payments_enabled: Optional[bool] = None
-    payment_provider: Optional[Literal["stripe", "xendit"]] = None
+    payment_provider: Optional[Literal["stripe", "xendit", "vayada"]] = None
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None

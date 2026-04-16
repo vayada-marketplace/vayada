@@ -55,6 +55,12 @@ async def process_property_payouts():
                 continue
 
             provider = settings.get("payment_provider", "stripe")
+
+            if provider == "vayada":
+                # Vayada Payment: payouts are handled manually — skip auto-processing
+                logger.info("Skipping auto-payout %s for hotel %s (vayada provider, manual payout)", payout_id, hotel_id)
+                continue
+
             await PayoutRepository.update_status(payout_id, "processing")
 
             if provider == "xendit":
