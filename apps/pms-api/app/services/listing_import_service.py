@@ -50,9 +50,9 @@ async def scrape_listing(url: str) -> tuple[str, str]:
     platform = detect_platform(url)
 
     app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
-    result = app.scrape_url(url, params={"formats": ["markdown"]})
+    result = app.scrape(url, formats=["markdown"])
 
-    markdown = result.get("markdown", "")
+    markdown = result.markdown or ""
     if not markdown:
         raise ValueError("Firecrawl returned no content for this URL")
 
