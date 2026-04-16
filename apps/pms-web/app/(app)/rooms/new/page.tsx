@@ -12,6 +12,7 @@ export default function NewRoomPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [initialCurrency, setInitialCurrency] = useState('EUR')
   const [form, setForm] = useState<RoomTypeCreate>({
     name: '',
     description: '',
@@ -37,7 +38,10 @@ export default function NewRoomPage() {
     bookingsService.getPaymentSettings()
       .then((res) => {
         const c = res.paymentSettings.defaultCurrency
-        if (c) setForm((prev) => ({ ...prev, currency: c }))
+        if (c) {
+          setInitialCurrency(c)
+          setForm((prev) => ({ ...prev, currency: c }))
+        }
       })
       .catch(console.error)
   }, [])
@@ -59,6 +63,9 @@ export default function NewRoomPage() {
     setSaving(true)
     setError('')
     try {
+      if (form.currency && form.currency !== initialCurrency) {
+        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
+      }
       await roomsService.create(form)
       router.push('/rooms')
     } catch (err: any) {

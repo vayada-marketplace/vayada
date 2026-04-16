@@ -20,6 +20,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
   const [success, setSuccess] = useState('')
 
   const [form, setForm] = useState<RoomTypeUpdate>({})
+  const [initialCurrency, setInitialCurrency] = useState('EUR')
 
   useEffect(() => {
     roomsService.get(params.id)
@@ -64,7 +65,10 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
     bookingsService.getPaymentSettings()
       .then((res) => {
         const c = res.paymentSettings.defaultCurrency
-        if (c) setForm((prev) => ({ ...prev, currency: c }))
+        if (c) {
+          setInitialCurrency(c)
+          setForm((prev) => ({ ...prev, currency: c }))
+        }
       })
       .catch(console.error)
   }, [params.id])
@@ -83,6 +87,9 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
     setError('')
     setSuccess('')
     try {
+      if (form.currency && form.currency !== initialCurrency) {
+        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
+      }
       await roomsService.update(params.id, form)
       setSuccess('Room type updated successfully')
     } catch (err: any) {
