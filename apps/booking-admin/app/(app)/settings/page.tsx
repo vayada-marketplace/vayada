@@ -163,7 +163,7 @@ export default function SettingsPage() {
   const [connectEmail, setConnectEmail] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('userEmail') || '' : '')
   const [connectCountry, setConnectCountry] = useState('AT')
   const [creatingAccount, setCreatingAccount] = useState(false)
-  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit' | 'vayada'>('stripe')
   const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
   const [xenditAccountNumber, setXenditAccountNumber] = useState('')
   const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
@@ -1077,14 +1077,10 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Payments — Stripe Connect / Xendit */}
+              {/* Payments — Provider Selection */}
               {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-                <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
-                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
-                  {paymentProvider === 'xendit'
-                    ? 'Receive payouts from guest bookings directly to your Indonesian bank account via Xendit.'
-                    : 'Accept credit card payments from guests via Stripe. Payouts are sent automatically to your connected bank account.'}
-                </p>
+                <h2 className="text-sm font-semibold text-gray-900">Payment Provider</h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose how you want to accept online card payments from guests.</p>
 
                 {paymentError && (
                   <FeedbackAlert type="error" message={paymentError} className="mb-3" />
@@ -1093,7 +1089,69 @@ export default function SettingsPage() {
                   <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
                 )}
 
-                {paymentProvider === 'xendit' ? (
+                {/* Provider selector */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider('vayada')}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === 'vayada'
+                        ? 'border-primary-500 bg-primary-50/30'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'vayada' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {paymentProvider === 'vayada' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">Vayada Payment</span>
+                    <p className="text-[11px] text-gray-500 mt-1">We handle everything. No setup needed.</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider('stripe')}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === 'stripe'
+                        ? 'border-primary-500 bg-primary-50/30'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'stripe' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {paymentProvider === 'stripe' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">Stripe Connect</span>
+                    <p className="text-[11px] text-gray-500 mt-1">Your own Stripe account. Direct payouts.</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider('xendit')}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === 'xendit'
+                        ? 'border-primary-500 bg-primary-50/30'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'xendit' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
+                      {paymentProvider === 'xendit' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">Xendit</span>
+                    <p className="text-[11px] text-gray-500 mt-1">Indonesian bank payouts via Xendit.</p>
+                  </button>
+                </div>
+
+                {/* Provider-specific content */}
+                {paymentProvider === 'vayada' ? (
+                  <div className="space-y-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                      <p className="text-[13px] text-green-800 font-medium">No setup required</p>
+                      <p className="text-[12px] text-green-700 mt-1">
+                        Vayada processes card payments on your behalf. Guest payments are collected securely and payouts are sent to your bank account on file.
+                      </p>
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                    </div>
+                  </div>
+                ) : paymentProvider === 'xendit' ? (
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
@@ -1136,6 +1194,9 @@ export default function SettingsPage() {
                         </button>
                       </div>
                     )}
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
