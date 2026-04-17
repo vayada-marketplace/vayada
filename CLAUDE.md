@@ -1,4 +1,4 @@
-# Vayada Monorepo
+# vayada Monorepo
 
 ## Worktree Workflow
 
