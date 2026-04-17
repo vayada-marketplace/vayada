@@ -80,7 +80,7 @@ async def register(request: RegisterRequest):
     # Send welcome/registration confirmation email
     login_link = f"{settings.FRONTEND_URL}/login"
     welcome_html = create_welcome_email_html(user_name, login_link)
-    await send_email(user['email'], "Welcome to Vayada!", welcome_html)
+    await send_email(user['email'], "Welcome to vayada!", welcome_html)
 
     return RegisterResponse(
         id=str(user['id']),
