@@ -418,7 +418,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         provider = hotel_settings.get("payment_provider", "stripe") if hotel_settings else "stripe"
 
         if provider == "vayada":
-            # Vayada Payment: charge on platform Stripe account (no Connect)
+            # vayada Payment: charge on platform Stripe account (no Connect)
             amount_cents = int(math.ceil(total_amount * 100))
             try:
                 pi = await stripe_service.create_payment_intent(

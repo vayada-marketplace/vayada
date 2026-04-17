@@ -118,7 +118,7 @@ async def send_hotel_notification(hotel_email: str, booking: dict):
     """
     await _send_email(hotel_email, subject, _wrap_html(content))
 
-    # Also notify Vayada ops
+    # Also notify vayada ops
     if settings.VAYADA_OPS_EMAIL and settings.VAYADA_OPS_EMAIL != hotel_email:
         await _send_email(settings.VAYADA_OPS_EMAIL, subject, _wrap_html(content))
 
@@ -185,7 +185,7 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     """
     await _send_email(hotel_email, subject, _wrap_html(content))
 
-    # Also notify Vayada ops
+    # Also notify vayada ops
     ops_recipients = [
         settings.VAYADA_OPS_EMAIL,
         "p.paetzold@vayada.com",

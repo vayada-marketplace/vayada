@@ -351,7 +351,7 @@ async def get_activity(
 async def get_payouts(user_id: str = Depends(require_affiliate)):
     """Return completed payouts for this affiliate, grouped by the
     batch they were sent in (matched on completed_at + payment_method
-    + external_reference so a single Vayada transfer that covered
+    + external_reference so a single vayada transfer that covered
     several bookings shows up as one row)."""
     affiliates = await AffiliateRepository.list_by_user_id(user_id)
     if not affiliates:

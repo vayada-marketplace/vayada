@@ -1,5 +1,5 @@
 """
-Vayada-staff-only routes for tracking and recording manual affiliate
+vayada-staff-only routes for tracking and recording manual affiliate
 payouts. These endpoints are NOT scoped to a single hotel — they
 operate across the entire platform and require `users.is_superadmin`.
 """

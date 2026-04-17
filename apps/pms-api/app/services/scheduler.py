@@ -57,7 +57,7 @@ async def process_property_payouts():
             provider = settings.get("payment_provider", "stripe")
 
             if provider == "vayada":
-                # Vayada Payment: payouts are handled manually — skip auto-processing
+                # vayada Payment: payouts are handled manually — skip auto-processing
                 logger.info("Skipping auto-payout %s for hotel %s (vayada provider, manual payout)", payout_id, hotel_id)
                 continue
 

@@ -105,14 +105,14 @@ async def require_affiliate(
 async def require_super_admin(
     user_id: str = Depends(get_current_user_id),
 ) -> str:
-    """Vayada-staff-only endpoints. Gated by users.is_superadmin."""
+    """vayada-staff-only endpoints. Gated by users.is_superadmin."""
     user = await AuthDatabase.fetchrow(
         "SELECT is_superadmin FROM users WHERE id = $1", user_id
     )
     if not user or not user["is_superadmin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vayada staff access required",
+            detail="vayada staff access required",
         )
     return user_id
 
