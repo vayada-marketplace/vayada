@@ -8,11 +8,11 @@ import {
 } from '@/services/api/affiliatePayouts'
 
 const PAYMENT_METHOD_OPTIONS = [
-  { value: 'manual_bank',   label: 'Bank transfer (manual)' },
+  { value: 'manual_bank', label: 'Bank transfer (manual)' },
   { value: 'manual_paypal', label: 'PayPal (manual)' },
-  { value: 'wise',          label: 'Wise' },
-  { value: 'stripe',        label: 'Stripe transfer' },
-  { value: 'other',         label: 'Other' },
+  { value: 'wise', label: 'Wise' },
+  { value: 'stripe', label: 'Stripe transfer' },
+  { value: 'other', label: 'Other' },
 ]
 
 function formatAmount(amount: number, currency: string) {
@@ -66,7 +66,7 @@ export default function AffiliatePayoutsPage() {
       <div className="mb-5 md:mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Affiliate Payouts</h1>
         <p className="text-[13px] text-gray-500 mt-1">
-          Track what Vayada owes referrers across all hotels and record manual payouts
+          Track what vayada owes referrers across all hotels and record manual payouts
         </p>
       </div>
 
@@ -99,9 +99,8 @@ export default function AffiliatePayoutsPage() {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 text-[12px] font-medium rounded-full border transition-colors ${
-                filter === f ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-              }`}
+              className={`px-3 py-1.5 text-[12px] font-medium rounded-full border transition-colors ${filter === f ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
             >
               {f === 'outstanding' ? 'Outstanding only' : 'All affiliates'}
             </button>
@@ -317,9 +316,8 @@ function PayoutDetailDrawer({ affiliateId, onClose, onPaid }: { affiliateId: str
                           <td className="px-3 py-2 text-right text-gray-600">{formatAmount(l.bookingTotal, l.currency)}</td>
                           <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatAmount(l.commission, l.currency)}</td>
                           <td className="px-3 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${
-                              l.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : l.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                            }`}>{l.status}</span>
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${l.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : l.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}>{l.status}</span>
                           </td>
                         </tr>
                       ))}
