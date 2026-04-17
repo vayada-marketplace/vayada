@@ -734,6 +734,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
+                                  if (soldOut) return
                                   const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=nonrefundable${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
@@ -794,6 +795,7 @@ export default function HomePage() {
                               )}
                               <button
                                 onClick={() => {
+                                  if (soldOut) return
                                   const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=flexible${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
                                   router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
                                 }}
@@ -817,24 +819,29 @@ export default function HomePage() {
       </div>
 
       {/* Room Detail Modal */}
-      {detailModalIndex !== null && filteredRooms[detailModalIndex] && (
-        <RoomDetailModal
-          room={filteredRooms[detailModalIndex]}
-          nights={nights}
-          open={true}
-          onClose={() => setDetailModalIndex(null)}
-          currentIndex={detailModalIndex}
-          totalRooms={filteredRooms.length}
-          onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1)}
-          onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
-          onSelectRate={(rateType) => {
-            const room = filteredRooms[detailModalIndex]
-            const modalRequiredRooms = Math.ceil((committedAdults + committedChildren) / room.maxOccupancy)
-            const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
-            router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
-          }}
-        />
-      )}
+      {detailModalIndex !== null && filteredRooms[detailModalIndex] && (() => {
+        const modalRoom = filteredRooms[detailModalIndex]
+        const modalRequiredRooms = Math.ceil((committedAdults + committedChildren) / modalRoom.maxOccupancy)
+        const modalSoldOut = modalRoom.remainingRooms < modalRequiredRooms
+        return (
+          <RoomDetailModal
+            room={modalRoom}
+            nights={nights}
+            open={true}
+            onClose={() => setDetailModalIndex(null)}
+            currentIndex={detailModalIndex}
+            totalRooms={filteredRooms.length}
+            onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1)}
+            onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
+            soldOut={modalSoldOut}
+            onSelectRate={(rateType) => {
+              if (modalSoldOut) return
+              const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
+              router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+            }}
+          />
+        )
+      })()}
 
       <BookingFooter />
     </div>
