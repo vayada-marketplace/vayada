@@ -1,10 +1,10 @@
-import {themes as prismThemes} from 'prism-react-renderer';
-import type {Config} from '@docusaurus/types';
+import { themes as prismThemes } from 'prism-react-renderer';
+import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'Vayada Docs',
-  tagline: 'Internal documentation for the Vayada team',
+  title: 'vayada Docs',
+  tagline: 'Internal documentation for the vayada team',
   favicon: 'img/favicon.ico',
 
   future: {
@@ -46,7 +46,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'Vayada Docs',
+      title: 'vayada Docs',
       items: [
         {
           type: 'docSidebar',
@@ -72,20 +72,20 @@ const config: Config = {
         {
           title: 'Guides',
           items: [
-            {label: 'Getting Started', to: '/'},
-            {label: 'Custom Domains', to: '/domains/custom-domain-setup'},
+            { label: 'Getting Started', to: '/' },
+            { label: 'Custom Domains', to: '/domains/custom-domain-setup' },
           ],
         },
         {
           title: 'Platform',
           items: [
-            {label: 'Booking Admin', href: 'https://admin.booking.vayada.com'},
-            {label: 'PMS', href: 'https://pms.vayada.com'},
-            {label: 'Marketplace Admin', href: 'https://admin.vayada.com'},
+            { label: 'Booking Admin', href: 'https://admin.booking.vayada.com' },
+            { label: 'PMS', href: 'https://pms.vayada.com' },
+            { label: 'Marketplace Admin', href: 'https://admin.vayada.com' },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Vayada. Internal use only.`,
+      copyright: `Copyright © ${new Date().getFullYear()} vayada. Internal use only.`,
     },
     prism: {
       theme: prismThemes.github,

@@ -101,7 +101,7 @@ resource "aws_acm_certificate_validation" "docs" {
 
 resource "aws_cloudfront_origin_access_control" "docs" {
   name                              = "vayada-docs-oac"
-  description                       = "OAC for Vayada docs S3 bucket"
+  description                       = "OAC for vayada docs S3 bucket"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"

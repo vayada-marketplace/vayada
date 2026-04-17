@@ -10,8 +10,8 @@ Hotels can use their own domain (e.g. `book.hotelname.com`) instead of the defau
 
 When a hotel wants to use a custom domain for their booking engine, there are two things that need to happen:
 
-1. **The hotel** adds a DNS record pointing their domain to Vayada
-2. **We (Vayada)** configure our system to recognize and serve that domain with SSL
+1. **The hotel** adds a DNS record pointing their domain to vayada
+2. **We (vayada)** configure our system to recognize and serve that domain with SSL
 
 ## Step-by-Step
 

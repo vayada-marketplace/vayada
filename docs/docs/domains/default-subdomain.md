@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Default Subdomain
 
-Every hotel on Vayada automatically gets a booking page at:
+Every hotel on vayada automatically gets a booking page at:
 
 ```
 https://<hotel-slug>.booking.vayada.com

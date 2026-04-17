@@ -3,9 +3,9 @@ sidebar_position: 1
 slug: /
 ---
 
-# Welcome to Vayada Docs
+# Welcome to vayada Docs
 
-This is the internal documentation for the Vayada team. Here you'll find step-by-step guides for common tasks like setting up hotels, configuring domains, and managing the platform.
+This is the internal documentation for the vayada team. Here you'll find step-by-step guides for common tasks like setting up hotels, configuring domains, and managing the platform.
 
 ## Quick Links
 
@@ -23,5 +23,5 @@ This is the internal documentation for the Vayada team. Here you'll find step-by
 |------|-----|-------------|
 | Booking Admin | [admin.booking.vayada.com](https://admin.booking.vayada.com) | Hotels (manage their booking engine) |
 | PMS | [pms.vayada.com](https://pms.vayada.com) | Hotels (manage rooms, bookings, calendar) |
-| Marketplace Admin | [admin.vayada.com](https://admin.vayada.com) | Vayada team (manage users, hotels, collabs) |
+| Marketplace Admin | [admin.vayada.com](https://admin.vayada.com) | vayada team (manage users, hotels, collabs) |
 | Hotel Booking Page | `hotelslug.booking.vayada.com` | Guests (book rooms) |

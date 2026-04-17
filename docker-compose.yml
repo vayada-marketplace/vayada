@@ -1,5 +1,5 @@
 ###############################################################################
-# Vayada — All Services
+# vayada — All Services
 #
 # Starts every service: marketplace (3) + booking engine (3) + PMS (2) + shared infra.
 #
@@ -43,7 +43,7 @@ services:
     volumes:
       - marketplace_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vayada_user -d vayada_db"]
+      test: [ "CMD-SHELL", "pg_isready -U vayada_user -d vayada_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,7 +62,7 @@ services:
     volumes:
       - booking_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vayada_booking_user -d vayada_booking_db"]
+      test: [ "CMD-SHELL", "pg_isready -U vayada_booking_user -d vayada_booking_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -81,7 +81,7 @@ services:
     volumes:
       - auth_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vayada_auth_user -d vayada_auth_db"]
+      test: [ "CMD-SHELL", "pg_isready -U vayada_auth_user -d vayada_auth_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -100,7 +100,7 @@ services:
     volumes:
       - pms_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vayada_pms_user -d vayada_pms_db"]
+      test: [ "CMD-SHELL", "pg_isready -U vayada_pms_user -d vayada_pms_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -143,7 +143,7 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -157,12 +157,7 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin;
-      mc mb --ignore-existing local/vayada-uploads;
-      mc anonymous set download local/vayada-uploads;
-      exit 0;
-      "
+      /bin/sh -c " mc alias set local http://minio:9000 minioadmin minioadmin; mc mb --ignore-existing local/vayada-uploads; mc anonymous set download local/vayada-uploads; exit 0; "
     networks:
       - vayada-network
 
@@ -419,6 +414,7 @@ volumes:
   auth_postgres_data:
   pms_postgres_data:
   minio_data:
+
 
 networks:
   vayada-network:

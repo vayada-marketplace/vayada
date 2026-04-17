@@ -4,14 +4,14 @@ sidebar_position: 3
 
 # Billing
 
-Each hotel on the Vayada booking engine is on a billing plan that determines how Vayada earns revenue from their bookings.
+Each hotel on the vayada booking engine is on a billing plan that determines how vayada earns revenue from their bookings.
 
 ## Billing plans
 
 There are two types of billing plans:
 
 ### Commission-based
-- Vayada takes a **percentage** of each booking
+- vayada takes a **percentage** of each booking
 - Example: 5% commission on every booking made through the booking engine
 - Best for: hotels that want to start with no upfront cost
 
@@ -36,4 +36,4 @@ Hotels configure their payout details (IBAN) in:
 
 - **Booking Admin** > **Settings** > **Billing** > **Payout Details**
 
-This is where payments from guest bookings are sent after Vayada's fee is deducted.
+This is where payments from guest bookings are sent after vayada's fee is deducted.

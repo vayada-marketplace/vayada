@@ -1,6 +1,6 @@
-# Vayada
+# vayada
 
-Vayada is a hospitality platform that connects travel creators and influencers with hotels for collaborations, and provides hotels with a direct booking engine and property management system. The platform is composed of three core products — a **Creator Marketplace**, a **Booking Engine**, and a **Property Management System (PMS)** — each with dedicated customer-facing frontends, admin dashboards, and backend APIs, all sharing a centralized authentication system.
+vayada is a hospitality platform that connects travel creators and influencers with hotels for collaborations, and provides hotels with a direct booking engine and property management system. The platform is composed of three core products — a **Creator Marketplace**, a **Booking Engine**, and a **Property Management System (PMS)** — each with dedicated customer-facing frontends, admin dashboards, and backend APIs, all sharing a centralized authentication system.
 
 ---
 
@@ -33,7 +33,7 @@ Vayada is a hospitality platform that connects travel creators and influencers w
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                              Vayada Platform                                │
+│                              vayada Platform                                │
 │                                                                              │
 │  ┌──────────────────────┐  ┌──────────────────────┐  ┌───────────────────┐  │
 │  │  Creator Marketplace │  │    Booking Engine     │  │        PMS        │  │
@@ -297,7 +297,7 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 | Service                       | Port  | Description                          |
 |-------------------------------|-------|--------------------------------------|
 | Marketplace Frontend          | 3000  | Public marketplace site              |
-| Marketplace Admin             | 3001  | Vayada admin dashboard               |
+| Marketplace Admin             | 3001  | vayada admin dashboard               |
 | Booking Frontend              | 3002  | Guest-facing booking site            |
 | Booking Admin                 | 3003  | Hotel admin dashboard                |
 | PMS Frontend                  | 3004  | Hotel property management            |
@@ -409,7 +409,7 @@ After running `python scripts/seed_all.py`:
 
 | Email              | Password    | Type    | Notes                          |
 |--------------------|-------------|---------|--------------------------------|
-| admin@vayada.com   | Vayada123   | admin   | Full admin access              |
+| admin@vayada.com   | vayada123   | admin   | Full admin access              |
 | creator1@mock.com  | Test1234    | creator | Verified, with platforms       |
 | creator2@mock.com  | Test1234    | creator | Verified                       |
 | creator3@mock.com  | Test1234    | creator | Pending                        |
