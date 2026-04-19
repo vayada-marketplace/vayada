@@ -76,6 +76,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         non_refundable_discount=room.get("non_refundable_discount", 10),
         last_minute_discount=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("last_minute_discount"))),
         minimum_advance_days=room.get("minimum_advance_days") or 0,
+        rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
     )

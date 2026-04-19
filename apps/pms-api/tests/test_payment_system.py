@@ -130,6 +130,126 @@ class TestCreateBookingRequest:
         assert body["clientSecret"] is None
         assert body["booking"]["status"] == "pending"
 
+    async def test_booking_rejected_when_method_not_allowed_for_rate(self, client, cleanup_database):
+        """Rate-level rate_payment_methods list must gate booking creation."""
+        import json as _json
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        # Flexible rate allows only card + bank_transfer — NOT pay_at_property
+        await Database.execute(
+            "UPDATE room_types SET rate_payment_methods = $1::jsonb WHERE id = $2",
+            _json.dumps({"flexible": ["card", "bank_transfer"]}),
+            str(room["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Alice",
+                "guestLastName": "Tester",
+                "guestEmail": "alice@test.com",
+                "guestPhone": "+1234567890",
+                "checkIn": "2026-09-01",
+                "checkOut": "2026-09-04",
+                "adults": 2,
+                "paymentMethod": "pay_at_property",
+                "rateType": "flexible",
+            },
+        )
+        assert resp.status_code == 400
+        assert "not allowed" in resp.json()["detail"].lower()
+
+    async def test_booking_allowed_when_method_in_rate_list(self, client, cleanup_database):
+        """An allowed method for the selected rate should go through."""
+        import json as _json
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute(
+            "UPDATE room_types SET rate_payment_methods = $1::jsonb WHERE id = $2",
+            _json.dumps({"flexible": ["card", "pay_at_property"]}),
+            str(room["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Bob",
+                "guestLastName": "Tester",
+                "guestEmail": "bob@test.com",
+                "guestPhone": "+9876543210",
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-12",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+                "rateType": "flexible",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["paymentMethod"] == "pay_at_property"
+
+    async def test_booking_null_rate_methods_uses_hotel_defaults(self, client, cleanup_database):
+        """When rate_payment_methods is NULL, hotel-level flags govern — legacy behavior."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        # No rate_payment_methods set — should fall through to hotel defaults.
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Cat",
+                "guestLastName": "Tester",
+                "guestEmail": "cat@test.com",
+                "guestPhone": "+111",
+                "checkIn": "2026-09-20",
+                "checkOut": "2026-09-22",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 200
+
+    async def test_card_booking_rejected_when_stripe_not_onboarded(self, client, cleanup_database):
+        """Card booking must fail loudly (not silently fall back to pay-at-property)
+        when the hotel hasn't finished Stripe Connect onboarding.
+        """
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        # Pay-at-property enabled AND online card toggled on, but Connect
+        # onboarding never finished — the old code would silently switch to
+        # pay-at-property, which is exactly Bug 1.
+        await create_test_payment_settings(
+            str(hotel["id"]),
+            pay_at_property_enabled=True,
+            stripe_connect_account_id=None,
+            stripe_connect_onboarded=False,
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Alice",
+                "guestLastName": "Tester",
+                "guestEmail": "alice@test.com",
+                "guestPhone": "+1234567890",
+                "checkIn": "2026-09-01",
+                "checkOut": "2026-09-04",
+                "adults": 2,
+                "paymentMethod": "card",
+            },
+        )
+        assert resp.status_code == 400
+
     async def test_pay_at_property_rejected_when_disabled(self, client, hotel_with_rooms):
         """Pay-at-property fails if not enabled for the hotel."""
         hotel = hotel_with_rooms["hotel"]
@@ -510,6 +630,57 @@ class TestPaymentSettingsPublic:
     async def test_payment_settings_unknown_hotel(self, client, init_database):
         resp = await client.get("/api/hotels/nonexistent-slug/payment-settings")
         assert resp.status_code == 404
+
+    async def test_online_card_gated_when_stripe_not_onboarded(self, client, cleanup_database):
+        """onlineCardPayment must be false if the hotel turned the flag on
+        but never finished Stripe Connect onboarding — otherwise the guest
+        sees a card form that can't actually charge.
+        """
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await Database.execute(
+            """INSERT INTO hotel_payment_settings
+                 (hotel_id, online_card_payment, payment_provider,
+                  stripe_connect_account_id, stripe_connect_onboarded)
+               VALUES ($1, TRUE, 'stripe', NULL, FALSE)""",
+            str(hotel["id"]),
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
+        assert resp.status_code == 200
+        assert resp.json()["onlineCardPayment"] is False
+
+    async def test_online_card_exposed_when_stripe_onboarded(self, client, cleanup_database):
+        """onlineCardPayment is true when Stripe Connect onboarding finished."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await Database.execute(
+            """INSERT INTO hotel_payment_settings
+                 (hotel_id, online_card_payment, payment_provider,
+                  stripe_connect_account_id, stripe_connect_onboarded)
+               VALUES ($1, TRUE, 'stripe', 'acct_test_onboarded', TRUE)""",
+            str(hotel["id"]),
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
+        assert resp.status_code == 200
+        assert resp.json()["onlineCardPayment"] is True
+
+    async def test_online_card_exposed_for_vayada_provider(self, client, cleanup_database):
+        """vayada provider charges on the platform account — no Connect check needed."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await Database.execute(
+            """INSERT INTO hotel_payment_settings
+                 (hotel_id, online_card_payment, payment_provider,
+                  stripe_connect_account_id, stripe_connect_onboarded)
+               VALUES ($1, TRUE, 'vayada', NULL, FALSE)""",
+            str(hotel["id"]),
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
+        assert resp.status_code == 200
+        assert resp.json()["onlineCardPayment"] is True
 
 
 # ── Payment Settings (Admin) ─────────────────────────────────────

@@ -153,6 +153,28 @@ async def get_payment_settings(slug: str):
         online_card = settings.get("online_card_payment", False) if settings else False
         bank_transfer = settings.get("bank_transfer", False) if settings else False
 
+    # Gate onlineCardPayment on the PMS side actually being able to charge.
+    # The admin toggle in booking_hotels only says "the hotel *wants* online
+    # payments" — it doesn't know whether Stripe Connect onboarding finished.
+    # If we surface the flag without this check, guests see a card form but
+    # booking fails (or — worse — silently downgrades to pay-at-property).
+    # provider='stripe' → requires completed Stripe Connect onboarding
+    # provider='vayada' → charges on platform Stripe account, always usable
+    if online_card:
+        provider = settings.get("payment_provider", "stripe") if settings else "stripe"
+        if provider == "vayada":
+            pass  # platform account always works
+        elif provider == "stripe":
+            has_connect = bool(
+                settings
+                and settings.get("stripe_connect_account_id")
+                and settings.get("stripe_connect_onboarded")
+            )
+            if not has_connect:
+                online_card = False
+        else:
+            online_card = False
+
     result = {
         "payAtPropertyEnabled": pay_at_property,
         "onlineCardPayment": online_card,

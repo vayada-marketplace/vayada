@@ -137,6 +137,7 @@ class RoomTypeCreate(BaseModel):
     non_refundable_discount: int = 10
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
+    rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
     @field_validator("size")
     @classmethod
@@ -192,6 +193,7 @@ class RoomTypeUpdate(BaseModel):
     non_refundable_discount: Optional[int] = None
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: Optional[int] = None
+    rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
     @field_validator("size")
     @classmethod
@@ -243,6 +245,7 @@ class RoomTypeResponse(BaseModel):
     features: List[str]
     benefits: List[str] = []
     flexible_rate_enabled: bool = True
+    rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -280,5 +283,6 @@ class RoomTypeAdminResponse(BaseModel):
     non_refundable_discount: int = 10
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
+    rate_payment_methods: Optional[Dict[str, List[str]]] = None
     created_at: str
     updated_at: str
