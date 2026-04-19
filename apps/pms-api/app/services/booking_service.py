@@ -183,9 +183,19 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                 f"This room requires booking at least {min_advance} days in advance"
             )
 
-    # Resolve rate per night across the full stay
-    if data.rate_type == "nonrefundable" and data.payment_method == "pay_at_property":
-        raise ValueError("Non-refundable rate requires card payment")
+    # Validate the selected payment method is allowed for this rate. If
+    # the room has a `rate_payment_methods` override, enforce it; otherwise
+    # fall through to the hotel-level enabled methods (checked further below).
+    rate_methods_raw = room.get("rate_payment_methods")
+    if rate_methods_raw:
+        import json as _j
+        rate_methods = _j.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
+        allowed = rate_methods.get(data.rate_type) if isinstance(rate_methods, dict) else None
+        if allowed is not None and data.payment_method not in allowed:
+            raise ValueError(
+                f"Payment method '{data.payment_method}' is not allowed for the "
+                f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
+            )
 
     room_total = 0.0
     for i in range(nights):
@@ -469,29 +479,13 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                     payment_method="card",
                     stripe_pi_id=pi["id"],
                 )
-            elif hotel_settings and hotel_settings.get("pay_at_property_enabled"):
-                # Fall back to pay_at_property if the hotel supports it. We must
-                # mirror the pay_at_property branch below — create the payment
-                # row with the right method and fire the host notification —
-                # otherwise the booking lands in the DB but the hotel never
-                # learns about it.
-                payment_method = "pay_at_property"
-                await Database.execute(
-                    "UPDATE bookings SET payment_method = 'pay_at_property', payment_status = 'pay_at_property' WHERE id = $1",
-                    booking_id,
-                )
-                await PaymentRepository.create(
-                    booking_id=booking_id,
-                    amount=total_amount,
-                    currency=room["currency"],
-                    payment_method="pay_at_property",
-                )
-                booking = await BookingRepository.get_by_id(booking_id)
-                asyncio.create_task(
-                    send_booking_request_notification(hotel["contact_email"], booking)
-                )
             else:
-                raise ValueError("This hotel has not set up online payments yet. Please contact the hotel.")
+                # Don't silently downgrade to pay-at-property: the guest picked
+                # "card" specifically, so surfacing a different outcome silently
+                # is a trust/UX bug. If the /payment-settings gating is doing
+                # its job, this branch is unreachable from the UI.
+                await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+                raise ValueError("This hotel has not finished setting up online payments. Please contact the hotel or choose another payment method.")
 
     elif payment_method == "xendit":
         # Create Xendit Invoice — supports QRIS, e-wallets, VA, cards

@@ -1,7 +1,9 @@
 """
 Tests for public /api/hotels/{slug}/rooms endpoint.
 """
+import json
 import pytest
+from app.database import Database
 from tests.conftest import (
     create_test_user,
     create_test_hotel,
@@ -136,3 +138,29 @@ class TestPublicRooms:
         assert len(rooms) == 1
         # non_refundable_enabled defaults to False, so NR rate should be None
         assert rooms[0]["nonRefundableRate"] is None
+
+    async def test_rate_payment_methods_exposed(self, client, cleanup_database):
+        """rate_payment_methods JSONB column round-trips to the guest response."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        methods = {
+            "flexible": ["card", "pay_at_property", "bank_transfer"],
+            "nonrefundable": ["card", "bank_transfer"],
+        }
+        await Database.execute(
+            "UPDATE room_types SET rate_payment_methods = $1::jsonb WHERE id = $2",
+            json.dumps(methods), str(room["id"]),
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert rooms[0]["ratePaymentMethods"] == methods
+
+    async def test_rate_payment_methods_null_default(self, client, hotel_with_rooms):
+        """Rooms without explicit per-rate methods return null (hotel-level fallback)."""
+        hotel = hotel_with_rooms["hotel"]
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+        assert resp.status_code == 200
+        assert resp.json()[0]["ratePaymentMethods"] is None

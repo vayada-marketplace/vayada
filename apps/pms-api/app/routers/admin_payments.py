@@ -238,15 +238,24 @@ async def update_payment_settings(
     }
     booking_updates = {k: v for k, v in updates.items() if k in sync_fields}
     if booking_updates and app_settings.BOOKING_ENGINE_DATABASE_URL:
+        # Match on hotel id (unified across PMS and booking_db — see
+        # memory/project_hotel_data_ownership.md) rather than user_id, which
+        # would clobber every hotel owned by a multi-hotel operator.
+        # Surface failures: silent drift here is the root cause of guests
+        # seeing the wrong payment options at checkout.
         try:
             sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(booking_updates))
             vals = list(booking_updates.values())
             await BookingEngineDatabase.execute(
-                f"UPDATE booking_hotels SET {sets} WHERE user_id = $1",
-                user_id, *vals,
+                f"UPDATE booking_hotels SET {sets} WHERE id = $1",
+                hotel_id, *vals,
             )
         except Exception as e:
-            logger.warning("Failed to sync payment methods to booking engine: %s", e)
+            logger.error("Failed to sync payment methods to booking engine: %s", e)
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to sync payment methods to booking engine. Please retry.",
+            )
 
     return {"status": "updated"}
 
