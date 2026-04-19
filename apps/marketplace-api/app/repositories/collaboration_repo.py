@@ -55,12 +55,26 @@ class CollaborationRepository:
         *,
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        """Fetch listing with hotel name."""
+        """Fetch listing with hotel name, creator requirements, and free stay nights."""
         query = """
             SELECT hl.id, hl.hotel_profile_id, hl.name, hl.location, hl.status,
-                   hp.name as hotel_name
+                   hp.name as hotel_name,
+                   lcr.min_followers as req_min_followers,
+                   (
+                       SELECT free_stay_min_nights
+                       FROM listing_collaboration_offerings
+                       WHERE listing_id = hl.id AND collaboration_type = 'Free Stay'
+                       LIMIT 1
+                   ) as offering_free_stay_min_nights,
+                   (
+                       SELECT free_stay_max_nights
+                       FROM listing_collaboration_offerings
+                       WHERE listing_id = hl.id AND collaboration_type = 'Free Stay'
+                       LIMIT 1
+                   ) as offering_free_stay_max_nights
             FROM hotel_listings hl
             JOIN hotel_profiles hp ON hp.id = hl.hotel_profile_id
+            LEFT JOIN listing_creator_requirements lcr ON lcr.listing_id = hl.id
             WHERE hl.id = $1
         """
         if conn:
