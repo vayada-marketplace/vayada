@@ -6,6 +6,8 @@ import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react
 import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
 import { usersService } from '@/services/api'
 
+const BOOKING_URL_TEMPLATE = process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || 'https://{slug}.booking.vayada.com'
+
 interface HotelRow {
   id: string
   name: string
@@ -210,7 +212,7 @@ export default function HotelsPage() {
                             <>
                               {hotel.slug && (
                                 <a
-                                  href={`https://${hotel.slug}.booking.vayada.com`}
+                                  href={BOOKING_URL_TEMPLATE.replace('{slug}', hotel.slug)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
