@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import date
 from typing import List
 
 import asyncpg
@@ -10,9 +11,64 @@ from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
 from app.models.setup import SetupStatusResponse, SetupPrefillData
 from app.models.utils import parse_json, slugify
-from app.database import MarketplaceDatabase
+from app.database import Database, MarketplaceDatabase, PmsDatabase
 from app.config import settings
 from app.services import cloudflare_service
+
+
+def _first_of_next_month(today: date) -> date:
+    if today.month == 12:
+        return date(today.year + 1, 1, 1)
+    return date(today.year, today.month + 1, 1)
+
+
+async def _count_active_rooms(hotel_id: str) -> int:
+    """Physical-inventory room count from pms_db, filtered to active room types."""
+    if not settings.PMS_DATABASE_URL:
+        return 0
+    try:
+        count = await PmsDatabase.fetchval(
+            """
+            SELECT COUNT(*)
+              FROM rooms r
+              JOIN room_types rt ON rt.id = r.room_type_id
+             WHERE r.hotel_id = $1
+               AND rt.is_active = TRUE
+            """,
+            hotel_id,
+        )
+        return int(count or 0)
+    except Exception as exc:
+        logger.warning("Failed to count active rooms: %s", exc)
+        return 0
+
+
+def compute_fixed_plan_projected_fee(
+    base: float, rooms_included: int, per_extra: float, room_count: int
+) -> float:
+    extras = max(0, room_count - rooms_included)
+    return round(base + extras * per_extra, 2)
+
+
+async def _apply_pending_plan_switch_if_due(hotel_id: str) -> None:
+    """Flip billing_active_plan in place when a pending switch's effective date has passed.
+
+    Idempotent — the WHERE clause skips rows without a due pending switch.
+    Called on read paths so a missed cron or unscheduled day still lands on the right plan.
+    """
+    await Database.execute(
+        """
+        UPDATE booking_hotels
+           SET billing_active_plan = billing_pending_switch,
+               billing_pending_switch = NULL,
+               billing_switch_effective_date = NULL
+         WHERE id = $1
+           AND billing_pending_switch IS NOT NULL
+           AND billing_switch_effective_date IS NOT NULL
+           AND billing_switch_effective_date <= CURRENT_DATE
+        """,
+        hotel_id,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +183,20 @@ _PROPERTY_FIELD_MAP = {
 }
 
 
-def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
+async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
+    hotel_id = str(hotel.get('id')) if hotel.get('id') else None
+    if hotel_id:
+        room_count = await _count_active_rooms(hotel_id)
+    else:
+        room_count = 0
+    fixed_base = float(hotel.get('fixed_base_fee') or 30)
+    rooms_included = int(hotel.get('fixed_rooms_included') or 1)
+    per_extra = float(hotel.get('fixed_per_extra_room_fee') or 5)
+    projected_fee = compute_fixed_plan_projected_fee(
+        fixed_base, rooms_included, per_extra, room_count
+    )
     return PropertySettingsResponse(
-        id=str(hotel.get('id')) if hotel.get('id') else None,
+        id=hotel_id,
         slug=hotel.get('slug') or '',
         property_name=hotel.get('name') or '',
         reservation_email=hotel.get('contact_email') or '',
@@ -169,6 +236,16 @@ def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         billing_commission_rate=float(hotel.get('billing_commission_rate') or 5),
         billing_fixed_fee=float(hotel.get('billing_fixed_fee') or 49),
         billing_pending_switch=hotel.get('billing_pending_switch'),
+        billing_switch_effective_date=(
+            hotel['billing_switch_effective_date'].isoformat()
+            if hotel.get('billing_switch_effective_date')
+            else None
+        ),
+        booking_engine_fee_pct=float(hotel.get('booking_engine_fee_pct') or 2),
+        channel_manager_fee_pct=float(hotel.get('channel_manager_fee_pct') or 3),
+        affiliate_platform_fee_pct=float(hotel.get('affiliate_platform_fee_pct') or 2),
+        active_room_count=room_count,
+        fixed_plan_projected_monthly_fee=projected_fee,
         payout_account_holder=hotel.get('payout_account_holder') or '',
         payout_account_type=hotel.get('payout_account_type') or 'iban',
         payout_iban=hotel.get('payout_iban') or '',
@@ -195,6 +272,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     instagram='', facebook='', tiktok='', youtube='',
     billing_active_plan='commission', billing_commission_rate=5,
     billing_fixed_fee=49, billing_pending_switch=None,
+    billing_switch_effective_date=None,
     payout_account_holder='', payout_account_type='iban', payout_iban='', payout_account_number='',
     payout_bank_name='', payout_swift='',
 )
@@ -207,8 +285,9 @@ async def get_property_settings(
 ):
     if not hotel:
         return _DEFAULT_PROPERTY_SETTINGS
+    await _apply_pending_plan_switch_if_due(str(hotel["id"]))
     full_hotel = await BookingHotelRepository.get_by_id(str(hotel["id"]))
-    return _hotel_to_property_settings(full_hotel)
+    return await _hotel_to_property_settings(full_hotel)
 
 
 async def _create_hotel_from_settings(
@@ -290,7 +369,7 @@ async def create_hotel(
     """
     try:
         result = await _create_hotel_from_settings(data, user_id)
-        return _hotel_to_property_settings(result)
+        return await _hotel_to_property_settings(result)
     except HTTPException:
         raise
     except Exception as e:
@@ -315,6 +394,17 @@ async def update_property_settings(
                 if value is not None:
                     updates[db_col] = value
 
+            # Derive billing_switch_effective_date from the pending switch:
+            #   setting a plan → schedule for the 1st of next month
+            #   clearing it (empty string) → clear the effective date too
+            if "billing_pending_switch" in updates:
+                pending = updates["billing_pending_switch"]
+                if pending:
+                    updates["billing_switch_effective_date"] = _first_of_next_month(date.today())
+                else:
+                    updates["billing_pending_switch"] = None
+                    updates["billing_switch_effective_date"] = None
+
             if updates:
                 result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
             else:
@@ -326,7 +416,7 @@ async def update_property_settings(
             # POST /admin/hotels endpoint above.
             result = await _create_hotel_from_settings(data, user_id)
 
-        return _hotel_to_property_settings(result)
+        return await _hotel_to_property_settings(result)
     except HTTPException:
         raise
     except Exception as e:

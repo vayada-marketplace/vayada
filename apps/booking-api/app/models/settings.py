@@ -47,6 +47,14 @@ class PropertySettingsResponse(BaseModel):
     billing_commission_rate: float
     billing_fixed_fee: float
     billing_pending_switch: Optional[str]
+    billing_switch_effective_date: Optional[str] = None
+    # Per-source platform fees (read-only for the hotel; Vayada admin owns these).
+    booking_engine_fee_pct: float = 2.0
+    channel_manager_fee_pct: float = 3.0
+    affiliate_platform_fee_pct: float = 2.0
+    # Live room count + projected Fixed-plan fee at that count.
+    active_room_count: int = 0
+    fixed_plan_projected_monthly_fee: float = 0.0
     payout_account_holder: str
     payout_account_type: str
     payout_iban: str

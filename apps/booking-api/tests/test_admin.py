@@ -184,6 +184,81 @@ class TestPropertySettings:
         assert resp.json()["default_currency"] == "JPY"
 
 
+class TestFixedPlanProjection:
+    """compute_fixed_plan_projected_fee: €30 base + €5 per extra room (1 included)."""
+
+    def test_zero_rooms(self):
+        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        assert compute_fixed_plan_projected_fee(30, 1, 5, 0) == 30.0
+
+    def test_included_count_only(self):
+        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        # 1 room included → 1 active room → no extras → base only
+        assert compute_fixed_plan_projected_fee(30, 1, 5, 1) == 30.0
+
+    def test_scales_with_extras(self):
+        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        # 8 rooms, 1 included → 7 extras × €5 = €35 + €30 base
+        assert compute_fixed_plan_projected_fee(30, 1, 5, 8) == 65.0
+
+    def test_no_negative_on_shrink(self):
+        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        # 2 included but 0 active → clamp to base, no refund
+        assert compute_fixed_plan_projected_fee(30, 2, 5, 0) == 30.0
+
+    def test_custom_rates(self):
+        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        # Larger hotel on a special deal
+        assert compute_fixed_plan_projected_fee(100, 5, 3, 20) == 145.0
+
+
+class TestBillingPlanSwitch:
+    """Setting billing_pending_switch must auto-compute billing_switch_effective_date."""
+
+    async def test_setting_pending_switch_auto_schedules_first_of_next_month(
+        self, client, hotel_with_property
+    ):
+        from datetime import date
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={"billing_pending_switch": "fixed"},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["billing_pending_switch"] == "fixed"
+
+        effective = date.fromisoformat(body["billing_switch_effective_date"])
+        today = date.today()
+        expected_year = today.year + (1 if today.month == 12 else 0)
+        expected_month = 1 if today.month == 12 else today.month + 1
+        assert effective == date(expected_year, expected_month, 1)
+
+    async def test_clearing_pending_switch_clears_effective_date(
+        self, client, hotel_with_property
+    ):
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        await client.patch(
+            "/admin/settings/property",
+            json={"billing_pending_switch": "fixed"},
+            headers=headers,
+        )
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={"billing_pending_switch": ""},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["billing_pending_switch"] is None
+        assert body["billing_switch_effective_date"] is None
+
+
 class TestDesignSettings:
     async def test_get_defaults_no_hotel(self, client, hotel_user):
         resp = await client.get(
