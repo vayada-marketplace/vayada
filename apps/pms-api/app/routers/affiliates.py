@@ -34,7 +34,7 @@ def _affiliate_to_response(a: dict) -> AffiliateResponse:
         bank_swift_bic=a.get("bank_swift_bic", "") or "",
         bank_name=a.get("bank_name", "") or "",
         bank_country=a.get("bank_country", "") or "",
-        commission_pct=float(a["commission_pct"]),
+        commission_pct=float(a["effective_commission_pct"]),
         status=a["status"],
         created_at=a["created_at"].isoformat(),
     )

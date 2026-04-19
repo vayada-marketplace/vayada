@@ -102,7 +102,7 @@ class ProfileUpdate(BaseModel):
 
 def _build_property_stats(a: dict) -> PropertyStats:
     revenue = float(a.get("total_revenue", 0) or 0)
-    commission_pct = float(a["commission_pct"])
+    commission_pct = float(a["effective_commission_pct"])
     booking_count = int(a.get("booking_count", 0) or 0)
     click_count = int(a.get("click_count", 0) or 0)
     conversion_rate = round(booking_count / click_count * 100, 2) if click_count > 0 else 0.0

@@ -797,71 +797,108 @@ class TestPayoutsAdmin:
 
 
 class TestPayoutService:
-    """Unit tests for calculate_split."""
+    """Unit tests covering the plan × channel × affiliate fee matrix."""
 
-    async def test_split_percentage_no_affiliate(self, init_database):
+    def _call(self, **overrides):
         from app.services.payout_service import calculate_split
 
-        result = calculate_split(
+        defaults = dict(
             total_amount=1000.0,
-            fee_type="percentage",
-            fee_value=8.0,
-            fee_with_affiliate=2.0,
+            plan="commission",
+            channel="direct",
+            booking_engine_fee_pct=2.0,
+            channel_manager_fee_pct=3.0,
+            affiliate_platform_fee_pct=2.0,
             has_affiliate=False,
-            affiliate_commission_pct=0.0,
+            effective_affiliate_commission_pct=0.0,
         )
-        assert result["platform_fee"] == 80.0  # 8% of 1000
-        assert result["affiliate_commission"] == 0.0
-        assert result["property_payout"] == 920.0  # 1000 - 80
+        defaults.update(overrides)
+        return calculate_split(defaults.pop("total_amount"), **defaults)
 
-    async def test_split_percentage_with_affiliate(self, init_database):
-        from app.services.payout_service import calculate_split
+    async def test_fixed_plan_direct_no_affiliate(self, init_database):
+        result = self._call(plan="fixed")
+        assert result == {
+            "platform_fee": 0.0,
+            "affiliate_commission": 0.0,
+            "property_payout": 1000.0,
+        }
 
-        result = calculate_split(
-            total_amount=1000.0,
-            fee_type="percentage",
-            fee_value=8.0,
-            fee_with_affiliate=2.0,
+    async def test_fixed_plan_ota_no_affiliate(self, init_database):
+        result = self._call(plan="fixed", channel="booking_com")
+        assert result == {
+            "platform_fee": 0.0,
+            "affiliate_commission": 0.0,
+            "property_payout": 1000.0,
+        }
+
+    async def test_fixed_plan_direct_with_affiliate(self, init_database):
+        result = self._call(
+            plan="fixed",
             has_affiliate=True,
-            affiliate_commission_pct=5.0,
+            effective_affiliate_commission_pct=5.0,
         )
-        # Total fee always 8% = 80. Affiliate gets 5% = 50, platform gets 80 - 50 = 30
-        assert result["platform_fee"] == 30.0
-        assert result["affiliate_commission"] == 50.0
-        assert result["property_payout"] == 920.0  # 1000 - 80
+        # 2% affiliate platform fee + 5% affiliate commission
+        assert result == {
+            "platform_fee": 20.0,
+            "affiliate_commission": 50.0,
+            "property_payout": 930.0,
+        }
 
-    async def test_split_flat_fee(self, init_database):
-        from app.services.payout_service import calculate_split
+    async def test_commission_plan_direct_no_affiliate(self, init_database):
+        result = self._call(plan="commission")
+        assert result == {
+            "platform_fee": 20.0,   # 2% BE fee
+            "affiliate_commission": 0.0,
+            "property_payout": 980.0,
+        }
 
-        result = calculate_split(
-            total_amount=500.0,
-            fee_type="flat",
-            fee_value=25.0,
-            fee_with_affiliate=10.0,
-            has_affiliate=False,
-            affiliate_commission_pct=0.0,
-        )
-        assert result["platform_fee"] == 25.0
-        assert result["property_payout"] == 475.0  # 500 - 25
+    async def test_commission_plan_ota_no_affiliate(self, init_database):
+        result = self._call(plan="commission", channel="airbnb")
+        assert result == {
+            "platform_fee": 30.0,   # 3% channel-manager fee
+            "affiliate_commission": 0.0,
+            "property_payout": 970.0,
+        }
 
-    async def test_split_10pct_affiliate_commission(self, init_database):
-        """Example: €1000 booking, 10% creator commission capped to 8% total fee."""
-        from app.services.payout_service import calculate_split
-
-        result = calculate_split(
-            total_amount=1000.0,
-            fee_type="percentage",
-            fee_value=8.0,
-            fee_with_affiliate=2.0,
+    async def test_commission_plan_direct_with_affiliate(self, init_database):
+        result = self._call(
+            plan="commission",
             has_affiliate=True,
-            affiliate_commission_pct=10.0,
+            effective_affiliate_commission_pct=5.0,
         )
-        # Total fee is 8% = 80. Affiliate wants 10% = 100, but capped to 80 (total fee).
-        # Platform gets 80 - 80 = 0, hotel still pays only 8%.
-        assert result["platform_fee"] == 0.0
-        assert result["affiliate_commission"] == 80.0  # capped to total fee
-        assert result["property_payout"] == 920.0     # 1000 - 80
-        # Total: 0 + 80 + 920 = 1000 ✓
+        # 2% BE + 2% affiliate platform = 4% platform, + 5% affiliate commission
+        assert result == {
+            "platform_fee": 40.0,
+            "affiliate_commission": 50.0,
+            "property_payout": 910.0,
+        }
+
+    async def test_commission_plan_ota_with_affiliate(self, init_database):
+        result = self._call(
+            plan="commission",
+            channel="booking_com",
+            has_affiliate=True,
+            effective_affiliate_commission_pct=5.0,
+        )
+        # 3% channel + 2% affiliate platform = 5% platform, + 5% affiliate commission
+        assert result == {
+            "platform_fee": 50.0,
+            "affiliate_commission": 50.0,
+            "property_payout": 900.0,
+        }
+
+    async def test_affiliate_commission_additive_not_capped(self, init_database):
+        """High affiliate commission (10%) is paid in full, on top of the platform fee."""
+        result = self._call(
+            plan="commission",
+            has_affiliate=True,
+            effective_affiliate_commission_pct=10.0,
+        )
+        assert result == {
+            "platform_fee": 40.0,     # 2% BE + 2% affiliate
+            "affiliate_commission": 100.0,  # 10% of 1000, not clamped
+            "property_payout": 860.0,
+        }
 
 
 # ── Expire Booking (Scheduler) ──────────────────────────────────

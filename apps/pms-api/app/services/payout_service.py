@@ -2,45 +2,107 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app.database import Database
+from app.config import settings as app_settings
+from app.database import BookingEngineDatabase
 from app.repositories.payout_repo import PayoutRepository
-from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 
 logger = logging.getLogger(__name__)
 
 
+# Defaults match the pricing PDF and are used when a hotel row predates the
+# pricing_config migration (or in tests where booking_db is not connected).
+DEFAULT_BILLING_CONFIG = {
+    "active_plan": "commission",
+    "booking_engine_fee_pct": 2.00,
+    "channel_manager_fee_pct": 3.00,
+    "affiliate_platform_fee_pct": 2.00,
+}
+
+
+async def fetch_billing_config(hotel_id: str) -> dict:
+    """Read per-hotel platform-fee config from booking_db, falling back to defaults.
+
+    Applies a pending plan switch inline if its effective date has passed — so
+    bookings on/after the 1st of the month see the new plan even if nothing
+    else has touched this hotel's row yet.
+    """
+    if not app_settings.BOOKING_ENGINE_DATABASE_URL:
+        return dict(DEFAULT_BILLING_CONFIG)
+    try:
+        row = await BookingEngineDatabase.fetchrow(
+            """
+            WITH flipped AS (
+                UPDATE booking_hotels
+                   SET billing_active_plan = billing_pending_switch,
+                       billing_pending_switch = NULL,
+                       billing_switch_effective_date = NULL
+                 WHERE id = $1
+                   AND billing_pending_switch IS NOT NULL
+                   AND billing_switch_effective_date IS NOT NULL
+                   AND billing_switch_effective_date <= CURRENT_DATE
+                RETURNING id
+            )
+            SELECT billing_active_plan,
+                   booking_engine_fee_pct,
+                   channel_manager_fee_pct,
+                   affiliate_platform_fee_pct
+              FROM booking_hotels
+             WHERE id = $1
+            """,
+            hotel_id,
+        )
+    except Exception as exc:
+        logger.warning("Failed to fetch billing config from booking_db: %s", exc)
+        return dict(DEFAULT_BILLING_CONFIG)
+    if not row:
+        return dict(DEFAULT_BILLING_CONFIG)
+    return {
+        "active_plan": row["billing_active_plan"],
+        "booking_engine_fee_pct": float(row["booking_engine_fee_pct"]),
+        "channel_manager_fee_pct": float(row["channel_manager_fee_pct"]),
+        "affiliate_platform_fee_pct": float(row["affiliate_platform_fee_pct"]),
+    }
+
+
 def calculate_split(
     total_amount: float,
-    fee_type: str,
-    fee_value: float,
-    fee_with_affiliate: float,
+    *,
+    plan: str,
+    channel: str,
+    booking_engine_fee_pct: float,
+    channel_manager_fee_pct: float,
+    affiliate_platform_fee_pct: float,
     has_affiliate: bool,
-    affiliate_commission_pct: float = 0.0,
+    effective_affiliate_commission_pct: float = 0.0,
 ) -> dict:
-    """Calculate platform fee, affiliate commission, and property payout.
+    """Split a booking total into platform fee, affiliate commission, and property payout.
 
-    Total fee is always fee_value (8%) of the booking.
-    Without affiliate: platform keeps the full 8%.
-    With affiliate: affiliate gets their commission (max 5%) out of the 8%,
-    platform keeps the remainder.
-    Hotel always pays exactly fee_value (8%).
+    Fee matrix:
+      Fixed plan:      0% on non-affiliate bookings (covered by monthly base + per-room).
+                       +affiliate_platform_fee_pct on affiliate bookings.
+      Commission plan: booking_engine_fee_pct on direct bookings,
+                       channel_manager_fee_pct on OTA bookings.
+                       +affiliate_platform_fee_pct on top if affiliate involved.
+      Affiliate commission is additive — paid by the property on top of the platform fee.
     """
-    if fee_type == "flat":
-        total_fee = fee_value
-    else:
-        total_fee = round(total_amount * fee_value / 100, 2)
+    is_channel_booking = channel != "direct"
 
+    platform_fee_pct = 0.0
+    if plan == "commission":
+        platform_fee_pct += (
+            channel_manager_fee_pct if is_channel_booking else booking_engine_fee_pct
+        )
     if has_affiliate:
-        affiliate_commission = round(total_amount * affiliate_commission_pct / 100, 2)
-        # Affiliate commission comes out of the total fee, not on top of it
-        affiliate_commission = min(affiliate_commission, total_fee)
-        platform_fee = round(total_fee - affiliate_commission, 2)
-    else:
-        affiliate_commission = 0.0
-        platform_fee = total_fee
+        platform_fee_pct += affiliate_platform_fee_pct
 
-    property_payout = round(total_amount - total_fee, 2)
+    platform_fee = round(total_amount * platform_fee_pct / 100, 2)
+    affiliate_commission = (
+        round(total_amount * effective_affiliate_commission_pct / 100, 2)
+        if has_affiliate
+        else 0.0
+    )
+    property_payout = round(total_amount - platform_fee - affiliate_commission, 2)
 
     return {
         "platform_fee": platform_fee,
@@ -60,11 +122,9 @@ async def schedule_payouts(
     check_out,
 ) -> None:
     """Schedule hotel payout (after cancellation window) and affiliate payout (monthly batch)."""
-    # Get cancellation policy to determine payout delay
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
     free_days = policy["free_cancellation_days"] if policy else 7
 
-    # Hotel payout: schedule for check-out + cancellation window days
     hotel_payout_date = datetime.combine(
         check_out, datetime.min.time(), tzinfo=timezone.utc
     ) + timedelta(days=free_days)
@@ -78,7 +138,6 @@ async def schedule_payouts(
         scheduled_for=hotel_payout_date,
     )
 
-    # Affiliate payout: schedule for 1st of month after checkout
     if affiliate_id and affiliate_commission > 0:
         checkout_dt = datetime.combine(
             check_out, datetime.min.time(), tzinfo=timezone.utc

@@ -14,9 +14,10 @@ from app.repositories.payment_repo import PaymentRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.affiliate_repo import AffiliateRepository
 from app.models.booking import BookingCreate, BookingResponse
 from app.services import stripe_service, xendit_service
-from app.services.payout_service import calculate_split, schedule_payouts
+from app.services.payout_service import calculate_split, fetch_billing_config, schedule_payouts
 from app.services.email_service import (
     send_hotel_notification,
     send_booking_request_notification,
@@ -626,27 +627,28 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
                 str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
             )
 
-    # Calculate split
-    hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-    fee_type = hotel_settings["platform_fee_type"] if hotel_settings else "percentage"
-    fee_value = float(hotel_settings["platform_fee_value"]) if hotel_settings else 8.00
-    fee_with_affiliate = float(hotel_settings["platform_fee_with_affiliate"]) if hotel_settings else 2.00
+    # Calculate split using plan-aware fee engine.
+    billing = await fetch_billing_config(hotel_id)
 
     has_affiliate = booking.get("affiliate_id") is not None
     affiliate_commission_pct = 0.0
     affiliate_id = None
     if has_affiliate:
         affiliate_id = str(booking["affiliate_id"])
-        aff = await Database.fetchrow(
-            "SELECT commission_pct FROM affiliates WHERE id = $1", booking["affiliate_id"]
-        )
-        if aff:
-            affiliate_commission_pct = float(aff["commission_pct"])
+        effective = await AffiliateRepository.get_effective_commission_pct(affiliate_id)
+        if effective is not None:
+            affiliate_commission_pct = effective
 
     total_amount = float(booking["total_amount"])
     split = calculate_split(
-        total_amount, fee_type, fee_value, fee_with_affiliate,
-        has_affiliate, affiliate_commission_pct,
+        total_amount,
+        plan=billing["active_plan"],
+        channel=booking.get("channel", "direct"),
+        booking_engine_fee_pct=billing["booking_engine_fee_pct"],
+        channel_manager_fee_pct=billing["channel_manager_fee_pct"],
+        affiliate_platform_fee_pct=billing["affiliate_platform_fee_pct"],
+        has_affiliate=has_affiliate,
+        effective_affiliate_commission_pct=affiliate_commission_pct,
     )
 
     # Update booking

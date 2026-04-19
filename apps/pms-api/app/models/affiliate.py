@@ -39,6 +39,7 @@ class AffiliateResponse(BaseModel):
     bank_swift_bic: str = ""
     bank_name: str = ""
     bank_country: str = ""
+    # What the affiliate will actually earn — override if set, else hotel default.
     commission_pct: float
     status: str
     created_at: str
@@ -61,7 +62,13 @@ class AffiliateAdminResponse(BaseModel):
     bank_swift_bic: str = ""
     bank_name: str = ""
     bank_country: str = ""
-    commission_pct: float
+    # Commission fields exposed in three shapes so admins can see the full picture:
+    # - default_commission_pct: the hotel-wide default at read time
+    # - commission_pct_override: the custom rate for this affiliate, or null if inheriting
+    # - effective_commission_pct: what's actually paid on bookings
+    default_commission_pct: float
+    commission_pct_override: Optional[float] = None
+    effective_commission_pct: float
     status: str
     created_at: str
     updated_at: str
@@ -87,4 +94,17 @@ class AffiliateStatusUpdate(BaseModel):
 class AffiliateCommissionUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    commission_pct: float
+    # null clears the override so the affiliate reverts to the hotel default.
+    commission_pct: Optional[float]
+
+
+class DefaultAffiliateCommissionResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    default_commission_pct: float
+
+
+class DefaultAffiliateCommissionUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    default_commission_pct: float

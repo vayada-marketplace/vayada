@@ -345,7 +345,8 @@ class TestAdminAffiliateCommission:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 200
-        assert resp.json()["commissionPct"] == 15.0
+        assert resp.json()["effectiveCommissionPct"] == 15.0
+        assert resp.json()["commissionPctOverride"] == 15.0
 
     async def test_commission_zero(self, client, cleanup_database):
         user = await create_test_user()
@@ -358,7 +359,8 @@ class TestAdminAffiliateCommission:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 200
-        assert resp.json()["commissionPct"] == 0.0
+        assert resp.json()["effectiveCommissionPct"] == 0.0
+        assert resp.json()["commissionPctOverride"] == 0.0
 
     async def test_commission_100(self, client, cleanup_database):
         user = await create_test_user()
@@ -371,7 +373,8 @@ class TestAdminAffiliateCommission:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 200
-        assert resp.json()["commissionPct"] == 100.0
+        assert resp.json()["effectiveCommissionPct"] == 100.0
+        assert resp.json()["commissionPctOverride"] == 100.0
 
     async def test_commission_over_100(self, client, cleanup_database):
         user = await create_test_user()
@@ -422,3 +425,105 @@ class TestAdminAffiliateCommission:
             headers=get_auth_headers(user_b["token"]),
         )
         assert resp.status_code == 404
+
+    async def test_commission_null_clears_override(self, client, cleanup_database):
+        """Setting commissionPct=null reverts the affiliate to the hotel default."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        aff = await create_test_affiliate(str(hotel["id"]))
+
+        # First set a custom rate
+        await client.patch(
+            f"/admin/affiliates/{aff['id']}/commission",
+            json={"commissionPct": 12.5},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        # Then clear it
+        resp = await client.patch(
+            f"/admin/affiliates/{aff['id']}/commission",
+            json={"commissionPct": None},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["commissionPctOverride"] is None
+        # Reverts to hotel default (5.0)
+        assert body["effectiveCommissionPct"] == 5.0
+
+    async def test_commission_tracks_hotel_default_when_no_override(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_affiliate(str(hotel["id"]))
+
+        # Change the hotel's default
+        await client.patch(
+            "/admin/affiliates/default-commission",
+            json={"defaultCommissionPct": 8.0},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        # List affiliates — the one without an override should show 8%
+        resp = await client.get(
+            "/admin/affiliates?status=pending",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        affiliates = resp.json()["affiliates"]
+        assert len(affiliates) == 1
+        assert affiliates[0]["defaultCommissionPct"] == 8.0
+        assert affiliates[0]["commissionPctOverride"] is None
+        assert affiliates[0]["effectiveCommissionPct"] == 8.0
+
+    async def test_default_commission_get_initial(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.get(
+            "/admin/affiliates/default-commission",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["defaultCommissionPct"] == 5.0
+
+    async def test_default_commission_update(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.patch(
+            "/admin/affiliates/default-commission",
+            json={"defaultCommissionPct": 7.5},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["defaultCommissionPct"] == 7.5
+
+        get_resp = await client.get(
+            "/admin/affiliates/default-commission",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert get_resp.json()["defaultCommissionPct"] == 7.5
+
+    async def test_default_commission_over_100(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.patch(
+            "/admin/affiliates/default-commission",
+            json={"defaultCommissionPct": 150},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400
+
+    async def test_default_commission_negative(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.patch(
+            "/admin/affiliates/default-commission",
+            json={"defaultCommissionPct": -1},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400

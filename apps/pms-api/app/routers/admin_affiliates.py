@@ -12,6 +12,8 @@ from app.models.affiliate import (
     AffiliateAdminResponse,
     AffiliateStatusUpdate,
     AffiliateCommissionUpdate,
+    DefaultAffiliateCommissionResponse,
+    DefaultAffiliateCommissionUpdate,
 )
 from app.models.payment import StripeConnectAccountRequest, XenditBankDetailsRequest
 from app.services import stripe_service
@@ -25,7 +27,10 @@ router = APIRouter(prefix="/admin", tags=["admin-affiliates"])
 
 def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
     revenue = float(a.get("total_revenue", 0) or 0)
-    commission_pct = float(a["commission_pct"])
+    default_pct = float(a["default_commission_pct"])
+    override = a.get("commission_pct_override")
+    override_pct = float(override) if override is not None else None
+    effective_pct = float(a["effective_commission_pct"])
     booking_count = int(a.get("booking_count", 0) or 0)
     click_count = int(a.get("click_count", 0) or 0)
     conversion_rate = round(booking_count / click_count * 100, 2) if click_count > 0 else 0.0
@@ -44,7 +49,9 @@ def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
         bank_swift_bic=a.get("bank_swift_bic", "") or "",
         bank_name=a.get("bank_name", "") or "",
         bank_country=a.get("bank_country", "") or "",
-        commission_pct=commission_pct,
+        default_commission_pct=default_pct,
+        commission_pct_override=override_pct,
+        effective_commission_pct=effective_pct,
         status=a["status"],
         created_at=a["created_at"].isoformat(),
         updated_at=a["updated_at"].isoformat(),
@@ -55,10 +62,47 @@ def _affiliate_to_admin(a: dict) -> AffiliateAdminResponse:
         xendit_account_holder_name=a.get("xendit_account_holder_name"),
         booking_count=booking_count,
         total_revenue=revenue,
-        total_commission=round(revenue * commission_pct / 100, 2),
+        total_commission=round(revenue * effective_pct / 100, 2),
         click_count=click_count,
         conversion_rate=conversion_rate,
     )
+
+
+# ── Hotel default affiliate commission ────────────────────────────
+
+
+@router.get("/affiliates/default-commission", response_model=DefaultAffiliateCommissionResponse)
+async def get_default_affiliate_commission(
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    pct = await Database.fetchval(
+        "SELECT default_affiliate_commission_pct FROM hotels WHERE id = $1",
+        hotel_id,
+    )
+    return DefaultAffiliateCommissionResponse(default_commission_pct=float(pct or 5.0))
+
+
+@router.patch("/affiliates/default-commission", response_model=DefaultAffiliateCommissionResponse)
+async def update_default_affiliate_commission(
+    data: DefaultAffiliateCommissionUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    if data.default_commission_pct < 0 or data.default_commission_pct > 100:
+        raise HTTPException(
+            status_code=400, detail="Default commission must be between 0 and 100"
+        )
+    hotel_id = await get_hotel_id(user_id)
+    pct = await Database.fetchval(
+        """
+        UPDATE hotels SET default_affiliate_commission_pct = $2
+         WHERE id = $1
+         RETURNING default_affiliate_commission_pct
+        """,
+        hotel_id,
+        data.default_commission_pct,
+    )
+    return DefaultAffiliateCommissionResponse(default_commission_pct=float(pct))
 
 
 # ── Affiliates ─────────────────────────────────────────────────────
@@ -197,7 +241,8 @@ async def update_affiliate_commission(
     data: AffiliateCommissionUpdate,
     user_id: str = Depends(require_hotel_admin),
 ):
-    if data.commission_pct < 0 or data.commission_pct > 100:
+    """Set or clear the per-affiliate override. null reverts to the hotel default."""
+    if data.commission_pct is not None and (data.commission_pct < 0 or data.commission_pct > 100):
         raise HTTPException(
             status_code=400, detail="Commission must be between 0 and 100"
         )
@@ -207,7 +252,7 @@ async def update_affiliate_commission(
     if not affiliate or str(affiliate["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
-    await AffiliateRepository.update_commission(affiliate_id, data.commission_pct)
+    await AffiliateRepository.set_commission_override(affiliate_id, data.commission_pct)
     # Re-fetch with stats
     affiliates = await AffiliateRepository.list_by_hotel_id(hotel_id, limit=1000)
     matched = next((a for a in affiliates if str(a["id"]) == affiliate_id), None)

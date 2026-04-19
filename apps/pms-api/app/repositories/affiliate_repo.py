@@ -26,14 +26,22 @@ class AffiliateRepository:
 
         row = await Database.fetchrow(
             """
-            INSERT INTO affiliates (
-                hotel_id, referral_code, full_name, email,
-                social_media, user_type, payment_method,
-                paypal_email, bank_iban,
-                bank_account_holder, bank_swift_bic, bank_name, bank_country
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-            ) RETURNING *
+            WITH inserted AS (
+                INSERT INTO affiliates (
+                    hotel_id, referral_code, full_name, email,
+                    social_media, user_type, payment_method,
+                    paypal_email, bank_iban,
+                    bank_account_holder, bank_swift_bic, bank_name, bank_country
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                ) RETURNING *
+            )
+            SELECT inserted.*,
+                   h.default_affiliate_commission_pct AS default_commission_pct,
+                   COALESCE(inserted.commission_pct_override, h.default_affiliate_commission_pct)
+                       AS effective_commission_pct
+              FROM inserted
+              JOIN hotels h ON h.id = inserted.hotel_id
             """,
             hotel_id,
             code,
@@ -54,7 +62,15 @@ class AffiliateRepository:
     @staticmethod
     async def get_by_code(hotel_id: str, referral_code: str) -> Optional[dict]:
         row = await Database.fetchrow(
-            "SELECT * FROM affiliates WHERE hotel_id = $1 AND referral_code = $2",
+            """
+            SELECT a.*,
+                   h.default_affiliate_commission_pct AS default_commission_pct,
+                   COALESCE(a.commission_pct_override, h.default_affiliate_commission_pct)
+                       AS effective_commission_pct
+              FROM affiliates a
+              JOIN hotels h ON h.id = a.hotel_id
+             WHERE a.hotel_id = $1 AND a.referral_code = $2
+            """,
             hotel_id,
             referral_code,
         )
@@ -63,7 +79,15 @@ class AffiliateRepository:
     @staticmethod
     async def get_by_id(affiliate_id: str) -> Optional[dict]:
         row = await Database.fetchrow(
-            "SELECT * FROM affiliates WHERE id = $1",
+            """
+            SELECT a.*,
+                   h.default_affiliate_commission_pct AS default_commission_pct,
+                   COALESCE(a.commission_pct_override, h.default_affiliate_commission_pct)
+                       AS effective_commission_pct
+              FROM affiliates a
+              JOIN hotels h ON h.id = a.hotel_id
+             WHERE a.id = $1
+            """,
             affiliate_id,
         )
         return dict(row) if row else None
@@ -76,6 +100,9 @@ class AffiliateRepository:
             SELECT a.*,
                    h.name AS hotel_name,
                    h.slug AS hotel_slug,
+                   h.default_affiliate_commission_pct AS default_commission_pct,
+                   COALESCE(a.commission_pct_override, h.default_affiliate_commission_pct)
+                       AS effective_commission_pct,
                    COALESCE(s.booking_count, 0) AS booking_count,
                    COALESCE(s.total_revenue, 0) AS total_revenue,
                    COALESCE(c.click_count, 0) AS click_count
@@ -124,10 +151,14 @@ class AffiliateRepository:
         rows = await Database.fetch(
             f"""
             SELECT a.*,
+                   h.default_affiliate_commission_pct AS default_commission_pct,
+                   COALESCE(a.commission_pct_override, h.default_affiliate_commission_pct)
+                       AS effective_commission_pct,
                    COALESCE(s.booking_count, 0) AS booking_count,
                    COALESCE(s.total_revenue, 0) AS total_revenue,
                    COALESCE(c.click_count, 0) AS click_count
             FROM affiliates a
+            JOIN hotels h ON h.id = a.hotel_id
             LEFT JOIN (
                 SELECT affiliate_id,
                        COUNT(*) AS booking_count,
@@ -198,10 +229,12 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def update_commission(affiliate_id: str, commission_pct: float) -> Optional[dict]:
+    async def set_commission_override(
+        affiliate_id: str, commission_pct: Optional[float]
+    ) -> Optional[dict]:
         row = await Database.fetchrow(
             """
-            UPDATE affiliates SET commission_pct = $2, updated_at = now()
+            UPDATE affiliates SET commission_pct_override = $2, updated_at = now()
             WHERE id = $1
             RETURNING *
             """,
@@ -209,6 +242,21 @@ class AffiliateRepository:
             commission_pct,
         )
         return dict(row) if row else None
+
+    @staticmethod
+    async def get_effective_commission_pct(affiliate_id: str) -> Optional[float]:
+        """Return the affiliate's effective commission (override, else hotel default)."""
+        row = await Database.fetchrow(
+            """
+            SELECT COALESCE(a.commission_pct_override, h.default_affiliate_commission_pct)
+                   AS effective_pct
+              FROM affiliates a
+              JOIN hotels h ON h.id = a.hotel_id
+             WHERE a.id = $1
+            """,
+            affiliate_id,
+        )
+        return float(row["effective_pct"]) if row else None
 
     @staticmethod
     async def update_stripe_connect(affiliate_id: str, account_id: str) -> Optional[dict]:
