@@ -44,6 +44,12 @@ export interface PropertySettings {
   billing_commission_rate?: number
   billing_fixed_fee?: number
   billing_pending_switch?: string | null
+  billing_switch_effective_date?: string | null
+  booking_engine_fee_pct?: number
+  channel_manager_fee_pct?: number
+  affiliate_platform_fee_pct?: number
+  active_room_count?: number
+  fixed_plan_projected_monthly_fee?: number
   payout_account_holder?: string
   payout_account_type?: 'iban' | 'account_number'
   payout_iban?: string
@@ -109,9 +115,24 @@ export interface AddonItem {
 export interface SuperAdminHotel extends HotelSummary {
   owner_name: string
   owner_email: string
-  billing_commission_rate: number
-  billing_fixed_fee: number
   billing_active_plan: string
+  billing_pending_switch: string | null
+  billing_switch_effective_date: string | null
+  booking_engine_fee_pct: number
+  channel_manager_fee_pct: number
+  affiliate_platform_fee_pct: number
+  fixed_base_fee: number
+  fixed_rooms_included: number
+  fixed_per_extra_room_fee: number
+}
+
+export interface HotelBillingUpdate {
+  booking_engine_fee_pct?: number
+  channel_manager_fee_pct?: number
+  affiliate_platform_fee_pct?: number
+  fixed_base_fee?: number
+  fixed_rooms_included?: number
+  fixed_per_extra_room_fee?: number
 }
 
 export interface AddonSettings {
@@ -164,7 +185,7 @@ export const settingsService = {
   listAllHotels: () =>
     apiClient.get<SuperAdminHotel[]>('/admin/superadmin/hotels'),
 
-  updateHotelBilling: (hotelId: string, data: { billing_commission_rate?: number; billing_fixed_fee?: number }) =>
+  updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) =>
     apiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
 
 

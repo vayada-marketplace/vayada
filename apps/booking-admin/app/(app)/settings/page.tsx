@@ -126,6 +126,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   billing_commission_rate: 5,
   billing_fixed_fee: 49,
   billing_pending_switch: null,
+  billing_switch_effective_date: null,
   payout_account_holder: '',
   payout_account_type: 'iban',
   payout_iban: '',
@@ -835,11 +836,21 @@ export default function SettingsPage() {
                   <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
                 )}
               </div>
-              <p className="text-[12px] text-gray-500 mb-3">Percentage of each booking</p>
-              <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
-                <span className="text-3xl font-bold text-gray-900">{settings.billing_commission_rate || 5}%</span>
-                <p className="text-[11px] text-gray-400 mt-1">per booking</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">No monthly fee — pay only when you earn</p>
+              <p className="text-[12px] text-gray-500 mb-3">Percentage per booking, varies by source</p>
+              <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-2">
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="text-gray-600">Direct bookings</span>
+                  <span className="font-semibold text-gray-900">{settings.booking_engine_fee_pct ?? 2}%</span>
+                </div>
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="text-gray-600">Channel manager (OTA)</span>
+                  <span className="font-semibold text-gray-900">{settings.channel_manager_fee_pct ?? 3}%</span>
+                </div>
+                <div className="flex items-center justify-between text-[13px] pt-2 border-t border-gray-200">
+                  <span className="text-gray-600">+ on affiliate bookings</span>
+                  <span className="font-semibold text-gray-900">{settings.affiliate_platform_fee_pct ?? 2}%</span>
+                </div>
+                <p className="text-[10px] text-gray-400 text-center pt-1">No monthly fee — pay only when you earn</p>
               </div>
               {settings.billing_active_plan !== 'commission' && !settings.billing_pending_switch && (
                 <button
@@ -887,9 +898,13 @@ export default function SettingsPage() {
               </div>
               <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
               <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
-                <span className="text-3xl font-bold text-gray-900">${settings.billing_fixed_fee || 30}</span>
+                <span className="text-3xl font-bold text-gray-900">€{(settings.fixed_plan_projected_monthly_fee ?? settings.billing_fixed_fee ?? 30).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                 <p className="text-[11px] text-gray-400 mt-1">per month</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Base fee + per room pricing</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {typeof settings.active_room_count === 'number'
+                    ? `At ${settings.active_room_count} active room${settings.active_room_count === 1 ? '' : 's'} · base + per-extra-room pricing`
+                    : 'Base fee + per room pricing'}
+                </p>
               </div>
               {settings.billing_active_plan !== 'fixed' && !settings.billing_pending_switch && (
                 <button
@@ -923,7 +938,9 @@ export default function SettingsPage() {
           {settings.billing_pending_switch && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-[13px] text-amber-800">
-                Your plan will switch to <strong>{settings.billing_pending_switch === 'commission' ? 'Commission' : 'Fixed Fee'}</strong> at the start of next month.
+                Your plan will switch to <strong>{settings.billing_pending_switch === 'commission' ? 'Commission' : 'Fixed Fee'}</strong>{settings.billing_switch_effective_date
+                  ? ` on ${new Date(settings.billing_switch_effective_date).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}`
+                  : ' at the start of next month'}.
               </p>
             </div>
           )}

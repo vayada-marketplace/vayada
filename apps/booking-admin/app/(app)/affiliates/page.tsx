@@ -61,6 +61,7 @@ export default function AffiliatesPage() {
   const [offset, setOffset] = useState(0)
   const [currencySymbol, setCurrencySymbol] = useState('US$')
   const [payoutModalAffiliate, setPayoutModalAffiliate] = useState<Affiliate | null>(null)
+  const [rateModalAffiliate, setRateModalAffiliate] = useState<Affiliate | null>(null)
   const limit = 20
 
   useEffect(() => {
@@ -113,7 +114,7 @@ export default function AffiliatesPage() {
     const totalCommission = affiliates.reduce((sum, a) => sum + a.totalCommission, 0)
     const avgCommission =
       affiliates.length > 0
-        ? affiliates.reduce((sum, a) => sum + a.commissionPct, 0) / affiliates.length
+        ? affiliates.reduce((sum, a) => sum + a.effectiveCommissionPct, 0) / affiliates.length
         : 0
     const avgPerBooking = totalBookings > 0 ? totalRevenue / totalBookings : 0
 
@@ -436,6 +437,8 @@ export default function AffiliatesPage() {
       {/* All Affiliates Tab */}
       {mainTab === 'All Affiliates' && (
         <>
+          <DefaultCommissionCard />
+
           <div className="flex items-center justify-end mb-4">
             <input
               type="text"
@@ -540,11 +543,18 @@ export default function AffiliatesPage() {
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{a.bookingCount}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{a.conversionRate > 0 ? `${a.conversionRate}%` : '—'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{a.totalRevenue > 0 ? formatCurrency(a.totalRevenue) : '—'}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">{a.totalCommission > 0 ? formatCurrency(a.totalCommission) : '—'}<span className="text-[11px] text-gray-500 ml-1">({a.commissionPct}%)</span></td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">
+                        {a.totalCommission > 0 ? formatCurrency(a.totalCommission) : '—'}
+                        <span className="text-[11px] text-gray-500 ml-1">({a.effectiveCommissionPct}%)</span>
+                        {a.commissionPctOverride !== null && (
+                          <span className="ml-1 inline-flex px-1.5 py-0 rounded-full text-[9px] font-semibold bg-amber-50 text-amber-700" title="Custom rate — click Set rate to change or revert">Custom</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${STATUS_STYLES[a.status] || ''}`}>{a.status === 'suspended' ? 'Blocked' : a.status}</span></td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button onClick={(e) => { e.stopPropagation(); setPayoutModalAffiliate(a) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">View payout</button>
+                          <button onClick={(e) => { e.stopPropagation(); setRateModalAffiliate(a) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Set rate</button>
                           {a.status === 'approved' ? (
                             <button onClick={(e) => { e.stopPropagation(); handleBlock(a.id) }} className="px-3 py-1 text-[12px] font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Block</button>
                           ) : a.status === 'suspended' ? (
@@ -582,6 +592,126 @@ export default function AffiliatesPage() {
           onClose={() => setPayoutModalAffiliate(null)}
         />
       )}
+
+      {rateModalAffiliate && (
+        <CommissionRateModal
+          affiliate={rateModalAffiliate}
+          onClose={() => setRateModalAffiliate(null)}
+          onSaved={(updated) => {
+            setAffiliates((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+            setRateModalAffiliate(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function CommissionRateModal({
+  affiliate,
+  onClose,
+  onSaved,
+}: {
+  affiliate: Affiliate
+  onClose: () => void
+  onSaved: (updated: Affiliate) => void
+}) {
+  const [value, setValue] = useState<number>(affiliate.effectiveCommissionPct)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const hasOverride = affiliate.commissionPctOverride !== null
+
+  const handleSave = async () => {
+    if (value < 0 || value > 100) {
+      setError('Must be between 0 and 100')
+      return
+    }
+    setSaving(true)
+    try {
+      const updated = await affiliatesService.updateCommission(affiliate.id, value)
+      onSaved(updated)
+    } catch {
+      setError('Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRevert = async () => {
+    setSaving(true)
+    try {
+      const updated = await affiliatesService.updateCommission(affiliate.id, null)
+      onSaved(updated)
+    } catch {
+      setError('Failed to revert')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl max-w-md w-full p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-[14px] font-semibold text-gray-900">Commission rate for {affiliate.fullName}</h3>
+        <p className="text-[12px] text-gray-500 mt-1 mb-4">
+          Hotel default: <strong>{affiliate.defaultCommissionPct}%</strong>
+          {hasOverride ? (
+            <> · Currently custom: <strong>{affiliate.commissionPctOverride}%</strong></>
+          ) : (
+            <> · This affiliate uses the default.</>
+          )}
+        </p>
+
+        <label className="block text-[12px] font-medium text-gray-700 mb-1">Custom rate</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.5}
+            value={value}
+            onChange={(e) => setValue(Number(e.target.value))}
+            className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <span className="text-[13px] text-gray-600">%</span>
+        </div>
+        {error && <p className="mt-2 text-[12px] text-red-600">{error}</p>}
+
+        <div className="flex items-center justify-between mt-5 gap-2">
+          {hasOverride ? (
+            <button
+              onClick={handleRevert}
+              disabled={saving}
+              className="px-3 py-2 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              Revert to default
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-3 py-2 text-[12px] font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 text-[12px] font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -663,6 +793,92 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
     <div>
       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">{label}</p>
       <p className={`text-sm text-gray-900 ${mono ? 'font-mono' : ''} break-all`}>{value}</p>
+    </div>
+  )
+}
+
+function DefaultCommissionCard() {
+  const [pct, setPct] = useState<number | null>(null)
+  const [editing, setEditing] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+
+  useEffect(() => {
+    affiliatesService.getDefaultCommission()
+      .then((r) => setPct(r.defaultCommissionPct))
+      .catch(() => setPct(5))
+  }, [])
+
+  const handleSave = async () => {
+    if (editing === null) return
+    if (editing < 0 || editing > 100) {
+      setFeedback('Must be between 0 and 100')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await affiliatesService.updateDefaultCommission(editing)
+      setPct(r.defaultCommissionPct)
+      setEditing(null)
+      setFeedback('Saved')
+      setTimeout(() => setFeedback(null), 2000)
+    } catch {
+      setFeedback('Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (pct === null) {
+    return <div className="mb-4 h-16 bg-gray-100 rounded-lg animate-pulse" />
+  }
+
+  return (
+    <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <p className="text-[13px] font-semibold text-gray-900">Default affiliate commission</p>
+        <p className="text-[12px] text-gray-500">Applied to every new affiliate unless overridden for a specific one.</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {editing === null ? (
+          <>
+            <span className="text-[14px] font-semibold text-gray-900">{pct}%</span>
+            <button
+              onClick={() => setEditing(pct)}
+              className="px-3 py-1.5 text-[12px] font-medium border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+            >
+              Edit
+            </button>
+          </>
+        ) : (
+          <>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={editing}
+              onChange={(e) => setEditing(Number(e.target.value))}
+              className="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-[13px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <span className="text-[13px] text-gray-600">%</span>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-3 py-1.5 text-[12px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => { setEditing(null); setFeedback(null) }}
+              className="px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+          </>
+        )}
+        {feedback && <span className="text-[12px] text-gray-500">{feedback}</span>}
+      </div>
     </div>
   )
 }

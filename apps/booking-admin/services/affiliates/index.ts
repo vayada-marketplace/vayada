@@ -15,7 +15,9 @@ export interface Affiliate {
   bankSwiftBic: string
   bankName: string
   bankCountry: string
-  commissionPct: number
+  defaultCommissionPct: number
+  commissionPctOverride: number | null
+  effectiveCommissionPct: number
   status: 'pending' | 'approved' | 'rejected' | 'suspended'
   createdAt: string
   updatedAt: string
@@ -38,6 +40,10 @@ export interface AffiliateListResponse {
   offset: number
 }
 
+export interface DefaultAffiliateCommission {
+  defaultCommissionPct: number
+}
+
 export const affiliatesService = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
     const parts: string[] = []
@@ -54,6 +60,12 @@ export const affiliatesService = {
   updateStatus: (id: string, status: 'approved' | 'rejected' | 'suspended') =>
     pmsClient.patch<Affiliate>(`/admin/affiliates/${id}/status`, { status }),
 
-  updateCommission: (id: string, commissionPct: number) =>
+  updateCommission: (id: string, commissionPct: number | null) =>
     pmsClient.patch<Affiliate>(`/admin/affiliates/${id}/commission`, { commissionPct }),
+
+  getDefaultCommission: () =>
+    pmsClient.get<DefaultAffiliateCommission>('/admin/affiliates/default-commission'),
+
+  updateDefaultCommission: (defaultCommissionPct: number) =>
+    pmsClient.patch<DefaultAffiliateCommission>('/admin/affiliates/default-commission', { defaultCommissionPct }),
 }
