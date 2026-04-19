@@ -12,6 +12,8 @@ import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
+const BOOKING_URL_TEMPLATE = process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || 'https://{slug}.booking.vayada.com'
+
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter()
   const { t, locale, setLocale } = useTranslation()
@@ -175,7 +177,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         <button
           onClick={() => {
             if (selectedHotel?.slug) {
-              window.open(`https://${selectedHotel.slug}.booking.vayada.com`, '_blank')
+              window.open(BOOKING_URL_TEMPLATE.replace('{slug}', selectedHotel.slug), '_blank')
             }
           }}
           disabled={!selectedHotel?.slug}

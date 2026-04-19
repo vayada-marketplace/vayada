@@ -45,7 +45,6 @@ function formatDiff(current: number, previous: number, isCurrency = false, curre
 export default function DashboardPage() {
   const { t } = useTranslation()
   const [propertyName, setPropertyName] = useState('')
-  const [slug, setSlug] = useState('')
   const [timeRange, setTimeRange] = useState<TimeRange>('today')
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [sources, setSources] = useState<BookingsBySource | null>(null)
@@ -57,11 +56,9 @@ export default function DashboardPage() {
   useEffect(() => {
     settingsService.getPropertySettings().then((settings: PropertySettings) => {
       setPropertyName(settings.property_name)
-      setSlug(settings.slug)
       if (settings.default_currency) setCurrency(settings.default_currency)
     }).catch(() => {
       setPropertyName('My Property')
-      setSlug('my-property')
     })
   }, [])
 
@@ -88,8 +85,6 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData(timeRange)
   }, [timeRange, fetchData])
-
-  const bookingUrl = `https://book.vayada.com/${slug}`
 
   // Build donut chart gradient
   const donutGradient = sources && sources.sources.length > 0
