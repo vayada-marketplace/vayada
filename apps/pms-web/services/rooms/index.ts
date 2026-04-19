@@ -37,6 +37,7 @@ export interface RoomType {
   nonRefundableEnabled: boolean
   nonRefundableDiscount: number
   minimumAdvanceDays: number
+  ratePaymentMethods: Record<string, string[]> | null
   createdAt: string
   updatedAt: string
 }
@@ -71,6 +72,7 @@ export interface RoomTypeCreate {
   nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
   minimumAdvanceDays?: number
+  ratePaymentMethods?: Record<string, string[]> | null
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>

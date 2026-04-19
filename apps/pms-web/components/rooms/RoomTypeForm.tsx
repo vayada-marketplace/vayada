@@ -128,6 +128,102 @@ function parseBedType(bedType: string): { type: string; count: number }[] {
   })
 }
 
+const PAYMENT_METHODS: { key: string; label: string; hint: string }[] = [
+  { key: 'card', label: 'Card (online)', hint: 'Stripe — authorized at booking, captured on host approval' },
+  { key: 'pay_at_property', label: 'Pay at property', hint: 'Guest pays on arrival — cash or terminal' },
+  { key: 'bank_transfer', label: 'Bank transfer', hint: 'Guest wires to your account before arrival' },
+  { key: 'xendit', label: 'QRIS / e-wallet (Xendit)', hint: 'Indonesian local payment rails' },
+]
+
+function RatePaymentMethodsSection({
+  value,
+  flexibleRateEnabled,
+  nonRefundableEnabled,
+  onChange,
+}: {
+  value: Record<string, string[]> | null
+  flexibleRateEnabled: boolean
+  nonRefundableEnabled: boolean
+  onChange: (next: Record<string, string[]> | null) => void
+}) {
+  const rates: { key: string; label: string; shown: boolean }[] = [
+    { key: 'flexible', label: 'Flexible rate', shown: flexibleRateEnabled },
+    { key: 'nonrefundable', label: 'Non-refundable rate', shown: nonRefundableEnabled },
+  ]
+
+  const toggle = (rateKey: string, methodKey: string) => {
+    const current = value ?? {}
+    const currentList = current[rateKey] ?? []
+    const nextList = currentList.includes(methodKey)
+      ? currentList.filter((m) => m !== methodKey)
+      : [...currentList, methodKey]
+    const next = { ...current, [rateKey]: nextList }
+    onChange(next)
+  }
+
+  const clearAll = () => onChange(null)
+
+  return (
+    <div>
+      <div className="flex items-start gap-3 mb-2">
+        <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">6</span>
+        <div className="flex-1">
+          <h3 className="text-[13px] font-semibold text-gray-900">Allowed payment methods per rate</h3>
+          <p className="text-[11px] text-gray-400">
+            Leave empty to accept every method the hotel has enabled. Ticking any method turns this rate into an explicit allow-list.
+          </p>
+        </div>
+        {value !== null && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="text-[11px] text-gray-500 hover:text-gray-700 underline"
+          >
+            Reset to hotel defaults
+          </button>
+        )}
+      </div>
+      <div className="ml-4 md:ml-9 space-y-3">
+        {rates.filter((r) => r.shown).map((rate) => {
+          const selected = (value ?? {})[rate.key] ?? []
+          return (
+            <div key={rate.key} className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-[12px] font-semibold text-gray-900 mb-2">{rate.label}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {PAYMENT_METHODS.map((m) => {
+                  const checked = selected.includes(m.key)
+                  return (
+                    <label
+                      key={m.key}
+                      className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-[11px] cursor-pointer transition-colors ${
+                        checked ? 'border-primary-300 bg-primary-50/50' : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(rate.key, m.key)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="font-medium text-gray-900 block">{m.label}</span>
+                        <span className="text-gray-500">{m.hint}</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+        {!flexibleRateEnabled && !nonRefundableEnabled && (
+          <p className="text-[11px] text-gray-400">Enable at least one rate type above to configure payment methods.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function RoomTypeForm({
   form,
   onChange,
@@ -1219,6 +1315,14 @@ export default function RoomTypeForm({
                 <span className="text-[10px] text-gray-400 ml-2">(0 = no restriction)</span>
               </div>
             </div>
+
+            {/* Section 6: Allowed payment methods per rate */}
+            <RatePaymentMethodsSection
+              value={form.ratePaymentMethods ?? null}
+              flexibleRateEnabled={flexibleRateEnabled}
+              nonRefundableEnabled={nonRefundableEnabled}
+              onChange={(next) => updateForm({ ratePaymentMethods: next })}
+            />
           </div>
 
           {/* Right column: LIVE RATE PREVIEW */}
