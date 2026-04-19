@@ -481,9 +481,16 @@ export default function BookingFlowSection({ hotelId }: { hotelId: string }) {
 }
 
 function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: (type: 'success' | 'error', message: string) => void }) {
-  const [commissionRate, setCommissionRate] = useState(5)
-  const [fixedFee, setFixedFee] = useState(30)
   const [activePlan, setActivePlan] = useState('commission')
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
+  const [switchDate, setSwitchDate] = useState<string | null>(null)
+  const [beFee, setBeFee] = useState(2)
+  const [channelFee, setChannelFee] = useState(3)
+  const [affiliatePlatformFee, setAffiliatePlatformFee] = useState(2)
+  const [fixedBase, setFixedBase] = useState(30)
+  const [roomsIncluded, setRoomsIncluded] = useState(1)
+  const [perExtraRoom, setPerExtraRoom] = useState(5)
+  const [roomCount, setRoomCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -492,21 +499,36 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
       .then((hotels) => {
         const hotel = hotels.find((h) => h.id === hotelId)
         if (hotel) {
-          setCommissionRate(hotel.billing_commission_rate || 5)
-          setFixedFee(hotel.billing_fixed_fee || 30)
           setActivePlan(hotel.billing_active_plan || 'commission')
+          setPendingSwitch(hotel.billing_pending_switch)
+          setSwitchDate(hotel.billing_switch_effective_date)
+          setBeFee(hotel.booking_engine_fee_pct ?? 2)
+          setChannelFee(hotel.channel_manager_fee_pct ?? 3)
+          setAffiliatePlatformFee(hotel.affiliate_platform_fee_pct ?? 2)
+          setFixedBase(hotel.fixed_base_fee ?? 30)
+          setRoomsIncluded(hotel.fixed_rooms_included ?? 1)
+          setPerExtraRoom(hotel.fixed_per_extra_room_fee ?? 5)
+          setRoomCount(hotel.active_room_count ?? 0)
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [hotelId])
 
+  const projectedFee = Math.round(
+    (fixedBase + Math.max(0, roomCount - roomsIncluded) * perExtraRoom) * 100
+  ) / 100
+
   const handleSave = async () => {
     setSaving(true)
     try {
       await bookingSettingsService.updateHotelBilling(hotelId, {
-        billing_commission_rate: commissionRate,
-        billing_fixed_fee: fixedFee,
+        booking_engine_fee_pct: beFee,
+        channel_manager_fee_pct: channelFee,
+        affiliate_platform_fee_pct: affiliatePlatformFee,
+        fixed_base_fee: fixedBase,
+        fixed_rooms_included: roomsIncluded,
+        fixed_per_extra_room_fee: perExtraRoom,
       })
       showFeedback('success', 'Billing settings saved')
     } catch {
@@ -521,34 +543,95 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
   return (
     <div className="max-w-2xl space-y-4">
       <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="text-[14px] font-semibold text-gray-900">Current Plan</h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">This hotel is on the <strong>{activePlan === 'fixed' ? 'Fixed Fee' : 'Commission'}</strong> plan.</p>
-        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${activePlan === 'fixed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-          {activePlan === 'fixed' ? 'Fixed Fee' : 'Commission'}
-        </span>
-      </div>
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="text-[14px] font-semibold text-gray-900">Commission Rate</h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Percentage charged on each booking.</p>
+        <h2 className="text-[14px] font-semibold text-gray-900">Active Plan</h2>
+        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">The hotel chooses their plan; it switches on the 1st of the following month.</p>
         <div className="flex items-center gap-2">
-          <input type="number" min={0} max={100} step={0.5} value={commissionRate} onChange={(e) => setCommissionRate(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          <span className="text-[14px] font-medium text-gray-600">% per booking</span>
+          <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${activePlan === 'fixed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+            {activePlan === 'fixed' ? 'Fixed Fee' : 'Commission'}
+          </span>
+          {pendingSwitch && pendingSwitch !== activePlan && (
+            <span className="text-[12px] text-amber-700">
+              Switching to <strong>{pendingSwitch === 'fixed' ? 'Fixed Fee' : 'Commission'}</strong>
+              {switchDate ? ` on ${switchDate}` : ''}
+            </span>
+          )}
         </div>
       </div>
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="text-[14px] font-semibold text-gray-900">Fixed Monthly Fee</h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Monthly subscription fee. Base $30 + $5 per additional room.</p>
-        <div className="flex items-center gap-2">
-          <span className="text-[14px] font-medium text-gray-600">$</span>
-          <input type="number" min={0} step={5} value={fixedFee} onChange={(e) => setFixedFee(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          <span className="text-[14px] font-medium text-gray-600">per month</span>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-gray-900">Platform Fees (Commission Plan)</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Per-booking percentages Vayada charges on the Commission plan.</p>
+        </div>
+        <FeeInput label="Booking engine" suffix="% on direct bookings" value={beFee} onChange={setBeFee} />
+        <FeeInput label="Channel manager (OTA)" suffix="% on OTA bookings (Booking.com, Airbnb…)" value={channelFee} onChange={setChannelFee} />
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-gray-900">Affiliate Platform Fee</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Added on top of the platform fee whenever a booking has a referral — applies under both plans.</p>
+        </div>
+        <FeeInput label="Affiliate booking" suffix="% added to every affiliate booking" value={affiliatePlatformFee} onChange={setAffiliatePlatformFee} />
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-gray-900">Fixed Plan</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Monthly subscription for hotels on the Fixed plan. {roomsIncluded} room included · +€{perExtraRoom} per extra room.</p>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <MoneyInput label="Base fee" value={fixedBase} onChange={setFixedBase} suffix="/ month" />
+          <IntInput label="Rooms included" value={roomsIncluded} onChange={setRoomsIncluded} />
+          <MoneyInput label="Per extra room" value={perExtraRoom} onChange={setPerExtraRoom} suffix="/ room" />
+        </div>
+        <div className="bg-gray-50 rounded-md p-3 flex items-center justify-between">
+          <span className="text-[12px] text-gray-600">
+            Projected at <strong>{roomCount}</strong> active rooms
+          </span>
+          <span className="text-[14px] font-semibold text-gray-900">€{projectedFee.toFixed(2)} / month</span>
         </div>
       </div>
+
       <div className="flex justify-end">
         <button onClick={handleSave} disabled={saving} className="px-5 py-2 text-[13px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
           {saving ? 'Saving...' : 'Save Billing Settings'}
         </button>
       </div>
+    </div>
+  )
+}
+
+function FeeInput({ label, suffix, value, onChange }: { label: string; suffix: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="block text-[12px] font-medium text-gray-700 mb-1">{label}</label>
+      <div className="flex items-center gap-2">
+        <input type="number" min={0} max={100} step={0.5} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
+        <span className="text-[13px] text-gray-600">{suffix}</span>
+      </div>
+    </div>
+  )
+}
+
+function MoneyInput({ label, value, onChange, suffix }: { label: string; value: number; onChange: (v: number) => void; suffix: string }) {
+  return (
+    <div>
+      <label className="block text-[12px] font-medium text-gray-700 mb-1">{label}</label>
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] font-medium text-gray-600">€</span>
+        <input type="number" min={0} step={1} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
+        <span className="text-[12px] text-gray-500">{suffix}</span>
+      </div>
+    </div>
+  )
+}
+
+function IntInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="block text-[12px] font-medium text-gray-700 mb-1">{label}</label>
+      <input type="number" min={0} step={1} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
     </div>
   )
 }
