@@ -65,6 +65,7 @@ export interface RoomType {
   flexibleRateEnabled: boolean
   originalRate?: number | null
   lastMinuteDiscountPercent?: number | null
+  ratePaymentMethods?: Record<string, string[]> | null
 }
 
 export interface AvailableRoom extends RoomType {

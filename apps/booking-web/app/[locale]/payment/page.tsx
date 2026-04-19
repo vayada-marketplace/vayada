@@ -172,6 +172,16 @@ function PaymentPageContent() {
     }
   }, [router])
 
+  // Per-rate allow-list from the room. When null, every hotel-enabled method is
+  // offered (pre-Bug-2 behavior). When set, only methods in the list for the
+  // selected rate are offered — replacing the old hardcoded !isNonRefundable gates.
+  const rateAllowList: string[] | null =
+    room?.ratePaymentMethods?.[rateType] && Array.isArray(room.ratePaymentMethods[rateType])
+      ? room.ratePaymentMethods[rateType]
+      : null
+  const isMethodAllowedForRate = (method: string) =>
+    rateAllowList === null ? true : rateAllowList.includes(method)
+
   // Check if pay-at-property is enabled
   useEffect(() => {
     if (slug) {
@@ -182,19 +192,25 @@ function PaymentPageContent() {
         setBankTransferEnabled(settings.bankTransfer || false)
         if (settings.bankDetails) setBankDetails(settings.bankDetails)
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
-        // Default to first available payment method
-        if (settings.onlineCardPayment) {
-          setPaymentMethod('card')
-        } else if (settings.payAtPropertyEnabled) {
-          setPaymentMethod('pay_at_property')
-        } else if (settings.bankTransfer) {
-          setPaymentMethod('bank_transfer')
-        } else if (settings.xenditPaymentsEnabled) {
-          setPaymentMethod('xendit')
+        // Default to first available payment method, honoring the rate-level
+        // allow-list if one is set on this room.
+        const preference: ('card' | 'pay_at_property' | 'bank_transfer' | 'xendit')[] = ['card', 'pay_at_property', 'bank_transfer', 'xendit']
+        const hotelEnabled: Record<string, boolean> = {
+          card: !!settings.onlineCardPayment,
+          pay_at_property: !!settings.payAtPropertyEnabled,
+          bank_transfer: !!settings.bankTransfer,
+          xendit: !!settings.xenditPaymentsEnabled,
+        }
+        for (const m of preference) {
+          if (hotelEnabled[m] && isMethodAllowedForRate(m)) {
+            setPaymentMethod(m)
+            break
+          }
         }
       })
     }
-  }, [slug])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, rateType, room?.id])
 
   const handleSubmit = async () => {
     if (!agreedToTerms || !guestDetails || !room) return
@@ -210,7 +226,7 @@ function PaymentPageContent() {
         adults: adultsParam,
         children: childrenParam,
         numberOfRooms: roomsParam,
-        paymentMethod: isNonRefundable ? 'card' : paymentMethod,
+        paymentMethod,
         rateType,
         addonIds: selectedAddonIds,
         addonQuantities,
@@ -319,7 +335,7 @@ function PaymentPageContent() {
 
               {/* Payment method tabs */}
               <div className="space-y-3 mb-6">
-                {onlineCardPayment && (
+                {onlineCardPayment && isMethodAllowedForRate('card') && (
                 <button
                   onClick={() => setPaymentMethod('card')}
                   className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
@@ -348,7 +364,7 @@ function PaymentPageContent() {
                   </div>
                 </button>
                 )}
-                {xenditPaymentsEnabled && (
+                {xenditPaymentsEnabled && isMethodAllowedForRate('xendit') && (
                   <button
                     onClick={() => setPaymentMethod('xendit')}
                     className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
@@ -373,7 +389,7 @@ function PaymentPageContent() {
                     </div>
                   </button>
                 )}
-                {payAtPropertyEnabled && !isNonRefundable && (
+                {payAtPropertyEnabled && isMethodAllowedForRate('pay_at_property') && (
                   <button
                     onClick={() => setPaymentMethod('pay_at_property')}
                     className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
@@ -404,7 +420,7 @@ function PaymentPageContent() {
                     </div>
                   </button>
                 )}
-                {bankTransferEnabled && !isNonRefundable && (
+                {bankTransferEnabled && isMethodAllowedForRate('bank_transfer') && (
                   <button
                     onClick={() => setPaymentMethod('bank_transfer')}
                     className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
@@ -433,10 +449,13 @@ function PaymentPageContent() {
                 )}
               </div>
 
-              {/* Non-refundable hint */}
-              {isNonRefundable && (payAtPropertyEnabled || bankTransferEnabled) && (
+              {/* Hint when the rate restricts some hotel-enabled methods */}
+              {rateAllowList !== null && (
+                (payAtPropertyEnabled && !isMethodAllowedForRate('pay_at_property')) ||
+                (bankTransferEnabled && !isMethodAllowedForRate('bank_transfer'))
+              ) && (
                 <p className="text-xs text-gray-400 mb-4">
-                  {t('nonRefundablePaymentHint') || 'Pay at Property and Bank Transfer are not available for non-refundable rates.'}
+                  {t('ratePaymentHint') || 'Some payment methods are not available for this rate.'}
                 </p>
               )}
 
