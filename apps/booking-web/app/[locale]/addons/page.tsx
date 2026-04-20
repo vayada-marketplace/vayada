@@ -23,7 +23,7 @@ export default function AddonsPage() {
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { addons } = useAddons()
-  const { formatPrice, convertPrice, selectedCurrency } = useCurrency()
+  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const [activeCategory, setActiveCategory] = useState('all')
   const [selections, setSelections] = useState<Record<string, number>>({})
   const [selectedDates, setSelectedDates] = useState<Record<string, string[]>>({})
@@ -297,6 +297,8 @@ export default function AddonsPage() {
               <p className="text-sm text-gray-500">{t('addonsTotal')}</p>
               <p className="text-xl font-bold text-gray-900">
                 {(() => {
+                  // Sum line totals in displayed currency so total = sum of shown per-line prices
+                  // (avoids "$25 × 3 = $76" conversion rounding mismatch).
                   let total = 0
                   for (const addon of addons) {
                     if (!selectedIds.includes(addon.id)) continue
@@ -304,7 +306,7 @@ export default function AddonsPage() {
                     let price = addon.price
                     if (addon.perPerson) price *= adultsParam
                     price *= qty
-                    total += convertPrice(price, addon.currency)
+                    total += convertAndRound(price, addon.currency)
                   }
                   return formatPrice(total, selectedCurrency)
                 })()}
