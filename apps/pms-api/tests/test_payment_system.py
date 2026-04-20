@@ -866,11 +866,11 @@ class TestPayoutService:
             has_affiliate=True,
             effective_affiliate_commission_pct=5.0,
         )
-        # 2% BE + 2% affiliate platform = 4% platform, + 5% affiliate commission
+        # 2% BE fee (affiliate fee doesn't stack on commission plan) + 5% commission
         assert result == {
-            "platform_fee": 40.0,
+            "platform_fee": 20.0,
             "affiliate_commission": 50.0,
-            "property_payout": 910.0,
+            "property_payout": 930.0,
         }
 
     async def test_commission_plan_ota_with_affiliate(self, init_database):
@@ -880,11 +880,11 @@ class TestPayoutService:
             has_affiliate=True,
             effective_affiliate_commission_pct=5.0,
         )
-        # 3% channel + 2% affiliate platform = 5% platform, + 5% affiliate commission
+        # 3% channel fee (affiliate fee doesn't stack on commission plan) + 5% commission
         assert result == {
-            "platform_fee": 50.0,
+            "platform_fee": 30.0,
             "affiliate_commission": 50.0,
-            "property_payout": 900.0,
+            "property_payout": 920.0,
         }
 
     async def test_affiliate_commission_additive_not_capped(self, init_database):
@@ -895,9 +895,9 @@ class TestPayoutService:
             effective_affiliate_commission_pct=10.0,
         )
         assert result == {
-            "platform_fee": 40.0,     # 2% BE + 2% affiliate
+            "platform_fee": 20.0,     # 2% BE only; affiliate fee doesn't stack
             "affiliate_commission": 100.0,  # 10% of 1000, not clamped
-            "property_payout": 860.0,
+            "property_payout": 880.0,
         }
 
 

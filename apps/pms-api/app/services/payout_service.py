@@ -83,7 +83,8 @@ def calculate_split(
                        +affiliate_platform_fee_pct on affiliate bookings.
       Commission plan: booking_engine_fee_pct on direct bookings,
                        channel_manager_fee_pct on OTA bookings.
-                       +affiliate_platform_fee_pct on top if affiliate involved.
+                       Affiliate bookings do NOT add the affiliate platform fee — the
+                       channel fee (direct or OTA) already covers the platform cut.
       Affiliate commission is additive — paid by the property on top of the platform fee.
     """
     is_channel_booking = channel != "direct"
@@ -93,7 +94,7 @@ def calculate_split(
         platform_fee_pct += (
             channel_manager_fee_pct if is_channel_booking else booking_engine_fee_pct
         )
-    if has_affiliate:
+    elif has_affiliate:
         platform_fee_pct += affiliate_platform_fee_pct
 
     platform_fee = round(total_amount * platform_fee_pct / 100, 2)
