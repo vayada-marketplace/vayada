@@ -195,6 +195,8 @@ async def duplicate_room_type(
         "description": existing.get("description", ""),
         "short_description": existing.get("short_description", ""),
         "max_occupancy": existing["max_occupancy"],
+        "bedrooms": existing.get("bedrooms", 1),
+        "bathrooms": existing.get("bathrooms", 1),
         "size": existing["size"],
         "base_rate": float(existing["base_rate"]),
         "non_refundable_rate": float(existing["non_refundable_rate"]) if existing.get("non_refundable_rate") is not None else None,
