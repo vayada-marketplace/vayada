@@ -35,7 +35,7 @@ function BookPageContent() {
   const { hotel } = useHotel()
   const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice, convertBetween } = useCurrency()
+  const { formatPrice, convertBetween, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || ''
@@ -73,10 +73,14 @@ function BookPageContent() {
 
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const nightlyRate = rateType === 'nonrefundable'
+  const nightlyRateBase = rateType === 'nonrefundable'
     ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
     : room?.baseRate ?? 0
-  const roomTotal = room ? nightlyRate * nights * roomsParam : 0
+  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
+  // Per-night rate rounded in the displayed currency so that nightly × nights
+  // matches the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
+  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0
+  const roomTotal = nightlyRate * nights * roomsParam
 
   const addonEntries = (searchParams.get('addons') || '').split(',').filter(Boolean)
   const selectedAddonIds: string[] = []
@@ -86,8 +90,8 @@ function BookPageContent() {
     selectedAddonIds.push(id)
     if (qtyStr) addonQuantities[id] = parseInt(qtyStr)
   }
-  // Calculate addon total converted to room currency so mixed currencies sum correctly
-  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
+  // Sum addon line totals in the displayed currency. Each line is rounded in
+  // the displayed currency first so its shown price matches the contribution.
   const addonTotal = (() => {
     let total = 0
     for (const addon of addons) {
@@ -96,9 +100,9 @@ function BookPageContent() {
       let price = addon.price
       if (addon.perPerson) price *= adultsParam
       price *= qty
-      total += convertBetween(price, addon.currency, roomCurrency)
+      total += convertAndRound(price, addon.currency)
     }
-    return Math.round(total * 100) / 100
+    return total
   })()
   const promoCodeParam = searchParams.get('promoCode') || ''
   const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
@@ -108,12 +112,17 @@ function BookPageContent() {
       hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
         if (res.valid) {
           const subtotal = roomTotal + addonTotal
-          const amount = calculatePromoDiscount(subtotal, res.discountType!, res.discountValue!)
+          // Fixed-amount promos are stored in the hotel's base currency; convert to
+          // the displayed currency so the discount matches the shown subtotal.
+          const value = res.discountType === 'fixed'
+            ? convertAndRound(res.discountValue!, roomCurrency)
+            : res.discountValue!
+          const amount = calculatePromoDiscount(subtotal, res.discountType!, value)
           setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
         }
       }).catch(() => {})
     }
-  }, [promoCodeParam, slug, roomTotal, addonTotal])
+  }, [promoCodeParam, slug, roomTotal, addonTotal, roomCurrency, convertAndRound])
 
   const discountAmount = promoDiscount?.amount ?? 0
   const grandTotal = roomTotal + addonTotal - discountAmount
@@ -258,8 +267,8 @@ function BookPageContent() {
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-bold text-gray-900">{formatPrice(roomTotal, room.currency)}</p>
-                  <p className="text-xs text-gray-500">{formatPrice(nightlyRate, room.currency)} &times; {nights}</p>
+                  <p className="text-sm font-bold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</p>
+                  <p className="text-xs text-gray-500">{formatPrice(nightlyRate, selectedCurrency)} &times; {nights}</p>
                 </div>
               </div>
 
@@ -271,10 +280,11 @@ function BookPageContent() {
                     let unitPrice = addon.price
                     if (addon.perPerson) unitPrice *= adultsParam
                     unitPrice *= qty
+                    const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
                         <p className="text-sm text-gray-700">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights} nights)` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</p>
-                        <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</p>
+                        <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</p>
                       </div>
                     )
                   })}
@@ -288,7 +298,7 @@ function BookPageContent() {
                     Promo {promoCodeParam}
                     {promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
                   </p>
-                  <p className="text-sm font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</p>
+                  <p className="text-sm font-semibold text-primary-600">-{formatPrice(discountAmount, selectedCurrency)}</p>
                 </div>
               )}
 
@@ -296,7 +306,7 @@ function BookPageContent() {
               <div className="flex items-center justify-between pt-4">
                 <p className="text-base font-bold text-gray-900">{tc('total')}</p>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
+                  <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, selectedCurrency)}</p>
                   <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                 </div>
               </div>
@@ -482,17 +492,18 @@ function BookPageContent() {
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('roomLabel')} ({tc('nights', { count: nights })})</span>
-                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                   let unitPrice = addon.price
                   if (addon.perPerson) unitPrice *= adultsParam
                   unitPrice *= qty
+                  const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
-                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                     </div>
                   )
                 })}
@@ -504,7 +515,7 @@ function BookPageContent() {
                   <span className="text-primary-600 font-medium">
                     Promo {promoCodeParam}{promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
                   </span>
-                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</span>
+                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, selectedCurrency)}</span>
                 </div>
               )}
 
@@ -513,7 +524,7 @@ function BookPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, selectedCurrency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>

@@ -76,7 +76,7 @@ function PaymentPageContent() {
   const { hotel } = useHotel()
   const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice, convertBetween } = useCurrency()
+  const { formatPrice, convertBetween, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
 
@@ -106,15 +106,18 @@ function PaymentPageContent() {
 
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
-  const nightlyRate = isNonRefundable
+  const nightlyRateBase = isNonRefundable
     ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
     : room?.baseRate ?? 0
-  const roomTotal = room ? nightlyRate * nights * roomsParam : 0
+  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
+  // Per-night rate rounded in the displayed currency so nightly × nights equals
+  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
+  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0
+  const roomTotal = nightlyRate * nights * roomsParam
 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
-  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
   const addonTotal = (() => {
     let total = 0
     for (const addon of addons) {
@@ -123,9 +126,9 @@ function PaymentPageContent() {
       let price = addon.price
       if (addon.perPerson) price *= adultsParam
       price *= qty
-      total += convertBetween(price, addon.currency, roomCurrency)
+      total += convertAndRound(price, addon.currency)
     }
-    return Math.round(total * 100) / 100
+    return total
   })()
   const promoCodeParam = searchParams.get('promoCode') || ''
   const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
@@ -135,12 +138,15 @@ function PaymentPageContent() {
       hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
         if (res.valid) {
           const subtotal = roomTotal + addonTotal
-          const amount = calculatePromoDiscount(subtotal, res.discountType!, res.discountValue!)
+          const value = res.discountType === 'fixed'
+            ? convertAndRound(res.discountValue!, roomCurrency)
+            : res.discountValue!
+          const amount = calculatePromoDiscount(subtotal, res.discountType!, value)
           setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
         }
       }).catch(() => {})
     }
-  }, [promoCodeParam, slug, roomTotal, addonTotal])
+  }, [promoCodeParam, slug, roomTotal, addonTotal, roomCurrency, convertAndRound])
 
   const discountAmount = promoDiscount?.amount ?? 0
   const grandTotal = roomTotal + addonTotal - discountAmount
@@ -285,6 +291,8 @@ function PaymentPageContent() {
           formatDate={formatDate}
           locale={locale}
           roomsParam={roomsParam}
+          selectedCurrency={selectedCurrency}
+          convertAndRound={convertAndRound}
         />
       </StripeProvider>
     )
@@ -528,7 +536,7 @@ function PaymentPageContent() {
                   {paymentMethod === 'card' ? t.rich('agreeTerms', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                    amount: formatPrice(grandTotal, room?.currency || 'EUR'),
+                    amount: formatPrice(grandTotal, selectedCurrency),
                   }) : t.rich('agreeTermsProperty', {
                     terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
                     cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
@@ -623,17 +631,18 @@ function PaymentPageContent() {
               <div className="space-y-3 py-5 border-b border-gray-100">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{ts('rooms')} ({tc('nights', { count: nights })})</span>
-                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                   let unitPrice = addon.price
                   if (addon.perPerson) unitPrice *= adultsParam
                   unitPrice *= qty
+                  const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
-                      <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                     </div>
                   )
                 })}
@@ -645,7 +654,7 @@ function PaymentPageContent() {
                   <span className="text-primary-600 font-medium">
                     Promo {promoCodeParam}{promoDiscount.type === 'percentage' ? ` (-${promoDiscount.value}%)` : ''}
                   </span>
-                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, room.currency)}</span>
+                  <span className="font-semibold text-primary-600">-{formatPrice(discountAmount, selectedCurrency)}</span>
                 </div>
               )}
 
@@ -654,7 +663,7 @@ function PaymentPageContent() {
                 <div className="flex justify-between items-start">
                   <span className="text-base font-bold text-gray-900">{tc('total')}</span>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</p>
+                    <p className="text-xl font-bold text-gray-900">{formatPrice(grandTotal, selectedCurrency)}</p>
                     <p className="text-xs text-gray-500">{tc('includesTaxes')}</p>
                   </div>
                 </div>
@@ -692,6 +701,8 @@ function StripePaymentPage({
   formatDate,
   locale,
   roomsParam,
+  selectedCurrency,
+  convertAndRound,
 }: any) {
   const stripe = useStripe()
   const elements = useElements()
@@ -764,17 +775,18 @@ function StripePaymentPage({
           <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">{roomsParam > 1 ? `${roomsParam}× ` : ''}{room.name}</span>
-              <span className="font-semibold text-gray-900">{formatPrice(roomTotal, room.currency)}</span>
+              <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
             </div>
             {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
               const qty = addon.perNight ? (addonQuantities?.[addon.id] ?? nights) : (addonQuantities?.[addon.id] ?? 1)
               let unitPrice = addon.price
               if (addon.perPerson) unitPrice *= adults
               unitPrice *= qty
+              const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
               return (
                 <div key={addon.id} className="flex justify-between text-sm">
                   <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
-                  <span className="font-semibold text-gray-900">{formatPrice(unitPrice, addon.currency)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                 </div>
               )
             })}
@@ -784,7 +796,7 @@ function StripePaymentPage({
             </div>
             <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
               <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900">{formatPrice(grandTotal, room.currency)}</span>
+              <span className="font-bold text-gray-900">{formatPrice(grandTotal, selectedCurrency)}</span>
             </div>
           </div>
 
@@ -809,7 +821,7 @@ function StripePaymentPage({
           >
             {submitting
               ? (t('processing') || 'Processing...')
-              : (t('authorizePayment') || `Authorize ${formatPrice(grandTotal, room.currency)}`)
+              : (t('authorizePayment') || `Authorize ${formatPrice(grandTotal, selectedCurrency)}`)
             }
           </button>
 

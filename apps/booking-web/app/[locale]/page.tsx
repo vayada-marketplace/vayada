@@ -91,7 +91,7 @@ export default function HomePage() {
   const { hotel } = useHotel()
   const { rooms, loading: roomsLoading, roomsLoading: roomsRefetching, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice } = useCurrency()
+  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
 
   useEffect(() => { trackEvent(slug, 'page_visit') }, [slug])
@@ -538,13 +538,19 @@ export default function HomePage() {
             const expandedRate = expandedRates[room.id] ?? null
             const totalGuests = committedAdults + committedChildren
             const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy)
-            const flexibleTotal = room.baseRate * nights * requiredRooms
-            const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
+            // Per-night rates rounded in the displayed currency so that nightly × nights
+            // matches the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
+            const flexibleNightly = convertAndRound(room.baseRate, room.currency)
+            const flexibleTotal = flexibleNightly * nights * requiredRooms
+            const nonRefundableNightlyBase = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
+            const nonRefundableNightly = convertAndRound(nonRefundableNightlyBase, room.currency)
             const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms
-            const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
+            const discount = Math.round((1 - nonRefundableNightlyBase / room.baseRate) * 100)
             const soldOut = room.remainingRooms < requiredRooms
             const hasLastMinuteDeal = room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
-            const originalFlexibleTotal = hasLastMinuteDeal && room.originalRate ? room.originalRate * nights * requiredRooms : null
+            const originalFlexibleTotal = hasLastMinuteDeal && room.originalRate
+              ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
+              : null
 
             return (
               <div
@@ -675,7 +681,7 @@ export default function HomePage() {
                         <span className="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded">-{room.lastMinuteDiscountPercent}%</span>
                         <span className="text-sm font-medium text-amber-800">Last-minute deal</span>
                         {originalFlexibleTotal && (
-                          <span className="ml-auto text-sm text-gray-400 line-through">{formatPrice(originalFlexibleTotal, room.currency)}</span>
+                          <span className="ml-auto text-sm text-gray-400 line-through">{formatPrice(originalFlexibleTotal, selectedCurrency)}</span>
                         )}
                       </div>
                     )}
@@ -709,8 +715,8 @@ export default function HomePage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableTotal, room.currency)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(nonRefundableNightly, room.currency) })}</p>
+                                <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableTotal, selectedCurrency)}</p>
+                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(nonRefundableNightly, selectedCurrency) })}</p>
                               </div>
                               <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'nonrefundable' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -770,8 +776,8 @@ export default function HomePage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, room.currency)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(room.baseRate, room.currency) })}</p>
+                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, selectedCurrency)}</p>
+                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(flexibleNightly, selectedCurrency) })}</p>
                               </div>
                               <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'flexible' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

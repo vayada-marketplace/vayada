@@ -11,6 +11,7 @@ interface CurrencyContextValue {
   loading: boolean
   convertPrice: (amount: number, fromCurrency: string) => number
   convertBetween: (amount: number, fromCurrency: string, toCurrency: string) => number
+  convertAndRound: (amount: number, fromCurrency: string) => number
   formatPrice: (amount: number, fromCurrency: string) => string
 }
 
@@ -21,6 +22,7 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   loading: true,
   convertPrice: (amount) => amount,
   convertBetween: (amount) => amount,
+  convertAndRound: (amount) => Math.round(amount),
   formatPrice: (amount) => String(amount),
 })
 
@@ -126,6 +128,23 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [baseCurrency, rates]
   )
 
+  // Convert an amount to the selected display currency and round to a whole unit,
+  // matching formatPrice's display rounding. Use this when computing totals that
+  // must equal per-unit × quantity in the displayed currency (avoids the "$25 × 3 = $76"
+  // rounding mismatch when converting from a different base currency).
+  const convertAndRound = useCallback(
+    (amount: number, fromCurrency: string): number => {
+      let canConvert = true
+      if (fromCurrency !== selectedCurrency) {
+        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false
+        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false
+      }
+      const converted = canConvert ? convertPrice(amount, fromCurrency) : amount
+      return Math.round(converted)
+    },
+    [convertPrice, selectedCurrency, baseCurrency, rates]
+  )
+
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
       // Check if we can actually perform the conversion
@@ -157,6 +176,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         loading,
         convertPrice,
         convertBetween,
+        convertAndRound,
         formatPrice,
       }}
     >
