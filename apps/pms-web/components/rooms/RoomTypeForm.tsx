@@ -85,7 +85,7 @@ const AMENITY_CATEGORIES = [
   },
   {
     name: 'Services',
-    items: ['Room service', 'Daily housekeeping', 'Concierge', 'Parking', 'Non-smoking', 'Adults-Only', 'Outdoor furniture'],
+    items: ['Room service', 'Daily housekeeping', 'Concierge', 'Parking', 'Non-smoking', 'Adults-Only'],
   },
 ]
 
