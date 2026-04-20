@@ -476,11 +476,17 @@ function BookPageContent() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('checkIn')}</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkIn, locale)}</span>
+                  <span className="font-semibold text-gray-900 text-right">
+                    {formatDate(checkIn, locale)}
+                    {hotel.checkInTime && <span className="block text-xs font-normal text-gray-500">{tc('checkInFrom', { time: hotel.checkInTime })}</span>}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('checkOut')}</span>
-                  <span className="font-semibold text-gray-900">{formatDate(checkOut, locale)}</span>
+                  <span className="font-semibold text-gray-900 text-right">
+                    {formatDate(checkOut, locale)}
+                    {hotel.checkOutTime && <span className="block text-xs font-normal text-gray-500">{tc('checkOutBy', { time: hotel.checkOutTime })}</span>}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">{t('duration')}</span>

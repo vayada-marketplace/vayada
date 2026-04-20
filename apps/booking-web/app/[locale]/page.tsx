@@ -425,6 +425,18 @@ export default function HomePage() {
 
       {/* Main Content */}
       <div ref={roomsSectionRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {(hotel.checkInTime || hotel.checkOutTime) && (
+          <div className="flex items-center gap-2 text-sm text-gray-600 mb-6">
+            <svg className="w-4 h-4 text-primary-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+              {hotel.checkInTime && <span>{tc('checkInFrom', { time: hotel.checkInTime })}</span>}
+              {hotel.checkInTime && hotel.checkOutTime && <span className="text-gray-300" aria-hidden>·</span>}
+              {hotel.checkOutTime && <span>{tc('checkOutBy', { time: hotel.checkOutTime })}</span>}
+            </span>
+          </div>
+        )}
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
@@ -840,6 +852,8 @@ export default function HomePage() {
             onPrev={() => setDetailModalIndex(detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1)}
             onNext={() => setDetailModalIndex(detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1)}
             soldOut={modalSoldOut}
+            checkInTime={hotel.checkInTime}
+            checkOutTime={hotel.checkOutTime}
             onSelectRate={(rateType) => {
               if (modalSoldOut) return
               const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`

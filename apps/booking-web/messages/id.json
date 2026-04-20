@@ -26,7 +26,9 @@
     "email": "Email",
     "loading": "Memuat...",
     "qty": "Jml",
-    "perPerson": "per orang"
+    "perPerson": "per orang",
+    "checkInFrom": "Check-in mulai {time}",
+    "checkOutBy": "Check-out sampai {time}"
   },
   "nav": {
     "contact": "Kontak",

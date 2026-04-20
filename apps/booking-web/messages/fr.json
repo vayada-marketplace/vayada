@@ -26,7 +26,9 @@
     "email": "E-mail",
     "loading": "Chargement...",
     "qty": "Qté",
-    "perPerson": "par personne"
+    "perPerson": "par personne",
+    "checkInFrom": "Arrivée à partir de {time}",
+    "checkOutBy": "Départ avant {time}"
   },
   "nav": {
     "contact": "Contact",

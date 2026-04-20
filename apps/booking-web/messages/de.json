@@ -26,7 +26,9 @@
     "email": "E-Mail",
     "loading": "Wird geladen...",
     "qty": "Anz",
-    "perPerson": "pro Person"
+    "perPerson": "pro Person",
+    "checkInFrom": "Check-in ab {time}",
+    "checkOutBy": "Check-out bis {time}"
   },
   "nav": {
     "contact": "Kontakt",
