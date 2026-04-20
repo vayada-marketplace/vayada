@@ -76,7 +76,7 @@ function PaymentPageContent() {
   const { hotel } = useHotel()
   const { rooms, refetchRooms } = useRooms()
   const { addons } = useAddons()
-  const { formatPrice, convertBetween, convertAndRound, selectedCurrency } = useCurrency()
+  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
   const searchParams = useSearchParams()
 
