@@ -79,7 +79,7 @@ EXTRACTION_TOOL = {
                             "Wardrobe, Bed linen, Washing machine, Dryer, Iron/Ironing board, Clothes rack, "
                             "Safe, 24hr Security, Smoke detector, First aid kit, Fire extinguisher, "
                             "Room service, Daily housekeeping, Concierge, Parking, Non-smoking, "
-                            "Adults-Only, Outdoor furniture",
+                            "Adults-Only",
                         },
                         "features": {
                             "type": "array",
