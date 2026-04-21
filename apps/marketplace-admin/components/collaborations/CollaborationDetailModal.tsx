@@ -2,6 +2,7 @@ import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { Avatar } from '../ui/Avatar';
 import { Collaboration, CollaborationStatus } from '../../lib/types/collaboration';
+import { getCurrencySymbol } from '../../lib/utils/getCurrencySymbol';
 
 interface CollaborationDetailModalProps {
     isOpen: boolean;
@@ -33,7 +34,7 @@ export function CollaborationDetailModal({
     const getCompensationText = (collab: Collaboration) => {
         switch (collab.collaboration_type) {
             case 'Paid':
-                return `Rp${Number(collab.paid_amount || 0).toLocaleString('id-ID')} Paid`;
+                return `${getCurrencySymbol(collab.currency || 'USD')}${Number(collab.paid_amount || 0).toLocaleString()} Paid`;
             case 'Discount':
                 return `${collab.discount_percentage || 0}% Discount`;
             case 'Free Stay':

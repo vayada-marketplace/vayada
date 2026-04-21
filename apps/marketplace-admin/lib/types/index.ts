@@ -235,6 +235,7 @@ export interface CollaborationOffering {
   freeStayMinNights: number | null      // Only for 'Free Stay'
   freeStayMaxNights: number | null      // Only for 'Free Stay'
   paidMaxAmount: number | null          // Only for 'Paid'
+  currency: string | null               // ISO 4217 code, only meaningful for 'Paid'
   discountPercentage: number | null     // Only for 'Discount'
   createdAt: string
   updatedAt: string

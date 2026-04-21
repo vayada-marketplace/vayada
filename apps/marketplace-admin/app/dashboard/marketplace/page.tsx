@@ -7,6 +7,7 @@ import { marketplaceService, MarketplaceListing, MarketplaceCreator, CreatorPlat
 import { ApiErrorResponse } from '@/services/api/client'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
+import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 import {
   ArrowLeftIcon,
   BuildingOfficeIcon,
@@ -517,7 +518,7 @@ export default function MarketplacePreviewPage() {
                         <p>Stay duration: {offering.free_stay_min_nights} - {offering.free_stay_max_nights} nights</p>
                       )}
                       {offering.collaboration_type === 'Paid' && offering.paid_max_amount && (
-                        <p>Budget: up to Rp{Number(offering.paid_max_amount).toLocaleString('id-ID')}</p>
+                        <p>Budget: up to {getCurrencySymbol(offering.currency || 'USD')}{Number(offering.paid_max_amount).toLocaleString()}</p>
                       )}
                       {offering.collaboration_type === 'Discount' && offering.discount_percentage && (
                         <p>Discount: {offering.discount_percentage}% off</p>

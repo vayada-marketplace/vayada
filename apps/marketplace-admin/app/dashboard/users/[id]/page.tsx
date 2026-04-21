@@ -10,6 +10,8 @@ import { Input } from '@/components/ui'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiErrorResponse } from '@/services/api/client'
 import type { UserDetailResponse, CreatorProfileDetail, HotelProfileDetail, PlatformResponse, ListingResponse, CollaborationOffering, CreatorRequirements } from '@/lib/types'
+import { CURRENCY_OPTIONS } from '@/lib/constants/booking'
+import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 
 const PLATFORMS = ['Instagram', 'TikTok', 'YouTube', 'Facebook'] as const
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55+'] as const
@@ -89,6 +91,7 @@ export default function UserDetailPage() {
       freeStayMinNights?: number | null
       freeStayMaxNights?: number | null
       paidMaxAmount?: number | null
+      currency?: string | null
       discountPercentage?: number | null
     }>
     creatorRequirements: {
@@ -462,6 +465,7 @@ export default function UserDetailPage() {
         freeStayMinNights: offering.freeStayMinNights,
         freeStayMaxNights: offering.freeStayMaxNights,
         paidMaxAmount: offering.paidMaxAmount,
+        currency: offering.currency,
         discountPercentage: offering.discountPercentage,
       })),
       creatorRequirements: listing.creatorRequirements ? {
@@ -597,6 +601,7 @@ export default function UserDetailPage() {
           offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
         } else if (offering.collaborationType === 'Paid') {
           offeringData.paidMaxAmount = offering.paidMaxAmount ? parseFloat(offering.paidMaxAmount.toString()) : null
+          offeringData.currency = offering.currency || 'USD'
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
         }
@@ -767,6 +772,7 @@ export default function UserDetailPage() {
           offeringData.freeStayMaxNights = offering.freeStayMaxNights ? parseInt(offering.freeStayMaxNights.toString()) : null
         } else if (offering.collaborationType === 'Paid') {
           offeringData.paidMaxAmount = offering.paidMaxAmount ? parseFloat(offering.paidMaxAmount.toString()) : null
+          offeringData.currency = offering.currency || 'USD'
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
         }
@@ -2543,14 +2549,28 @@ export default function UserDetailPage() {
                               </div>
                             )}
                             {offering.collaborationType === 'Paid' && (
-                              <div>
-                                <Input
-                                  label="Max Amount (IDR)"
-                                  type="number"
-                                  value={offering.paidMaxAmount?.toString() || ''}
-                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'paidMaxAmount', e.target.value ? parseFloat(e.target.value) : null)}
-                                  placeholder="1000000"
-                                />
+                              <div className="flex gap-2">
+                                <div className="w-32">
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                                  <select
+                                    value={offering.currency || 'USD'}
+                                    onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'currency', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    {CURRENCY_OPTIONS.map(c => (
+                                      <option key={c.code} value={c.code}>{c.code}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="flex-1">
+                                  <Input
+                                    label="Max Amount"
+                                    type="number"
+                                    value={offering.paidMaxAmount?.toString() || ''}
+                                    onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'paidMaxAmount', e.target.value ? parseFloat(e.target.value) : null)}
+                                    placeholder="1000"
+                                  />
+                                </div>
                               </div>
                             )}
                             {offering.collaborationType === 'Discount' && (
@@ -2687,7 +2707,7 @@ export default function UserDetailPage() {
                             {offering.collaborationType === 'Paid' && offering.paidMaxAmount !== null && (
                               <div>
                                 <label className="block text-sm font-medium text-gray-700">Maximum Amount</label>
-                                <p className="mt-1 text-sm text-gray-900">Rp{offering.paidMaxAmount.toLocaleString('id-ID')}</p>
+                                <p className="mt-1 text-sm text-gray-900">{getCurrencySymbol(offering.currency || 'USD')}{offering.paidMaxAmount.toLocaleString()}</p>
                               </div>
                             )}
 

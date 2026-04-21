@@ -28,6 +28,7 @@ export interface CollaborationOffering {
   free_stay_min_nights: number | null
   free_stay_max_nights: number | null
   paid_max_amount: number | null
+  currency: string | null
   discount_percentage: number | null
   created_at: string
   updated_at: string

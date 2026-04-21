@@ -47,6 +47,7 @@ export interface Collaboration {
     // Terms & Compensation
     collaboration_type?: CollaborationType;
     paid_amount?: number;             // Only if type is 'Paid'
+    currency?: string;                // ISO 4217 code, only meaningful if type is 'Paid'
     discount_percentage?: number;     // Only if type is 'Discount'
     free_stay_min_nights?: number;    // Only if type is 'Free Stay'
     free_stay_max_nights?: number;    // Only if type is 'Free Stay'

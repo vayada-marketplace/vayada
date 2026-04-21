@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { ArrowLeftIcon, PlusIcon, TrashIcon, PhotoIcon, ChevronDownIcon, ChevronUpIcon, XMarkIcon, GiftIcon, CurrencyDollarIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { usersService, uploadService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
+import { CURRENCY_OPTIONS } from '@/lib/constants/booking'
 
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55+'] as const
 
@@ -94,6 +95,7 @@ export default function CreateUserPage() {
     freeStayMinNights?: string
     freeStayMaxNights?: string
     paidMaxAmount?: string
+    currency?: string
     discountPercentage?: string
   }
 
@@ -663,6 +665,7 @@ export default function CreateUserPage() {
                     if (co.paidMaxAmount) {
                       offering.paidMaxAmount = parseFloat(co.paidMaxAmount)
                     }
+                    offering.currency = co.currency || 'USD'
                   } else if (co.collaborationType === 'Discount') {
                     if (co.discountPercentage) {
                       offering.discountPercentage = parseInt(co.discountPercentage)
@@ -1487,15 +1490,29 @@ export default function CreateUserPage() {
                                           </div>
                                         )}
                                         {offering.collaborationType === 'Paid' && (
-                                          <div>
-                                            <Input
-                                              label="Max Amount (IDR)"
-                                              type="number"
-                                              value={offering.paidMaxAmount || ''}
-                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'paidMaxAmount', e.target.value)}
-                                              placeholder="1000000"
-                                              required
-                                            />
+                                          <div className="flex gap-2">
+                                            <div className="w-28">
+                                              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                                              <select
+                                                value={offering.currency || 'USD'}
+                                                onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'currency', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                              >
+                                                {CURRENCY_OPTIONS.map(c => (
+                                                  <option key={c.code} value={c.code}>{c.code}</option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                            <div className="flex-1">
+                                              <Input
+                                                label="Max Amount"
+                                                type="number"
+                                                value={offering.paidMaxAmount || ''}
+                                                onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'paidMaxAmount', e.target.value)}
+                                                placeholder="1000"
+                                                required
+                                              />
+                                            </div>
                                           </div>
                                         )}
                                         {offering.collaborationType === 'Discount' && (
