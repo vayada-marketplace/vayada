@@ -68,7 +68,7 @@
     "viewDetails": "Ver Detalles",
     "rateOptions": "Opciones de Tarifa",
     "flexibleRate": "Tarifa Flexible",
-    "flexibleDesc": "Cancelación gratuita hasta 7 días antes",
+    "flexibleDesc": "Cancelación gratuita hasta {days} días antes",
     "nonRefundableRate": "Tarifa No Reembolsable",
     "nonRefundableDesc": "No reembolsable",
     "off": "-15% DTO",

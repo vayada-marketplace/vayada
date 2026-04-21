@@ -69,7 +69,7 @@
     "viewDetails": "View Details",
     "rateOptions": "Rate Options",
     "flexibleRate": "Flexible Rate",
-    "flexibleDesc": "Free cancellation until 7 days before",
+    "flexibleDesc": "Free cancellation until {days} days before",
     "nonRefundableRate": "Non-Refundable Rate",
     "nonRefundableDesc": "Non-refundable",
     "off": "-15% OFF",

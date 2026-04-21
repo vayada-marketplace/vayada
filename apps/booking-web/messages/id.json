@@ -68,7 +68,7 @@
     "viewDetails": "Lihat Detail",
     "rateOptions": "Pilihan Tarif",
     "flexibleRate": "Tarif Fleksibel",
-    "flexibleDesc": "Pembatalan gratis hingga 7 hari sebelumnya",
+    "flexibleDesc": "Pembatalan gratis hingga {days} hari sebelumnya",
     "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",

@@ -63,6 +63,7 @@ export interface RoomType {
   features: string[]
   benefits: string[]
   flexibleRateEnabled: boolean
+  cancellationPolicy?: string
   originalRate?: number | null
   lastMinuteDiscountPercent?: number | null
   ratePaymentMethods?: Record<string, string[]> | null

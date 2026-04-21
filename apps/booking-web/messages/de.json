@@ -68,7 +68,7 @@
     "viewDetails": "Details ansehen",
     "rateOptions": "Tarifoptionen",
     "flexibleRate": "Flexibler Tarif",
-    "flexibleDesc": "Kostenlose Stornierung bis 7 Tage vorher",
+    "flexibleDesc": "Kostenlose Stornierung bis {days} Tage vorher",
     "nonRefundableRate": "Nicht erstattbarer Tarif",
     "nonRefundableDesc": "Nicht erstattbar",
     "off": "-15% RABATT",

@@ -14,7 +14,7 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
-import { getNonRefundableRate, calculatePromoDiscount } from '@/lib/constants/booking'
+import { getNonRefundableRate, calculatePromoDiscount, getFreeCancellationDays } from '@/lib/constants/booking'
 import { hotelService } from '@/services/api/hotel'
 
 interface GuestDetails {
@@ -549,7 +549,12 @@ function PaymentPageContent() {
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <h3 className="text-base font-bold text-gray-900 mb-2">{t('cancellationPolicyTitle')}</h3>
               <p className="text-sm text-gray-600">
-                {t('cancellationPolicyDesc', { date: formatDate(checkIn, locale) })}
+                {t('cancellationPolicyDesc', {
+                  date: formatDate(
+                    new Date(new Date(checkIn).getTime() - getFreeCancellationDays(room?.cancellationPolicy) * 86400000).toISOString().slice(0, 10),
+                    locale,
+                  ),
+                })}
               </p>
             </div>
 

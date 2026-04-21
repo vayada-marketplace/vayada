@@ -7,6 +7,15 @@ export function getNonRefundableRate(baseRate: number, nonRefundableRate?: numbe
   return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT * 100) / 100
 }
 
+/** Parse the admin-selected cancellation policy string (e.g. "Free until 14 days before")
+ *  into the number of days before check-in. Falls back to 7 if the policy string is missing
+ *  or in an unexpected format. */
+export function getFreeCancellationDays(cancellationPolicy?: string | null): number {
+  if (!cancellationPolicy) return 7
+  const match = cancellationPolicy.match(/(\d+)\s*days?/i)
+  return match ? parseInt(match[1], 10) : 7
+}
+
 /** Calculate the discount amount from a promo code. */
 export function calculatePromoDiscount(
   subtotal: number,
