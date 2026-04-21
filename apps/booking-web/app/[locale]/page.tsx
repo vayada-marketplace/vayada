@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import Image from 'next/image'
 import { useRouter } from '@/i18n/navigation'
@@ -82,7 +83,7 @@ function PromoPopover({
   )
 }
 
-export default function HomePage() {
+function HomePageContent() {
   const router = useRouter()
   const locale = useLocale()
   const t = useTranslations('home')
@@ -93,26 +94,34 @@ export default function HomePage() {
   const { addons } = useAddons()
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
+  const searchParams = useSearchParams()
 
   useEffect(() => { trackEvent(slug, 'page_visit') }, [slug])
+
+  // Initialize from URL params so back-navigation from /book or /addons
+  // preserves the user's selected dates and guests.
   const [checkIn, setCheckIn] = useState(() => {
+    const q = searchParams.get('checkIn')
+    if (q) return q
     const d = new Date()
     d.setDate(d.getDate() + 1)
     return d.toISOString().split('T')[0]
   })
   const [checkOut, setCheckOut] = useState(() => {
+    const q = searchParams.get('checkOut')
+    if (q) return q
     const d = new Date()
     d.setDate(d.getDate() + 2)
     return d.toISOString().split('T')[0]
   })
-  const [adults, setAdults] = useState(2)
-  const [children, setChildren] = useState(0)
+  const [adults, setAdults] = useState(() => parseInt(searchParams.get('adults') || '2'))
+  const [children, setChildren] = useState(() => parseInt(searchParams.get('children') || '0'))
 
   // "Committed" search params — only update when user clicks "Check Availability"
   const [committedCheckIn, setCommittedCheckIn] = useState(checkIn)
   const [committedCheckOut, setCommittedCheckOut] = useState(checkOut)
-  const [committedAdults, setCommittedAdults] = useState(2)
-  const [committedChildren, setCommittedChildren] = useState(0)
+  const [committedAdults, setCommittedAdults] = useState(adults)
+  const [committedChildren, setCommittedChildren] = useState(children)
 
   // Fetch rooms with default dates on initial load so prices reflect seasonal rates
   const [initialFetchDone, setInitialFetchDone] = useState(false)
@@ -206,6 +215,9 @@ export default function HomePage() {
     if (sortOption === 'priceLow') result.sort((a, b) => a.baseRate - b.baseRate)
     else if (sortOption === 'priceHigh') result.sort((a, b) => b.baseRate - a.baseRate)
     else if (sortOption === 'roomSize') result.sort((a, b) => (b.size || 0) - (a.size || 0))
+    const totalGuests = committedAdults + committedChildren
+    const isSoldOut = (room: typeof rooms[number]) => room.remainingRooms < Math.ceil(totalGuests / room.maxOccupancy)
+    result.sort((a, b) => Number(isSoldOut(a)) - Number(isSoldOut(b)))
     return result
   })()
 
@@ -865,5 +877,13 @@ export default function HomePage() {
 
       <BookingFooter />
     </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <HomePageContent />
+    </Suspense>
   )
 }

@@ -318,7 +318,16 @@ export default function AddonsPage() {
         {/* Bottom Action Bar */}
         <div className="flex items-center justify-between border-t border-gray-200 pt-6">
           <button
-            onClick={() => router.push('/')}
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (checkIn) params.set('checkIn', checkIn)
+              if (checkOut) params.set('checkOut', checkOut)
+              params.set('adults', String(adultsParam))
+              const childrenParam = parseInt(searchParams.get('children') || '0')
+              if (childrenParam > 0) params.set('children', String(childrenParam))
+              const qs = params.toString()
+              router.push(qs ? `/?${qs}` : '/')
+            }}
             className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
