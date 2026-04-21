@@ -12,6 +12,7 @@ import {
   BuildingOfficeIcon,
   UserGroupIcon,
   MapPinIcon,
+  MagnifyingGlassIcon,
   StarIcon,
   PhotoIcon,
   GlobeAltIcon,
@@ -30,6 +31,7 @@ export default function MarketplacePreviewPage() {
   const [loadingListings, setLoadingListings] = useState(true)
   const [loadingCreators, setLoadingCreators] = useState(true)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
 
   // Modal states
   const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null)
@@ -134,6 +136,33 @@ export default function MarketplacePreviewPage() {
     }
   }
 
+  const q = search.trim().toLowerCase()
+  const filteredListings = q
+    ? listings.filter((l) =>
+        [
+          l.name,
+          l.hotel_name,
+          l.location,
+          l.description,
+          l.accommodation_type,
+        ]
+          .filter(Boolean)
+          .some((v) => v!.toLowerCase().includes(q)),
+      )
+    : listings
+  const filteredCreators = q
+    ? creators.filter((c) =>
+        [
+          c.name,
+          c.location,
+          c.short_description,
+          ...c.platforms.flatMap((p) => [p.name, p.handle]),
+        ]
+          .filter(Boolean)
+          .some((v) => v!.toLowerCase().includes(q)),
+      )
+    : creators
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -171,6 +200,24 @@ export default function MarketplacePreviewPage() {
           </button>
         </div>
 
+        {/* Search */}
+        <div className="mb-6 bg-white p-4 rounded-lg shadow">
+          <div className="relative">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder={
+                activeTab === 'listings'
+                  ? 'Search by hotel, location, description...'
+                  : 'Search by creator, location, platform...'
+              }
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-gray-400"
+            />
+          </div>
+        </div>
+
         {error && (
           <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-sm text-red-800">{error}</p>
@@ -184,17 +231,21 @@ export default function MarketplacePreviewPage() {
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <p className="text-gray-600">Loading listings...</p>
               </div>
-            ) : listings.length === 0 ? (
+            ) : filteredListings.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <BuildingOfficeIcon className="mx-auto h-12 w-12 text-gray-400" />
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No listings</h3>
+                <h3 className="mt-2 text-sm font-medium text-gray-900">
+                  {q ? 'No matching listings' : 'No listings'}
+                </h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  No verified hotels with complete profiles have listings yet.
+                  {q
+                    ? 'Try a different search.'
+                    : 'No verified hotels with complete profiles have listings yet.'}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {listings.map((listing) => (
+                {filteredListings.map((listing) => (
                   <div
                     key={listing.id}
                     className="bg-white rounded-lg shadow overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
@@ -285,17 +336,21 @@ export default function MarketplacePreviewPage() {
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <p className="text-gray-600">Loading creators...</p>
               </div>
-            ) : creators.length === 0 ? (
+            ) : filteredCreators.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <UserGroupIcon className="mx-auto h-12 w-12 text-gray-400" />
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No creators</h3>
+                <h3 className="mt-2 text-sm font-medium text-gray-900">
+                  {q ? 'No matching creators' : 'No creators'}
+                </h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  No verified creators with complete profiles yet.
+                  {q
+                    ? 'Try a different search.'
+                    : 'No verified creators with complete profiles yet.'}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {creators.map((creator) => (
+                {filteredCreators.map((creator) => (
                   <div
                     key={creator.id}
                     className="bg-white rounded-lg shadow overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
