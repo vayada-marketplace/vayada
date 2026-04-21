@@ -1,7 +1,12 @@
 from typing import Optional, List
 from datetime import datetime
+from decimal import Decimal
 
 from app.database import Database
+
+
+# Channels that support a configurable markup. 'direct' is implicit (0%).
+MARKUP_CHANNELS = ("booking_com", "airbnb")
 
 
 class ChannexConnectionRepository:
@@ -173,17 +178,18 @@ class ChannexRatePlanMappingRepository:
         channex_room_type_id: str,
         sell_mode: str = "per_room",
         plan_name: str = "standard",
+        channel: str = "direct",
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO channex_rate_plan_mappings
                 (hotel_id, room_type_id, channex_rate_plan_id,
-                 channex_room_type_id, sell_mode, plan_name)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                 channex_room_type_id, sell_mode, plan_name, channel)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             """,
             hotel_id, room_type_id, channex_rate_plan_id,
-            channex_room_type_id, sell_mode, plan_name,
+            channex_room_type_id, sell_mode, plan_name, channel,
         )
         return dict(row)
 
@@ -304,3 +310,44 @@ class ChannexBookingMappingRepository:
                 """,
                 booking_id, synced_at,
             )
+
+
+class ChannexChannelMarkupRepository:
+
+    @staticmethod
+    async def list_by_hotel_id(hotel_id: str) -> List[dict]:
+        rows = await Database.fetch(
+            "SELECT * FROM channex_channel_markups WHERE hotel_id = $1",
+            hotel_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def get_markup_map(hotel_id: str) -> dict:
+        """Return {channel: Decimal(markup_pct)} for the hotel.
+
+        Channels with no configured row default to Decimal(0). Direct is
+        always 0 (never stored)."""
+        rows = await Database.fetch(
+            "SELECT channel, markup_pct FROM channex_channel_markups WHERE hotel_id = $1",
+            hotel_id,
+        )
+        result = {channel: Decimal(0) for channel in MARKUP_CHANNELS}
+        result["direct"] = Decimal(0)
+        for r in rows:
+            result[r["channel"]] = Decimal(r["markup_pct"])
+        return result
+
+    @staticmethod
+    async def upsert(hotel_id: str, channel: str, markup_pct: Decimal) -> dict:
+        row = await Database.fetchrow(
+            """
+            INSERT INTO channex_channel_markups (hotel_id, channel, markup_pct)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (hotel_id, channel)
+            DO UPDATE SET markup_pct = EXCLUDED.markup_pct, updated_at = now()
+            RETURNING *
+            """,
+            hotel_id, channel, markup_pct,
+        )
+        return dict(row)

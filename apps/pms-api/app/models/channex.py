@@ -1,5 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
+from decimal import Decimal
 
 
 def to_camel(string: str) -> str:
@@ -59,3 +60,24 @@ class ChannexSyncStatusResponse(BaseModel):
     rate_plans_provisioned: int = 0
     last_booking_sync_at: Optional[str] = None
     last_ari_sync_at: Optional[str] = None
+
+
+# ── Channel markups ──────────────────────────────────────────────────
+
+class ChannelMarkup(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    channel: str
+    markup_pct: Decimal = Field(ge=-50, le=200)
+
+
+class ChannelMarkupsResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    markups: List[ChannelMarkup]
+
+
+class ChannelMarkupsUpdateRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    markups: List[ChannelMarkup]

@@ -10,11 +10,16 @@ from app.repositories.channex_mapping_repo import (
     ChannexConnectionRepository,
     ChannexRoomTypeMappingRepository,
     ChannexRatePlanMappingRepository,
+    ChannexChannelMarkupRepository,
+    MARKUP_CHANNELS,
 )
 from app.models.channex import (
     ChannexRoomTypeMappingResponse,
     ChannexRatePlanMappingResponse,
     ChannexSyncStatusResponse,
+    ChannelMarkup,
+    ChannelMarkupsResponse,
+    ChannelMarkupsUpdateRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,6 +207,66 @@ async def channex_sync_bookings(
 
     await poll_bookings_for_hotel(hotel_id)
     return {"status": "sync_complete"}
+
+
+# ── Channel markups ──────────────────────────────────────────────────
+
+@router.get("/channex/markups", response_model=ChannelMarkupsResponse)
+async def channex_get_markups(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Return current per-channel markup percentages for the hotel.
+    Channels with no configured row default to 0%."""
+    hotel_id = await get_hotel_id(user_id)
+    rows = await ChannexChannelMarkupRepository.list_by_hotel_id(hotel_id)
+    by_channel = {r["channel"]: r["markup_pct"] for r in rows}
+    markups = [
+        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0))
+        for ch in MARKUP_CHANNELS
+    ]
+    return ChannelMarkupsResponse(markups=markups)
+
+
+@router.put("/channex/markups", response_model=ChannelMarkupsResponse)
+async def channex_update_markups(
+    req: ChannelMarkupsUpdateRequest,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Upsert per-channel markup percentages, ensure per-channel rate plans
+    exist in Channex, and trigger an ARI re-sync so the updated prices
+    propagate to OTAs."""
+    from app.services.channex_sync_service import provision_property, push_ari_for_hotel
+
+    hotel_id = await get_hotel_id(user_id)
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"]:
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
+
+    for m in req.markups:
+        if m.channel not in MARKUP_CHANNELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported channel '{m.channel}'",
+            )
+        await ChannexChannelMarkupRepository.upsert(hotel_id, m.channel, m.markup_pct)
+
+    # Provision is idempotent — creates any missing per-channel rate plans
+    # (needed for hotels that enabled Channex before this feature shipped).
+    try:
+        await provision_property(hotel_id)
+    except Exception as e:
+        logger.exception("Failed to provision per-channel rate plans for hotel %s", hotel_id)
+        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
+
+    asyncio.create_task(push_ari_for_hotel(hotel_id))
+
+    rows = await ChannexChannelMarkupRepository.list_by_hotel_id(hotel_id)
+    by_channel = {r["channel"]: r["markup_pct"] for r in rows}
+    markups = [
+        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0))
+        for ch in MARKUP_CHANNELS
+    ]
+    return ChannelMarkupsResponse(markups=markups)
 
 
 # ── Channel IFrame ───────────────────────────────────────────────────

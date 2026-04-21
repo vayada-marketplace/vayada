@@ -1,5 +1,6 @@
 import logging
 from datetime import date, timedelta, datetime, timezone
+from decimal import Decimal
 from typing import Optional, List
 
 from app.repositories.room_type_repo import RoomTypeRepository
@@ -11,12 +12,22 @@ from app.repositories.channex_mapping_repo import (
     ChannexRoomTypeMappingRepository,
     ChannexRatePlanMappingRepository,
     ChannexBookingMappingRepository,
+    ChannexChannelMarkupRepository,
 )
 from app.services import channex_service
 
 logger = logging.getLogger(__name__)
 
 SYNC_HORIZON_DAYS = 365
+
+# Channel labels used in Channex rate plan titles and plan combinations.
+# Airbnb only accepts one rate plan per listing, so we skip non_refundable there.
+_CHANNEL_LABELS = {
+    "direct": "",
+    "booking_com": "BDC",
+    "airbnb": "Airbnb",
+}
+_CHANNELS_WITH_NON_REFUNDABLE = {"direct", "booking_com"}
 
 
 # ── Provisioning ─────────────────────────────────────────────────────
@@ -118,17 +129,26 @@ async def provision_property(hotel_id: str) -> dict:
                 channex_room_type_id, rt["name"], room_type_id,
             )
 
-        # Create rate plans — Standard always, Non-Refundable if enabled
+        # Create rate plans — one per (channel, plan_name) combination:
+        #   direct        → standard (+ non_refundable if enabled)
+        #   booking_com   → standard (+ non_refundable if enabled)
+        #   airbnb        → standard only (Airbnb API allows one rate plan per listing)
         existing_rates = await ChannexRatePlanMappingRepository.list_by_room_type_id(room_type_id)
-        existing_plan_names = {r.get("plan_name", "standard") for r in existing_rates}
+        existing_combos = {
+            (r.get("channel", "direct"), r.get("plan_name", "standard"))
+            for r in existing_rates
+        }
         default_occ = min(2, rt["max_occupancy"])
 
-        plans_to_create = [("standard", f"{rt['name']} - Standard")]
-        if rt.get("non_refundable_enabled"):
-            plans_to_create.append(("non_refundable", f"{rt['name']} - Non-Refundable"))
+        plans_to_create = []
+        for channel, label in _CHANNEL_LABELS.items():
+            prefix = f"{label} " if label else ""
+            plans_to_create.append((channel, "standard", f"{rt['name']} - {prefix}Standard"))
+            if rt.get("non_refundable_enabled") and channel in _CHANNELS_WITH_NON_REFUNDABLE:
+                plans_to_create.append((channel, "non_refundable", f"{rt['name']} - {prefix}Non-Refundable"))
 
-        for plan_name, plan_title in plans_to_create:
-            if plan_name in existing_plan_names:
+        for channel, plan_name, plan_title in plans_to_create:
+            if (channel, plan_name) in existing_combos:
                 continue
             channex_rp = await channex_service.create_rate_plan(
                 api_key,
@@ -146,11 +166,12 @@ async def provision_property(hotel_id: str) -> dict:
                 channex_room_type_id=channex_room_type_id,
                 sell_mode="per_room",
                 plan_name=plan_name,
+                channel=channel,
             )
             rates_created += 1
             logger.info(
-                "Created Channex rate plan %s (%s) for %s",
-                channex_rp["id"], plan_name, rt["name"],
+                "Created Channex rate plan %s (%s/%s) for %s",
+                channex_rp["id"], channel, plan_name, rt["name"],
             )
 
     return {
@@ -246,7 +267,10 @@ async def push_availability_for_room_type(
 # ── ARI Push: Restrictions (rates + rules) ───────────────────────────
 
 def _build_restriction_entry(
-    room_type: dict, check_date: date, plan_name: str = "standard"
+    room_type: dict,
+    check_date: date,
+    plan_name: str = "standard",
+    markup_pct: Decimal = Decimal(0),
 ) -> dict:
     """Build a restriction snapshot for a single date.
     Returns dict with rate, min_stay_arrival, max_stay, stop_sell, CTA, CTD."""
@@ -261,6 +285,10 @@ def _build_restriction_entry(
             rate = round(base_rate * (1 - discount / 100), 2)
     else:
         rate = base_rate
+
+    # Apply channel markup (direct is always 0%)
+    if markup_pct:
+        rate = round(float(rate) * (1 + float(markup_pct) / 100), 2)
 
     # stop_sell: true if the date falls outside all operating periods
     in_operating = RoomTypeRepository.is_date_in_operating_periods(room_type, check_date)
@@ -320,6 +348,8 @@ async def push_restrictions_for_rate_plan(
     room_type_id: str,
     channex_rate_plan_id: str,
     plan_name: str = "standard",
+    channel: str = "direct",
+    markup_pct: Optional[Decimal] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> None:
@@ -337,6 +367,10 @@ async def push_restrictions_for_rate_plan(
     if end_date is None:
         end_date = start_date + timedelta(days=SYNC_HORIZON_DAYS)
 
+    if markup_pct is None:
+        markup_map = await ChannexChannelMarkupRepository.get_markup_map(hotel_id)
+        markup_pct = markup_map.get(channel, Decimal(0))
+
     api_key = channex_service.get_platform_api_key()
     channex_property_id = str(conn["channex_property_id"])
 
@@ -347,7 +381,7 @@ async def push_restrictions_for_rate_plan(
     prev_restr = None
 
     while current <= end_date:
-        restr = _build_restriction_entry(room_type, current, plan_name)
+        restr = _build_restriction_entry(room_type, current, plan_name, markup_pct)
 
         if prev_restr is not None and not _restrictions_equal(prev_restr, restr):
             values.append(_restriction_to_value(
@@ -386,6 +420,7 @@ async def push_restrictions_for_rate_plan(
 async def push_ari_for_hotel(hotel_id: str) -> None:
     """Full availability + restrictions sync for all mapped room types in a hotel."""
     room_mappings = await ChannexRoomTypeMappingRepository.list_by_hotel_id(hotel_id)
+    markup_map = await ChannexChannelMarkupRepository.get_markup_map(hotel_id)
     for mapping in room_mappings:
         room_type_id = str(mapping["room_type_id"])
         await push_availability_for_room_type(hotel_id, room_type_id)
@@ -393,10 +428,13 @@ async def push_ari_for_hotel(hotel_id: str) -> None:
         # Push restrictions for ALL rate plans linked to this room type
         rate_plans = await ChannexRatePlanMappingRepository.list_by_room_type_id(room_type_id)
         for rp in rate_plans:
+            channel = rp.get("channel", "direct")
             await push_restrictions_for_rate_plan(
                 hotel_id, room_type_id,
                 str(rp["channex_rate_plan_id"]),
                 plan_name=rp.get("plan_name", "standard"),
+                channel=channel,
+                markup_pct=markup_map.get(channel, Decimal(0)),
             )
 
     await ChannexConnectionRepository.update_last_ari_sync(
