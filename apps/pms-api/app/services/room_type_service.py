@@ -153,6 +153,7 @@ async def get_rooms_for_guest(
                 features=parse_jsonb(room["features"]),
                 benefits=hotel_benefits,
                 flexible_rate_enabled=room.get("flexible_rate_enabled", True),
+                cancellation_policy=room.get("cancellation_policy") or "Free until 7 days before",
                 rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
             )
         )

@@ -245,6 +245,7 @@ class RoomTypeResponse(BaseModel):
     features: List[str]
     benefits: List[str] = []
     flexible_rate_enabled: bool = True
+    cancellation_policy: str = "Free until 7 days before"
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
 
