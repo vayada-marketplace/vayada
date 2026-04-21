@@ -556,6 +556,7 @@ async def get_creator_collaborations(
                 free_stay_min_nights=collab['free_stay_min_nights'],
                 free_stay_max_nights=collab['free_stay_max_nights'],
                 paid_amount=collab['paid_amount'],
+                currency=collab.get('currency'),
                 discount_percentage=collab['discount_percentage'],
                 platform_deliverables=deliverables
             ))
@@ -685,6 +686,7 @@ async def get_creator_collaboration_detail(
             free_stay_min_nights=collab['free_stay_min_nights'],
             free_stay_max_nights=collab['free_stay_max_nights'],
             paid_amount=collab['paid_amount'],
+            currency=collab.get('currency'),
             discount_percentage=collab['discount_percentage'],
             travel_date_from=collab['travel_date_from'],
             travel_date_to=collab['travel_date_to'],

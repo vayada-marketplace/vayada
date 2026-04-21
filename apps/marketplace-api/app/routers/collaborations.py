@@ -240,18 +240,18 @@ async def create_collaboration(
                         initiator_type, creator_id, hotel_id, listing_id, status,
                         why_great_fit, collaboration_type,
                         free_stay_min_nights, free_stay_max_nights,
-                        paid_amount, discount_percentage,
+                        paid_amount, currency, discount_percentage,
                         travel_date_from, travel_date_to,
                         preferred_date_from, preferred_date_to,
                         preferred_months, consent, creator_fee
                     )
-                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                    VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, COALESCE($10, 'USD'), $11, $12, $13, $14, $15, $16, $17, $18)
                     RETURNING *
                     """,
                     request.initiator_type, creator_id, hotel_id, request.listing_id,
                     request.why_great_fit, request.collaboration_type,
                     request.free_stay_min_nights, request.free_stay_max_nights,
-                    request.paid_amount, request.discount_percentage,
+                    request.paid_amount, request.currency, request.discount_percentage,
                     request.travel_date_from, request.travel_date_to,
                     request.preferred_date_from, request.preferred_date_to,
                     request.preferred_months, request.consent, request.creator_fee
@@ -315,6 +315,7 @@ async def create_collaboration(
             free_stay_min_nights=collaboration['free_stay_min_nights'],
             free_stay_max_nights=collaboration['free_stay_max_nights'],
             paid_amount=collaboration['paid_amount'],
+            currency=collaboration.get('currency'),
             discount_percentage=collaboration['discount_percentage'],
             travel_date_from=collaboration['travel_date_from'],
             travel_date_to=collaboration['travel_date_to'],
@@ -486,6 +487,7 @@ async def respond_to_collaboration_request(
             free_stay_min_nights=updated['free_stay_min_nights'],
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
+            currency=updated.get('currency'),
             discount_percentage=updated['discount_percentage'],
             travel_date_from=updated['travel_date_from'],
             travel_date_to=updated['travel_date_to'],
@@ -620,6 +622,12 @@ async def update_collaboration_terms(
             param_idx += 1
             diff_summary.append(f"Amount: {request.paid_amount}")
 
+        if request.currency is not None:
+            updates.append(f"currency = ${param_idx}")
+            update_params.append(request.currency)
+            param_idx += 1
+            diff_summary.append(f"Currency: {request.currency}")
+
         if request.discount_percentage is not None:
             updates.append(f"discount_percentage = ${param_idx}")
             update_params.append(request.discount_percentage)
@@ -744,6 +752,7 @@ async def update_collaboration_terms(
             free_stay_min_nights=updated['free_stay_min_nights'],
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
+            currency=updated.get('currency'),
             discount_percentage=updated['discount_percentage'],
             stay_nights=updated['free_stay_min_nights'] if updated['free_stay_min_nights'] == updated['free_stay_max_nights'] else None,
             travel_date_from=updated['travel_date_from'],
@@ -956,6 +965,7 @@ async def approve_collaboration_terms(
             free_stay_min_nights=updated['free_stay_min_nights'],
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
+            currency=updated.get('currency'),
             discount_percentage=updated['discount_percentage'],
             travel_date_from=updated['travel_date_from'],
             travel_date_to=updated['travel_date_to'],
@@ -1080,6 +1090,7 @@ async def cancel_collaboration(
             free_stay_min_nights=updated['free_stay_min_nights'],
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
+            currency=updated.get('currency'),
             discount_percentage=updated['discount_percentage'],
             travel_date_from=updated['travel_date_from'],
             travel_date_to=updated['travel_date_to'],
@@ -1171,6 +1182,7 @@ async def toggle_deliverable(
             free_stay_min_nights=updated['free_stay_min_nights'],
             free_stay_max_nights=updated['free_stay_max_nights'],
             paid_amount=updated['paid_amount'],
+            currency=updated.get('currency'),
             discount_percentage=updated['discount_percentage'],
             travel_date_from=updated['travel_date_from'],
             travel_date_to=updated['travel_date_to'],

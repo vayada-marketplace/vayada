@@ -89,6 +89,7 @@ class CollaborationOfferingRequest(BaseModel):
     freeStayMinNights: Optional[int] = Field(None, gt=0, alias="free_stay_min_nights")
     freeStayMaxNights: Optional[int] = Field(None, gt=0, alias="free_stay_max_nights")
     paidMaxAmount: Optional[Decimal] = Field(None, gt=0, alias="paid_max_amount")
+    currency: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$', description="ISO 4217 currency code for paid offerings (defaults to USD server-side)")
     discountPercentage: Optional[int] = Field(None, ge=1, le=100, alias="discount_percentage")
 
     @model_validator(mode='after')
@@ -307,6 +308,7 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     collaborationType: Optional[str] = Field(None, alias="collaboration_type")
     discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
     paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
+    currency: Optional[str] = Field(None, description="ISO 4217 currency code for paidAmount")
     freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
     freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
     preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")

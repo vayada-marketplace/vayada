@@ -65,6 +65,7 @@ async def get_all_listings():
                 free_stay_min_nights=o['free_stay_min_nights'],
                 free_stay_max_nights=o['free_stay_max_nights'],
                 paid_max_amount=o['paid_max_amount'],
+                currency=o['currency'],
                 discount_percentage=o['discount_percentage'],
                 created_at=o['created_at'],
                 updated_at=o['updated_at']

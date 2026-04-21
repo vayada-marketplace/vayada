@@ -110,6 +110,11 @@ class CreateCollaborationRequest(BaseModel):
         gt=0,
         description="Payment amount for Paid collaboration (required if collaboration_type is 'Paid')"
     )
+    currency: Optional[str] = Field(
+        None,
+        pattern=r'^[A-Z]{3}$',
+        description="ISO 4217 currency code for paid_amount (defaults to USD server-side)"
+    )
     discount_percentage: Optional[int] = Field(
         None,
         ge=1,
@@ -196,6 +201,7 @@ class UpdateCollaborationTermsRequest(BaseModel):
     free_stay_min_nights: Optional[int] = None
     free_stay_max_nights: Optional[int] = None
     paid_amount: Optional[Decimal] = None
+    currency: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$', description="ISO 4217 currency code for paid_amount")
     discount_percentage: Optional[int] = None
     stay_nights: Optional[int] = None
     travel_date_from: Optional[date] = None
@@ -210,6 +216,7 @@ class UpdateCollaborationTermsRequest(BaseModel):
             self.free_stay_min_nights,
             self.free_stay_max_nights,
             self.paid_amount,
+            self.currency,
             self.discount_percentage,
             self.stay_nights,
             self.travel_date_from,
@@ -278,6 +285,7 @@ class CollaborationResponse(BaseModel):
     free_stay_min_nights: Optional[int] = None
     free_stay_max_nights: Optional[int] = None
     paid_amount: Optional[Decimal] = None
+    currency: Optional[str] = None
     discount_percentage: Optional[int] = None
     stay_nights: Optional[int] = None
 

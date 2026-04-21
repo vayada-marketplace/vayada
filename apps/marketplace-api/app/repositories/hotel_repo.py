@@ -163,8 +163,8 @@ class HotelRepository:
     ) -> list:
         query = """
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
-                   free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
-                   created_at, updated_at
+                   free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
+                   discount_percentage, created_at, updated_at
             FROM listing_collaboration_offerings
             WHERE listing_id = $1
             ORDER BY created_at DESC
@@ -185,20 +185,21 @@ class HotelRepository:
         free_stay_max_nights: Optional[int],
         paid_max_amount: Optional[float],
         discount_percentage: Optional[float],
+        currency: Optional[str] = None,
         *,
         conn: Optional[asyncpg.Connection] = None,
     ) -> dict:
         query = """
             INSERT INTO listing_collaboration_offerings
             (listing_id, collaboration_type, availability_months, platforms,
-             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'))
             RETURNING id, collaboration_type, availability_months, platforms,
-                      free_stay_min_nights, free_stay_max_nights, paid_max_amount,
+                      free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
                       discount_percentage, created_at, updated_at
         """
         args = (listing_id, collaboration_type, availability_months, platforms,
-                free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
+                free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency)
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -339,8 +340,8 @@ class HotelRepository:
         placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
         query = f"""
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
-                   free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage,
-                   created_at, updated_at
+                   free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
+                   discount_percentage, created_at, updated_at
             FROM listing_collaboration_offerings
             WHERE listing_id IN ({placeholders})
             ORDER BY listing_id, created_at DESC

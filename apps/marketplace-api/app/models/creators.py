@@ -168,6 +168,7 @@ class CreatorCollaborationListResponse(BaseModel):
     freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
     freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
     paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
+    currency: Optional[str] = Field(None, description="ISO 4217 currency code for paidAmount")
     discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)

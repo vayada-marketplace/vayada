@@ -175,6 +175,7 @@ class AdminCollaborationOfferingResponse(BaseModel):
     free_stay_min_nights: Optional[int] = None
     free_stay_max_nights: Optional[int] = None
     paid_max_amount: Optional[Decimal] = None
+    currency: Optional[str] = None
     discount_percentage: Optional[Decimal] = None
     created_at: datetime
     updated_at: datetime
