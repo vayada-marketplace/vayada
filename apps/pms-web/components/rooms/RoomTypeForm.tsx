@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import { getCurrencySymbol, CURRENCY_SYMBOLS } from '@/lib/utils'
@@ -128,6 +128,17 @@ function parseBedType(bedType: string): { type: string; count: number }[] {
   })
 }
 
+// Sort seasons by start date (MM-DD). Empty `from` values keep their relative order at the end
+// so a newly added (blank) season stays at the bottom until the user picks a date.
+function sortSeasonsChronologically<T extends { from: string }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => {
+    if (!a.from && !b.from) return 0
+    if (!a.from) return 1
+    if (!b.from) return -1
+    return a.from.localeCompare(b.from)
+  })
+}
+
 const PAYMENT_METHODS: { key: string; label: string; hint: string }[] = [
   { key: 'card', label: 'Card (online)', hint: 'Stripe — authorized at booking, captured on host approval' },
   { key: 'pay_at_property', label: 'Pay at property', hint: 'Guest pays on arrival — cash or terminal' },
@@ -248,12 +259,14 @@ export default function RoomTypeForm({
     })) : [{ from: '01-01', to: '12-31' }]
   )
   const [seasons, setSeasons] = useState<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number; occupancyRates?: Record<string, string> }[]>(
-    (form.seasons || []).map(s => ({
-      ...s,
-      from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
-      to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
-      occupancyRates: s.occupancyRates || {},
-    }))
+    sortSeasonsChronologically(
+      (form.seasons || []).map(s => ({
+        ...s,
+        from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
+        to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
+        occupancyRates: s.occupancyRates || {},
+      }))
+    )
   )
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
   const [weekendSurcharge, setWeekendSurcharge] = useState(form.weekendSurcharge || '+0%')
@@ -282,6 +295,12 @@ export default function RoomTypeForm({
     onChange((prev: any) => prev.bedrooms === bedrooms && prev.bathrooms === bathrooms ? prev : { ...prev, bedrooms, bathrooms })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bedrooms, bathrooms])
+
+  // Keep seasons in chronological order by start date
+  useEffect(() => {
+    const sorted = sortSeasonsChronologically(seasons)
+    if (sorted.some((s, i) => s !== seasons[i])) setSeasons(sorted)
+  }, [seasons])
 
   // Sync pricing fields -> form
   useEffect(() => {
@@ -944,7 +963,6 @@ export default function RoomTypeForm({
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-gray-100">
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium w-8"></th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Season</th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Flex Rate</th>
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">Min Stay</th>
@@ -958,60 +976,6 @@ export default function RoomTypeForm({
                           return (
                             <React.Fragment key={idx}>
                               <tr className="border-b border-gray-50">
-                                <td className="px-2 py-2.5 align-middle">
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (idx === 0) return
-                                        const u = [...seasons]
-                                        const tmp = u[idx - 1]
-                                        u[idx - 1] = u[idx]
-                                        u[idx] = tmp
-                                        setSeasons(u)
-                                        setExpandedOccupancy(prev => {
-                                          const next = { ...prev }
-                                          const a = prev[idx - 1]
-                                          const b = prev[idx]
-                                          if (b !== undefined) next[idx - 1] = b; else delete next[idx - 1]
-                                          if (a !== undefined) next[idx] = a; else delete next[idx]
-                                          return next
-                                        })
-                                      }}
-                                      disabled={idx === 0}
-                                      className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${idx === 0 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
-                                      title="Move up"
-                                      aria-label="Move season up"
-                                    >
-                                      <ChevronUpIcon className="w-3 h-3" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (idx === seasons.length - 1) return
-                                        const u = [...seasons]
-                                        const tmp = u[idx + 1]
-                                        u[idx + 1] = u[idx]
-                                        u[idx] = tmp
-                                        setSeasons(u)
-                                        setExpandedOccupancy(prev => {
-                                          const next = { ...prev }
-                                          const a = prev[idx]
-                                          const b = prev[idx + 1]
-                                          if (b !== undefined) next[idx] = b; else delete next[idx]
-                                          if (a !== undefined) next[idx + 1] = a; else delete next[idx + 1]
-                                          return next
-                                        })
-                                      }}
-                                      disabled={idx === seasons.length - 1}
-                                      className={`w-5 h-4 flex items-center justify-center rounded transition-colors ${idx === seasons.length - 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
-                                      title="Move down"
-                                      aria-label="Move season down"
-                                    >
-                                      <ChevronDownIcon className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                </td>
                                 <td className="px-4 py-2.5">
                                   <div className="flex items-center gap-2">
                                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
@@ -1076,7 +1040,7 @@ export default function RoomTypeForm({
                               </tr>
                               {isOccExpanded && maxOcc > 1 && (
                                 <tr className="border-b border-gray-50 bg-gray-50/50">
-                                  <td colSpan={4} className="px-4 py-2.5 pl-10">
+                                  <td colSpan={3} className="px-4 py-2.5 pl-10">
                                     <div className="space-y-1.5">
                                       <span className="text-[10px] text-gray-400 font-medium">Rate per number of guests</span>
                                       {Array.from({ length: maxOcc }, (_, i) => i + 1).map(guestCount => {
