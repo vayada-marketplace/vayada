@@ -33,7 +33,7 @@ export function CollaborationDetailModal({
     const getCompensationText = (collab: Collaboration) => {
         switch (collab.collaboration_type) {
             case 'Paid':
-                return `$${collab.paid_amount || 0} Paid`;
+                return `Rp${Number(collab.paid_amount || 0).toLocaleString('id-ID')} Paid`;
             case 'Discount':
                 return `${collab.discount_percentage || 0}% Discount`;
             case 'Free Stay':

@@ -2545,11 +2545,11 @@ export default function UserDetailPage() {
                             {offering.collaborationType === 'Paid' && (
                               <div>
                                 <Input
-                                  label="Max Amount"
+                                  label="Max Amount (IDR)"
                                   type="number"
                                   value={offering.paidMaxAmount?.toString() || ''}
                                   onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'paidMaxAmount', e.target.value ? parseFloat(e.target.value) : null)}
-                                  placeholder="1000"
+                                  placeholder="1000000"
                                 />
                               </div>
                             )}
@@ -2687,7 +2687,7 @@ export default function UserDetailPage() {
                             {offering.collaborationType === 'Paid' && offering.paidMaxAmount !== null && (
                               <div>
                                 <label className="block text-sm font-medium text-gray-700">Maximum Amount</label>
-                                <p className="mt-1 text-sm text-gray-900">${offering.paidMaxAmount.toLocaleString()}</p>
+                                <p className="mt-1 text-sm text-gray-900">Rp{offering.paidMaxAmount.toLocaleString('id-ID')}</p>
                               </div>
                             )}
 

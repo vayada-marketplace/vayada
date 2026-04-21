@@ -1489,11 +1489,11 @@ export default function CreateUserPage() {
                                         {offering.collaborationType === 'Paid' && (
                                           <div>
                                             <Input
-                                              label="Max Amount"
+                                              label="Max Amount (IDR)"
                                               type="number"
                                               value={offering.paidMaxAmount || ''}
                                               onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'paidMaxAmount', e.target.value)}
-                                              placeholder="1000"
+                                              placeholder="1000000"
                                               required
                                             />
                                           </div>
