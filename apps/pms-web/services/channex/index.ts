@@ -35,6 +35,15 @@ export interface ChannexEnableResult {
   ratesCreated: number
 }
 
+export interface ChannelMarkup {
+  channel: string
+  markupPct: number
+}
+
+export interface ChannelMarkupsResponse {
+  markups: ChannelMarkup[]
+}
+
 export const channexService = {
   // Enable / disable
   enable: () =>
@@ -68,4 +77,11 @@ export const channexService = {
   // Channel iframe
   getIframeUrl: () =>
     pmsClient.post<{ iframe_url: string }>('/admin/channex/iframe-url'),
+
+  // Channel pricing markups
+  getMarkups: () =>
+    pmsClient.get<ChannelMarkupsResponse>('/admin/channex/markups'),
+
+  updateMarkups: (markups: ChannelMarkup[]) =>
+    pmsClient.put<ChannelMarkupsResponse>('/admin/channex/markups', { markups }),
 }

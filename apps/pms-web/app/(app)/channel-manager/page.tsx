@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { channexService, ChannexSyncStatus, ChannexRoomTypeMapping, ChannexRatePlanMapping } from '@/services/channex'
+import { channexService, ChannexSyncStatus, ChannexRoomTypeMapping, ChannexRatePlanMapping, ChannelMarkup } from '@/services/channex'
 import { ArrowPathIcon, CheckCircleIcon, LinkIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -29,6 +29,11 @@ export default function ChannelManagerPage() {
   const [iframeUrl, setIframeUrl] = useState<string | null>(null)
   const [loadingIframe, setLoadingIframe] = useState(false)
 
+  // Channel pricing markups
+  const [bookingComMarkup, setBookingComMarkup] = useState('0')
+  const [airbnbMarkup, setAirbnbMarkup] = useState('0')
+  const [savingMarkups, setSavingMarkups] = useState(false)
+
   const isEnabled = status?.isConnected && status?.channexPropertyId
 
   useEffect(() => {
@@ -38,6 +43,7 @@ export default function ChannelManagerPage() {
   useEffect(() => {
     if (isEnabled) {
       loadMappings()
+      loadMarkups()
     }
   }, [isEnabled])
 
@@ -60,6 +66,36 @@ export default function ChannelManagerPage() {
     ])
     if (rooms.status === 'fulfilled') setRoomMappings(rooms.value)
     if (rates.status === 'fulfilled') setRateMappings(rates.value)
+  }
+
+  const loadMarkups = async () => {
+    try {
+      const { markups } = await channexService.getMarkups()
+      const bdc = markups.find((m) => m.channel === 'booking_com')
+      const abb = markups.find((m) => m.channel === 'airbnb')
+      setBookingComMarkup(bdc ? String(bdc.markupPct) : '0')
+      setAirbnbMarkup(abb ? String(abb.markupPct) : '0')
+    } catch {
+      // ignore — card still renders with defaults
+    }
+  }
+
+  const handleSaveMarkups = async () => {
+    setSavingMarkups(true)
+    setError('')
+    try {
+      const payload: ChannelMarkup[] = [
+        { channel: 'booking_com', markupPct: Number(bookingComMarkup) || 0 },
+        { channel: 'airbnb', markupPct: Number(airbnbMarkup) || 0 },
+      ]
+      await channexService.updateMarkups(payload)
+      setSuccess(t('channels.pricingSaved'))
+      await loadStatus()
+    } catch (err: any) {
+      setError(err.message || t('channels.failedToSavePricing'))
+    } finally {
+      setSavingMarkups(false)
+    }
   }
 
   const handleEnable = async () => {
@@ -278,6 +314,59 @@ export default function ChannelManagerPage() {
                   allow="clipboard-write"
                 />
               )}
+            </div>
+
+            {/* Channel pricing */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+              <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('channels.pricingTitle')}</h2>
+              <p className="text-sm text-gray-600 mb-4">{t('channels.pricingDescription')}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    {t('channels.bookingComMarkup')}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="-50"
+                      max="200"
+                      value={bookingComMarkup}
+                      onChange={(e) => setBookingComMarkup(e.target.value)}
+                      className="w-full pr-8 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    {t('channels.airbnbMarkup')}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="-50"
+                      max="200"
+                      value={airbnbMarkup}
+                      onChange={(e) => setAirbnbMarkup(e.target.value)}
+                      className="w-full pr-8 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">{t('channels.markupHint')}</p>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                {t('channels.remapHint')}
+              </p>
+              <button
+                onClick={handleSaveMarkups}
+                disabled={savingMarkups}
+                className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              >
+                {savingMarkups ? t('channels.savingPricing') : t('channels.savePricing')}
+              </button>
             </div>
 
             {/* Provisioned room types */}
