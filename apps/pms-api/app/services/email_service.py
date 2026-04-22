@@ -169,9 +169,10 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     }
     payment_label = payment_labels.get(payment_method, payment_method)
 
-    subject = f"New Booking Request: {booking['booking_reference']}"
+    subject = f"New Booking Request: {booking['hotel_name']} — {booking['booking_reference']}"
     content = f"""
     <h2>New Booking Request</h2>
+    <p class="detail"><strong>Hotel:</strong> {booking['hotel_name']}</p>
     <p class="detail"><strong>Guest:</strong> {booking['guest_first_name']} {booking['guest_last_name']}</p>
     <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
     <p class="detail"><strong>Payment:</strong> {payment_label}</p>
