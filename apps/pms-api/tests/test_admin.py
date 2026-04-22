@@ -154,6 +154,32 @@ class TestAdminRoomTypes:
         assert body["amenities"] == ["WiFi", "TV"]
         assert body["isActive"] is True
 
+    async def test_create_room_type_auto_creates_rooms(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 3,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 201
+        room_type_id = resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rooms_resp.status_code == 200
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert len(rooms) == 3
+        assert {r["roomNumber"] for r in rooms} == {"1", "2", "3"}
+
     async def test_get_room_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]

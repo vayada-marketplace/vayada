@@ -97,6 +97,45 @@ def _room_to_response(r: dict) -> RoomResponse:
     )
 
 
+async def _auto_create_rooms(hotel_id: str, room_type_id: str, count: int) -> None:
+    """Create `count` Room records for a newly created room type.
+
+    Room numbers start after the highest existing numeric room number in the
+    hotel, so the defaults ("1", "2", "3", …) never collide with the unique
+    (hotel_id, room_number) index. Non-numeric room numbers are ignored.
+    Failures are logged but do not abort the request — the user can still
+    add rooms manually if the defaults clash.
+    """
+    if count <= 0:
+        return
+    max_num = await Database.fetchval(
+        """
+        SELECT COALESCE(MAX((room_number)::int), 0)
+        FROM rooms
+        WHERE hotel_id = $1 AND room_number ~ '^[0-9]+$'
+        """,
+        hotel_id,
+    ) or 0
+    for i in range(count):
+        room_number = str(max_num + i + 1)
+        try:
+            await RoomRepository.create(
+                {
+                    "hotel_id": hotel_id,
+                    "room_type_id": room_type_id,
+                    "room_number": room_number,
+                    "floor": "",
+                    "status": "available",
+                    "sort_order": i,
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to auto-create room %s for room_type %s: %s",
+                room_number, room_type_id, e,
+            )
+
+
 # ── Room Types ──────────────────────────────────────────────────────
 
 
@@ -143,6 +182,7 @@ async def create_room_type(
     if not payload.get("daily_rates"):
         payload["daily_rates"] = {}
     room = await RoomTypeRepository.create(hotel_id, payload)
+    await _auto_create_rooms(hotel_id, str(room["id"]), int(payload.get("total_rooms") or 0))
     return _room_to_admin(room)
 
 
