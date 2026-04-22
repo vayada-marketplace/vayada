@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
 import { usersService } from '@/services/api'
 
@@ -29,6 +29,7 @@ export default function HotelsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [settingUp, setSettingUp] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     loadHotels()
@@ -79,6 +80,30 @@ export default function HotelsPage() {
       setError('Failed to load hotels. Please check your connection and try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDelete = async (row: HotelRow) => {
+    const label = row.name || row.owner_email || 'this hotel'
+    const confirmMsg = row.initialized
+      ? `Delete "${label}" and all its booking engine data (rooms, add-ons, promo codes, translations)? This cannot be undone.`
+      : `Delete marketplace account "${label}"? This cannot be undone.`
+    if (!window.confirm(confirmMsg)) return
+
+    try {
+      setDeletingId(row.id)
+      setError('')
+      if (row.initialized) {
+        await bookingSettingsService.deleteHotel(row.id)
+      } else if (row.marketplace_user_id) {
+        await usersService.deleteUser(row.marketplace_user_id)
+      }
+      setHotels((prev) => prev.filter((h) => h.id !== row.id))
+    } catch (err) {
+      console.error('Failed to delete hotel:', err)
+      setError('Failed to delete hotel. Please try again.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -237,6 +262,15 @@ export default function HotelsPage() {
                               {settingUp === hotel.marketplace_user_id ? 'Setting up...' : 'Set Up'}
                             </button>
                           )}
+                          <button
+                            onClick={() => handleDelete(hotel)}
+                            disabled={deletingId === hotel.id}
+                            title="Delete"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors disabled:opacity-50"
+                          >
+                            <TrashIcon className="w-3.5 h-3.5" />
+                            {deletingId === hotel.id ? 'Deleting...' : 'Delete'}
+                          </button>
                         </td>
                       </tr>
                     ))

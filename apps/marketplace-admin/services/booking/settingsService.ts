@@ -106,6 +106,9 @@ export const bookingSettingsService = {
       { user_id: userId, name },
     ),
 
+  deleteHotel: (hotelId: string) =>
+    bookingApiClient.delete(`/admin/superadmin/hotels/${hotelId}`),
+
   getPropertySettings: (hotelId: string) =>
     bookingApiClient.get<PropertySettings>('/admin/settings/property', hotelHeaders(hotelId)),
 
