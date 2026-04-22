@@ -65,7 +65,7 @@ const AMENITY_CATEGORIES = [
   },
   {
     name: 'Bathroom',
-    items: ['Bath', 'Shower', 'Free toiletries', 'Hairdryer', 'Toilet', 'Toilet paper', 'Hot Tub', 'Towels', 'Slippers', 'Bathrobe'],
+    items: ['Private Bathroom', 'Bath', 'Shower', 'Free toiletries', 'Hairdryer', 'Toilet', 'Toilet paper', 'Hot Tub', 'Towels', 'Slippers', 'Bathrobe'],
   },
   {
     name: 'Climate & Comfort',
