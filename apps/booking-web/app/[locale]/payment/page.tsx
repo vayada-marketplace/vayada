@@ -561,7 +561,19 @@ function PaymentPageContent() {
             {/* Action buttons */}
             <div className="flex items-center justify-between pt-2">
               <button
-                onClick={() => router.push('/book')}
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    room: roomId,
+                    checkIn,
+                    checkOut,
+                    adults: String(adultsParam),
+                    children: String(childrenParam),
+                    rooms: String(roomsParam),
+                    rateType,
+                  })
+                  if (promoCodeParam) params.set('promoCode', promoCodeParam)
+                  router.push(`/book?${params.toString()}`)
+                }}
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors border border-gray-300 rounded-full px-5 py-2.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
