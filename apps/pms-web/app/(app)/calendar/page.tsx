@@ -155,9 +155,9 @@ export default function CalendarPage() {
 
   const handleCreateBlock = async (blockData: {
     roomTypeId: string
+    roomIds: string[]
     startDate: string
     endDate: string
-    blockedCount: number
     reason: string
   }) => {
     await calendarService.createRoomBlock(blockData)
@@ -169,7 +169,6 @@ export default function CalendarPage() {
   const handleUpdateBlock = async (updates: {
     startDate: string
     endDate: string
-    blockedCount: number
     reason: string
   }) => {
     if (!selectedBlock) return
@@ -245,28 +244,33 @@ export default function CalendarPage() {
     return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase()
   }
 
-  // Group blocks by room type ID
-  const blocksByRoomType = useMemo(() => {
-    if (!data) return {}
-    const map: Record<string, CalendarBlock[]> = {}
-    for (const bl of data.blocks) {
-      if (!map[bl.roomTypeId]) map[bl.roomTypeId] = []
-      map[bl.roomTypeId].push(bl)
+  // Group blocks by the room they target. Legacy blocks (roomId === null) fall
+  // back to the old "first N rooms of the type" rendering for backwards compat.
+  const { blocksByRoom, legacyBlocksByRoomType, roomIndexInType } = useMemo(() => {
+    const byRoom: Record<string, CalendarBlock[]> = {}
+    const byType: Record<string, CalendarBlock[]> = {}
+    const idxMap: Record<string, number> = {}
+    if (!data) return {
+      blocksByRoom: byRoom,
+      legacyBlocksByRoomType: byType,
+      roomIndexInType: idxMap,
     }
-    return map
-  }, [data])
-
-  // Index of each room within its room type (for rendering blocks on only N rooms)
-  const roomIndexInType = useMemo(() => {
-    if (!data) return {}
     const counts: Record<string, number> = {}
-    const map: Record<string, number> = {}
     for (const room of data.rooms) {
       const idx = counts[room.roomTypeId] || 0
-      map[room.id] = idx
+      idxMap[room.id] = idx
       counts[room.roomTypeId] = idx + 1
     }
-    return map
+    for (const bl of data.blocks) {
+      if (bl.roomId) {
+        if (!byRoom[bl.roomId]) byRoom[bl.roomId] = []
+        byRoom[bl.roomId].push(bl)
+      } else {
+        if (!byType[bl.roomTypeId]) byType[bl.roomTypeId] = []
+        byType[bl.roomTypeId].push(bl)
+      }
+    }
+    return { blocksByRoom: byRoom, legacyBlocksByRoomType: byType, roomIndexInType: idxMap }
   }, [data])
 
   const allBookings = useMemo(() => data?.bookings || [], [data])
@@ -431,10 +435,13 @@ export default function CalendarPage() {
                           />
                         )
                       })()}
-                      {/* Block bars — only show on first N rooms of each type (N = blockedCount) */}
-                      {(blocksByRoomType[room.roomTypeId] || [])
-                        .filter((bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount)
-                        .map((bl) => {
+                      {/* Block bars — per-room blocks render on their own row.
+                          Legacy count-based blocks still fill the first N rooms of the type. */}
+                      {[
+                        ...(blocksByRoom[room.id] || []),
+                        ...(legacyBlocksByRoomType[room.roomTypeId] || [])
+                          .filter((bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount),
+                      ].map((bl) => {
                         const style = getBarStyle(bl.startDate, bl.endDate)
                         if (!style) return null
                         return (
@@ -443,7 +450,11 @@ export default function CalendarPage() {
                             data-bar="block"
                             className="absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] bg-red-100 border border-red-300 border-dashed text-red-600 flex items-center gap-1 cursor-pointer hover:bg-red-200 transition-colors"
                             style={style}
-                            title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}\nClick to edit or unblock`}
+                            title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}${
+                              bl.roomId
+                                ? `\nRoom #${bl.roomNumber ?? ''}`
+                                : `\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}`
+                            }\nClick to edit or unblock`}
                             onClick={() => setSelectedBlock(bl)}
                           >
                             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -582,6 +593,7 @@ export default function CalendarPage() {
       {showBlockModal && data && (
         <BlockModal
           roomTypes={data.roomTypes}
+          rooms={data.rooms}
           onSubmit={handleCreateBlock}
           onClose={() => {
             setShowBlockModal(false)
@@ -592,6 +604,7 @@ export default function CalendarPage() {
           initialRoomTypeId={
             prefill ? data.rooms.find((r) => r.id === prefill.roomId)?.roomTypeId : undefined
           }
+          initialRoomId={prefill?.roomId}
         />
       )}
 
