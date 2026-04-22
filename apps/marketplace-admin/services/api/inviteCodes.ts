@@ -66,7 +66,10 @@ export interface InviteData {
     active_plan: 'commission' | 'fixed'
     commission_rate: number
     fixed_monthly_fee: number
-    payment_provider?: 'stripe' | 'xendit'
+    payment_provider?: 'stripe' | 'xendit' | 'vayada'
+    xendit_channel_code?: string
+    xendit_account_number?: string
+    xendit_account_holder_name?: string
   }
   addons?: Array<{
     name: string
@@ -84,16 +87,28 @@ export interface InviteData {
     check_in_time: string
     check_out_time: string
     pay_at_property: boolean
+    pay_at_hotel_methods?: string[]
     online_card_payment: boolean
     bank_transfer: boolean
     payout_account_holder?: string
+    payout_account_type?: 'iban' | 'account_number'
     payout_iban?: string
+    payout_account_number?: string
     payout_bank_name?: string
     payout_swift?: string
     special_requests: boolean
     arrival_time: boolean
     guest_count: boolean
     refer_a_guest: boolean
+  }
+  last_minute_discount?: {
+    enabled: boolean
+    stackWithPromo: boolean
+    tiers: Array<{
+      daysBeforeMin: number
+      daysBeforeMax: number | null
+      discountPercent: number
+    }>
   }
 }
 

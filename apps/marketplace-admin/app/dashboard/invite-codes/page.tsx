@@ -13,6 +13,7 @@ import RoomsStep, { type RoomType, createEmptyRoom } from '@/components/setup/Ro
 import AddonsStep, { type SetupAddon, createEmptyAddon } from '@/components/setup/AddonsStep'
 import PoliciesStep from '@/components/setup/PoliciesStep'
 import BenefitsStep from '@/components/setup/BenefitsStep'
+import LastMinuteStep, { type LastMinuteConfig, createEmptyLastMinuteConfig } from '@/components/setup/LastMinuteStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -22,8 +23,9 @@ const STEPS = [
   { number: 3, label: 'Rooms & Rates' },
   { number: 4, label: 'Add-ons' },
   { number: 5, label: 'Benefits' },
-  { number: 6, label: 'Policies' },
-  { number: 7, label: 'Payment Terms' },
+  { number: 6, label: 'Last-Minute' },
+  { number: 7, label: 'Policies' },
+  { number: 8, label: 'Payment Terms' },
 ]
 
 type RoomTab = 'details' | 'pricing' | 'media' | 'benefits'
@@ -82,6 +84,9 @@ export default function InviteCodesPage() {
   // Step 5: Benefits
   const [benefits, setBenefits] = useState<string[]>([])
 
+  // Step 6: Last-Minute Discounts
+  const [lastMinuteConfig, setLastMinuteConfig] = useState<LastMinuteConfig>(createEmptyLastMinuteConfig())
+
   // Step 7: Policies
   const [checkInTime, setCheckInTime] = useState('15:00')
   const [checkOutTime, setCheckOutTime] = useState('11:00')
@@ -90,7 +95,9 @@ export default function InviteCodesPage() {
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [bankTransfer, setBankTransfer] = useState(false)
   const [payoutAccountHolder, setPayoutAccountHolder] = useState('')
+  const [payoutAccountType, setPayoutAccountType] = useState<'iban' | 'account_number'>('iban')
   const [payoutIban, setPayoutIban] = useState('')
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('')
   const [payoutBankName, setPayoutBankName] = useState('')
   const [payoutSwift, setPayoutSwift] = useState('')
   const [specialRequests, setSpecialRequests] = useState(true)
@@ -102,7 +109,10 @@ export default function InviteCodesPage() {
   const [activePlan, setActivePlan] = useState<'commission' | 'fixed'>('commission')
   const [commissionRate, setCommissionRate] = useState('5')
   const [fixedMonthlyFee, setFixedMonthlyFee] = useState('49')
-  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit' | 'vayada'>('vayada')
+  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
+  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
+  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
 
   useEffect(() => { loadInvites() }, [])
 
@@ -202,17 +212,27 @@ export default function InviteCodesPage() {
           commission_rate: parseFloat(commissionRate) || 0,
           fixed_monthly_fee: parseFloat(fixedMonthlyFee) || 0,
           payment_provider: paymentProvider,
+          ...(paymentProvider === 'xendit' ? {
+            xendit_channel_code: xenditChannelCode,
+            xendit_account_number: xenditAccountNumber,
+            xendit_account_holder_name: xenditAccountHolderName,
+          } : {}),
         },
         benefits,
         policies: {
           check_in_time: checkInTime, check_out_time: checkOutTime,
           pay_at_property: payAtHotel,
+          pay_at_hotel_methods: payAtHotelMethods,
           online_card_payment: onlineCardPayment, bank_transfer: bankTransfer,
-          payout_account_holder: payoutAccountHolder, payout_iban: payoutIban,
+          payout_account_holder: payoutAccountHolder,
+          payout_account_type: payoutAccountType,
+          payout_iban: payoutIban,
+          payout_account_number: payoutAccountNumber,
           payout_bank_name: payoutBankName, payout_swift: payoutSwift,
           special_requests: specialRequests, arrival_time: estimatedArrivalTime,
           guest_count: numberOfGuests, refer_a_guest: enableReferAGuest,
         },
+        last_minute_discount: lastMinuteConfig,
       }
       const result = await inviteCodesService.create(data)
       setGeneratedCode(result.code)
@@ -234,6 +254,7 @@ export default function InviteCodesPage() {
     setRooms([createEmptyRoom()]); setActiveRoomIndex(0)
     setSetupAddons([])
     setBenefits([])
+    setLastMinuteConfig(createEmptyLastMinuteConfig())
     setCheckInTime('15:00'); setCheckOutTime('11:00')
     setPayAtHotel(true); setOnlineCardPayment(false); setBankTransfer(false)
     setSpecialRequests(true); setEstimatedArrivalTime(false)
@@ -409,6 +430,18 @@ export default function InviteCodesPage() {
         )}
 
         {step === 6 && (
+          <LastMinuteStep
+            config={lastMinuteConfig}
+            setConfig={setLastMinuteConfig}
+            error=""
+            canProceed={true}
+            onBack={() => setStep(5)}
+            onContinue={() => setStep(7)}
+            stepIndicators={stepIndicators}
+          />
+        )}
+
+        {step === 7 && (
           <PoliciesStep
             checkInTime={checkInTime} setCheckInTime={setCheckInTime}
             checkOutTime={checkOutTime} setCheckOutTime={setCheckOutTime}
@@ -416,8 +449,14 @@ export default function InviteCodesPage() {
             payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
             onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
             bankTransfer={bankTransfer} setBankTransfer={setBankTransfer}
+            paymentProvider={paymentProvider} setPaymentProvider={setPaymentProvider}
+            xenditChannelCode={xenditChannelCode} setXenditChannelCode={setXenditChannelCode}
+            xenditAccountNumber={xenditAccountNumber} setXenditAccountNumber={setXenditAccountNumber}
+            xenditAccountHolderName={xenditAccountHolderName} setXenditAccountHolderName={setXenditAccountHolderName}
             payoutAccountHolder={payoutAccountHolder} setPayoutAccountHolder={setPayoutAccountHolder}
+            payoutAccountType={payoutAccountType} setPayoutAccountType={setPayoutAccountType}
             payoutIban={payoutIban} setPayoutIban={setPayoutIban}
+            payoutAccountNumber={payoutAccountNumber} setPayoutAccountNumber={setPayoutAccountNumber}
             payoutBankName={payoutBankName} setPayoutBankName={setPayoutBankName}
             payoutSwift={payoutSwift} setPayoutSwift={setPayoutSwift}
             specialRequests={specialRequests} setSpecialRequests={setSpecialRequests}
@@ -427,13 +466,13 @@ export default function InviteCodesPage() {
             stepIndicators={stepIndicators}
             error=""
             saving={false}
-            onBack={() => setStep(5)}
-            onComplete={() => setStep(7)}
+            onBack={() => setStep(6)}
+            onComplete={() => setStep(8)}
           />
         )}
 
-        {/* Step 7: vayada Payment Terms */}
-        {step === 7 && (
+        {/* Step 8: vayada Payment Terms */}
+        {step === 8 && (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto px-8 py-8">
               {stepIndicators}
@@ -547,7 +586,7 @@ export default function InviteCodesPage() {
               {/* Navigation */}
               <div className="flex justify-between">
                 <button
-                  onClick={() => setStep(6)}
+                  onClick={() => setStep(7)}
                   className="px-8 py-2.5 text-[14px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   Back
