@@ -258,7 +258,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
         <ConfirmDialog
           title={t('rooms.deleteRoom')}
           message={t('rooms.deleteRoomConfirm')}
-          confirmLabel={t('rooms.delete')}
+          confirmLabel={t('rooms.deleteRoom')}
           variant="danger"
           onConfirm={doDeleteRoom}
           onCancel={() => setConfirmDelete(null)}
