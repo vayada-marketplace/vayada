@@ -1,0 +1,1 @@
+ALTER TABLE bookings ADD COLUMN guest_country TEXT NOT NULL DEFAULT '';

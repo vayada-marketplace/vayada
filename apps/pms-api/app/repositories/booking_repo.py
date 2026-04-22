@@ -37,12 +37,13 @@ class BookingRepository:
                 payment_method, payment_status, host_response_deadline,
                 rate_type, addon_ids, addon_names, addon_total, addon_quantities,
                 promo_code, promo_discount,
-                last_minute_discount_percent, last_minute_discount_amount
+                last_minute_discount_percent, last_minute_discount_amount,
+                guest_country
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34
+                $31, $32, $33, $34, $35
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -79,6 +80,7 @@ class BookingRepository:
             data.get("promo_discount", 0),
             data.get("last_minute_discount_percent", 0),
             data.get("last_minute_discount_amount", 0),
+            data.get("guest_country", ""),
         )
         return dict(row)
 
@@ -238,7 +240,7 @@ class BookingRepository:
 
         ALLOWED = {
             "check_in", "check_out", "guest_first_name", "guest_last_name",
-            "guest_email", "guest_phone", "adults", "children",
+            "guest_email", "guest_phone", "guest_country", "adults", "children",
             "nightly_rate", "special_requests",
         }
         filtered = {k: v for k, v in updates.items() if k in ALLOWED and v is not None}

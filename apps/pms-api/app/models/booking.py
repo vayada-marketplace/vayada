@@ -17,6 +17,7 @@ class BookingCreate(BaseModel):
     guest_last_name: str
     guest_email: EmailStr
     guest_phone: str
+    guest_country: str = ""
     special_requests: str = ""
     estimated_arrival_time: Optional[str] = None
     number_of_guests: Optional[int] = None
@@ -69,6 +70,7 @@ class AdminBookingCreate(BaseModel):
     guest_last_name: str
     guest_email: EmailStr
     guest_phone: str = ""
+    guest_country: str = ""
     special_requests: str = ""
     check_in: date
     check_out: date
@@ -89,6 +91,7 @@ class BookingAdminResponse(BaseModel):
     guest_last_name: str
     guest_email: str
     guest_phone: str
+    guest_country: str = ""
     special_requests: str
     estimated_arrival_time: Optional[str] = None
     number_of_guests: Optional[int] = None
@@ -162,6 +165,7 @@ class BookingDetailsUpdate(BaseModel):
     guest_last_name: Optional[str] = None
     guest_email: Optional[str] = None
     guest_phone: Optional[str] = None
+    guest_country: Optional[str] = None
     adults: Optional[int] = None
     children: Optional[int] = None
     nightly_rate: Optional[float] = None
