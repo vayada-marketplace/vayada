@@ -175,6 +175,21 @@ async def superadmin_create_hotel(
     }
 
 
+@router.delete("/superadmin/hotels/{hotel_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def superadmin_delete_hotel(
+    hotel_id: str,
+    user_id: str = Depends(require_superadmin),
+):
+    existing = await BookingHotelRepository.get_by_id(hotel_id, columns="id")
+    if not existing:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    deleted = await BookingHotelRepository.delete(hotel_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete hotel")
+    logger.info("Superadmin %s deleted booking hotel %s", user_id, hotel_id)
+    return None
+
+
 @router.post("/superadmin/set-password")
 async def superadmin_set_password(
     data: SuperadminSetPasswordRequest,

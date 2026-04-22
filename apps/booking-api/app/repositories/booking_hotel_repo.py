@@ -65,8 +65,14 @@ class BookingHotelRepository:
 
     @staticmethod
     async def list_all(*, columns: str = "id, name, slug, location, country, user_id") -> list[dict]:
-        rows = await Database.fetch(f"SELECT {columns} FROM booking_hotels ORDER BY created_at ASC")
+        rows = await Database.fetch(f"SELECT {columns} FROM booking_hotels ORDER BY created_at DESC")
         return [dict(row) for row in rows]
+
+    @staticmethod
+    async def delete(hotel_id: str) -> bool:
+        result = await Database.execute("DELETE FROM booking_hotels WHERE id = $1", hotel_id)
+        # asyncpg returns a status string like "DELETE 1"
+        return isinstance(result, str) and result.endswith(" 1")
 
     @staticmethod
     async def get_by_id_and_user_id(
