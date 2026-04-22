@@ -14,12 +14,22 @@ interface BlockModalProps {
     reason: string
   }) => Promise<void>
   onClose: () => void
+  initialRoomTypeId?: string
+  initialStartDate?: string
+  initialEndDate?: string
 }
 
-export default function BlockModal({ roomTypes, onSubmit, onClose }: BlockModalProps) {
-  const [roomTypeId, setRoomTypeId] = useState(roomTypes[0]?.id || '')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+export default function BlockModal({
+  roomTypes,
+  onSubmit,
+  onClose,
+  initialRoomTypeId,
+  initialStartDate,
+  initialEndDate,
+}: BlockModalProps) {
+  const [roomTypeId, setRoomTypeId] = useState(initialRoomTypeId || roomTypes[0]?.id || '')
+  const [startDate, setStartDate] = useState(initialStartDate || '')
+  const [endDate, setEndDate] = useState(initialEndDate || '')
   const [blockedCount, setBlockedCount] = useState(1)
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)

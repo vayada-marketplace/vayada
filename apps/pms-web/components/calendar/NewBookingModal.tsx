@@ -10,6 +10,9 @@ interface NewBookingModalProps {
   rooms: CalendarRoom[]
   onSubmit: (data: CreateAdminBookingPayload) => Promise<void>
   onClose: () => void
+  initialRoomId?: string
+  initialCheckIn?: string
+  initialCheckOut?: string
 }
 
 const CHANNELS = [
@@ -20,17 +23,31 @@ const CHANNELS = [
   { value: 'other', label: 'Other' },
 ]
 
-export default function NewBookingModal({ roomTypes, rooms, onSubmit, onClose }: NewBookingModalProps) {
-  const [roomId, setRoomId] = useState(rooms[0]?.id || '')
-  const [checkIn, setCheckIn] = useState('')
-  const [checkOut, setCheckOut] = useState('')
+export default function NewBookingModal({
+  roomTypes,
+  rooms,
+  onSubmit,
+  onClose,
+  initialRoomId,
+  initialCheckIn,
+  initialCheckOut,
+}: NewBookingModalProps) {
+  const initialRoom =
+    (initialRoomId && rooms.find((r) => r.id === initialRoomId)) || rooms[0]
+  const initialRoomType =
+    initialRoom && roomTypes.find((t) => t.id === initialRoom.roomTypeId)
+  const [roomId, setRoomId] = useState(initialRoom?.id || '')
+  const [checkIn, setCheckIn] = useState(initialCheckIn || '')
+  const [checkOut, setCheckOut] = useState(initialCheckOut || '')
   const [guestFirstName, setGuestFirstName] = useState('')
   const [guestLastName, setGuestLastName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
   const [guestPhone, setGuestPhone] = useState('')
   const [adults, setAdults] = useState(1)
   const [children, setChildren] = useState(0)
-  const [nightlyRate, setNightlyRate] = useState<string>('')
+  const [nightlyRate, setNightlyRate] = useState<string>(
+    initialRoomType ? String(initialRoomType.baseRate) : ''
+  )
   const [channel, setChannel] = useState('direct')
   const [specialRequests, setSpecialRequests] = useState('')
   const [submitting, setSubmitting] = useState(false)

@@ -46,6 +46,23 @@ export default function CalendarPage() {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
 
+  // Drag-to-select state for creating bookings/blocks by dragging across day cells
+  const [drag, setDrag] = useState<{
+    roomId: string
+    rectLeft: number
+    rectWidth: number
+    startIdx: number
+    endIdx: number
+  } | null>(null)
+  const [prefill, setPrefill] = useState<{
+    roomId: string
+    startDate: string
+    endDate: string
+    x: number
+    y: number
+  } | null>(null)
+  const dragActive = drag !== null
+
   const endDate = addDays(startDate, VIEW_DAYS)
   const dates = useMemo(
     () => Array.from({ length: VIEW_DAYS }, (_, i) => addDays(startDate, i)),
@@ -65,6 +82,73 @@ export default function CalendarPage() {
     fetchData()
   }, [startDate])
 
+  const handleCellPointerDown = (
+    e: React.PointerEvent<HTMLTableCellElement>,
+    roomId: string
+  ) => {
+    if ((e.target as HTMLElement).closest('[data-bar]')) return
+    if (e.button !== 0) return
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const idx = Math.max(
+      0,
+      Math.min(VIEW_DAYS - 1, Math.floor(((e.clientX - rect.left) / rect.width) * VIEW_DAYS))
+    )
+    setPrefill(null)
+    setDrag({ roomId, rectLeft: rect.left, rectWidth: rect.width, startIdx: idx, endIdx: idx })
+  }
+
+  useEffect(() => {
+    if (!dragActive) return
+    const handleMove = (ev: PointerEvent) => {
+      setDrag((d) => {
+        if (!d) return d
+        const idx = Math.max(
+          0,
+          Math.min(
+            VIEW_DAYS - 1,
+            Math.floor(((ev.clientX - d.rectLeft) / d.rectWidth) * VIEW_DAYS)
+          )
+        )
+        return idx === d.endIdx ? d : { ...d, endIdx: idx }
+      })
+    }
+    const handleUp = (ev: PointerEvent) => {
+      setDrag((d) => {
+        if (!d) return null
+        const startIdx = Math.min(d.startIdx, d.endIdx)
+        const endIdx = Math.max(d.startIdx, d.endIdx)
+        const sDate = format(addDays(startDate, startIdx), 'yyyy-MM-dd')
+        const eDate = format(addDays(startDate, endIdx + 1), 'yyyy-MM-dd')
+        setPrefill({
+          roomId: d.roomId,
+          startDate: sDate,
+          endDate: eDate,
+          x: ev.clientX,
+          y: ev.clientY,
+        })
+        return null
+      })
+    }
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+    return () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+  }, [dragActive, startDate])
+
+  useEffect(() => {
+    if (!prefill) return
+    const handleClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-prefill-popover]')) {
+        setPrefill(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [prefill])
+
   const goToday = () => setStartDate(startOfDay(new Date()))
   const goPrev = () => setStartDate((d) => addDays(d, -7))
   const goNext = () => setStartDate((d) => addDays(d, 7))
@@ -78,6 +162,7 @@ export default function CalendarPage() {
   }) => {
     await calendarService.createRoomBlock(blockData)
     setShowBlockModal(false)
+    setPrefill(null)
     fetchData()
   }
 
@@ -103,6 +188,7 @@ export default function CalendarPage() {
   const handleCreateBooking = async (bookingData: CreateAdminBookingPayload) => {
     await calendarService.createAdminBooking(bookingData)
     setShowNewBookingModal(false)
+    setPrefill(null)
     fetchData()
   }
 
@@ -230,13 +316,19 @@ export default function CalendarPage() {
             &rarr;
           </button>
           <button
-            onClick={() => setShowBlockModal(true)}
+            onClick={() => {
+              setPrefill(null)
+              setShowBlockModal(true)
+            }}
             className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
           >
             {t('calendar.blockRoom')}
           </button>
           <button
-            onClick={() => setShowNewBookingModal(true)}
+            onClick={() => {
+              setPrefill(null)
+              setShowNewBookingModal(true)
+            }}
             className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
           >
             {t('calendar.newBooking')}
@@ -302,13 +394,31 @@ export default function CalendarPage() {
                         )}
                       </div>
                     </td>
-                    <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
+                    <td
+                      colSpan={VIEW_DAYS}
+                      className="relative h-12 p-0 select-none touch-none cursor-cell"
+                      onPointerDown={(e) => handleCellPointerDown(e, room.id)}
+                    >
                       {/* Day grid lines */}
                       <div className="absolute inset-0 flex">
                         {dates.map((d) => (
                           <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
                         ))}
                       </div>
+                      {/* Drag-selection overlay */}
+                      {drag && drag.roomId === room.id && (() => {
+                        const s = Math.min(drag.startIdx, drag.endIdx)
+                        const e = Math.max(drag.startIdx, drag.endIdx)
+                        return (
+                          <div
+                            className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
+                            style={{
+                              left: `${(s / VIEW_DAYS) * 100}%`,
+                              width: `${((e - s + 1) / VIEW_DAYS) * 100}%`,
+                            }}
+                          />
+                        )
+                      })()}
                       {/* Block bars — only show on first N rooms of each type (N = blockedCount) */}
                       {(blocksByRoomType[room.roomTypeId] || [])
                         .filter((bl) => (roomIndexInType[room.id] ?? 0) < bl.blockedCount)
@@ -318,6 +428,7 @@ export default function CalendarPage() {
                         return (
                           <div
                             key={`block-${bl.id}`}
+                            data-bar="block"
                             className="absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate z-[1] bg-red-100 border border-red-300 border-dashed text-red-600 flex items-center gap-1 cursor-pointer hover:bg-red-200 transition-colors"
                             style={style}
                             title={`Blocked: ${bl.reason || 'No reason'}\n${bl.startDate} → ${bl.endDate}\n${bl.blockedCount} room${bl.blockedCount !== 1 ? 's' : ''}\nClick to edit or unblock`}
@@ -338,6 +449,7 @@ export default function CalendarPage() {
                         return (
                           <div
                             key={b.id}
+                            data-bar="booking"
                             className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5`}
                             style={style}
                             title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`}
@@ -375,6 +487,7 @@ export default function CalendarPage() {
                       return (
                         <div
                           key={b.id}
+                          data-bar="booking"
                           className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 opacity-75`}
                           style={style}
                           title={`${b.guestFirstName} ${b.guestLastName} (${b.status}) - Unassigned\n${b.checkIn} → ${b.checkOut}`}
@@ -396,12 +509,51 @@ export default function CalendarPage() {
       )}
       </div>
 
+      {/* Drag-selection action popover */}
+      {prefill && !showBlockModal && !showNewBookingModal && data && (
+        <div
+          data-prefill-popover
+          className="fixed z-50 bg-white border border-gray-200 shadow-lg rounded-lg p-1 flex flex-col min-w-[160px]"
+          style={{
+            left: Math.min(prefill.x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 180),
+            top: prefill.y + 6,
+          }}
+        >
+          <button
+            onClick={() => setShowNewBookingModal(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+          >
+            <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            {t('calendar.newBooking')}
+          </button>
+          <button
+            onClick={() => setShowBlockModal(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+          >
+            <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            {t('calendar.blockRoom')}
+          </button>
+        </div>
+      )}
+
       {/* Block Modal */}
       {showBlockModal && data && (
         <BlockModal
           roomTypes={data.roomTypes}
           onSubmit={handleCreateBlock}
-          onClose={() => setShowBlockModal(false)}
+          onClose={() => {
+            setShowBlockModal(false)
+            setPrefill(null)
+          }}
+          initialStartDate={prefill?.startDate}
+          initialEndDate={prefill?.endDate}
+          initialRoomTypeId={
+            prefill ? data.rooms.find((r) => r.id === prefill.roomId)?.roomTypeId : undefined
+          }
         />
       )}
 
@@ -411,7 +563,13 @@ export default function CalendarPage() {
           roomTypes={data.roomTypes}
           rooms={data.rooms}
           onSubmit={handleCreateBooking}
-          onClose={() => setShowNewBookingModal(false)}
+          onClose={() => {
+            setShowNewBookingModal(false)
+            setPrefill(null)
+          }}
+          initialRoomId={prefill?.roomId}
+          initialCheckIn={prefill?.startDate}
+          initialCheckOut={prefill?.endDate}
         />
       )}
 
