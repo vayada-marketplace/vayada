@@ -398,6 +398,7 @@ async def create_test_room_block(
     end_date: str = "2026-07-05",
     blocked_count: int = 1,
     reason: str = "Maintenance",
+    room_id: Optional[str] = None,
 ) -> Dict:
     """Create a room block in the PMS database."""
     from datetime import date as date_type
@@ -405,11 +406,30 @@ async def create_test_room_block(
     ed = date_type.fromisoformat(end_date)
     row = await Database.fetchrow(
         """
-        INSERT INTO room_blocks (hotel_id, room_type_id, start_date, end_date, blocked_count, reason)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO room_blocks (hotel_id, room_type_id, room_id, start_date, end_date, blocked_count, reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
-        hotel_id, room_type_id, sd, ed, blocked_count, reason,
+        hotel_id, room_type_id, room_id, sd, ed, blocked_count, reason,
+    )
+    return dict(row)
+
+
+async def create_test_room(
+    hotel_id: str,
+    room_type_id: str,
+    room_number: str = "101",
+    floor: str = "1",
+    status: str = "available",
+) -> Dict:
+    """Create a single individual room in the PMS database."""
+    row = await Database.fetchrow(
+        """
+        INSERT INTO rooms (hotel_id, room_type_id, room_number, floor, status, sort_order)
+        VALUES ($1, $2, $3, $4, $5, 0)
+        RETURNING *
+        """,
+        hotel_id, room_type_id, room_number, floor, status,
     )
     return dict(row)
 
@@ -523,11 +543,24 @@ async def hotel_user(cleanup_database):
 
 @pytest.fixture
 async def hotel_with_rooms(cleanup_database):
-    """Create a user + hotel + room type. Returns dict with all data."""
+    """Create a user + hotel + room type + individual rooms (one per total_rooms)."""
     user = await create_test_user()
     hotel = await create_test_hotel(str(user["id"]))
     room = await create_test_room_type(str(hotel["id"]))
-    return {"user": user, "hotel": hotel, "room": room}
+    individual_rooms = []
+    for i in range(room["total_rooms"]):
+        r = await create_test_room(
+            str(hotel["id"]),
+            str(room["id"]),
+            room_number=str(100 + i),
+        )
+        individual_rooms.append(r)
+    return {
+        "user": user,
+        "hotel": hotel,
+        "room": room,
+        "rooms": individual_rooms,
+    }
 
 
 @pytest.fixture

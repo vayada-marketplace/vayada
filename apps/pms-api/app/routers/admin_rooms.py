@@ -433,6 +433,8 @@ async def get_calendar(
             {
                 "id": str(bl["id"]),
                 "roomTypeId": str(bl["room_type_id"]),
+                "roomId": str(bl["room_id"]) if bl.get("room_id") else None,
+                "roomNumber": bl.get("room_number"),
                 "startDate": str(bl["start_date"]),
                 "endDate": str(bl["end_date"]),
                 "blockedCount": bl["blocked_count"],
@@ -482,7 +484,7 @@ async def _check_block_availability(
         current = next_day
 
 
-@router.post("/room-blocks", response_model=RoomBlockResponse, status_code=201)
+@router.post("/room-blocks", response_model=List[RoomBlockResponse], status_code=201)
 async def create_room_block(
     data: RoomBlockCreate,
     user_id: str = Depends(require_hotel_admin),
@@ -490,41 +492,76 @@ async def create_room_block(
     hotel_id = await get_hotel_id(user_id)
 
     # Validate room type belongs to hotel
-    room = await RoomTypeRepository.get_by_id(data.room_type_id)
-    if not room or str(room["hotel_id"]) != hotel_id:
+    room_type = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room_type or str(room_type["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Room type not found")
-
-    if data.blocked_count < 1 or data.blocked_count > room["total_rooms"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"blocked_count must be between 1 and {room['total_rooms']}",
-        )
 
     if data.end_date <= data.start_date:
         raise HTTPException(
             status_code=400, detail="end_date must be after start_date"
         )
 
+    room_ids = list(dict.fromkeys(data.room_ids))  # dedupe, preserve order
+    if len(room_ids) > room_type["total_rooms"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot block more than {room_type['total_rooms']} rooms for this type",
+        )
+
+    # Validate each room belongs to this room type
+    rooms_by_id: dict[str, dict] = {}
+    for rid in room_ids:
+        room = await RoomRepository.get_by_id(rid)
+        if (
+            not room
+            or str(room["hotel_id"]) != hotel_id
+            or str(room["room_type_id"]) != data.room_type_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Room {rid} does not belong to the selected room type",
+            )
+        rooms_by_id[rid] = room
+
+    # Aggregate availability (bookings + existing blocks + this block) vs total
     await _check_block_availability(
         data.room_type_id,
-        room["total_rooms"],
+        room_type["total_rooms"],
         data.start_date,
         data.end_date,
-        data.blocked_count,
+        len(room_ids),
     )
 
-    block = await RoomBlockRepository.create(
-        {
-            "hotel_id": hotel_id,
-            "room_type_id": data.room_type_id,
-            "start_date": data.start_date,
-            "end_date": data.end_date,
-            "blocked_count": data.blocked_count,
-            "reason": data.reason,
-        }
-    )
+    # Per-room conflict: a specific room can't already have an overlapping block
+    for rid in room_ids:
+        conflict = await RoomBlockRepository.find_room_conflict(
+            rid, data.start_date, data.end_date
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Room #{rooms_by_id[rid]['room_number']} is already blocked "
+                    f"from {conflict['start_date']} to {conflict['end_date']}"
+                ),
+            )
 
-    # Push updated availability to Channex
+    created: list[dict] = []
+    for rid in room_ids:
+        block = await RoomBlockRepository.create(
+            {
+                "hotel_id": hotel_id,
+                "room_type_id": data.room_type_id,
+                "room_id": rid,
+                "start_date": data.start_date,
+                "end_date": data.end_date,
+                "blocked_count": 1,
+                "reason": data.reason,
+            }
+        )
+        created.append(block)
+
+    # Push updated availability to Channex (once for the whole range)
     asyncio.create_task(
         push_availability_for_room_type(
             hotel_id, data.room_type_id,
@@ -532,15 +569,21 @@ async def create_room_block(
         )
     )
 
-    return RoomBlockResponse(
-        id=str(block["id"]),
-        room_type_id=str(block["room_type_id"]),
-        start_date=str(block["start_date"]),
-        end_date=str(block["end_date"]),
-        blocked_count=block["blocked_count"],
-        reason=block["reason"],
-        created_at=block["created_at"].isoformat(),
-    )
+    return [
+        RoomBlockResponse(
+            id=str(block["id"]),
+            room_type_id=str(block["room_type_id"]),
+            room_id=str(block["room_id"]) if block.get("room_id") else None,
+            room_number=rooms_by_id[str(block["room_id"])]["room_number"]
+            if block.get("room_id") else None,
+            start_date=str(block["start_date"]),
+            end_date=str(block["end_date"]),
+            blocked_count=block["blocked_count"],
+            reason=block["reason"],
+            created_at=block["created_at"].isoformat(),
+        )
+        for block in created
+    ]
 
 
 @router.patch("/room-blocks/{block_id}", response_model=RoomBlockResponse)
@@ -556,32 +599,43 @@ async def update_room_block(
 
     updates = data.model_dump(exclude_unset=True)
 
-    # Validate date range against the (possibly updated) fields
     new_start = updates.get("start_date", block["start_date"])
     new_end = updates.get("end_date", block["end_date"])
     if new_end <= new_start:
         raise HTTPException(status_code=400, detail="end_date must be after start_date")
 
-    # Validate blocked_count against room type total and availability
-    new_count = updates.get("blocked_count", block["blocked_count"])
-    room = await RoomTypeRepository.get_by_id(str(block["room_type_id"]))
-    if room and (new_count < 1 or new_count > room["total_rooms"]):
-        raise HTTPException(
-            status_code=400,
-            detail=f"blocked_count must be between 1 and {room['total_rooms']}",
-        )
-
-    if room:
+    room_type = await RoomTypeRepository.get_by_id(str(block["room_type_id"]))
+    if room_type:
         await _check_block_availability(
             str(block["room_type_id"]),
-            room["total_rooms"],
+            room_type["total_rooms"],
             new_start,
             new_end,
-            new_count,
+            block["blocked_count"],
             exclude_block_id=block_id,
         )
 
+    # For per-room blocks, also ensure the new date range doesn't collide with
+    # another block on the same room
+    if block.get("room_id"):
+        conflict = await RoomBlockRepository.find_room_conflict(
+            str(block["room_id"]), new_start, new_end, exclude_block_id=block_id,
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This room is already blocked "
+                    f"from {conflict['start_date']} to {conflict['end_date']}"
+                ),
+            )
+
     updated = await RoomBlockRepository.update(block_id, updates)
+
+    room_number = None
+    if updated.get("room_id"):
+        room_row = await RoomRepository.get_by_id(str(updated["room_id"]))
+        room_number = room_row["room_number"] if room_row else None
 
     # Push updated availability to Channex — cover union of old and new date ranges
     sync_start = min(block["start_date"], new_start)
@@ -596,6 +650,8 @@ async def update_room_block(
     return RoomBlockResponse(
         id=str(updated["id"]),
         room_type_id=str(updated["room_type_id"]),
+        room_id=str(updated["room_id"]) if updated.get("room_id") else None,
+        room_number=room_number,
         start_date=str(updated["start_date"]),
         end_date=str(updated["end_date"]),
         blocked_count=updated["blocked_count"],
