@@ -10,6 +10,7 @@ export interface Booking {
   guestLastName: string
   guestEmail: string
   guestPhone: string
+  guestCountry: string
   specialRequests: string
   checkIn: string
   checkOut: string
@@ -86,7 +87,7 @@ export const bookingsService = {
   update: (id: string, data: Partial<{
     checkIn: string; checkOut: string;
     guestFirstName: string; guestLastName: string;
-    guestEmail: string; guestPhone: string;
+    guestEmail: string; guestPhone: string; guestCountry: string;
     adults: number; children: number;
     nightlyRate: number; specialRequests: string;
   }>) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),

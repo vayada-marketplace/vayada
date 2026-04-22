@@ -190,6 +190,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <p className="text-gray-500">Phone</p>
               <p className="font-medium text-gray-900">{booking.guestPhone}</p>
             </div>
+            {booking.guestCountry && (
+              <div>
+                <p className="text-gray-500">Country</p>
+                <p className="font-medium text-gray-900">{booking.guestCountry}</p>
+              </div>
+            )}
           </div>
           {booking.specialRequests && (
             <div className="mt-4 text-sm">
