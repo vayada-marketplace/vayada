@@ -39,8 +39,28 @@ export default function RoomDetailModal({
   const [imgIndex, setImgIndex] = useState(0)
   const [showAllAmenities, setShowAllAmenities] = useState(false)
   const [selectedRate, setSelectedRate] = useState<'flexible' | 'nonrefundable'>('flexible')
+  const [touchStartX, setTouchStartX] = useState<number | null>(null)
   const { formatPrice } = useCurrency()
   const tc = useTranslations('common')
+
+  const hasMultipleImages = room.images.length > 1
+  const goPrevImage = () => setImgIndex((i) => (i - 1 + room.images.length) % room.images.length)
+  const goNextImage = () => setImgIndex((i) => (i + 1) % room.images.length)
+  const handleTouchStart = (e: React.TouchEvent) => setTouchStartX(e.touches[0].clientX)
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return
+    const delta = e.changedTouches[0].clientX - touchStartX
+    if (Math.abs(delta) > 50) {
+      if (delta < 0) goNextImage()
+      else goPrevImage()
+    }
+    setTouchStartX(null)
+  }
+
+  // Reset image index when switching between rooms
+  useEffect(() => {
+    setImgIndex(0)
+  }, [room])
 
   // Lock body scroll when modal is open to prevent background scroll-bleed on mobile
   useEffect(() => {
@@ -96,19 +116,49 @@ export default function RoomDetailModal({
         <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
           <div className="md:w-1/2 flex-shrink-0 flex flex-col min-h-0">
-            <div className="relative flex-1 min-h-[300px]">
+            <div
+              className="relative flex-1 min-h-[300px] select-none"
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+            >
               <Image src={room.images[imgIndex]} alt={room.name} fill className="object-cover" />
               <div className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
                 {room.name}
               </div>
+              {hasMultipleImages && (
+                <>
+                  <button
+                    onClick={goPrevImage}
+                    aria-label="Previous image"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/85 hover:bg-white text-gray-700 shadow-md transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <button
+                    onClick={goNextImage}
+                    aria-label="Next image"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/85 hover:bg-white text-gray-700 shadow-md transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                    {room.images.map((_, i) => (
+                      <span
+                        key={i}
+                        className={`h-1.5 rounded-full transition-all ${i === imgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/60'}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            {room.images.length > 1 && (
-              <div className="flex gap-1.5 p-3 flex-shrink-0 bg-white">
+            {hasMultipleImages && (
+              <div className="flex gap-1.5 p-3 flex-shrink-0 bg-white overflow-x-auto">
                 {room.images.map((img, i) => (
                   <button
                     key={i}
                     onClick={() => setImgIndex(i)}
-                    className={`relative w-16 h-12 rounded-lg overflow-hidden border-2 transition-colors ${i === imgIndex ? 'border-primary-500' : 'border-transparent'}`}
+                    className={`relative w-16 h-12 flex-shrink-0 rounded-lg overflow-hidden border-2 transition-colors ${i === imgIndex ? 'border-primary-500' : 'border-transparent'}`}
                   >
                     <Image src={img} alt="" fill className="object-cover" />
                   </button>
