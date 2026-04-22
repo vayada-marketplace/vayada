@@ -18,6 +18,7 @@ import PoliciesStep from '@/components/setup/PoliciesStep'
 import AddonsStep, { type SetupAddon } from '@/components/setup/AddonsStep'
 import BenefitsStep from '@/components/setup/BenefitsStep'
 import PromoCodesStep, { type SetupPromoCode } from '@/components/setup/PromoCodesStep'
+import LastMinuteStep, { type LastMinuteConfig, createEmptyLastMinuteConfig } from '@/components/setup/LastMinuteStep'
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap'
 
@@ -29,6 +30,7 @@ const STEPS = [
   { number: 5, label: 'Add-ons' },
   // { number: 6, label: 'Promo Codes' },  // Hidden — can be re-enabled later
   { number: 7, label: 'Benefits' },
+  { number: 9, label: 'Last-Minute' },
   { number: 8, label: 'Policies' },
 ]
 
@@ -94,6 +96,9 @@ export default function SetupPage() {
   // Step 7: Benefits
   const [benefits, setBenefits] = useState<string[]>([])
 
+  // Step 9: Last-Minute Discounts
+  const [lastMinuteConfig, setLastMinuteConfig] = useState<LastMinuteConfig>(createEmptyLastMinuteConfig())
+
   // Step 6: Policies & Operations
   const [checkInFrom, setCheckInFrom] = useState('14:00')
   const [checkInUntil, setCheckInUntil] = useState('22:00')
@@ -104,14 +109,19 @@ export default function SetupPage() {
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
   const [bankTransfer, setBankTransfer] = useState(false)
   const [payoutAccountHolder, setPayoutAccountHolder] = useState('')
+  const [payoutAccountType, setPayoutAccountType] = useState<'iban' | 'account_number'>('iban')
   const [payoutIban, setPayoutIban] = useState('')
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('')
   const [payoutBankName, setPayoutBankName] = useState('')
   const [payoutSwift, setPayoutSwift] = useState('')
   const [specialRequests, setSpecialRequests] = useState(true)
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false)
   const [numberOfGuests, setNumberOfGuests] = useState(false)
   const [enableReferAGuest, setEnableReferAGuest] = useState(false)
-  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit'>('stripe')
+  const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'xendit' | 'vayada'>('vayada')
+  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
+  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
+  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
 
   useEffect(() => {
     async function checkAuth() {
@@ -258,6 +268,9 @@ export default function SetupPage() {
     if (step === 7) {
       return true
     }
+    if (step === 9) {
+      return true // last-minute is optional
+    }
     return false
   }
 
@@ -294,10 +307,13 @@ export default function SetupPage() {
         check_out_from: checkOutFrom,
         check_out_until: checkOutUntil,
         pay_at_property_enabled: payAtHotel,
+        pay_at_hotel_methods: payAtHotelMethods,
         online_card_payment: onlineCardPayment,
         bank_transfer: bankTransfer,
         payout_account_holder: payoutAccountHolder,
+        payout_account_type: payoutAccountType,
         payout_iban: payoutIban,
+        payout_account_number: payoutAccountNumber,
         payout_bank_name: payoutBankName,
         payout_swift: payoutSwift,
         special_requests_enabled: specialRequests,
@@ -390,9 +406,28 @@ export default function SetupPage() {
             bankTransfer: bankTransfer,
             paymentProvider: paymentProvider,
             defaultCurrency: currency,
+            ...(paymentProvider === 'xendit' ? {
+              xenditChannelCode,
+              xenditAccountNumber,
+              xenditAccountHolderName,
+            } : {}),
           })
         } catch {
           // Non-fatal
+        }
+
+        // 5b. Save last-minute discount config on the hotel.
+        // Only PATCH when enabled — otherwise the hotel keeps whatever
+        // default the PMS has (typically null/off), avoiding an empty
+        // overwrite if the user skipped the step.
+        if (lastMinuteConfig.enabled) {
+          try {
+            await pmsClient.patch('/admin/hotel', {
+              last_minute_discount: lastMinuteConfig,
+            })
+          } catch {
+            // Non-fatal: can be configured later from Booking Flow
+          }
         }
       }
 
@@ -503,37 +538,40 @@ export default function SetupPage() {
     }
   }
 
+  const currentStepIdx = STEPS.findIndex(s => s.number === step)
   const stepIndicators = (
     <div className="flex items-center justify-center mb-6 sm:mb-8">
-      {STEPS.map((s, idx) => (
-        <div key={s.number} className="flex items-center">
-          <div className="flex items-center gap-1.5 shrink-0">
-            <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors shrink-0 ${
-                step > s.number
-                  ? 'bg-primary-500 text-white'
-                  : step === s.number
+      {STEPS.map((s, idx) => {
+        const isCompleted = currentStepIdx > idx
+        const isActive = currentStepIdx === idx
+        return (
+          <div key={s.number} className="flex items-center">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors shrink-0 ${
+                  isCompleted || isActive
                     ? 'bg-primary-500 text-white'
                     : 'bg-gray-200 text-gray-500'
-              }`}
-            >
-              {step > s.number ? (
-                <CheckIcon className="w-3.5 h-3.5" />
-              ) : (
-                idx + 1
-              )}
+                }`}
+              >
+                {isCompleted ? (
+                  <CheckIcon className="w-3.5 h-3.5" />
+                ) : (
+                  idx + 1
+                )}
+              </div>
+              <span className={`hidden sm:inline text-[12px] font-medium whitespace-nowrap ${
+                isCompleted || isActive ? 'text-gray-900' : 'text-gray-400'
+              }`}>
+                {s.label}
+              </span>
             </div>
-            <span className={`hidden sm:inline text-[12px] font-medium whitespace-nowrap ${
-              step >= s.number ? 'text-gray-900' : 'text-gray-400'
-            }`}>
-              {s.label}
-            </span>
+            {idx < STEPS.length - 1 && (
+              <div className={`w-6 sm:w-12 h-px mx-2 sm:mx-3 shrink-0 ${isCompleted ? 'bg-primary-500' : 'bg-gray-300'}`} />
+            )}
           </div>
-          {idx < STEPS.length - 1 && (
-            <div className={`w-6 sm:w-12 h-px mx-2 sm:mx-3 shrink-0 ${step > s.number ? 'bg-primary-500' : 'bg-gray-300'}`} />
-          )}
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 
@@ -648,6 +686,15 @@ export default function SetupPage() {
       // Prefill payment provider from internal settings
       if (data.internal?.payment_provider) {
         setPaymentProvider(data.internal.payment_provider)
+      }
+
+      // Prefill last-minute discount config
+      if (data.last_minute_discount) {
+        setLastMinuteConfig({
+          enabled: !!data.last_minute_discount.enabled,
+          stackWithPromo: !!data.last_minute_discount.stackWithPromo,
+          tiers: Array.isArray(data.last_minute_discount.tiers) ? data.last_minute_discount.tiers : [],
+        })
       }
 
       setAppliedInviteCode(inviteCode.trim().toUpperCase())
@@ -861,6 +908,18 @@ export default function SetupPage() {
           error={error}
           canProceed={canProceed()}
           onBack={() => setStep(5)}
+          onContinue={() => { setError(''); setStep(9) }}
+          stepIndicators={stepIndicators}
+        />
+      )}
+
+      {step === 9 && (
+        <LastMinuteStep
+          config={lastMinuteConfig}
+          setConfig={setLastMinuteConfig}
+          error={error}
+          canProceed={canProceed()}
+          onBack={() => setStep(7)}
           onContinue={() => { setError(''); setStep(8) }}
           stepIndicators={stepIndicators}
         />
@@ -876,8 +935,14 @@ export default function SetupPage() {
           payAtHotelMethods={payAtHotelMethods} setPayAtHotelMethods={setPayAtHotelMethods}
           onlineCardPayment={onlineCardPayment} setOnlineCardPayment={setOnlineCardPayment}
           bankTransfer={bankTransfer} setBankTransfer={setBankTransfer}
+          paymentProvider={paymentProvider} setPaymentProvider={setPaymentProvider}
+          xenditChannelCode={xenditChannelCode} setXenditChannelCode={setXenditChannelCode}
+          xenditAccountNumber={xenditAccountNumber} setXenditAccountNumber={setXenditAccountNumber}
+          xenditAccountHolderName={xenditAccountHolderName} setXenditAccountHolderName={setXenditAccountHolderName}
           payoutAccountHolder={payoutAccountHolder} setPayoutAccountHolder={setPayoutAccountHolder}
+          payoutAccountType={payoutAccountType} setPayoutAccountType={setPayoutAccountType}
           payoutIban={payoutIban} setPayoutIban={setPayoutIban}
+          payoutAccountNumber={payoutAccountNumber} setPayoutAccountNumber={setPayoutAccountNumber}
           payoutBankName={payoutBankName} setPayoutBankName={setPayoutBankName}
           payoutSwift={payoutSwift} setPayoutSwift={setPayoutSwift}
           specialRequests={specialRequests} setSpecialRequests={setSpecialRequests}
@@ -886,7 +951,7 @@ export default function SetupPage() {
           enableReferAGuest={enableReferAGuest} setEnableReferAGuest={setEnableReferAGuest}
           error={error}
           saving={saving}
-          onBack={() => setStep(7)}
+          onBack={() => setStep(9)}
           onComplete={handleComplete}
           stepIndicators={stepIndicators}
         />
