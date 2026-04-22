@@ -405,10 +405,22 @@ export default function CalendarPage() {
                           <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
                         ))}
                       </div>
-                      {/* Drag-selection overlay */}
-                      {drag && drag.roomId === room.id && (() => {
-                        const s = Math.min(drag.startIdx, drag.endIdx)
-                        const e = Math.max(drag.startIdx, drag.endIdx)
+                      {/* Drag-selection overlay — persists while popover is open */}
+                      {(() => {
+                        let s: number | null = null
+                        let e: number | null = null
+                        if (drag && drag.roomId === room.id) {
+                          s = Math.min(drag.startIdx, drag.endIdx)
+                          e = Math.max(drag.startIdx, drag.endIdx)
+                        } else if (prefill && prefill.roomId === room.id) {
+                          const ps = differenceInDays(parseISO(prefill.startDate), startDate)
+                          const pe = differenceInDays(parseISO(prefill.endDate), startDate) - 1
+                          if (pe >= 0 && ps < VIEW_DAYS) {
+                            s = Math.max(0, ps)
+                            e = Math.min(VIEW_DAYS - 1, pe)
+                          }
+                        }
+                        if (s === null || e === null) return null
                         return (
                           <div
                             className="absolute top-1 bottom-1 bg-primary-500/20 border-2 border-primary-500 rounded-md pointer-events-none z-[2]"
@@ -521,20 +533,14 @@ export default function CalendarPage() {
         >
           <button
             onClick={() => setShowNewBookingModal(true)}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+            className="px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
           >
-            <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
             {t('calendar.newBooking')}
           </button>
           <button
             onClick={() => setShowBlockModal(true)}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+            className="px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
           >
-            <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" />
-            </svg>
             {t('calendar.blockRoom')}
           </button>
         </div>
