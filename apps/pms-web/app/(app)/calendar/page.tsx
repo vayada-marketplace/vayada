@@ -522,29 +522,61 @@ export default function CalendarPage() {
       </div>
 
       {/* Drag-selection action popover */}
-      {prefill && !showBlockModal && !showNewBookingModal && data && (
-        <div
-          data-prefill-popover
-          className="fixed z-50 bg-white border border-gray-200 shadow-lg rounded-lg p-1 flex flex-col min-w-[160px]"
-          style={{
-            left: Math.min(prefill.x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 180),
-            top: prefill.y + 6,
-          }}
-        >
-          <button
-            onClick={() => setShowNewBookingModal(true)}
-            className="px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+      {prefill && !showBlockModal && !showNewBookingModal && data && (() => {
+        const room = data.rooms.find((r) => r.id === prefill.roomId)
+        const nights = differenceInDays(parseISO(prefill.endDate), parseISO(prefill.startDate))
+        const newBookingLabel = t('calendar.newBooking').replace(/^\+\s*/, '')
+        const blockRoomLabel = t('calendar.blockRoom')
+        const POPOVER_WIDTH = 240
+        const POPOVER_HEIGHT = 150
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 9999
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 9999
+        const left = Math.min(Math.max(8, prefill.x + 8), vw - POPOVER_WIDTH - 8)
+        const top = Math.min(prefill.y + 8, vh - POPOVER_HEIGHT - 8)
+        return (
+          <div
+            data-prefill-popover
+            className="fixed z-50 bg-white border border-gray-200 shadow-xl rounded-xl overflow-hidden"
+            style={{ left, top, width: POPOVER_WIDTH }}
           >
-            {t('calendar.newBooking')}
-          </button>
-          <button
-            onClick={() => setShowBlockModal(true)}
-            className="px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
-          >
-            {t('calendar.blockRoom')}
-          </button>
-        </div>
-      )}
+            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
+              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                {room ? `#${room.roomNumber}` : t('calendar.roomColumn')}
+              </div>
+              <div className="text-xs text-gray-900 font-medium mt-0.5">
+                {format(parseISO(prefill.startDate), 'MMM d')}
+                <span className="text-gray-400 mx-1">→</span>
+                {format(parseISO(prefill.endDate), 'MMM d')}
+                <span className="text-gray-400"> · {nights} night{nights !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+            <div className="p-1">
+              <button
+                onClick={() => setShowNewBookingModal(true)}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 hover:bg-primary-50 hover:text-primary-700 rounded-md transition-colors"
+              >
+                <span className="w-7 h-7 flex items-center justify-center rounded-md bg-primary-50 text-primary-600">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </span>
+                <span className="font-medium">{newBookingLabel}</span>
+              </button>
+              <button
+                onClick={() => setShowBlockModal(true)}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors"
+              >
+                <span className="w-7 h-7 flex items-center justify-center rounded-md bg-red-50 text-red-500">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                </span>
+                <span className="font-medium">{blockRoomLabel}</span>
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Block Modal */}
       {showBlockModal && data && (
