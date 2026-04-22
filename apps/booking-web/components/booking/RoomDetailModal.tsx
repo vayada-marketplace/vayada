@@ -97,8 +97,8 @@ export default function RoomDetailModal({
   const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100)
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-5xl max-h-[95vh] md:max-h-[92vh] overflow-hidden flex flex-col overscroll-contain">
+    <div className="fixed inset-0 z-[100] flex items-stretch md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-white md:rounded-2xl shadow-2xl w-full md:max-w-5xl h-full md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col overscroll-contain">
         {/* Top bar with nav */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3 pb-1 flex-shrink-0">
           <button onClick={onPrev} className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 text-gray-500">
@@ -115,9 +115,9 @@ export default function RoomDetailModal({
 
         <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
-          <div className="md:w-1/2 flex-shrink-0 flex flex-col min-h-0">
+          <div className="md:w-1/2 md:flex-shrink-0 flex flex-col md:min-h-0">
             <div
-              className="relative flex-1 min-h-[300px] select-none"
+              className="relative h-72 md:h-auto md:flex-1 md:min-h-[300px] flex-shrink-0 select-none"
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
@@ -168,7 +168,7 @@ export default function RoomDetailModal({
           </div>
 
           {/* Right — Details */}
-          <div className="md:w-1/2 p-6 overflow-y-auto">
+          <div className="md:w-1/2 p-6 md:overflow-y-auto">
             {soldOut && (
               <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-gray-800">
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-2.99l-7.07-12a2 2 0 00-3.48 0l-7.07 12A2 2 0 004.93 19z" /></svg>
@@ -264,16 +264,16 @@ export default function RoomDetailModal({
                 onClick={() => setSelectedRate('flexible')}
                 className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
                     <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
                       <p className="text-xs text-gray-500">Free cancellation until {getFreeCancellationDays(room.cancellationPolicy)} days before</p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-lg font-bold text-gray-900">{formatPrice(room.baseRate, room.currency)}</p>
+                    <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">{formatPrice(room.baseRate, room.currency)}</p>
                     <p className="text-xs text-gray-500">/night</p>
                   </div>
                 </div>
@@ -286,19 +286,19 @@ export default function RoomDetailModal({
                 onClick={() => setSelectedRate('nonrefundable')}
                 className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
                     <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    <div>
-                      <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
                         Non-Refundable Rate
-                        {discount > 0 && <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">-{discount}% OFF</span>}
+                        {discount > 0 && <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap">-{discount}% OFF</span>}
                       </p>
                       <p className="text-xs text-gray-500">Non-refundable</p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableNightly, room.currency)}</p>
+                    <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">{formatPrice(nonRefundableNightly, room.currency)}</p>
                     <p className="text-xs text-gray-500">/night</p>
                   </div>
                 </div>
