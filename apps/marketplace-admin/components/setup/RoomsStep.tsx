@@ -30,6 +30,17 @@ export interface RoomType {
   features: string[]
 }
 
+// Sort seasons by start date (MM-DD). Empty `from` values keep their relative order at the end
+// so a newly added (blank) season stays at the bottom until the user picks a date.
+function sortSeasonsChronologically<T extends { from: string }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => {
+    if (!a.from && !b.from) return 0
+    if (!a.from) return 1
+    if (!b.from) return -1
+    return a.from.localeCompare(b.from)
+  })
+}
+
 export const createEmptyRoom = (): RoomType => ({
   name: '',
   beds: [{ type: 'King Bed', count: 1 }],
@@ -193,7 +204,8 @@ export default function RoomsStep({
 }: RoomsStepProps) {
   const room = rooms[activeRoomIndex]
   const updateRoom = (updates: Partial<RoomType>) => {
-    setRooms((prev: RoomType[]) => prev.map((r: RoomType, i: number) => i === activeRoomIndex ? { ...r, ...updates } : r))
+    const normalized = updates.seasons ? { ...updates, seasons: sortSeasonsChronologically(updates.seasons) } : updates
+    setRooms((prev: RoomType[]) => prev.map((r: RoomType, i: number) => i === activeRoomIndex ? { ...r, ...normalized } : r))
   }
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
