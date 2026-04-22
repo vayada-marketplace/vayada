@@ -132,6 +132,25 @@ function HomePageContent() {
     }
   }, [roomsLoading, rooms.length])
 
+  // Auto-refetch when the user changes dates or guests, so availability updates
+  // without requiring a click on "Check Availability". Debounced to coalesce
+  // rapid +/- clicks in the guest selector into a single request.
+  const skipNextAutoRefetch = useRef(true)
+  useEffect(() => {
+    if (skipNextAutoRefetch.current) {
+      skipNextAutoRefetch.current = false
+      return
+    }
+    const handle = setTimeout(() => {
+      setCommittedCheckIn(checkIn)
+      setCommittedCheckOut(checkOut)
+      setCommittedAdults(adults)
+      setCommittedChildren(children)
+      refetchRooms(checkIn, checkOut, adults)
+    }, 300)
+    return () => clearTimeout(handle)
+  }, [checkIn, checkOut, adults, children])
+
   // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [sortOption, setSortOption] = useState('recommended')
