@@ -68,6 +68,7 @@ export const bookingService = {
     guestLastName: string
     guestEmail: string
     guestPhone: string
+    guestCountry?: string
     specialRequests?: string
     estimatedArrivalTime?: string
     numberOfGuests?: number
