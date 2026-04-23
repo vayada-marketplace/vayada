@@ -21,6 +21,7 @@ from app.routers.affiliates import router as affiliates_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.affiliate_dashboard import router as affiliate_dashboard_router
 from app.routers.super_admin_payouts import router as super_admin_payouts_router
+from app.routers.super_admin_bookings import router as super_admin_bookings_router
 from app.services.scheduler import setup_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -112,6 +113,7 @@ app.include_router(affiliates_router)
 app.include_router(webhooks_router)
 app.include_router(affiliate_dashboard_router)
 app.include_router(super_admin_payouts_router)
+app.include_router(super_admin_bookings_router)
 
 
 @app.get("/health")
