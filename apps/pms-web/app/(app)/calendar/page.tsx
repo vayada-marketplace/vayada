@@ -28,11 +28,16 @@ const CHANNEL_COLORS: Record<string, string> = {
   other: 'bg-gray-500',
 }
 
-const CHANNEL_LEGEND_KEYS = [
+const CHANNEL_LEGEND_KEYS: Array<{
+  key: string
+  labelKey: string
+  color?: string
+  logo?: string
+}> = [
   { key: 'direct', labelKey: 'calendar.channelDirect', color: 'bg-blue-500' },
-  { key: 'airbnb', labelKey: 'calendar.channelAirbnb', color: 'bg-pink-500' },
-  { key: 'booking.com', labelKey: 'calendar.channelBookingCom', color: 'bg-indigo-500' },
-  { key: 'expedia', labelKey: 'calendar.channelExpedia', color: 'bg-yellow-500' },
+  { key: 'airbnb', labelKey: 'calendar.channelAirbnb', logo: '/logos/airbnb.svg' },
+  { key: 'booking.com', labelKey: 'calendar.channelBookingCom', logo: '/logos/booking.svg' },
+  { key: 'expedia', labelKey: 'calendar.channelExpedia', logo: '/logos/expedia.svg' },
   { key: 'other', labelKey: 'calendar.channelOther', color: 'bg-gray-500' },
 ]
 
@@ -344,7 +349,11 @@ export default function CalendarPage() {
       <div className="flex items-center gap-4 mb-4">
         {CHANNEL_LEGEND_KEYS.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
-            <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
+            {ch.logo ? (
+              <img src={ch.logo} alt="" className="w-4 h-4" />
+            ) : (
+              <div className={`w-3 h-3 rounded-sm ${ch.color}`} />
+            )}
             <span className="text-xs text-gray-600">{t(ch.labelKey)}</span>
           </div>
         ))}
