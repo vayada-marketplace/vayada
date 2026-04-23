@@ -9,6 +9,7 @@ const navItems = [
   { label: 'Dashboard', href: '/dashboard/kpis', icon: DashboardIcon },
   { label: 'Users', href: '/dashboard', icon: UsersIcon },
   { label: 'Hotels', href: '/dashboard/hotels', icon: HotelsIcon },
+  { label: 'Bookings', href: '/dashboard/bookings', icon: BookingsIcon },
   { label: 'Marketplace', href: '/dashboard/marketplace', icon: MarketplaceIcon },
   { label: 'Collaborations', href: '/dashboard/collaborations', icon: CollaborationsIcon },
   { label: 'Invite Codes', href: '/dashboard/invite-codes', icon: InviteCodesIcon },
@@ -162,6 +163,16 @@ function DashboardIcon({ className }: { className?: string }) {
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  )
+}
+
+function BookingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M8 3v4M16 3v4M3 10h18" />
+      <path d="M8 14h4" />
     </svg>
   )
 }
