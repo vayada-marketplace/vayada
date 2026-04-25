@@ -274,6 +274,7 @@ export default function RoomTypeForm({
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
+  const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
   const [editingDay, setEditingDay] = useState<string | null>(null)
@@ -313,10 +314,11 @@ export default function RoomTypeForm({
       flexibleRateEnabled,
       nonRefundableEnabled,
       nonRefundableDiscount,
+      nonRefundableCancellationPolicy,
       dailyRates,
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, dailyRates])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     const updated = { ...form, ...updates }
@@ -1158,6 +1160,24 @@ export default function RoomTypeForm({
                     <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
                     <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
                   </div>
+                  {nonRefundableEnabled && (
+                    <div className="mt-3 ml-[52px]">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] text-gray-500">Cancellation policy:</span>
+                        <select
+                          value={nonRefundableCancellationPolicy}
+                          onChange={(e) => setNonRefundableCancellationPolicy(e.target.value)}
+                          className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                          style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
+                        >
+                          <option>Non-refundable from booking</option>
+                          <option>Cancel within 24 hours of booking</option>
+                          <option>Cancel within 48 hours of booking</option>
+                          <option>Cancel within 7 days of booking</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                   {nonRefundableEnabled && flexibleRateEnabled && (
                     <div className="mt-3 ml-[52px] flex items-center gap-3">
                       <span className="text-[11px] text-gray-500">Discount:</span>

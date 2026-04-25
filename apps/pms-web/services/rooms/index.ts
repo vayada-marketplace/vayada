@@ -36,6 +36,7 @@ export interface RoomType {
   flexibleRateEnabled: boolean
   nonRefundableEnabled: boolean
   nonRefundableDiscount: number
+  nonRefundableCancellationPolicy: string
   minimumAdvanceDays: number
   ratePaymentMethods: Record<string, string[]> | null
   createdAt: string
@@ -71,6 +72,7 @@ export interface RoomTypeCreate {
   flexibleRateEnabled?: boolean
   nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
+  nonRefundableCancellationPolicy?: string
   minimumAdvanceDays?: number
   ratePaymentMethods?: Record<string, string[]> | null
 }
