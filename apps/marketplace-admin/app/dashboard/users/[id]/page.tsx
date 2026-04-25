@@ -16,7 +16,7 @@ import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 const PLATFORMS = ['Instagram', 'TikTok', 'YouTube', 'Facebook'] as const
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55+'] as const
 const ACCOMMODATION_TYPES = ['Hotel', 'Boutiques Hotel', 'City Hotel', 'Luxury Hotel', 'Apartment', 'Villa', 'Lodge'] as const
-const COLLABORATION_TYPES = ['Free Stay', 'Paid', 'Discount'] as const
+const COLLABORATION_TYPES = ['Free Stay', 'Paid', 'Discount', 'Affiliate'] as const
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 const COUNTRIES = [
@@ -85,7 +85,7 @@ export default function UserDetailPage() {
     accommodationType: string
     collaborationOfferings: Array<{
       id?: string
-      collaborationType: 'Free Stay' | 'Paid' | 'Discount'
+      collaborationType: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
       availabilityMonths: string[]
       platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
       freeStayMinNights?: number | null
@@ -93,6 +93,7 @@ export default function UserDetailPage() {
       paidMaxAmount?: number | null
       currency?: string | null
       discountPercentage?: number | null
+      commissionPercentage?: number | null
     }>
     creatorRequirements: {
       id?: string

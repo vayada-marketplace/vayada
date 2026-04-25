@@ -96,6 +96,8 @@ export default function MarketplacePreviewPage() {
         return 'bg-blue-100 text-blue-800'
       case 'Discount':
         return 'bg-yellow-100 text-yellow-800'
+      case 'Affiliate':
+        return 'bg-purple-100 text-purple-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -522,6 +524,9 @@ export default function MarketplacePreviewPage() {
                       )}
                       {offering.collaboration_type === 'Discount' && offering.discount_percentage && (
                         <p>Discount: {offering.discount_percentage}% off</p>
+                      )}
+                      {offering.collaboration_type === 'Affiliate' && offering.commission_percentage != null && (
+                        <p>Commission: {offering.commission_percentage}%</p>
                       )}
                       {offering.availability_months && offering.availability_months.length > 0 && (
                         <p>Available: {[...offering.availability_months].sort((a, b) => {

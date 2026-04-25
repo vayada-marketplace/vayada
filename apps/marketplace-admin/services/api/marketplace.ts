@@ -22,7 +22,7 @@ export interface MarketplaceListing {
 export interface CollaborationOffering {
   id: string
   listing_id: string
-  collaboration_type: 'Free Stay' | 'Paid' | 'Discount'
+  collaboration_type: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
   availability_months: string[]
   platforms: string[]
   free_stay_min_nights: number | null
@@ -30,6 +30,7 @@ export interface CollaborationOffering {
   paid_max_amount: number | null
   currency: string | null
   discount_percentage: number | null
+  commission_percentage: number | null
   created_at: string
   updated_at: string
 }

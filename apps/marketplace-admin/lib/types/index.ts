@@ -228,7 +228,7 @@ export interface ListingResponse {
 export interface CollaborationOffering {
   id: string
   listingId: string
-  collaborationType: 'Free Stay' | 'Paid' | 'Discount'
+  collaborationType: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
   availabilityMonths: string[]
   platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
   // Type-specific fields (only one set will be populated based on type)
@@ -237,6 +237,7 @@ export interface CollaborationOffering {
   paidMaxAmount: number | null          // Only for 'Paid'
   currency: string | null               // ISO 4217 code, only meaningful for 'Paid'
   discountPercentage: number | null     // Only for 'Discount'
+  commissionPercentage: number | null   // Only for 'Affiliate'
   createdAt: string
   updatedAt: string
 }
