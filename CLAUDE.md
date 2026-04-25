@@ -17,7 +17,9 @@ When the user pastes ticket content and says "create worktree" (or similar):
    ```
    cd ~/git/vayada-<TICKET-ID> && claude --enable-auto-mode
    ```
-5. Summarize the ticket so the user can paste it into the new Claude session as context.
+5. Summarize the ticket so the user can paste it into the new Claude session as context. **The summary must end with this directive verbatim:**
+
+   > When implementation is complete, commit all changes in each affected submodule on the `feature/<ticket-id-lowercase>` branch with clear, conventional messages, then push each affected submodule's feature branch to origin (`git push -u origin feature/<ticket-id-lowercase>`). Do not merge to main — the user runs the "merge & ship worktree" flow from the main worktree when ready.
 
 When the user asks to clean up a worktree:
 1. `git worktree remove ../vayada-<TICKET-ID>`
