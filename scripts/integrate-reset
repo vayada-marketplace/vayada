@@ -18,20 +18,28 @@ fi
 
 cd "$REPO_ROOT"
 
-echo "fetching origin in parent and submodules..."
-git fetch origin main --quiet
-git submodule foreach --quiet 'git fetch origin main --quiet || true'
+# Parent and submodules don't share a remote name (parent: "vayada",
+# submodules: "origin"). Detect each from the main branch's upstream.
+PARENT_REMOTE=$(git config --get branch.main.remote 2>/dev/null || echo "origin")
 
-echo "resetting submodules to origin/main..."
+echo "fetching $PARENT_REMOTE in parent and submodules..."
+git fetch "$PARENT_REMOTE" main --quiet
 git submodule foreach --quiet '
-  git checkout -B main origin/main >/dev/null 2>&1
-  git reset --hard origin/main --quiet
+  remote=$(git config --get branch.main.remote 2>/dev/null || echo "origin")
+  git fetch "$remote" main --quiet || true
+'
+
+echo "resetting submodules to remote main..."
+git submodule foreach --quiet '
+  remote=$(git config --get branch.main.remote 2>/dev/null || echo "origin")
+  git checkout -B main "$remote/main" >/dev/null 2>&1
+  git reset --hard "$remote/main" --quiet
   git branch -D local-integration >/dev/null 2>&1 || true
 '
 
-echo "resetting parent to origin/main..."
-git checkout -B main origin/main >/dev/null 2>&1
-git reset --hard origin/main --quiet
+echo "resetting parent to $PARENT_REMOTE/main..."
+git checkout -B main "$PARENT_REMOTE/main" >/dev/null 2>&1
+git reset --hard "$PARENT_REMOTE/main" --quiet
 git branch -D local-integration >/dev/null 2>&1 || true
 
 echo "syncing submodule working trees..."
