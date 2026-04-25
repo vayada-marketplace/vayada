@@ -583,6 +583,83 @@ def create_collaboration_approved_email_html(
     return _collaboration_email_wrapper(title, content)
 
 
+def create_admin_collaboration_request_email_html(
+    creator_name: str,
+    creator_email: Optional[str],
+    hotel_name: str,
+    hotel_email: Optional[str],
+    listing_name: str,
+    listing_location: Optional[str],
+    collaboration_type: str,
+    initiator_type: str,
+    why_great_fit: Optional[str] = None,
+) -> str:
+    """Internal admin notification: a new collaboration request was created."""
+    title = "New Marketplace Collaboration Request"
+    initiator_label = "Creator" if initiator_type == "creator" else "Hotel"
+    fit_section = ""
+    if why_great_fit:
+        fit_section = f"""
+        <p style="margin-top: 15px;"><strong>Why it's a great fit:</strong></p>
+        <p style="color: #555; font-style: italic;">"{why_great_fit}"</p>
+        """
+    location_line = f"<br><strong>Location:</strong> {listing_location}" if listing_location else ""
+    creator_email_line = f" &lt;{creator_email}&gt;" if creator_email else ""
+    hotel_email_line = f" &lt;{hotel_email}&gt;" if hotel_email else ""
+    content = f"""
+        <p>A new collaboration request has just been created on the marketplace.</p>
+        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <strong>Initiated by:</strong> {initiator_label}<br>
+            <strong>Creator:</strong> {creator_name}{creator_email_line}<br>
+            <strong>Hotel:</strong> {hotel_name}{hotel_email_line}<br>
+            <strong>Type:</strong> {collaboration_type}<br>
+            <strong>Listing:</strong> {listing_name}{location_line}
+        </div>
+        {fit_section}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
+def create_admin_collaboration_response_email_html(
+    creator_name: str,
+    creator_email: Optional[str],
+    hotel_name: str,
+    hotel_email: Optional[str],
+    listing_name: str,
+    listing_location: Optional[str],
+    collaboration_type: str,
+    accepted: bool,
+    response_message: Optional[str] = None,
+) -> str:
+    """Internal admin notification: a hotel accepted or rejected a collaboration request."""
+    if accepted:
+        title = "Hotel Accepted Collaboration Request"
+        status_html = '<div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;"><p style="margin: 0; color: #2e7d32; font-weight: bold;">Accepted — moved to negotiation.</p></div>'
+    else:
+        title = "Hotel Rejected Collaboration Request"
+        status_html = '<div style="background-color: #fbe9e7; padding: 15px; border-radius: 5px; margin: 20px 0;"><p style="margin: 0; color: #c62828; font-weight: bold;">Declined.</p></div>'
+
+    message_section = ""
+    if response_message:
+        message_section = f'<p style="color: #555;"><strong>Hotel message:</strong> "{response_message}"</p>'
+
+    location_line = f"<br><strong>Location:</strong> {listing_location}" if listing_location else ""
+    creator_email_line = f" &lt;{creator_email}&gt;" if creator_email else ""
+    hotel_email_line = f" &lt;{hotel_email}&gt;" if hotel_email else ""
+    content = f"""
+        <p>A hotel has responded to a collaboration request on the marketplace.</p>
+        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <strong>Creator:</strong> {creator_name}{creator_email_line}<br>
+            <strong>Hotel:</strong> {hotel_name}{hotel_email_line}<br>
+            <strong>Type:</strong> {collaboration_type}<br>
+            <strong>Listing:</strong> {listing_name}{location_line}
+        </div>
+        {status_html}
+        {message_section}
+    """
+    return _collaboration_email_wrapper(title, content)
+
+
 def create_collaboration_cancelled_email_html(
     recipient_name: str,
     canceller_name: str,

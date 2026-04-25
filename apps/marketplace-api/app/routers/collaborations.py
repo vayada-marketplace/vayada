@@ -24,6 +24,8 @@ from app.email_service import (
     create_collaboration_counter_offer_email_html,
     create_collaboration_approved_email_html,
     create_collaboration_cancelled_email_html,
+    create_admin_collaboration_request_email_html,
+    create_admin_collaboration_response_email_html,
 )
 from app.models.collaborations import (
     PlatformDeliverable,
@@ -74,6 +76,7 @@ async def _get_party_email_and_name(
 
 
 VAYADA_COLLABORATIONS_EMAIL = "collaborations@vayada.com"
+MARKETPLACE_ADMIN_EMAIL = "p.paetzold@vayada.com"
 
 
 def _send_email_background(to_email: str, subject: str, html_body: str):
@@ -84,6 +87,11 @@ def _send_email_background(to_email: str, subject: str, html_body: str):
 def _notify_vayada_team(subject: str, html_body: str):
     """Send a copy to the vayada collaborations team."""
     _send_email_background(VAYADA_COLLABORATIONS_EMAIL, f"[Internal] {subject}", html_body)
+
+
+def _notify_marketplace_admin(subject: str, html_body: str):
+    """Send a copy of marketplace activity to the marketplace admin (p.paetzold)."""
+    _send_email_background(MARKETPLACE_ADMIN_EMAIL, f"[Marketplace] {subject}", html_body)
 
 
 async def _send_email_safe(to_email: str, subject: str, html_body: str):
@@ -278,13 +286,19 @@ async def create_collaboration(
         # Fetch deliverables from the new table for the response
         platform_deliverables_response = await get_collaboration_deliverables(str(collaboration['id']))
         
+        # Fetch contact info for both parties (used by recipient + admin notifications)
+        creator_email_addr, creator_display_name = await _get_party_email_and_name(
+            "creator", creator_id=creator_id)
+        hotel_email_addr, hotel_display_name = await _get_party_email_and_name(
+            "hotel", hotel_id=hotel_id)
+
         # Send email notification to the recipient
         if request.initiator_type == "creator":
             initiator_name = creator_user_info['name'] if creator_user_info else 'A creator'
-            recipient_email, recipient_name = await _get_party_email_and_name("hotel", hotel_id=hotel_id)
+            recipient_email, recipient_name = hotel_email_addr, hotel_display_name
         else:
             initiator_name = listing['hotel_name']
-            recipient_email, recipient_name = await _get_party_email_and_name("creator", creator_id=creator_id)
+            recipient_email, recipient_name = creator_email_addr, creator_display_name
 
         if recipient_email:
             html = create_collaboration_request_email_html(
@@ -298,6 +312,19 @@ async def create_collaboration(
             )
             _send_email_background(recipient_email, "New Collaboration Request on vayada", html)
             _notify_vayada_team("New Collaboration Request on vayada", html)
+
+        admin_html = create_admin_collaboration_request_email_html(
+            creator_name=creator_display_name or (creator_user_info['name'] if creator_user_info else 'Unknown'),
+            creator_email=creator_email_addr,
+            hotel_name=listing['hotel_name'],
+            hotel_email=hotel_email_addr,
+            listing_name=listing['name'],
+            listing_location=listing.get('location'),
+            collaboration_type=request.collaboration_type,
+            initiator_type=request.initiator_type,
+            why_great_fit=request.why_great_fit,
+        )
+        _notify_marketplace_admin("New collaboration request", admin_html)
 
         return CollaborationResponse(
             id=str(collaboration['id']),
@@ -468,6 +495,30 @@ async def respond_to_collaboration_request(
             subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
             _send_email_background(initiator_email, subject, html)
             _notify_vayada_team(subject, html)
+
+        # Admin notification — only when the hotel is the responder (per ticket spec)
+        if collab['initiator_type'] == "creator":
+            accepted = request.status == "accepted"
+            creator_email_addr = initiator_email
+            creator_display_name = initiator_name
+            hotel_email_addr, hotel_display_name = await _get_party_email_and_name(
+                "hotel", hotel_id=str(collab['hotel_id']))
+            admin_html = create_admin_collaboration_response_email_html(
+                creator_name=creator_display_name or creator_name,
+                creator_email=creator_email_addr,
+                hotel_name=hotel_display_name or updated['hotel_name'],
+                hotel_email=hotel_email_addr,
+                listing_name=updated['listing_name'],
+                listing_location=updated.get('listing_location'),
+                collaboration_type=collab['collaboration_type'],
+                accepted=accepted,
+                response_message=request.response_message,
+            )
+            admin_subject = (
+                "Hotel accepted collaboration request"
+                if accepted else "Hotel declined collaboration request"
+            )
+            _notify_marketplace_admin(admin_subject, admin_html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
