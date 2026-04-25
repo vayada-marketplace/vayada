@@ -116,7 +116,7 @@ export default function BookingDetailModal({
     ? rooms.filter((r) => r.roomTypeId === booking.roomTypeId && r.status === 'available')
     : []
 
-  const channelStyle = CHANNEL_COLORS[booking?.channel || 'direct'] || CHANNEL_COLORS.other
+  const channelStyle = CHANNEL_COLORS[booking?.channel?.toLowerCase() || 'direct'] || CHANNEL_COLORS.other
 
   return (
     <Modal onClose={onClose} maxWidth="lg">

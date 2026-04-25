@@ -477,7 +477,7 @@ export default function CalendarPage() {
                       {roomBookings.map((b) => {
                         const style = getBarStyle(b.checkIn, b.checkOut)
                         if (!style) return null
-                        const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
+                        const channelColor = CHANNEL_COLORS[b.channel?.toLowerCase()] || CHANNEL_COLORS.other
                         return (
                           <div
                             key={b.id}
@@ -515,7 +515,7 @@ export default function CalendarPage() {
                     {unassignedBookings.map((b) => {
                       const style = getBarStyle(b.checkIn, b.checkOut)
                       if (!style) return null
-                      const channelColor = CHANNEL_COLORS[b.channel] || CHANNEL_COLORS.other
+                      const channelColor = CHANNEL_COLORS[b.channel?.toLowerCase()] || CHANNEL_COLORS.other
                       return (
                         <div
                           key={b.id}

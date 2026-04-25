@@ -36,5 +36,5 @@ export function getChannelLabel(channel: string): string {
     channex: 'Channex',
     other: 'Other',
   }
-  return labels[channel] || channel
+  return labels[channel?.toLowerCase()] || channel
 }
