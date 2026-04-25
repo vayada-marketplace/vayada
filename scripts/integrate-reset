@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# Wipe the local-integration sandbox: reset parent and all submodules
+# to origin/main and delete any local-integration branches.
+# Feature worktrees are not touched.
+#
+# Usage: scripts/integrate-reset
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_NAME="$(basename "$REPO_ROOT")"
+
+if [[ "$REPO_NAME" != "vayada" ]]; then
+  echo "error: must run from the main vayada worktree (~/git/vayada), not $REPO_NAME" >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+echo "fetching origin in parent and submodules..."
+git fetch origin main --quiet
+git submodule foreach --quiet 'git fetch origin main --quiet || true'
+
+echo "resetting submodules to origin/main..."
+git submodule foreach --quiet '
+  git checkout -B main origin/main >/dev/null 2>&1
+  git reset --hard origin/main --quiet
+  git branch -D local-integration >/dev/null 2>&1 || true
+'
+
+echo "resetting parent to origin/main..."
+git checkout -B main origin/main >/dev/null 2>&1
+git reset --hard origin/main --quiet
+git branch -D local-integration >/dev/null 2>&1 || true
+
+echo "syncing submodule working trees..."
+git submodule update --recursive
+
+echo ""
+echo "done. parent and all submodules are at origin/main; local-integration deleted."

@@ -23,6 +23,31 @@ When the user asks to clean up a worktree:
 1. `git worktree remove ../vayada-<TICKET-ID>`
 2. Optionally delete the branch if merged: `git branch -d feature/<ticket-id-lowercase>`
 
+## Local Integration Testing
+
+Use `scripts/integrate` and `scripts/integrate-reset` to Docker-test multiple in-flight feature worktrees together in the main worktree without merging anything to main. The branch `local-integration` is a throwaway sandbox — never push it.
+
+Both scripts must run from `~/git/vayada` (the main worktree). They will refuse to run from a feature worktree.
+
+When the user says "integrate worktree <TICKET-ID>" / "test feature <TICKET-ID>" / "stack <TICKET-ID>" / "add <TICKET-ID> to integration" (or similar):
+```
+cd ~/git/vayada
+./scripts/integrate <TICKET-ID>
+```
+Then tell the user to rebuild Docker (`docker compose up --build`) to pick up the changes. Repeat for each feature you want stacked together — conflicts surface here, which is useful signal.
+
+When the user says "reset integration" / "wipe integration" / "clean integration" / "back to main" (or similar):
+```
+cd ~/git/vayada
+./scripts/integrate-reset
+```
+This resets parent + all submodules to `origin/main` and deletes `local-integration` everywhere. Feature worktrees are untouched.
+
+Notes:
+- The integrate script reads feature branches directly from each `../vayada-<TICKET>` worktree, so feature branches don't need to be pushed to origin first.
+- The script refuses if the parent worktree has uncommitted changes — commit, stash, or reset first.
+- Re-running `integrate <TICKET>` after the feature worktree gets new commits will pull in those new commits.
+
 ## Merge & Ship Worktree
 
 When the user says "merge worktree" / "ship worktree" / "finish worktree" (or similar) for a given `<TICKET-ID>`:

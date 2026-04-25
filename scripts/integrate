@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# Stack a feature worktree's submodule changes onto a throwaway
+# `local-integration` branch in the main vayada worktree, so multiple
+# in-flight features can be Docker-tested together without touching main.
+#
+# Usage: scripts/integrate <TICKET-ID>
+# Reset: scripts/integrate-reset
+
+set -euo pipefail
+
+TICKET="${1:-}"
+if [[ -z "$TICKET" ]]; then
+  echo "usage: scripts/integrate <TICKET-ID>" >&2
+  exit 2
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_NAME="$(basename "$REPO_ROOT")"
+TICKET_LOWER=$(printf '%s' "$TICKET" | tr '[:upper:]' '[:lower:]')
+FEATURE_BRANCH="feature/$TICKET_LOWER"
+FEATURE_WT="$(cd "$REPO_ROOT/.." && pwd)/vayada-$TICKET"
+
+if [[ "$REPO_NAME" != "vayada" ]]; then
+  echo "error: must run from the main vayada worktree (~/git/vayada), not $REPO_NAME" >&2
+  exit 1
+fi
+
+if [[ ! -d "$FEATURE_WT" ]]; then
+  echo "error: feature worktree not found at $FEATURE_WT" >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "error: uncommitted changes in $REPO_ROOT — commit, stash, or reset them first" >&2
+  git status --short
+  exit 1
+fi
+
+CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CUR_BRANCH" != "local-integration" ]]; then
+  if git rev-parse --verify --quiet local-integration >/dev/null; then
+    git checkout local-integration
+  else
+    echo "creating local-integration branch from main"
+    git checkout -b local-integration main
+  fi
+fi
+
+SUBMODULES=$(git config --file .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}')
+
+INTEGRATED_ANY=0
+
+for SUB in $SUBMODULES; do
+  FEATURE_SUB="$FEATURE_WT/$SUB"
+  MAIN_SUB="$REPO_ROOT/$SUB"
+
+  if [[ ! -e "$FEATURE_SUB/.git" ]]; then
+    continue
+  fi
+
+  if ! git -C "$FEATURE_SUB" rev-parse --verify --quiet "$FEATURE_BRANCH" >/dev/null; then
+    continue
+  fi
+
+  FEATURE_HEAD=$(git -C "$FEATURE_SUB" rev-parse "$FEATURE_BRANCH")
+  MAIN_HEAD=$(git -C "$FEATURE_SUB" rev-parse main 2>/dev/null || echo "")
+  if [[ -z "$MAIN_HEAD" ]] || [[ "$FEATURE_HEAD" == "$MAIN_HEAD" ]]; then
+    continue
+  fi
+
+  echo ""
+  echo "integrating $SUB"
+
+  if [[ ! -e "$MAIN_SUB/.git" ]]; then
+    git submodule update --init -- "$SUB"
+  fi
+
+  CUR_SUB_BRANCH=$(git -C "$MAIN_SUB" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ "$CUR_SUB_BRANCH" != "local-integration" ]]; then
+    if git -C "$MAIN_SUB" rev-parse --verify --quiet local-integration >/dev/null; then
+      git -C "$MAIN_SUB" checkout local-integration
+    else
+      git -C "$MAIN_SUB" checkout -b local-integration main
+    fi
+  fi
+
+  git -C "$MAIN_SUB" fetch --quiet "$FEATURE_SUB" "$FEATURE_BRANCH"
+
+  if ! git -C "$MAIN_SUB" merge --no-ff --no-edit -m "Integrate $FEATURE_BRANCH" FETCH_HEAD; then
+    echo ""
+    echo "error: merge conflict in $SUB"
+    echo "resolve in $MAIN_SUB, commit, then re-run: scripts/integrate $TICKET"
+    exit 1
+  fi
+
+  INTEGRATED_ANY=1
+done
+
+if [[ "$INTEGRATED_ANY" == "0" ]]; then
+  echo "no submodules to integrate (feature branch matches main everywhere)"
+  exit 0
+fi
+
+git add -A
+if git diff --cached --quiet; then
+  echo "submodule pointers unchanged in parent — nothing to commit"
+  exit 0
+fi
+
+git commit -m "Integrate $FEATURE_BRANCH"
+
+echo ""
+echo "done. parent and changed submodules are on local-integration."
+echo "rebuild docker to pick up changes:"
+echo "  docker compose up --build"
