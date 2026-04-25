@@ -1,6 +1,6 @@
 'use client'
 
-import { RefObject, useState } from 'react'
+import { Fragment, RefObject, useState } from 'react'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline'
 import { getCurrencySymbol } from '@/lib/utils'
 
@@ -22,7 +22,7 @@ export interface RoomType {
   cancellationPolicy: string
   nonRefundableCancellationPolicy: string
   operatingPeriods: { from: string; to: string }[]
-  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
+  seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number; occupancyRates?: Record<string, string> }[]
   weekendSurcharge: string
   minimumAdvanceDays: number
   currency: string
@@ -227,6 +227,7 @@ export default function RoomsStep({
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [customAmenitiesByCategory, setCustomAmenitiesByCategory] = useState<Record<string, string[]>>({})
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
+  const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]
@@ -300,7 +301,7 @@ export default function RoomsStep({
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        const clone = { ...r, name: r.name + ' (Copy)', images: [...r.images], amenities: [...r.amenities], features: [...r.features], beds: r.beds.map(b => ({ ...b })), seasons: r.seasons.map(s => ({ ...s })), operatingPeriods: r.operatingPeriods.map(p => ({ ...p })) }
+                        const clone = { ...r, name: r.name + ' (Copy)', images: [...r.images], amenities: [...r.amenities], features: [...r.features], beds: r.beds.map(b => ({ ...b })), seasons: r.seasons.map(s => ({ ...s, occupancyRates: { ...(s.occupancyRates || {}) } })), operatingPeriods: r.operatingPeriods.map(p => ({ ...p })) }
                         setRooms((prev: RoomType[]) => [...prev, clone])
                         setActiveRoomIndex(rooms.length)
                         setActiveRoomTab('details')
@@ -794,7 +795,7 @@ export default function RoomsStep({
                 {(() => { const hasOverlap = room.seasons.some((a, i) => room.seasons.some((b, j) => i < j && a.from && a.to && b.from && b.to && a.from <= b.to && b.from <= a.to)); return hasOverlap ? <p className="mt-2 text-[11px] text-red-600 font-medium">Season date ranges must not overlap. Please adjust the highlighted seasons.</p> : null })()}
                 {uncoveredDays && <p className="mt-2 text-[11px] text-amber-600 font-medium">Some operating days have no season pricing: {uncoveredDays}. All open days must be covered by a season.</p>}
                 <button
-                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Mid', from: '', to: '', rate: '', minStay: 1 }] })}
+                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Mid', from: '', to: '', rate: '', minStay: 1, occupancyRates: {} }] })}
                   className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <PlusIcon className="w-3.5 h-3.5" /> Add season
@@ -820,58 +821,116 @@ export default function RoomsStep({
                             'High': 'text-blue-800 bg-blue-100',
                             'Peak': 'text-indigo-700 bg-indigo-100',
                           }
+                          const maxOcc = room.maxOccupancy ?? 2
+                          const hasOccRates = Object.values(season.occupancyRates || {}).some(v => v !== '' && v !== undefined)
+                          const isOccExpanded = expandedOccupancy[idx] || false
                           return (
-                            <tr key={idx} className="border-t border-gray-100">
-                              <td className="py-2.5">
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
-                                    {season.tier}
-                                  </span>
-                                  {season.name
-                                    ? <span className="text-[12px] text-gray-700">{season.name}</span>
-                                    : <span className="text-gray-300">&mdash;</span>
-                                  }
-                                </div>
-                              </td>
-                              <td className="py-2.5">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[11px] text-gray-400">{getCurrencySymbol(currency || 'USD')}</span>
-                                  <input
-                                    type="number"
-                                    value={season.rate}
-                                    onChange={(e) => {
-                                      const u = [...room.seasons]
-                                      u[idx] = { ...u[idx], rate: e.target.value }
-                                      updateRoom({ seasons: u })
-                                    }}
-                                    className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[12px] font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                  />
-                                </div>
-                              </td>
-                              <td className="py-2.5">
-                                <div className="inline-flex items-center gap-0 border border-gray-200 rounded overflow-hidden">
-                                  <button
-                                    onClick={() => {
-                                      const u = [...room.seasons]
-                                      u[idx] = { ...u[idx], minStay: Math.max(1, (season.minStay || 1) - 1) }
-                                      updateRoom({ seasons: u })
-                                    }}
-                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
-                                  >&minus;</button>
-                                  <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
-                                    {season.minStay || 1}
-                                  </span>
-                                  <button
-                                    onClick={() => {
-                                      const u = [...room.seasons]
-                                      u[idx] = { ...u[idx], minStay: (season.minStay || 1) + 1 }
-                                      updateRoom({ seasons: u })
-                                    }}
-                                    className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
-                                  >+</button>
-                                </div>
-                              </td>
-                            </tr>
+                            <Fragment key={idx}>
+                              <tr className="border-t border-gray-100">
+                                <td className="py-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
+                                      {season.tier}
+                                    </span>
+                                    {season.name
+                                      ? <span className="text-[12px] text-gray-700">{season.name}</span>
+                                      : <span className="text-gray-300">&mdash;</span>
+                                    }
+                                  </div>
+                                </td>
+                                <td className="py-2.5">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[11px] text-gray-400">{getCurrencySymbol(currency || 'USD')}</span>
+                                    <input
+                                      type="number"
+                                      value={season.rate}
+                                      onChange={(e) => {
+                                        const u = [...room.seasons]
+                                        u[idx] = { ...u[idx], rate: e.target.value }
+                                        updateRoom({ seasons: u })
+                                      }}
+                                      className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[12px] font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                  </div>
+                                </td>
+                                <td className="py-2.5">
+                                  <div className="flex items-center gap-3">
+                                    <div className="inline-flex items-center gap-0 border border-gray-200 rounded overflow-hidden">
+                                      <button
+                                        onClick={() => {
+                                          const u = [...room.seasons]
+                                          u[idx] = { ...u[idx], minStay: Math.max(1, (season.minStay || 1) - 1) }
+                                          updateRoom({ seasons: u })
+                                        }}
+                                        className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
+                                      >&minus;</button>
+                                      <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
+                                        {season.minStay || 1}
+                                      </span>
+                                      <button
+                                        onClick={() => {
+                                          const u = [...room.seasons]
+                                          u[idx] = { ...u[idx], minStay: (season.minStay || 1) + 1 }
+                                          updateRoom({ seasons: u })
+                                        }}
+                                        className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 text-[11px]"
+                                      >+</button>
+                                    </div>
+                                    {maxOcc > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedOccupancy(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${hasOccRates ? 'text-primary-600 bg-primary-50 hover:bg-primary-100' : 'text-gray-500 hover:bg-gray-100'}`}
+                                      >
+                                        <ChevronDownIcon className={`w-3 h-3 transition-transform ${isOccExpanded ? '' : '-rotate-90'}`} />
+                                        Per guest
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              {isOccExpanded && maxOcc > 1 && (
+                                <tr className="border-t border-gray-50 bg-gray-50/50">
+                                  <td colSpan={3} className="py-2.5 pl-6">
+                                    <div className="space-y-1.5">
+                                      <span className="text-[10px] text-gray-400 font-medium">Rate per number of guests</span>
+                                      {Array.from({ length: maxOcc }, (_, i) => i + 1).map(guestCount => {
+                                        const isAnchor = guestCount === 1
+                                        const occRate = (season.occupancyRates || {})[String(guestCount)] || ''
+                                        return (
+                                          <div key={guestCount} className="flex items-center gap-2">
+                                            <span className="text-[11px] text-gray-500 w-16">{guestCount} {guestCount === 1 ? 'guest' : 'guests'}</span>
+                                            <span className="text-gray-400 text-[11px]">{getCurrencySymbol(currency || 'USD')}</span>
+                                            {isAnchor ? (
+                                              <span className="text-[11px] text-gray-400 px-2 py-1">{season.rate || '—'} (season rate)</span>
+                                            ) : (
+                                              <input
+                                                type="number"
+                                                value={occRate}
+                                                onChange={(e) => {
+                                                  const u = [...room.seasons]
+                                                  const occ = { ...(u[idx].occupancyRates || {}) }
+                                                  if (e.target.value === '') {
+                                                    delete occ[String(guestCount)]
+                                                  } else {
+                                                    occ[String(guestCount)] = e.target.value
+                                                  }
+                                                  u[idx] = { ...u[idx], occupancyRates: occ }
+                                                  updateRoom({ seasons: u })
+                                                }}
+                                                className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                                placeholder={season.rate || 'same as rate'}
+                                                min="0"
+                                              />
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           )
                         })}
                       </tbody>
