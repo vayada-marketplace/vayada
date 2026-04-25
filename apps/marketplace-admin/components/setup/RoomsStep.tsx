@@ -20,6 +20,7 @@ export interface RoomType {
   flexibleRateEnabled: boolean
   nonRefundableEnabled: boolean
   cancellationPolicy: string
+  nonRefundableCancellationPolicy: string
   operatingPeriods: { from: string; to: string }[]
   seasons: { name: string; tier: string; from: string; to: string; rate: string; minStay: number }[]
   weekendSurcharge: string
@@ -57,6 +58,7 @@ export const createEmptyRoom = (): RoomType => ({
   flexibleRateEnabled: true,
   nonRefundableEnabled: false,
   cancellationPolicy: 'Free until 7 days before',
+  nonRefundableCancellationPolicy: 'Non-refundable from booking',
   operatingPeriods: [{ from: '01-01', to: '12-31' }],
   seasons: [],
   weekendSurcharge: '+0%',
@@ -887,6 +889,22 @@ export default function RoomsStep({
                     <span className="text-[12px] font-semibold text-gray-900">Non-refundable</span>
                     <span className="text-[11px] text-gray-400">(discount for no cancellation)</span>
                   </div>
+                  {room.nonRefundableEnabled && (
+                    <div className="mt-3 ml-[52px] flex items-center gap-3">
+                      <span className="text-[11px] text-gray-500">Cancellation policy:</span>
+                      <select
+                        value={room.nonRefundableCancellationPolicy}
+                        onChange={(e) => updateRoom({ nonRefundableCancellationPolicy: e.target.value })}
+                        className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+                      >
+                        <option>Non-refundable from booking</option>
+                        <option>Cancel within 24 hours of booking</option>
+                        <option>Cancel within 48 hours of booking</option>
+                        <option>Cancel within 7 days of booking</option>
+                      </select>
+                    </div>
+                  )}
                   {room.nonRefundableEnabled && room.flexibleRateEnabled && (
                     <div className="mt-3 ml-[52px] flex items-center gap-3">
                       <span className="text-[11px] text-gray-500">Discount:</span>

@@ -53,6 +53,7 @@ export interface InviteData {
     flexibleRateEnabled: boolean
     nonRefundableEnabled: boolean
     cancellationPolicy: string
+    nonRefundableCancellationPolicy: string
     currency: string
     images: string[]
     amenities: string[]
