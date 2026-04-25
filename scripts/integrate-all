@@ -51,8 +51,12 @@ done
 echo ""
 echo "=== restarting docker stack ==="
 docker compose down --remove-orphans
-docker compose up -d --build
+docker compose up -d --build --wait
 
 echo ""
-echo "done. ${#TICKETS[@]} worktree(s) integrated; stack is up."
+echo "=== seeding databases ==="
+python3 "$SCRIPTS_DIR/seed_all.py"
+
+echo ""
+echo "done. ${#TICKETS[@]} worktree(s) integrated; stack is up; databases seeded."
 echo "tail logs:  docker compose logs -f"
