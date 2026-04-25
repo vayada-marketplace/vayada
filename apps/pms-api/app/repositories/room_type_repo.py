@@ -77,7 +77,7 @@ class RoomTypeRepository:
             data.get("weekend_surcharge", "+0%"),
             data.get("cancellation_policy", "Free until 7 days before"),
             data.get("flexible_rate_enabled", True),
-            data.get("non_refundable_discount", 10),
+            data.get("non_refundable_discount", 5),
             data.get("non_refundable_enabled", False),
             json.dumps(data.get("last_minute_discount")) if data.get("last_minute_discount") else None,
             data.get("minimum_advance_days", 0),

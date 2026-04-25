@@ -281,7 +281,7 @@ def _build_restriction_entry(
         if non_refundable_rate:
             rate = non_refundable_rate
         else:
-            discount = room_type.get("non_refundable_discount", 10) or 10
+            discount = room_type.get("non_refundable_discount", 5) or 5
             rate = round(base_rate * (1 - discount / 100), 2)
     else:
         rate = base_rate
