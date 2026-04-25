@@ -39,14 +39,15 @@ class RoomTypeRepository:
                 operating_periods, seasons, weekend_surcharge,
                 cancellation_policy, flexible_rate_enabled, non_refundable_discount,
                 non_refundable_enabled, last_minute_discount,
-                minimum_advance_days, rate_payment_methods
+                minimum_advance_days, rate_payment_methods,
+                non_refundable_cancellation_policy
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
                 $10, $11, $12,
                 $13::jsonb, $14::jsonb, $15, $16::jsonb, $17::jsonb,
                 $18, $19, $20, $21::jsonb, $22::jsonb,
                 $23::jsonb, $24::jsonb, $25, $26, $27, $28,
-                $29, $30::jsonb, $31, $32::jsonb
+                $29, $30::jsonb, $31, $32::jsonb, $33
             ) RETURNING *
             """,
             hotel_id,
@@ -81,6 +82,7 @@ class RoomTypeRepository:
             json.dumps(data.get("last_minute_discount")) if data.get("last_minute_discount") else None,
             data.get("minimum_advance_days", 0),
             json.dumps(data.get("rate_payment_methods")) if data.get("rate_payment_methods") else None,
+            data.get("non_refundable_cancellation_policy", "Non-refundable from booking"),
         )
         return dict(row)
 

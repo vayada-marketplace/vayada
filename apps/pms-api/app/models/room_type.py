@@ -135,6 +135,7 @@ class RoomTypeCreate(BaseModel):
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
+    non_refundable_cancellation_policy: str = "Non-refundable from booking"
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
@@ -191,6 +192,7 @@ class RoomTypeUpdate(BaseModel):
     flexible_rate_enabled: Optional[bool] = None
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
+    non_refundable_cancellation_policy: Optional[str] = None
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: Optional[int] = None
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
@@ -246,6 +248,7 @@ class RoomTypeResponse(BaseModel):
     benefits: List[str] = []
     flexible_rate_enabled: bool = True
     cancellation_policy: str = "Free until 7 days before"
+    non_refundable_cancellation_policy: str = "Non-refundable from booking"
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
 
@@ -282,6 +285,7 @@ class RoomTypeAdminResponse(BaseModel):
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 10
+    non_refundable_cancellation_policy: str = "Non-refundable from booking"
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
