@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button, Input } from '@/components/ui'
 import { Textarea } from '@/components/ui/Textarea'
-import { ArrowLeftIcon, PlusIcon, TrashIcon, PhotoIcon, ChevronDownIcon, ChevronUpIcon, XMarkIcon, GiftIcon, CurrencyDollarIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, PlusIcon, TrashIcon, PhotoIcon, ChevronDownIcon, ChevronUpIcon, XMarkIcon, GiftIcon, CurrencyDollarIcon, TagIcon, LinkIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { usersService, uploadService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
 import { CURRENCY_OPTIONS } from '@/lib/constants/booking'
@@ -670,6 +670,10 @@ export default function CreateUserPage() {
                   } else if (co.collaborationType === 'Discount') {
                     if (co.discountPercentage) {
                       offering.discountPercentage = parseInt(co.discountPercentage)
+                    }
+                  } else if (co.collaborationType === 'Affiliate') {
+                    if (co.commissionPercentage) {
+                      offering.commissionPercentage = parseInt(co.commissionPercentage)
                     }
                   }
 
@@ -1443,6 +1447,7 @@ export default function CreateUserPage() {
                                                 if (type === 'Free Stay') return <GiftIcon className="w-8 h-8" />
                                                 if (type === 'Paid') return <CurrencyDollarIcon className="w-8 h-8" />
                                                 if (type === 'Discount') return <TagIcon className="w-8 h-8" />
+                                                if (type === 'Affiliate') return <LinkIcon className="w-8 h-8" />
                                               }
                                               
                                               return (
@@ -1526,6 +1531,20 @@ export default function CreateUserPage() {
                                               value={offering.discountPercentage || ''}
                                               onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'discountPercentage', e.target.value)}
                                               placeholder="30"
+                                              required
+                                            />
+                                          </div>
+                                        )}
+                                        {offering.collaborationType === 'Affiliate' && (
+                                          <div>
+                                            <Input
+                                              label="Commission Percentage"
+                                              type="number"
+                                              min="1"
+                                              max="100"
+                                              value={offering.commissionPercentage || ''}
+                                              onChange={(e) => handleCollaborationOfferingChange(listingIndex, offeringIndex, 'commissionPercentage', e.target.value)}
+                                              placeholder="10"
                                               required
                                             />
                                           </div>

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
-import { UserIcon, ArrowLeftIcon, TrashIcon, PencilIcon, XMarkIcon, PhotoIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon, GiftIcon, CurrencyDollarIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline'
+import { UserIcon, ArrowLeftIcon, TrashIcon, PencilIcon, XMarkIcon, PhotoIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon, GiftIcon, CurrencyDollarIcon, TagIcon, LinkIcon, CalendarIcon } from '@heroicons/react/24/outline'
 import { usersService, uploadService } from '@/services/api'
 import { Input } from '@/components/ui'
 import { Textarea } from '@/components/ui/Textarea'
@@ -468,6 +468,7 @@ export default function UserDetailPage() {
         paidMaxAmount: offering.paidMaxAmount,
         currency: offering.currency,
         discountPercentage: offering.discountPercentage,
+        commissionPercentage: offering.commissionPercentage,
       })),
       creatorRequirements: listing.creatorRequirements ? {
         id: listing.creatorRequirements.id,
@@ -605,6 +606,8 @@ export default function UserDetailPage() {
           offeringData.currency = offering.currency || 'USD'
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
+        } else if (offering.collaborationType === 'Affiliate') {
+          offeringData.commissionPercentage = offering.commissionPercentage ? parseInt(offering.commissionPercentage.toString()) : null
         }
 
         return offeringData
@@ -776,6 +779,8 @@ export default function UserDetailPage() {
           offeringData.currency = offering.currency || 'USD'
         } else if (offering.collaborationType === 'Discount') {
           offeringData.discountPercentage = offering.discountPercentage ? parseInt(offering.discountPercentage.toString()) : null
+        } else if (offering.collaborationType === 'Affiliate') {
+          offeringData.commissionPercentage = offering.commissionPercentage ? parseInt(offering.commissionPercentage.toString()) : null
         }
 
         if (offering.id) {
@@ -2503,6 +2508,7 @@ export default function UserDetailPage() {
                                     if (type === 'Free Stay') return <GiftIcon className="w-8 h-8" />
                                     if (type === 'Paid') return <CurrencyDollarIcon className="w-8 h-8" />
                                     if (type === 'Discount') return <TagIcon className="w-8 h-8" />
+                                    if (type === 'Affiliate') return <LinkIcon className="w-8 h-8" />
                                   }
 
                                   return (
@@ -2587,6 +2593,19 @@ export default function UserDetailPage() {
                                 />
                               </div>
                             )}
+                            {offering.collaborationType === 'Affiliate' && (
+                              <div>
+                                <Input
+                                  label="Commission Percentage"
+                                  type="number"
+                                  min="1"
+                                  max="100"
+                                  value={offering.commissionPercentage?.toString() || ''}
+                                  onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'commissionPercentage', e.target.value ? parseInt(e.target.value) : null)}
+                                  placeholder="10"
+                                />
+                              </div>
+                            )}
 
                             {/* Platforms */}
                             <div>
@@ -2653,7 +2672,8 @@ export default function UserDetailPage() {
                           <div className="flex items-center gap-2 mb-4">
                             <span className={`px-3 py-1 text-sm font-semibold rounded-full ${offering.collaborationType === 'Free Stay' ? 'bg-green-100 text-green-800' :
                                 offering.collaborationType === 'Paid' ? 'bg-blue-100 text-blue-800' :
-                                  'bg-yellow-100 text-yellow-800'
+                                  offering.collaborationType === 'Affiliate' ? 'bg-purple-100 text-purple-800' :
+                                    'bg-yellow-100 text-yellow-800'
                               }`}>
                               {offering.collaborationType}
                             </span>
@@ -2716,6 +2736,13 @@ export default function UserDetailPage() {
                               <div>
                                 <label className="block text-sm font-medium text-gray-700">Discount Percentage</label>
                                 <p className="mt-1 text-sm text-gray-900">{offering.discountPercentage}%</p>
+                              </div>
+                            )}
+
+                            {offering.collaborationType === 'Affiliate' && offering.commissionPercentage != null && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">Commission Percentage</label>
+                                <p className="mt-1 text-sm text-gray-900">{offering.commissionPercentage}%</p>
                               </div>
                             )}
                           </div>
