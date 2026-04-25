@@ -43,6 +43,13 @@ cd ~/git/vayada
 ```
 This resets parent + all submodules to `origin/main` and deletes `local-integration` everywhere. Feature worktrees are untouched.
 
+When the user says "integrate all worktrees" / "test all features" / "pull all worktrees" / "fresh stack" / "reload everything" (or similar):
+```
+cd ~/git/vayada
+./scripts/integrate-all
+```
+This resets the sandbox, integrates every active feature worktree onto `local-integration`, and brings the Docker stack up with `docker compose up -d --build`. Use this for "give me a fresh integration env with everything that's currently in flight." If a single worktree's merge conflicts, the script halts before the Docker step — resolve and re-run.
+
 Notes:
 - The integrate script reads feature branches directly from each `../vayada-<TICKET>` worktree, so feature branches don't need to be pushed to origin first.
 - The script refuses if the parent worktree has uncommitted changes — commit, stash, or reset first.

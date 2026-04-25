@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#
+# Reset the local-integration sandbox, integrate every active feature
+# worktree onto it, and (re)start the Docker stack.
+#
+# Usage: scripts/integrate-all
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_NAME="$(basename "$REPO_ROOT")"
+SCRIPTS_DIR="$REPO_ROOT/scripts"
+
+if [[ "$REPO_NAME" != "vayada" ]]; then
+  echo "error: must run from the main vayada worktree (~/git/vayada), not $REPO_NAME" >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+# Collect feature worktree ticket IDs (skip the main worktree)
+TICKETS=()
+while IFS= read -r path; do
+  base=$(basename "$path")
+  if [[ "$base" == "vayada" ]]; then
+    continue
+  fi
+  if [[ "$base" =~ ^vayada-(.+)$ ]]; then
+    TICKETS+=("${BASH_REMATCH[1]}")
+  else
+    echo "warn: skipping unrecognised worktree path: $path" >&2
+  fi
+done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
+
+if [[ ${#TICKETS[@]} -eq 0 ]]; then
+  echo "no feature worktrees found — will reset and restart stack only"
+else
+  echo "found ${#TICKETS[@]} feature worktree(s): ${TICKETS[*]}"
+fi
+
+echo ""
+echo "=== resetting local-integration sandbox ==="
+"$SCRIPTS_DIR/integrate-reset"
+
+for ticket in "${TICKETS[@]}"; do
+  echo ""
+  echo "=== integrating $ticket ==="
+  "$SCRIPTS_DIR/integrate" "$ticket"
+done
+
+echo ""
+echo "=== restarting docker stack ==="
+docker compose down --remove-orphans
+docker compose up -d --build
+
+echo ""
+echo "done. ${#TICKETS[@]} worktree(s) integrated; stack is up."
+echo "tail logs:  docker compose logs -f"
