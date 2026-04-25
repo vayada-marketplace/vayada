@@ -303,6 +303,7 @@ async def get_user_details(
                             paid_max_amount=o['paid_max_amount'],
                             currency=o.get('currency'),
                             discount_percentage=o['discount_percentage'],
+                            commission_percentage=o.get('commission_percentage'),
                             created_at=o['created_at'],
                             updated_at=o['updated_at']
                         )
@@ -532,8 +533,9 @@ async def create_user(
                                         """
                                         INSERT INTO listing_collaboration_offerings
                                         (listing_id, collaboration_type, availability_months, platforms,
-                                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency)
-                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'))
+                                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
+                                         commission_percentage)
+                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
                                         """,
                                         listing_id,
                                         offering.collaborationType,
@@ -543,7 +545,8 @@ async def create_user(
                                         offering.freeStayMaxNights,
                                         offering.paidMaxAmount,
                                         offering.discountPercentage,
-                                        offering.currency
+                                        offering.currency,
+                                        offering.commissionPercentage
                                     )
 
                                 # Create creator requirements
@@ -1022,13 +1025,37 @@ async def update_user(
         if update_fields:
             update_fields.append("updated_at = now()")
             update_values.append(user_id)  # WHERE clause parameter
-            
+
             update_query = f"""
-                UPDATE users 
+                UPDATE users
                 SET {', '.join(update_fields)}
                 WHERE id = ${param_counter}
             """
             await AuthDatabase.execute(update_query, *update_values)
+
+        # Cascade verification to the hotel profile and its listings. User
+        # verification is the only approval gate for the marketplace, so these
+        # rows should mirror that state instead of staying stuck on the
+        # 'pending' default.
+        if request.status == 'verified' and user['type'] == 'hotel':
+            await Database.execute(
+                """
+                UPDATE hotel_profiles
+                SET status = 'verified', updated_at = now()
+                WHERE user_id = $1 AND status != 'verified'
+                """,
+                user_id,
+            )
+            await Database.execute(
+                """
+                UPDATE hotel_listings
+                SET status = 'verified', updated_at = now()
+                WHERE hotel_profile_id IN (
+                    SELECT id FROM hotel_profiles WHERE user_id = $1
+                ) AND status != 'verified'
+                """,
+                user_id,
+            )
 
         # Fetch updated user
         updated_user = await UserRepository.get_by_id(
@@ -1170,11 +1197,12 @@ async def create_hotel_listing(
                         """
                         INSERT INTO listing_collaboration_offerings
                         (listing_id, collaboration_type, availability_months, platforms,
-                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'))
+                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
+                         commission_percentage)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
                         RETURNING id, collaboration_type, availability_months, platforms,
                                   free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
-                                  discount_percentage, created_at, updated_at
+                                  discount_percentage, commission_percentage, created_at, updated_at
                         """,
                         listing_id,
                         offering.collaborationType,
@@ -1184,7 +1212,8 @@ async def create_hotel_listing(
                         offering.freeStayMaxNights,
                         offering.paidMaxAmount,
                         offering.discountPercentage,
-                        offering.currency
+                        offering.currency,
+                        offering.commissionPercentage
                     )
 
                     offerings_response.append(CollaborationOfferingResponse(
@@ -1198,6 +1227,7 @@ async def create_hotel_listing(
                         paid_max_amount=offering_record['paid_max_amount'],
                         currency=offering_record['currency'],
                         discount_percentage=offering_record['discount_percentage'],
+                        commission_percentage=offering_record['commission_percentage'],
                         created_at=offering_record['created_at'],
                         updated_at=offering_record['updated_at']
                     ))
@@ -1292,6 +1322,7 @@ async def _get_listing_with_details_admin(listing_id: str, hotel_profile_id: str
             "paid_max_amount": o['paid_max_amount'],
             "currency": o.get('currency'),
             "discount_percentage": o['discount_percentage'],
+            "commission_percentage": o.get('commission_percentage'),
             "created_at": o['created_at'],
             "updated_at": o['updated_at']
         })
@@ -1430,8 +1461,9 @@ async def update_hotel_listing(
                             """
                             INSERT INTO listing_collaboration_offerings
                             (listing_id, collaboration_type, availability_months, platforms,
-                             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'))
+                             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
+                             commission_percentage)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
                             """,
                             listing_id,
                             offering.collaborationType,
@@ -1441,7 +1473,8 @@ async def update_hotel_listing(
                             offering.freeStayMaxNights,
                             offering.paidMaxAmount,
                             offering.discountPercentage,
-                            offering.currency
+                            offering.currency,
+                            offering.commissionPercentage
                         )
                 
                 # Update creator requirements if provided

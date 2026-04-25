@@ -49,6 +49,7 @@ class CollaborationOfferingResponse(BaseModel):
     paidMaxAmount: Optional[Decimal] = Field(None, alias="paid_max_amount")
     currency: Optional[str] = Field(None, description="ISO 4217 currency code for paid offerings")
     discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
+    commissionPercentage: Optional[int] = Field(None, alias="commission_percentage")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
 

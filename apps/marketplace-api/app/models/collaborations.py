@@ -91,7 +91,7 @@ class CreateCollaborationRequest(BaseModel):
     )
 
     # Hotel-specific fields
-    collaboration_type: Optional[Literal["Free Stay", "Paid", "Discount"]] = Field(
+    collaboration_type: Optional[Literal["Free Stay", "Paid", "Discount", "Affiliate"]] = Field(
         None,
         description="Type of collaboration (required for hotel invitations)"
     )
@@ -158,6 +158,9 @@ class CreateCollaborationRequest(BaseModel):
             elif self.collaboration_type == "Discount":
                 if not self.discount_percentage or not (1 <= self.discount_percentage <= 100):
                     raise ValueError("discount_percentage must be between 1-100 for Discount collaboration")
+            elif self.collaboration_type == "Affiliate":
+                if not self.creator_fee or not (1 <= self.creator_fee <= 100):
+                    raise ValueError("creator_fee must be between 1-100 for Affiliate collaboration")
 
         # Validate date ranges if provided
         if self.travel_date_from and self.travel_date_to:
@@ -197,7 +200,7 @@ class RespondToCollaborationRequest(BaseModel):
 
 class UpdateCollaborationTermsRequest(BaseModel):
     """Request model for suggesting changes (Negotiation)"""
-    collaboration_type: Optional[Literal["Free Stay", "Paid", "Discount"]] = None
+    collaboration_type: Optional[Literal["Free Stay", "Paid", "Discount", "Affiliate"]] = None
     free_stay_min_nights: Optional[int] = None
     free_stay_max_nights: Optional[int] = None
     paid_amount: Optional[Decimal] = None

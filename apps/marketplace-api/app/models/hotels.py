@@ -83,7 +83,7 @@ class HotelProfileResponse(BaseModel):
 
 class CollaborationOfferingRequest(BaseModel):
     """Collaboration offering request model"""
-    collaborationType: Literal["Free Stay", "Paid", "Discount"] = Field(alias="collaboration_type")
+    collaborationType: Literal["Free Stay", "Paid", "Discount", "Affiliate"] = Field(alias="collaboration_type")
     availabilityMonths: List[str] = Field(..., min_length=1, alias="availability_months")
     platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
     freeStayMinNights: Optional[int] = Field(None, gt=0, alias="free_stay_min_nights")
@@ -91,6 +91,7 @@ class CollaborationOfferingRequest(BaseModel):
     paidMaxAmount: Optional[Decimal] = Field(None, gt=0, alias="paid_max_amount")
     currency: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$', description="ISO 4217 currency code for paid offerings (defaults to USD server-side)")
     discountPercentage: Optional[int] = Field(None, ge=1, le=100, alias="discount_percentage")
+    commissionPercentage: Optional[int] = Field(None, ge=1, le=100, alias="commission_percentage")
 
     @model_validator(mode='after')
     def validate_type_specific_fields(self):
@@ -106,6 +107,9 @@ class CollaborationOfferingRequest(BaseModel):
         elif self.collaborationType == "Discount":
             if self.discountPercentage is None:
                 raise ValueError("discount_percentage is required for Discount collaboration")
+        elif self.collaborationType == "Affiliate":
+            if self.commissionPercentage is None:
+                raise ValueError("commission_percentage is required for Affiliate collaboration")
         return self
 
     model_config = ConfigDict(populate_by_name=True)

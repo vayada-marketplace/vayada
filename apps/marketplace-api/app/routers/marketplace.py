@@ -67,6 +67,7 @@ async def get_all_listings():
                 paid_max_amount=o['paid_max_amount'],
                 currency=o['currency'],
                 discount_percentage=o['discount_percentage'],
+                commission_percentage=o.get('commission_percentage'),
                 created_at=o['created_at'],
                 updated_at=o['updated_at']
             ))
