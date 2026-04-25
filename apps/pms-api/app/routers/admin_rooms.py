@@ -261,6 +261,7 @@ async def duplicate_room_type(
         "non_refundable_enabled": existing.get("non_refundable_enabled", False),
         "non_refundable_cancellation_policy": existing.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
         "last_minute_discount": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("last_minute_discount"))),
+        "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("rate_payment_methods"))),
     }
     room = await RoomTypeRepository.create(hotel_id, clone_data)
     return _room_to_admin(room)
