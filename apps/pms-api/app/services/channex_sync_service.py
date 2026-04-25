@@ -479,7 +479,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
         return
 
     status = (attrs.get("status", "") or "").lower()
-    ota_name = attrs.get("ota_name", "") or "channex"
+    ota_name = (attrs.get("ota_name", "") or "channex").lower()
 
     # Check if we already have this booking
     existing = await ChannexBookingMappingRepository.get_by_channex_id(channex_booking_id)
