@@ -56,6 +56,8 @@ export interface PropertySettings {
   payout_account_number?: string
   payout_bank_name?: string
   payout_swift?: string
+  terms_text?: string
+  cancellation_policy_text?: string
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>

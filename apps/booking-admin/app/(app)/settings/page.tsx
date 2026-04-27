@@ -134,6 +134,8 @@ const DEFAULT_SETTINGS: PropertySettings = {
   payout_bank_name: '',
   payout_swift: '',
   refer_a_guest_enabled: false,
+  terms_text: '',
+  cancellation_policy_text: '',
 }
 
 export default function SettingsPage() {
@@ -593,6 +595,36 @@ export default function SettingsPage() {
               label={'"Refer a Guest" Feature'}
               description="Allow guests to refer friends and earn rewards through your booking page"
             />
+          </div>
+
+          {/* Booking Policies */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+            <h2 className="text-sm font-semibold text-gray-900">Booking Policies</h2>
+            <p className="text-[13px] text-gray-500 mt-0.5 mb-4">
+              Shown in pop-ups when guests click the links on the payment page. Leave empty to hide the link.
+            </p>
+
+            <div className="mb-4">
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Terms &amp; Conditions</label>
+              <textarea
+                value={settings.terms_text ?? ''}
+                onChange={(e) => updateSetting('terms_text', e.target.value)}
+                rows={8}
+                placeholder="Enter your full Terms and Conditions here. Plain text or basic line breaks supported."
+                className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Cancellation Policy</label>
+              <textarea
+                value={settings.cancellation_policy_text ?? ''}
+                onChange={(e) => updateSetting('cancellation_policy_text', e.target.value)}
+                rows={6}
+                placeholder="Enter your full Cancellation Policy here. Plain text or basic line breaks supported."
+                className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"
+              />
+            </div>
           </div>
 
           {/* Custom Domain */}
