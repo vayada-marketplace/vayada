@@ -463,6 +463,7 @@
   "channels.otaDescription": "Connect your OTA channels (Booking.com, Airbnb, Expedia, etc.) and map rooms and rates.",
   "channels.failedToLoadIframe": "Failed to load channel management panel",
   "channels.disableButton": "Disable Channel Manager",
+  "channels.disable": "Disable",
   "channels.disabling": "Disabling...",
   "channels.disabled": "Channel manager disabled",
   "channels.failedToDisable": "Failed to disable",

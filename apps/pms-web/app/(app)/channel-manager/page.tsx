@@ -416,7 +416,7 @@ export default function ChannelManagerPage() {
 
       {showDisableConfirm && (
         <ConfirmDialog
-          title={t('channels.disable')}
+          title={t('channels.disableButton')}
           message={t('channels.disableConfirm')}
           confirmLabel={t('channels.disable')}
           variant="danger"
