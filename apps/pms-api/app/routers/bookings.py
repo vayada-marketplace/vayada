@@ -186,11 +186,12 @@ async def get_payment_settings(slug: str):
         "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
     }
 
-    # Fetch pay-at-hotel methods and bank details from booking engine DB
+    # Fetch pay-at-hotel methods, bank details, and policy texts from booking engine DB
     try:
         be_hotel = await BookingEngineDatabase.fetchrow(
             "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
-            "payout_bank_name, payout_swift FROM booking_hotels WHERE slug = $1",
+            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text "
+            "FROM booking_hotels WHERE slug = $1",
             slug,
         )
         if be_hotel:
@@ -199,6 +200,8 @@ async def get_payment_settings(slug: str):
             if isinstance(methods, str):
                 methods = json.loads(methods)
             result["payAtHotelMethods"] = methods or ["cash", "card"]
+            result["termsText"] = be_hotel.get("terms_text") or ""
+            result["cancellationPolicyText"] = be_hotel.get("cancellation_policy_text") or ""
             if bank_transfer:
                 result["bankDetails"] = {
                     "accountHolder": be_hotel.get("payout_account_holder") or "",
@@ -208,5 +211,7 @@ async def get_payment_settings(slug: str):
                 }
     except Exception:
         result["payAtHotelMethods"] = ["cash", "card"]
+        result["termsText"] = ""
+        result["cancellationPolicyText"] = ""
 
     return result
