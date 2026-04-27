@@ -540,30 +540,24 @@ function PaymentPageContent() {
                 </button>
                 <span className="text-sm text-gray-700 leading-relaxed">
                   {(() => {
-                    const renderTermsLink = (chunks: ReactNode) =>
-                      termsText ? (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.preventDefault(); setPolicyModal('terms') }}
-                          className="text-primary-600 underline font-medium hover:text-primary-700"
-                        >
-                          {chunks}
-                        </button>
-                      ) : (
-                        <span className="font-medium">{chunks}</span>
-                      )
-                    const renderCancellationLink = (chunks: ReactNode) =>
-                      cancellationPolicyText ? (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.preventDefault(); setPolicyModal('cancellation') }}
-                          className="text-primary-600 underline font-medium hover:text-primary-700"
-                        >
-                          {chunks}
-                        </button>
-                      ) : (
-                        <span className="font-medium">{chunks}</span>
-                      )
+                    const renderTermsLink = (chunks: ReactNode) => (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); setPolicyModal('terms') }}
+                        className="text-primary-600 underline font-medium hover:text-primary-700"
+                      >
+                        {chunks}
+                      </button>
+                    )
+                    const renderCancellationLink = (chunks: ReactNode) => (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); setPolicyModal('cancellation') }}
+                        className="text-primary-600 underline font-medium hover:text-primary-700"
+                      >
+                        {chunks}
+                      </button>
+                    )
                     return paymentMethod === 'card' ? t.rich('agreeTerms', {
                       terms: renderTermsLink,
                       cancellation: renderCancellationLink,
@@ -755,7 +749,14 @@ function PaymentPageContent() {
               </button>
             </div>
             <div className="px-6 py-5 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-              {policyModal === 'terms' ? termsText : cancellationPolicyText}
+              {policyModal === 'terms'
+                ? (termsText || 'Please contact the property for the full Terms and Conditions.')
+                : (cancellationPolicyText || t('cancellationPolicyDesc', {
+                    date: formatDate(
+                      new Date(new Date(checkIn).getTime() - getFreeCancellationDays(room?.cancellationPolicy) * 86400000).toISOString().slice(0, 10),
+                      locale,
+                    ),
+                  }))}
             </div>
           </div>
         </div>
