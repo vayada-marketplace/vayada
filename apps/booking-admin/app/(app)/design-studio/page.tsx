@@ -10,7 +10,7 @@ import MediaTab from '@/components/design-studio/MediaTab'
 import ColorsTab from '@/components/design-studio/ColorsTab'
 import FontsTab from '@/components/design-studio/FontsTab'
 
-const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap'
+const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&display=swap'
 
 type Tab = 'media' | 'colors' | 'fonts'
 

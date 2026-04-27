@@ -32,4 +32,12 @@ export const FONT_PAIRINGS = [
     headingFamily: "'Cormorant Garamond', serif",
     bodyFamily: "'Lato', sans-serif",
   },
+  {
+    id: 'imperial-serif',
+    name: 'Imperial Serif',
+    fonts: 'Cinzel + Source Sans Pro',
+    preview: 'MONUMENTAL & REFINED',
+    headingFamily: "'Cinzel', serif",
+    bodyFamily: "'Source Sans Pro', sans-serif",
+  },
 ]
