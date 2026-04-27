@@ -21,6 +21,11 @@ const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamil
     body: "'Source Sans Pro', sans-serif",
     googleFamilies: ['Lora:ital,wght@0,400;0,700;1,400', 'Source+Sans+Pro:wght@300;400;600;700'],
   },
+  'imperial-serif': {
+    heading: "'Cinzel', serif",
+    body: "'Source Sans Pro', sans-serif",
+    googleFamilies: ['Cinzel:wght@400;600;700', 'Source+Sans+Pro:wght@300;400;600;700'],
+  },
 }
 
 interface HotelContextValue {
