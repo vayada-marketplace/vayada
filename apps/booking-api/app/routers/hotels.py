@@ -51,6 +51,8 @@ async def get_payment_settings(slug: str):
         "specialRequestsEnabled": hotel.get("special_requests_enabled", True),
         "arrivalTimeEnabled": hotel.get("arrival_time_enabled", False),
         "guestCountEnabled": hotel.get("guest_count_enabled", False),
+        "termsText": hotel.get("terms_text") or "",
+        "cancellationPolicyText": hotel.get("cancellation_policy_text") or "",
     }
     if result["bankTransfer"]:
         result["bankDetails"] = {

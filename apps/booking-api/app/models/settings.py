@@ -61,6 +61,8 @@ class PropertySettingsResponse(BaseModel):
     payout_account_number: str
     payout_bank_name: str
     payout_swift: str
+    terms_text: str = ''
+    cancellation_policy_text: str = ''
 
 
 class PropertySettingsUpdate(BaseModel):
@@ -110,3 +112,5 @@ class PropertySettingsUpdate(BaseModel):
     payout_account_number: Optional[str] = None
     payout_bank_name: Optional[str] = None
     payout_swift: Optional[str] = None
+    terms_text: Optional[str] = None
+    cancellation_policy_text: Optional[str] = None

@@ -180,6 +180,8 @@ _PROPERTY_FIELD_MAP = {
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
     "refer_a_guest_enabled": "refer_a_guest_enabled",
+    "terms_text": "terms_text",
+    "cancellation_policy_text": "cancellation_policy_text",
 }
 
 
@@ -252,6 +254,8 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         payout_account_number=hotel.get('payout_account_number') or '',
         payout_bank_name=hotel.get('payout_bank_name') or '',
         payout_swift=hotel.get('payout_swift') or '',
+        terms_text=hotel.get('terms_text') or '',
+        cancellation_policy_text=hotel.get('cancellation_policy_text') or '',
     )
 
 
@@ -275,6 +279,7 @@ _DEFAULT_PROPERTY_SETTINGS = PropertySettingsResponse(
     billing_switch_effective_date=None,
     payout_account_holder='', payout_account_type='iban', payout_iban='', payout_account_number='',
     payout_bank_name='', payout_swift='',
+    terms_text='', cancellation_policy_text='',
 )
 
 
