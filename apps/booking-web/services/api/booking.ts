@@ -29,6 +29,8 @@ export interface PaymentSettings {
   specialRequestsEnabled?: boolean
   arrivalTimeEnabled?: boolean
   guestCountEnabled?: boolean
+  termsText?: string
+  cancellationPolicyText?: string
 }
 
 export interface BookingStatus {

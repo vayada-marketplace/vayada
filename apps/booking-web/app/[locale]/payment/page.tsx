@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, type ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
@@ -158,6 +158,9 @@ function PaymentPageContent() {
   const [bankTransferEnabled, setBankTransferEnabled] = useState(false)
   const [bankDetails, setBankDetails] = useState<{ accountHolder: string; accountType?: 'iban' | 'account_number'; iban: string; accountNumber?: string; bankName: string; swift: string } | null>(null)
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(['cash', 'card'])
+  const [termsText, setTermsText] = useState('')
+  const [cancellationPolicyText, setCancellationPolicyText] = useState('')
+  const [policyModal, setPolicyModal] = useState<null | 'terms' | 'cancellation'>(null)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -199,6 +202,8 @@ function PaymentPageContent() {
         setBankTransferEnabled(settings.bankTransfer || false)
         if (settings.bankDetails) setBankDetails(settings.bankDetails)
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods)
+        setTermsText(settings.termsText || '')
+        setCancellationPolicyText(settings.cancellationPolicyText || '')
         // Default to first available payment method, honoring the rate-level
         // allow-list if one is set on this room.
         const preference: ('card' | 'pay_at_property' | 'bank_transfer' | 'xendit')[] = ['card', 'pay_at_property', 'bank_transfer', 'xendit']
@@ -534,14 +539,40 @@ function PaymentPageContent() {
                   )}
                 </button>
                 <span className="text-sm text-gray-700 leading-relaxed">
-                  {paymentMethod === 'card' ? t.rich('agreeTerms', {
-                    terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                    cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                    amount: formatPrice(grandTotal, selectedCurrency),
-                  }) : t.rich('agreeTermsProperty', {
-                    terms: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                    cancellation: (chunks) => <a href="#" className="text-primary-600 underline font-medium">{chunks}</a>,
-                  })}
+                  {(() => {
+                    const renderTermsLink = (chunks: ReactNode) =>
+                      termsText ? (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); setPolicyModal('terms') }}
+                          className="text-primary-600 underline font-medium hover:text-primary-700"
+                        >
+                          {chunks}
+                        </button>
+                      ) : (
+                        <span className="font-medium">{chunks}</span>
+                      )
+                    const renderCancellationLink = (chunks: ReactNode) =>
+                      cancellationPolicyText ? (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); setPolicyModal('cancellation') }}
+                          className="text-primary-600 underline font-medium hover:text-primary-700"
+                        >
+                          {chunks}
+                        </button>
+                      ) : (
+                        <span className="font-medium">{chunks}</span>
+                      )
+                    return paymentMethod === 'card' ? t.rich('agreeTerms', {
+                      terms: renderTermsLink,
+                      cancellation: renderCancellationLink,
+                      amount: formatPrice(grandTotal, selectedCurrency),
+                    }) : t.rich('agreeTermsProperty', {
+                      terms: renderTermsLink,
+                      cancellation: renderCancellationLink,
+                    })
+                  })()}
                 </span>
               </label>
             </div>
@@ -698,6 +729,37 @@ function PaymentPageContent() {
       </div>
 
       <BookingFooter />
+
+      {policyModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setPolicyModal(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">
+                {policyModal === 'terms' ? t('termsAndConditions') : t('cancellationPolicyTitle')}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPolicyModal(null)}
+                className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+              {policyModal === 'terms' ? termsText : cancellationPolicyText}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
