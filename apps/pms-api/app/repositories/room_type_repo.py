@@ -242,6 +242,39 @@ class RoomTypeRepository:
         return None
 
     @staticmethod
+    def _find_season_min_stay(seasons: list, check_in: date) -> Optional[int]:
+        """Return the minStay configured on the season covering check_in, if any."""
+        for season in seasons:
+            season_from = season.get("from")
+            season_to = season.get("to")
+            if not season_from or not season_to:
+                continue
+            try:
+                if len(season_from) <= 5:
+                    s_from = date(check_in.year, int(season_from[:2]), int(season_from[3:]))
+                else:
+                    s_from = date.fromisoformat(season_from).replace(year=check_in.year)
+                if len(season_to) <= 5:
+                    s_to = date(check_in.year, int(season_to[:2]), int(season_to[3:]))
+                else:
+                    s_to = date.fromisoformat(season_to).replace(year=check_in.year)
+                if s_from > s_to:
+                    matched = check_in >= s_from or check_in <= s_to
+                else:
+                    matched = s_from <= check_in <= s_to
+                if matched:
+                    raw = season.get("minStay")
+                    if raw is None:
+                        return None
+                    try:
+                        return int(raw)
+                    except (ValueError, TypeError):
+                        return None
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    @staticmethod
     def _get_lowest_season_rate(seasons: list) -> Optional[float]:
         """Return the lowest non-zero season rate (for display when no dates selected)."""
         rates = []

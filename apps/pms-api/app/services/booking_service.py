@@ -98,6 +98,13 @@ async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
 
+    seasons = RoomTypeRepository._parse_seasons(room)
+    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
+    if min_stay and nights < min_stay:
+        raise ValueError(
+            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
+        )
+
     base_rate, _ = RoomTypeRepository.resolve_rate(room, data.check_in, data.adults)
     nightly_rate = base_rate
     total_amount = nightly_rate * nights
@@ -175,6 +182,13 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     nights = _nights(data.check_in, data.check_out)
     if nights <= 0:
         raise ValueError("Check-out must be after check-in")
+
+    seasons = RoomTypeRepository._parse_seasons(room)
+    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
+    if min_stay and nights < min_stay:
+        raise ValueError(
+            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
+        )
 
     # Check minimum advance booking days
     min_advance = room.get("minimum_advance_days") or 0

@@ -34,22 +34,32 @@ async def get_unavailable_dates(
     start: date = Query(...),
     end: date = Query(...),
 ):
-    """Return dates where ALL room types are fully booked."""
+    """Return dates where ALL room types are fully booked, plus per-arrival
+    min-stay constraints across the active rooms in the requested range.
+
+    `min_stay_by_arrival` only includes arrival dates where the smallest
+    available room min-stay is greater than 1 — clients can default to 1
+    for any date not present in the map.
+    """
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
-        return {"dates": []}
+        return {"dates": [], "min_stay_by_arrival": {}}
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     if not rooms:
-        return {"dates": []}
+        return {"dates": [], "min_stay_by_arrival": {}}
+
+    seasons_by_room = {str(r["id"]): RoomTypeRepository._parse_seasons(r) for r in rooms}
 
     today = date.today()
     unavailable = []
+    min_stay_by_arrival: dict[str, int] = {}
     current = start
     while current < end:
         next_day = current + timedelta(days=1)
         all_full = True
         days_until = (current - today).days
+        eligible_min_stays: list[int] = []
         for room in rooms:
             total = room["total_rooms"]
             if not RoomTypeRepository.is_date_in_operating_periods(room, current):
@@ -63,9 +73,16 @@ async def get_unavailable_dates(
             remaining = total - booked - blocked
             if remaining > 0:
                 all_full = False
-                break
+                room_min = RoomTypeRepository._find_season_min_stay(
+                    seasons_by_room[str(room["id"])], current
+                ) or 1
+                eligible_min_stays.append(room_min)
         if all_full:
             unavailable.append(current.isoformat())
+        elif eligible_min_stays:
+            lowest = min(eligible_min_stays)
+            if lowest > 1:
+                min_stay_by_arrival[current.isoformat()] = lowest
         current = next_day
 
-    return {"dates": unavailable}
+    return {"dates": unavailable, "min_stay_by_arrival": min_stay_by_arrival}
