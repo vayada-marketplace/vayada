@@ -37,12 +37,18 @@ export const hotelService = {
     return apiClient.get<Addon[]>(`/api/hotels/${slug}/addons`)
   },
 
-  async getUnavailableDates(slug: string, start: string, end: string): Promise<string[]> {
+  async getUnavailableDates(slug: string, start: string, end: string): Promise<{
+    dates: string[]
+    minStayByArrival: Record<string, number>
+  }> {
     const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
     const res = await fetch(`${base}/api/hotels/${slug}/unavailable-dates?start=${start}&end=${end}`)
-    if (!res.ok) return []
+    if (!res.ok) return { dates: [], minStayByArrival: {} }
     const data = await res.json()
-    return data.dates || []
+    return {
+      dates: data.dates || [],
+      minStayByArrival: data.min_stay_by_arrival || {},
+    }
   },
 
   async validatePromoCode(slug: string, code: string): Promise<{

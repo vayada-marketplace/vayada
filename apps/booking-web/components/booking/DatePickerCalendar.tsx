@@ -52,6 +52,12 @@ function getTodayString(): string {
   return toDateString(t.getFullYear(), t.getMonth(), t.getDate())
 }
 
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return toDateString(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
 const DAY_LABELS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
 function MonthGrid({
@@ -63,6 +69,8 @@ function MonthGrid({
   onDayClick,
   onDayHover,
   unavailableDates,
+  minCheckOut,
+  minStayNights,
 }: {
   year: number
   month: number
@@ -72,6 +80,8 @@ function MonthGrid({
   onDayClick: (date: string) => void
   onDayHover: (date: string | null) => void
   unavailableDates: Set<string>
+  minCheckOut: string | null
+  minStayNights: number
 }) {
   const daysInMonth = getDaysInMonth(year, month)
   const firstDay = getFirstDayOfMonth(year, month)
@@ -138,7 +148,13 @@ function MonthGrid({
               ? isBetween(cell.dateStr, checkIn, rangeEnd)
               : false
           const isUnavailable = unavailableDates.has(cell.dateStr)
-          const isDisabled = isPast || isUnavailable
+          const isBelowMinStay = !!(
+            minCheckOut &&
+            checkIn &&
+            isBeforeDate(checkIn, cell.dateStr) &&
+            isBeforeDate(cell.dateStr, minCheckOut)
+          )
+          const isDisabled = isPast || isUnavailable || isBelowMinStay
 
           return (
             <div
@@ -156,7 +172,13 @@ function MonthGrid({
                 onClick={() => !isDisabled && onDayClick(cell.dateStr)}
                 onMouseEnter={() => !isDisabled && onDayHover(cell.dateStr)}
                 onMouseLeave={() => onDayHover(null)}
-                title={isUnavailable ? 'Fully booked' : undefined}
+                title={
+                  isUnavailable
+                    ? 'Fully booked'
+                    : isBelowMinStay
+                    ? `Minimum stay is ${minStayNights} nights`
+                    : undefined
+                }
                 className={`w-9 h-9 flex items-center justify-center text-sm rounded-full transition-colors relative z-10 ${
                   isDisabled
                     ? isUnavailable
@@ -195,6 +217,7 @@ export default function DatePickerCalendar({
   const [tempCheckIn, setTempCheckIn] = useState<string | null>(checkIn)
   const [tempCheckOut, setTempCheckOut] = useState<string | null>(checkOut)
   const [unavailableDates, setUnavailableDates] = useState<Set<string>>(new Set())
+  const [minStayByArrival, setMinStayByArrival] = useState<Record<string, number>>({})
 
   // Calendar months
   const now = new Date()
@@ -231,8 +254,9 @@ export default function DatePickerCalendar({
     const endYear = baseMonth === 11 ? baseYear + 1 : baseYear
     const lastDay = getDaysInMonth(endYear, endMonth)
     const end = toDateString(endYear, endMonth, lastDay)
-    hotelService.getUnavailableDates(slug, start, end).then((dates) => {
+    hotelService.getUnavailableDates(slug, start, end).then(({ dates, minStayByArrival }) => {
       setUnavailableDates(new Set(dates))
+      setMinStayByArrival((prev) => ({ ...prev, ...minStayByArrival }))
     }).catch(() => {})
   }, [open, slug, baseMonth, baseYear])
 
@@ -300,6 +324,14 @@ export default function DatePickerCalendar({
       ? Math.ceil((new Date(tempCheckOut).getTime() - new Date(tempCheckIn).getTime()) / (1000 * 60 * 60 * 24))
       : 0
 
+  // Disable check-out cells that would violate min-stay for the chosen arrival.
+  const requiredMinStay =
+    selectionState === 'selectCheckOut' && tempCheckIn ? (minStayByArrival[tempCheckIn] || 1) : 1
+  const minCheckOut =
+    selectionState === 'selectCheckOut' && tempCheckIn && requiredMinStay > 1
+      ? addDays(tempCheckIn, requiredMinStay)
+      : null
+
   const formatSummaryDate = (dateStr: string) => {
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -359,6 +391,8 @@ export default function DatePickerCalendar({
             onDayClick={handleDayClick}
             onDayHover={setHoverDate}
             unavailableDates={unavailableDates}
+            minCheckOut={minCheckOut}
+            minStayNights={requiredMinStay}
           />
           <MonthGrid
             year={secondYear}
@@ -369,6 +403,8 @@ export default function DatePickerCalendar({
             onDayClick={handleDayClick}
             onDayHover={setHoverDate}
             unavailableDates={unavailableDates}
+            minCheckOut={minCheckOut}
+            minStayNights={requiredMinStay}
           />
         </div>
 
