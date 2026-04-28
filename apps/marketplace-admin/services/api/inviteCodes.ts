@@ -59,7 +59,7 @@ export interface InviteData {
     amenities: string[]
     features: string[]
     operatingPeriods: Array<{ from: string; to: string }>
-    seasons: Array<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number }>
+    seasons: Array<{ name: string; tier: string; from: string; to: string; rate: string; minStay: number; occupancyRates?: Record<string, string> }>
     weekendSurcharge: string
     minimumAdvanceDays: number
   }>
