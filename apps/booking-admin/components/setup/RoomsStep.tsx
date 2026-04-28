@@ -883,7 +883,7 @@ export default function RoomsStep({
                                         className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${hasOccRates ? 'text-primary-600 bg-primary-50 hover:bg-primary-100' : 'text-gray-500 hover:bg-gray-100'}`}
                                       >
                                         <ChevronDownIcon className={`w-3 h-3 transition-transform ${isOccExpanded ? '' : '-rotate-90'}`} />
-                                        Per guest
+                                        Per person
                                       </button>
                                     )}
                                   </div>
@@ -893,35 +893,46 @@ export default function RoomsStep({
                                 <tr className="border-t border-gray-50 bg-gray-50/50">
                                   <td colSpan={3} className="py-2.5 pl-6">
                                     <div className="space-y-1.5">
-                                      <span className="text-[10px] text-gray-400 font-medium">Rate per number of guests</span>
+                                      <span className="text-[10px] text-gray-400 font-medium">Rate per number of persons</span>
                                       {Array.from({ length: maxOcc }, (_, i) => i + 1).map(guestCount => {
                                         const isAnchor = guestCount === 1
                                         const occRate = (season.occupancyRates || {})[String(guestCount)] || ''
+                                        const prevRaw = guestCount === 2
+                                          ? season.rate
+                                          : ((season.occupancyRates || {})[String(guestCount - 1)] || season.rate)
+                                        const prevNum = Number(prevRaw)
+                                        const currNum = Number(occRate)
+                                        const decreasing = !isAnchor && occRate !== '' && prevRaw !== '' && Number.isFinite(prevNum) && Number.isFinite(currNum) && currNum < prevNum
                                         return (
-                                          <div key={guestCount} className="flex items-center gap-2">
-                                            <span className="text-[11px] text-gray-500 w-16">{guestCount} {guestCount === 1 ? 'guest' : 'guests'}</span>
-                                            <span className="text-gray-400 text-[11px]">{getCurrencySymbol(currency || 'USD')}</span>
-                                            {isAnchor ? (
-                                              <span className="text-[11px] text-gray-400 px-2 py-1">{season.rate || '—'} (season rate)</span>
-                                            ) : (
-                                              <input
-                                                type="number"
-                                                value={occRate}
-                                                onChange={(e) => {
-                                                  const u = [...room.seasons]
-                                                  const occ = { ...(u[idx].occupancyRates || {}) }
-                                                  if (e.target.value === '') {
-                                                    delete occ[String(guestCount)]
-                                                  } else {
-                                                    occ[String(guestCount)] = e.target.value
-                                                  }
-                                                  u[idx] = { ...u[idx], occupancyRates: occ }
-                                                  updateRoom({ seasons: u })
-                                                }}
-                                                className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                                placeholder={season.rate || 'same as rate'}
-                                                min="0"
-                                              />
+                                          <div key={guestCount} className="flex flex-col gap-0.5">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[11px] text-gray-500 w-16">{guestCount} {guestCount === 1 ? 'person' : 'people'}</span>
+                                              <span className="text-gray-400 text-[11px]">{getCurrencySymbol(currency || 'USD')}</span>
+                                              {isAnchor ? (
+                                                <span className="text-[11px] text-gray-400 px-2 py-1">{season.rate || '—'} (season rate)</span>
+                                              ) : (
+                                                <input
+                                                  type="number"
+                                                  value={occRate}
+                                                  onChange={(e) => {
+                                                    const u = [...room.seasons]
+                                                    const occ = { ...(u[idx].occupancyRates || {}) }
+                                                    if (e.target.value === '') {
+                                                      delete occ[String(guestCount)]
+                                                    } else {
+                                                      occ[String(guestCount)] = e.target.value
+                                                    }
+                                                    u[idx] = { ...u[idx], occupancyRates: occ }
+                                                    updateRoom({ seasons: u })
+                                                  }}
+                                                  className={`w-20 px-2 py-1 bg-white border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 ${decreasing ? 'border-amber-300 focus:ring-amber-400' : 'border-gray-200 focus:ring-primary-500'}`}
+                                                  placeholder={season.rate || 'same as rate'}
+                                                  min="0"
+                                                />
+                                              )}
+                                            </div>
+                                            {decreasing && (
+                                              <span className="text-[10px] text-amber-600 font-medium pl-[4.5rem]">Lower than {guestCount - 1}-person rate ({getCurrencySymbol(currency || 'USD')}{prevRaw})</span>
                                             )}
                                           </div>
                                         )
