@@ -44,6 +44,17 @@ export interface ChannelMarkupsResponse {
   markups: ChannelMarkup[]
 }
 
+export interface ConnectedChannel {
+  key: string
+  application: string
+  title: string | null
+  isActive: boolean
+}
+
+export interface ConnectedChannelsResponse {
+  channels: ConnectedChannel[]
+}
+
 export const channexService = {
   // Enable / disable
   enable: () =>
@@ -84,4 +95,8 @@ export const channexService = {
 
   updateMarkups: (markups: ChannelMarkup[]) =>
     pmsClient.put<ChannelMarkupsResponse>('/admin/channex/markups', { markups }),
+
+  // Connected OTA channels
+  listChannels: () =>
+    pmsClient.get<ConnectedChannelsResponse>('/admin/channex/channels'),
 }

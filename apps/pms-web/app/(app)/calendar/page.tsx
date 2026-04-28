@@ -15,6 +15,7 @@ import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
 import MobileCalendar from '@/components/calendar/MobileCalendar'
 import { useTranslation } from '@/lib/i18n'
+import { channexService } from '@/services/channex'
 
 const VIEW_DAYS = 21
 
@@ -34,12 +35,15 @@ const CHANNEL_LEGEND_KEYS: Array<{
   color?: string
   logo?: string
 }> = [
-  { key: 'direct', labelKey: 'calendar.channelDirect', color: 'bg-blue-500' },
+  { key: 'direct', labelKey: 'calendar.channelDirect', logo: '/vayada-logo.png' },
   { key: 'airbnb', labelKey: 'calendar.channelAirbnb', logo: '/logos/airbnb.svg' },
   { key: 'booking.com', labelKey: 'calendar.channelBookingCom', logo: '/logos/booking.svg' },
   { key: 'expedia', labelKey: 'calendar.channelExpedia', logo: '/logos/expedia.svg' },
   { key: 'other', labelKey: 'calendar.channelOther', color: 'bg-gray-500' },
 ]
+
+// Legend entries that are always shown regardless of channel manager state.
+const ALWAYS_SHOWN_LEGEND_KEYS = new Set(['direct', 'other'])
 
 export default function CalendarPage() {
   const { t } = useTranslation()
@@ -50,6 +54,7 @@ export default function CalendarPage() {
   const [showNewBookingModal, setShowNewBookingModal] = useState(false)
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
+  const [connectedChannelKeys, setConnectedChannelKeys] = useState<Set<string> | null>(null)
 
   // Drag-to-select state for creating bookings/blocks by dragging across day cells
   const [drag, setDrag] = useState<{
@@ -86,6 +91,22 @@ export default function CalendarPage() {
   useEffect(() => {
     fetchData()
   }, [startDate])
+
+  useEffect(() => {
+    channexService
+      .listChannels()
+      .then(({ channels }) => {
+        setConnectedChannelKeys(new Set(channels.map((c) => c.key)))
+      })
+      .catch(() => setConnectedChannelKeys(new Set()))
+  }, [])
+
+  const visibleLegendKeys = useMemo(() => {
+    if (!connectedChannelKeys) return CHANNEL_LEGEND_KEYS
+    return CHANNEL_LEGEND_KEYS.filter(
+      (ch) => ALWAYS_SHOWN_LEGEND_KEYS.has(ch.key) || connectedChannelKeys.has(ch.key)
+    )
+  }, [connectedChannelKeys])
 
   const handleCellPointerDown = (
     e: React.PointerEvent<HTMLTableCellElement>,
@@ -347,7 +368,7 @@ export default function CalendarPage() {
 
       {/* Channel Legend */}
       <div className="flex items-center gap-4 mb-4">
-        {CHANNEL_LEGEND_KEYS.map((ch) => (
+        {visibleLegendKeys.map((ch) => (
           <div key={ch.key} className="flex items-center gap-1.5">
             {ch.logo ? (
               <img src={ch.logo} alt="" className="w-4 h-4" />
