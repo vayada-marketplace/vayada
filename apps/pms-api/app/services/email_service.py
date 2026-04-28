@@ -2,6 +2,7 @@ import json
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from urllib.parse import urlparse
 
 from app.config import settings
 
@@ -27,9 +28,11 @@ STYLE = """
 
 def _my_booking_url(booking: dict) -> str | None:
     slug = booking.get("hotel_slug")
-    if not slug:
+    reference = booking.get("booking_reference")
+    if not slug or not reference:
         return None
-    return f"https://{slug}.vayada.com/my-booking"
+    parsed = urlparse(settings.BOOKING_ENGINE_URL)
+    return f"{parsed.scheme}://{slug}.{parsed.netloc}/booking/{reference}"
 
 
 def _my_booking_button_html(booking: dict) -> str:
