@@ -20,11 +20,29 @@ from app.models.channex import (
     ChannelMarkup,
     ChannelMarkupsResponse,
     ChannelMarkupsUpdateRequest,
+    ConnectedChannel,
+    ConnectedChannelsResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin-channex"])
+
+
+# Map Channex `attributes.application` strings to the internal keys used
+# by the PMS frontend (matches CalendarBooking.channel values from the
+# inbound booking sync — see channex_sync_service.process_inbound_booking).
+def _normalize_channex_application(app: str) -> str:
+    if not app:
+        return "other"
+    a = app.lower().replace("_", "").replace("-", "").replace(".", "")
+    if "booking" in a:
+        return "booking.com"
+    if "airbnb" in a:
+        return "airbnb"
+    if "expedia" in a:
+        return "expedia"
+    return "other"
 
 
 # ── Enable / Disable ─────────────────────────────────────────────────
@@ -207,6 +225,51 @@ async def channex_sync_bookings(
 
     await poll_bookings_for_hotel(hotel_id)
     return {"status": "sync_complete"}
+
+
+# ── Connected channels ───────────────────────────────────────────────
+
+@router.get("/channex/channels", response_model=ConnectedChannelsResponse)
+async def channex_list_channels(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Return the OTA channels currently connected for this hotel.
+
+    Used by the calendar legend to only show OTAs the hotel actually
+    has wired up via the channel manager.
+    """
+    from app.services import channex_service
+
+    hotel_id = await get_hotel_id(user_id)
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
+        return ConnectedChannelsResponse(channels=[])
+
+    api_key = channex_service.get_platform_api_key()
+    property_id = str(conn["channex_property_id"])
+
+    try:
+        raw = await channex_service.list_channels(api_key, property_id)
+    except Exception:
+        logger.exception("Failed to list Channex channels for hotel %s", hotel_id)
+        return ConnectedChannelsResponse(channels=[])
+
+    channels: List[ConnectedChannel] = []
+    for item in raw:
+        attrs = item.get("attributes", item) or {}
+        application = attrs.get("application") or attrs.get("app") or ""
+        if not application:
+            continue
+        is_active = attrs.get("is_active", True)
+        if is_active is False:
+            continue
+        channels.append(ConnectedChannel(
+            key=_normalize_channex_application(application),
+            application=application,
+            title=attrs.get("title"),
+            is_active=bool(is_active),
+        ))
+    return ConnectedChannelsResponse(channels=channels)
 
 
 # ── Channel markups ──────────────────────────────────────────────────

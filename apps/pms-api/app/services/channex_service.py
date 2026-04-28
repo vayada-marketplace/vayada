@@ -269,6 +269,25 @@ async def list_rate_plans(api_key: str, property_id: str) -> List[dict]:
     return data.get("data", [])
 
 
+# ── Channels ─────────────────────────────────────────────────────────
+
+async def list_channels(api_key: str, property_id: str) -> List[dict]:
+    """List OTA channels connected to a Channex property.
+
+    Each item has attributes.application (e.g. "BookingCom", "Airbnb",
+    "Expedia") and attributes.is_active.
+    """
+    data = await _request(
+        "GET", "/api/v1/channels", api_key,
+        params={
+            "filter[property_id]": property_id,
+            "pagination[page]": 1,
+            "pagination[limit]": 100,
+        },
+    )
+    return data.get("data", [])
+
+
 async def delete_rate_plan(
     api_key: str, rate_plan_id: str, force: bool = False
 ) -> None:

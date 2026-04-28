@@ -81,3 +81,22 @@ class ChannelMarkupsUpdateRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     markups: List[ChannelMarkup]
+
+
+# ── Connected channels ───────────────────────────────────────────────
+
+class ConnectedChannel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # Normalized internal key: "booking.com", "airbnb", "expedia", or "other"
+    key: str
+    # Raw Channex application code (e.g. "BookingCom", "Airbnb")
+    application: str
+    title: Optional[str] = None
+    is_active: bool = True
+
+
+class ConnectedChannelsResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    channels: List[ConnectedChannel]
