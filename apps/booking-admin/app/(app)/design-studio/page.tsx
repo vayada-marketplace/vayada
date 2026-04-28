@@ -5,6 +5,7 @@ import { settingsService } from '@/services/settings'
 import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
 import { FeedbackAlert, SaveButton } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
+import { generateColorPalette } from '@/lib/utils/colors'
 
 import MediaTab from '@/components/design-studio/MediaTab'
 import ColorsTab from '@/components/design-studio/ColorsTab'
@@ -28,10 +29,23 @@ export default function DesignStudioPage() {
 
   // Colors state
   const [primaryColor, setPrimaryColor] = useState('#4F46E5')
+  const previewRef = useRef<HTMLDivElement>(null)
 
   // Fonts state
   const [selectedFont, setSelectedFont] = useState('high-end-serif')
 
+  // Mirror the live booking engine's palette onto the preview pane so the
+  // preview renders with the same shade tokens (bg-primary-600 for CTAs,
+  // bg-primary-50 for tints, etc.) as the live site, not the raw input hex.
+  // Depends on `loading` so the effect re-fires once the preview mounts.
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el) return
+    const palette = generateColorPalette(primaryColor)
+    for (const [shade, color] of Object.entries(palette)) {
+      el.style.setProperty(`--color-primary-${shade}`, color)
+    }
+  }, [primaryColor, loading])
 
   useEffect(() => {
     settingsService.getDesignSettings()
@@ -205,7 +219,7 @@ export default function DesignStudioPage() {
         </div>
 
         {/* RIGHT: Live website preview */}
-        <div className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col">
+        <div ref={previewRef} className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col">
           {/* Browser chrome bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">
@@ -235,10 +249,7 @@ export default function DesignStudioPage() {
                     {heroHeading || 'Your Hotel'}
                   </span>
                   <div className="flex items-center gap-1.5">
-                    <span
-                      className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full"
-                      style={{ backgroundColor: primaryColor }}
-                    >
+                    <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full bg-primary-600">
                       Contact
                     </span>
                     <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full border border-white/60">
@@ -275,8 +286,8 @@ export default function DesignStudioPage() {
             <div className="relative z-20 max-w-[92%] mx-auto -mt-6">
               <div className="bg-white rounded-xl shadow-lg border border-gray-100 px-3 py-2.5 flex items-center gap-2">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
-                    <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-primary-50">
+                    <svg className="w-3 h-3 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -290,8 +301,8 @@ export default function DesignStudioPage() {
                 <div className="w-px h-8 bg-gray-200" />
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
-                    <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-primary-50">
+                    <svg className="w-3 h-3 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   </div>
@@ -311,10 +322,7 @@ export default function DesignStudioPage() {
                   <span className="text-[9px] font-medium" style={{ fontFamily: currentFont.bodyFamily }}>Promo</span>
                 </div>
 
-                <button
-                  className="px-3 py-1.5 rounded-full text-[9px] font-semibold text-white shrink-0"
-                  style={{ backgroundColor: primaryColor }}
-                >
+                <button className="px-3 py-1.5 rounded-full text-[9px] font-semibold text-white shrink-0 bg-primary-600 hover:bg-primary-700 transition-colors">
                   Check Availability
                 </button>
               </div>
@@ -340,11 +348,9 @@ export default function DesignStudioPage() {
                     <div key={step.n} className="flex items-center">
                       <div className="flex items-center gap-0.5">
                         <div
-                          className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold"
-                          style={{
-                            backgroundColor: step.n === 1 ? primaryColor : '#E5E7EB',
-                            color: step.n === 1 ? 'white' : '#6B7280',
-                          }}
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold ${
+                            step.n === 1 ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-500'
+                          }`}
                         >
                           {step.n}
                         </div>
@@ -403,7 +409,7 @@ export default function DesignStudioPage() {
                     <div className="flex flex-wrap gap-1 mb-2">
                       {['Mountain View', 'Balcony', 'Minibar', 'Safe'].map((feat) => (
                         <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
-                          <svg className="w-2 h-2 flex-shrink-0" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-2 h-2 flex-shrink-0 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
                           {feat}
@@ -414,7 +420,7 @@ export default function DesignStudioPage() {
                     <div className="border-t border-gray-100 pt-2">
                       <p className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Rate Options</p>
 
-                      <div className="rounded-lg border-2 mb-1.5" style={{ borderColor: primaryColor }}>
+                      <div className="rounded-lg border-2 mb-1.5 border-primary-500">
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
                             <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -441,7 +447,7 @@ export default function DesignStudioPage() {
                             <div>
                               <p className="text-[9px] font-bold text-gray-900 flex items-center gap-1" style={{ fontFamily: currentFont.bodyFamily }}>
                                 Non-Refundable
-                                <span className="text-[7px] font-bold text-white px-1 py-px rounded" style={{ backgroundColor: primaryColor }}>-15%</span>
+                                <span className="text-[7px] font-bold text-white px-1 py-px rounded bg-primary-600">-15%</span>
                               </p>
                               <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>No cancellation or changes</p>
                             </div>
@@ -490,7 +496,7 @@ export default function DesignStudioPage() {
                     <div className="flex flex-wrap gap-1 mb-2">
                       {['Ocean View', 'Private Pool', 'Living Area', 'Breakfast'].map((feat) => (
                         <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
-                          <svg className="w-2 h-2 flex-shrink-0" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-2 h-2 flex-shrink-0 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
                           {feat}
@@ -528,7 +534,7 @@ export default function DesignStudioPage() {
             </div>
 
             {/* FOOTER */}
-            <div className="px-4 py-4 text-white" style={{ backgroundColor: primaryColor }}>
+            <div className="px-4 py-4 text-white bg-primary-600">
               <div className="flex gap-6 mb-3">
                 <div className="flex-1">
                   <p className="text-[11px] font-bold mb-1" style={{ fontFamily: currentFont.headingFamily }}>
