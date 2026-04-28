@@ -134,7 +134,7 @@ class RoomTypeCreate(BaseModel):
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
-    non_refundable_discount: int = 10
+    non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
@@ -284,7 +284,7 @@ class RoomTypeAdminResponse(BaseModel):
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
     non_refundable_enabled: bool = False
-    non_refundable_discount: int = 10
+    non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
