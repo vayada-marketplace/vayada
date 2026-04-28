@@ -54,7 +54,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           cancellationPolicy: r.cancellationPolicy || 'Free until 7 days before',
           flexibleRateEnabled: r.flexibleRateEnabled ?? true,
           nonRefundableEnabled: r.nonRefundableEnabled ?? false,
-          nonRefundableDiscount: r.nonRefundableDiscount ?? 10,
+          nonRefundableDiscount: r.nonRefundableDiscount ?? 5,
           nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy || 'Non-refundable from booking',
           minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
           ratePaymentMethods: r.ratePaymentMethods ?? null,

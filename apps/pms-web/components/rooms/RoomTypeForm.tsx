@@ -273,7 +273,7 @@ export default function RoomTypeForm({
   const [cancellationPolicy, setCancellationPolicy] = useState(form.cancellationPolicy || 'Free until 7 days before')
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
-  const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 10)
+  const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 5)
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
