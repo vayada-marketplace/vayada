@@ -41,6 +41,7 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { labelKey: 'layout.sidebar.reservations', href: '/bookings', icon: ReservationsIcon },
 { labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
   { labelKey: 'layout.sidebar.channelManager', href: '/channel-manager', icon: ChannelsIcon },
+  { labelKey: 'layout.sidebar.financials', href: '/financials', icon: FinancialsIcon },
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: SettingsIcon },
 ]
 
@@ -268,6 +269,15 @@ function InboxIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
+
+function FinancialsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="1" x2="12" y2="23" />
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
     </svg>
   )
 }
