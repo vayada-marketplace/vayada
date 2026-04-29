@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Frontend URL (for reset password links)
     FRONTEND_URL: str = Field("http://localhost:3003", description="Frontend URL for reset password links")
 
+    # Shared secret for server-to-server endpoints (currently:
+    # /api/hotels/{slug}/increment-promo, called by pms-backend on
+    # successful booking). When empty, the endpoints stay open for
+    # backward compat — set this on both backends to enable enforcement.
+    INTERNAL_API_KEY: str = Field(default="", description="Shared secret for server-to-server endpoints; opt-in")
+
     # Cloudflare for SaaS (custom domains)
     CLOUDFLARE_API_TOKEN: str = Field(default="", description="Cloudflare API token for custom hostname management")
     CLOUDFLARE_ZONE_ID: str = Field(default="", description="Cloudflare zone ID for vayada.com")

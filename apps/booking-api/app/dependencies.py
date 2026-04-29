@@ -2,11 +2,29 @@
 Dependencies for FastAPI routes
 """
 from typing import Optional
-from fastapi import HTTPException, status, Depends, Request
+from fastapi import HTTPException, status, Depends, Header, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.config import settings
 from app.jwt_utils import decode_access_token, is_token_expired
 from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+
+
+async def require_internal_key(
+    x_internal_key: Optional[str] = Header(default=None),
+) -> None:
+    """Gate server-to-server endpoints behind ``INTERNAL_API_KEY``. When the
+    setting is empty, the gate is open for backward-compat — operators can
+    roll out enforcement by setting the key on both backends without a
+    flag day."""
+    expected = settings.INTERNAL_API_KEY
+    if not expected:
+        return
+    if not x_internal_key or x_internal_key != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing internal API key",
+        )
 
 security = HTTPBearer()
 

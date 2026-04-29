@@ -18,7 +18,7 @@ from app.services.billing_service import (
     apply_pending_plan_switch_if_due,
     compute_fixed_plan_projected_fee,
     count_active_rooms,
-    first_of_next_month,
+    schedule_pending_plan_switch,
 )
 
 logger = logging.getLogger(__name__)
@@ -350,16 +350,7 @@ async def update_property_settings(
             if value is not None:
                 updates[db_col] = value
 
-        # Derive billing_switch_effective_date from the pending switch:
-        #   setting a plan → schedule for the 1st of next month
-        #   clearing it (empty string) → clear the effective date too
-        if "billing_pending_switch" in updates:
-            pending = updates["billing_pending_switch"]
-            if pending:
-                updates["billing_switch_effective_date"] = first_of_next_month(date.today())
-            else:
-                updates["billing_pending_switch"] = None
-                updates["billing_switch_effective_date"] = None
+        schedule_pending_plan_switch(updates, date.today())
 
         if updates:
             try:

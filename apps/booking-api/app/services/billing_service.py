@@ -22,6 +22,24 @@ def first_of_next_month(today: date) -> date:
     return date(today.year, today.month + 1, 1)
 
 
+def schedule_pending_plan_switch(updates: dict, today: date) -> None:
+    """Given a settings PATCH payload, fill in
+    ``billing_switch_effective_date`` so the switch lands on the first of
+    next month — or clear both fields when the caller passes an empty
+    pending value to cancel a scheduled switch.
+
+    Mutates ``updates`` in place. Idempotent if ``billing_pending_switch``
+    isn't in the payload."""
+    if "billing_pending_switch" not in updates:
+        return
+    pending = updates["billing_pending_switch"]
+    if pending:
+        updates["billing_switch_effective_date"] = first_of_next_month(today)
+    else:
+        updates["billing_pending_switch"] = None
+        updates["billing_switch_effective_date"] = None
+
+
 async def count_active_rooms(hotel_id: str) -> int:
     """Physical-inventory room count from pms_db, filtered to active room
     types. Returns 0 if PMS is unconfigured or the query fails (logged)."""
