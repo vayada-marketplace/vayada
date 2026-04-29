@@ -11,64 +11,15 @@ from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import PropertySettingsResponse, PropertySettingsUpdate
 from app.models.setup import SetupStatusResponse, SetupPrefillData
 from app.models.utils import parse_json, slugify
-from app.database import Database, MarketplaceDatabase, PmsDatabase
+from app.database import Database, MarketplaceDatabase
 from app.config import settings
 from app.services import cloudflare_service
-
-
-def _first_of_next_month(today: date) -> date:
-    if today.month == 12:
-        return date(today.year + 1, 1, 1)
-    return date(today.year, today.month + 1, 1)
-
-
-async def _count_active_rooms(hotel_id: str) -> int:
-    """Physical-inventory room count from pms_db, filtered to active room types."""
-    if not settings.PMS_DATABASE_URL:
-        return 0
-    try:
-        count = await PmsDatabase.fetchval(
-            """
-            SELECT COUNT(*)
-              FROM rooms r
-              JOIN room_types rt ON rt.id = r.room_type_id
-             WHERE r.hotel_id = $1
-               AND rt.is_active = TRUE
-            """,
-            hotel_id,
-        )
-        return int(count or 0)
-    except Exception as exc:
-        logger.warning("Failed to count active rooms: %s", exc)
-        return 0
-
-
-def compute_fixed_plan_projected_fee(
-    base: float, rooms_included: int, per_extra: float, room_count: int
-) -> float:
-    extras = max(0, room_count - rooms_included)
-    return round(base + extras * per_extra, 2)
-
-
-async def _apply_pending_plan_switch_if_due(hotel_id: str) -> None:
-    """Flip billing_active_plan in place when a pending switch's effective date has passed.
-
-    Idempotent — the WHERE clause skips rows without a due pending switch.
-    Called on read paths so a missed cron or unscheduled day still lands on the right plan.
-    """
-    await Database.execute(
-        """
-        UPDATE booking_hotels
-           SET billing_active_plan = billing_pending_switch,
-               billing_pending_switch = NULL,
-               billing_switch_effective_date = NULL
-         WHERE id = $1
-           AND billing_pending_switch IS NOT NULL
-           AND billing_switch_effective_date IS NOT NULL
-           AND billing_switch_effective_date <= CURRENT_DATE
-        """,
-        hotel_id,
-    )
+from app.services.billing_service import (
+    apply_pending_plan_switch_if_due,
+    compute_fixed_plan_projected_fee,
+    count_active_rooms,
+    first_of_next_month,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +121,7 @@ _PROPERTY_FIELD_MAP = {
     "tiktok": "social_tiktok",
     "youtube": "social_youtube",
     # billing_active_plan deliberately omitted — it flips via the pending-switch
-    # flow only (see _apply_pending_plan_switch_if_due), never via PATCH.
+    # flow only (see billing_service.apply_pending_plan_switch_if_due), never via PATCH.
     "billing_commission_rate": "billing_commission_rate",
     "billing_fixed_fee": "billing_fixed_fee",
     "billing_pending_switch": "billing_pending_switch",
@@ -189,7 +140,7 @@ _PROPERTY_FIELD_MAP = {
 async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
     hotel_id = str(hotel.get('id')) if hotel.get('id') else None
     if hotel_id:
-        room_count = await _count_active_rooms(hotel_id)
+        room_count = await count_active_rooms(hotel_id)
     else:
         room_count = 0
     fixed_base = float(hotel.get('fixed_base_fee') or 30)
@@ -291,7 +242,7 @@ async def get_property_settings(
 ):
     if not hotel:
         return _DEFAULT_PROPERTY_SETTINGS
-    await _apply_pending_plan_switch_if_due(str(hotel["id"]))
+    await apply_pending_plan_switch_if_due(str(hotel["id"]))
     full_hotel = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     return await _hotel_to_property_settings(full_hotel)
 
@@ -392,45 +343,43 @@ async def update_property_settings(
     user_id: str = Depends(require_hotel_admin),
     hotel: dict | None = Depends(get_current_hotel),
 ):
-    try:
-        if hotel:
-            updates = {}
-            for api_field, db_col in _PROPERTY_FIELD_MAP.items():
-                value = getattr(data, api_field)
-                if value is not None:
-                    updates[db_col] = value
+    if hotel:
+        updates = {}
+        for api_field, db_col in _PROPERTY_FIELD_MAP.items():
+            value = getattr(data, api_field)
+            if value is not None:
+                updates[db_col] = value
 
-            # Derive billing_switch_effective_date from the pending switch:
-            #   setting a plan → schedule for the 1st of next month
-            #   clearing it (empty string) → clear the effective date too
-            if "billing_pending_switch" in updates:
-                pending = updates["billing_pending_switch"]
-                if pending:
-                    updates["billing_switch_effective_date"] = _first_of_next_month(date.today())
-                else:
-                    updates["billing_pending_switch"] = None
-                    updates["billing_switch_effective_date"] = None
-
-            if updates:
-                result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
+        # Derive billing_switch_effective_date from the pending switch:
+        #   setting a plan → schedule for the 1st of next month
+        #   clearing it (empty string) → clear the effective date too
+        if "billing_pending_switch" in updates:
+            pending = updates["billing_pending_switch"]
+            if pending:
+                updates["billing_switch_effective_date"] = first_of_next_month(date.today())
             else:
-                result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
-        else:
-            # Legacy auto-create branch: only reachable when the user
-            # has no hotels at all (otherwise get_current_hotel would
-            # have returned one). New callers should use the explicit
-            # POST /admin/hotels endpoint above.
-            result = await _create_hotel_from_settings(data, user_id)
+                updates["billing_pending_switch"] = None
+                updates["billing_switch_effective_date"] = None
 
-        return await _hotel_to_property_settings(result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update property settings: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save property settings. Please try again.",
-        )
+        if updates:
+            try:
+                result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
+            except asyncpg.UniqueViolationError:
+                # Slug or other UNIQUE collision — surface as 409 instead of 500.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A property with this name or slug already exists. Please choose a different value.",
+                )
+        else:
+            result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
+    else:
+        # Legacy auto-create branch: only reachable when the user
+        # has no hotels at all (otherwise get_current_hotel would
+        # have returned one). New callers should use the explicit
+        # POST /admin/hotels endpoint above.
+        result = await _create_hotel_from_settings(data, user_id)
+
+    return await _hotel_to_property_settings(result)
 
 
 # ── Custom domain management ─────────────────────────────────────

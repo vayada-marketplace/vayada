@@ -188,26 +188,26 @@ class TestFixedPlanProjection:
     """compute_fixed_plan_projected_fee: €30 base + €5 per extra room (1 included)."""
 
     def test_zero_rooms(self):
-        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        from app.services.billing_service import compute_fixed_plan_projected_fee
         assert compute_fixed_plan_projected_fee(30, 1, 5, 0) == 30.0
 
     def test_included_count_only(self):
-        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        from app.services.billing_service import compute_fixed_plan_projected_fee
         # 1 room included → 1 active room → no extras → base only
         assert compute_fixed_plan_projected_fee(30, 1, 5, 1) == 30.0
 
     def test_scales_with_extras(self):
-        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        from app.services.billing_service import compute_fixed_plan_projected_fee
         # 8 rooms, 1 included → 7 extras × €5 = €35 + €30 base
         assert compute_fixed_plan_projected_fee(30, 1, 5, 8) == 65.0
 
     def test_no_negative_on_shrink(self):
-        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        from app.services.billing_service import compute_fixed_plan_projected_fee
         # 2 included but 0 active → clamp to base, no refund
         assert compute_fixed_plan_projected_fee(30, 2, 5, 0) == 30.0
 
     def test_custom_rates(self):
-        from app.routers.admin.settings import compute_fixed_plan_projected_fee
+        from app.services.billing_service import compute_fixed_plan_projected_fee
         # Larger hotel on a special deal
         assert compute_fixed_plan_projected_fee(100, 5, 3, 20) == 145.0
 

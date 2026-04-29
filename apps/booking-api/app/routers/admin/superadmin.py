@@ -10,7 +10,10 @@ from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.database import Database
 from app.models.utils import slugify
-from app.routers.admin.settings import _count_active_rooms, compute_fixed_plan_projected_fee
+from app.services.billing_service import (
+    compute_fixed_plan_projected_fee,
+    count_active_rooms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,7 @@ _PERCENT_FIELDS = {
 
 async def _serialize_hotel_billing(hotel: dict, owner: Optional[dict]) -> dict:
     hotel_id = str(hotel["id"])
-    room_count = await _count_active_rooms(hotel_id)
+    room_count = await count_active_rooms(hotel_id)
     fixed_base = float(hotel.get("fixed_base_fee") or 30)
     rooms_included = int(hotel.get("fixed_rooms_included") or 1)
     per_extra = float(hotel.get("fixed_per_extra_room_fee") or 5)
