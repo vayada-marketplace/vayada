@@ -855,6 +855,7 @@ export default function RoomTypeForm({
                                 className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border appearance-none cursor-pointer ${tierColors[season.tier] || 'text-gray-600 bg-gray-100 border-gray-200'}`}
                                 style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 8px center', paddingRight: '20px' }}
                               >
+                                <option value="">—</option>
                                 <option value="Low">Low</option>
                                 <option value="Mid">Mid</option>
                                 <option value="High">High</option>
@@ -987,7 +988,7 @@ export default function RoomTypeForm({
                                 <td className="px-4 py-2.5">
                                   <div className="flex items-center gap-2">
                                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
-                                      {season.tier || 'Low'}
+                                      {season.tier || '—'}
                                     </span>
                                     {season.name
                                       ? <span className="text-[12px] text-gray-700">{season.name}</span>
