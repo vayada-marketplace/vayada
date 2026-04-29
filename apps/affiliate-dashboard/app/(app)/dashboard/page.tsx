@@ -10,6 +10,7 @@ import RecentActivity from '@/components/RecentActivity'
 import PerformanceTips from '@/components/PerformanceTips'
 import { apiClient } from '@/services/api/client'
 import { authService } from '@/services/auth'
+import { affiliateLink } from '@/services/constants/site'
 import type {
   AffiliateProperty,
   DashboardStats,
@@ -117,7 +118,7 @@ export default function DashboardPage() {
                   name={property.hotelName}
                   commission={property.commissionPct}
                   status={property.status === 'approved' ? 'active' : 'pending'}
-                  affiliateLink={`${property.hotelSlug}.vayada.com?ref=${property.referralCode}`}
+                  affiliateLink={affiliateLink(property.hotelSlug, property.referralCode)}
                   bookings={property.bookingCount}
                   outstanding={property.totalCommission}
                   clicks={property.clickCount}

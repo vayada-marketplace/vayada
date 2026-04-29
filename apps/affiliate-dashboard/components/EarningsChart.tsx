@@ -3,16 +3,10 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
+import { currencySymbol } from '@/services/constants/currency'
 import type { EarningsPeriod, EarningsResponse } from '@/services/types'
 
 type Period = Extract<EarningsPeriod, '6m' | '3m' | '1m'>
-
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  IDR: 'Rp',
-}
 
 const MESSAGE_CLASSNAME = 'h-40 flex items-center justify-center text-sm text-muted'
 
@@ -74,7 +68,7 @@ export default function EarningsChart() {
       >
         {(res) => {
           const maxEarnings = Math.max(...res.months.map((d) => d.earnings), 1)
-          const symbol = CURRENCY_SYMBOLS[res.currency] || res.currency + ' '
+          const symbol = currencySymbol(res.currency)
           return (
             <div className="flex items-end gap-3 h-40">
               {res.months.map((d) => (
