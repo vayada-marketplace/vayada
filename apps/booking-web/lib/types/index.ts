@@ -41,6 +41,7 @@ export interface Hotel {
   filterRooms?: Record<string, string[]>
   socialLinks?: HotelSocialLinks
   branding?: HotelBranding
+  defaultLanguage: string
   supportedLanguages: string[]
   referAGuestEnabled?: boolean
   instantBook?: boolean
