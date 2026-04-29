@@ -30,6 +30,17 @@ vw — vayada worktree helper
 
   vw sync                       Rebase every worktree branch on origin/main and
                                 re-init submodules.
+
+  vw ship-ready                 Scan all worktrees; for each whose branch tip
+                                is already in origin/main (the agent shipped),
+                                run vw done on it. Run vw sync at the end.
+
+  vw ship-all                   Ship every worktree sequentially: commit any
+                                uncommitted submodule work on a feature branch,
+                                merge each submodule's feature into its main and
+                                push, bump submodule pointers in the parent, and
+                                push the parent branch to origin/main. Then run
+                                ship-ready to clean up.
 HELP
 }
 
@@ -100,25 +111,24 @@ cmd_new() {
   fi
 
   echo "→ Opening new Warp tab"
-  local prompt="You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in three phases:
+  local prompt="You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in two phases:
 
 PHASE 1 — PLAN. Use the linear MCP server to fetch ticket $ticket, then move the ticket to \"In Progress\" via the linear MCP server. Propose a concise implementation plan and wait for my approval.
 
-PHASE 2 — IMPLEMENT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist.
-
-PHASE 3 — SHIP. When I say \"ship it\", run end-to-end without asking. Direct push to main, no PRs. Permissions are pre-approved.
+PHASE 2 — IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist. Then commit everything locally — do NOT merge to main, do NOT push, do NOT open PRs. \`vw ship-all\` will run the merge-to-main + push dance later.
 
 For each submodule with changes:
-  1. Commit on the submodule's feature branch.
-  2. git checkout main, git merge --no-ff <feature> -m \"Merge <feature> into main\".
-  3. git push main on the submodule.
+  1. Create or checkout a feature branch named $ticket inside the submodule.
+  2. Commit with a descriptive message (what changed and why, not just \"ship\").
 
 In the parent worktree:
-  4. git add the bumped submodule paths.
-  5. git commit -m \"Bump <submodule>: <summary> ($ticket)\".
-  6. Fast-forward parent main to the $ticket branch tip and push parent main (e.g. git push vayada $ticket:main).
+  3. git add the bumped submodule paths.
+  4. git commit -m \"Bump <submodule>: <summary> ($ticket)\" with a real summary.
 
-Report the final commit SHAs. Do NOT open PRs."
+Stop after committing. Report the local commit SHAs and wait."
+
+  local as_prompt="${prompt//\\/\\\\}"
+  as_prompt="${as_prompt//\"/\\\"}"
 
   /usr/bin/osascript <<APPLESCRIPT
 tell application "Warp" to activate
@@ -126,7 +136,7 @@ delay 0.4
 tell application "System Events"
     keystroke "t" using command down
     delay 0.5
-    keystroke "cd $worktree && claude '$prompt'"
+    keystroke "cd $worktree && claude '$as_prompt'"
     keystroke return
 end tell
 APPLESCRIPT
@@ -147,8 +157,8 @@ cmd_done() {
     exit 1
   fi
 
-  echo "→ Moving Linear ticket $ticket to Done"
-  claude -p "Use the linear MCP server to move ticket $ticket to the Done state. Reply with one short line: success or the error." \
+  echo "→ Moving Linear ticket $ticket to In Review"
+  claude -p "Use the linear MCP server to move ticket $ticket to the In Review state. Reply with one short line: success or the error." \
     2>&1 | sed 's/^/   /' || echo "   (failed; move it manually in Linear)"
 
   echo "→ Deinitializing submodules in worktree"
@@ -212,11 +222,190 @@ cmd_sync() {
   echo "✓ Synced"
 }
 
+cmd_ship_ready() {
+  cd "$MAIN_REPO"
+
+  local remote
+  remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
+  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+
+  echo "→ Fetching $remote/main"
+  git fetch "$remote" main --quiet
+
+  local cleaned=0
+  while IFS= read -r wt; do
+    [ "$wt" = "$MAIN_REPO" ] && continue
+
+    local wt_branch
+    wt_branch="$(git -C "$wt" branch --show-current)"
+    if [ -z "$wt_branch" ]; then
+      echo "→ Skipping $wt (detached HEAD)"
+      continue
+    fi
+
+    if ! git merge-base --is-ancestor "$wt_branch" "$remote/main" 2>/dev/null; then
+      echo "→ Skipping $wt_branch (not yet in $remote/main)"
+      continue
+    fi
+
+    if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+      echo "→ Skipping $wt_branch (uncommitted changes — finish or revert first)"
+      continue
+    fi
+
+    echo "→ Cleaning up $wt_branch"
+    if cmd_done "$wt_branch"; then
+      cleaned=$((cleaned + 1))
+    else
+      echo "   ✗ vw done failed for $wt_branch — leaving in place"
+    fi
+  done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
+
+  if [ "$cleaned" -gt 0 ]; then
+    echo
+    cmd_sync
+  else
+    echo "✓ Nothing ready to clean up"
+  fi
+}
+
+ship_submodule() {
+  local subdir="$1" ticket="$2"
+
+  local branch has_changes=0
+  branch="$(git -C "$subdir" branch --show-current 2>/dev/null || echo '')"
+  [ -n "$(git -C "$subdir" status --porcelain 2>/dev/null)" ] && has_changes=1
+
+  # Nothing to ship: clean working tree and not on a feature branch.
+  if [ "$has_changes" -eq 0 ] && { [ -z "$branch" ] || [ "$branch" = "main" ]; }; then
+    return 0
+  fi
+
+  echo "  → ${subdir##*/}"
+
+  if [ -z "$branch" ] || [ "$branch" = "main" ]; then
+    git -C "$subdir" checkout -b "$ticket" --quiet 2>/dev/null \
+      || git -C "$subdir" checkout "$ticket" --quiet
+    branch="$ticket"
+  fi
+
+  if [ "$has_changes" -eq 1 ]; then
+    git -C "$subdir" add -A
+    git -C "$subdir" commit -m "$ticket: ship" --quiet
+  fi
+
+  local sub_remote
+  sub_remote="$(git -C "$subdir" config branch.main.remote 2>/dev/null || git -C "$subdir" remote | head -n1)"
+  [ -z "$sub_remote" ] && { echo "    ✗ no remote"; return 1; }
+
+  git -C "$subdir" fetch "$sub_remote" main --quiet
+
+  if git -C "$subdir" merge-base --is-ancestor "$branch" "$sub_remote/main"; then
+    echo "    (already in $sub_remote/main)"
+    return 0
+  fi
+
+  git -C "$subdir" checkout main --quiet
+  git -C "$subdir" merge --ff-only "$sub_remote/main" --quiet 2>/dev/null || true
+  if ! git -C "$subdir" merge --no-ff "$branch" -m "Merge $branch into main" --quiet; then
+    git -C "$subdir" merge --abort 2>/dev/null || true
+    echo "    ✗ merge conflict"
+    return 1
+  fi
+  if ! git -C "$subdir" push "$sub_remote" main --quiet; then
+    echo "    ✗ push failed"
+    return 1
+  fi
+
+  echo "    ✓ pushed"
+}
+
+ship_worktree() {
+  local wt="$1" ticket="$2" remote="$3"
+
+  local subs
+  subs="$(git -C "$wt" submodule --quiet foreach --recursive 'echo "$displaypath"' 2>/dev/null || true)"
+  while IFS= read -r sub; do
+    [ -z "$sub" ] && continue
+    ship_submodule "$wt/$sub" "$ticket" || return 1
+  done <<< "$subs"
+
+  if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+    git -C "$wt" add -A
+    git -C "$wt" commit -m "Bump submodules: $ticket" --quiet
+  fi
+
+  # Earlier worktrees may have advanced parent main; rebase if needed.
+  if ! git -C "$wt" merge-base --is-ancestor "$remote/main" "$ticket" 2>/dev/null; then
+    if ! git -C "$wt" rebase "$remote/main" --quiet; then
+      git -C "$wt" rebase --abort 2>/dev/null || true
+      echo "  ✗ parent rebase failed — resolve manually in $wt"
+      return 1
+    fi
+  fi
+
+  # Re-sync submodule HEADs to what the bumped parent commit records.
+  # Without this, ship_submodule leaves submodule HEAD on the merge commit
+  # on main while the parent records the feature-branch tip, so git status
+  # reports the submodule as modified and ship-ready refuses to clean up.
+  git -C "$wt" submodule update --init --recursive --quiet 2>/dev/null || true
+
+  echo "  → pushing $ticket → $remote/main"
+  git -C "$wt" push "$remote" "$ticket:main" --quiet || return 1
+}
+
+cmd_ship_all() {
+  cd "$MAIN_REPO"
+
+  local remote
+  remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
+  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+
+  echo "→ Fetching $remote/main"
+  git fetch "$remote" main --quiet
+
+  local shipped=0 failed=0
+  while IFS= read -r wt; do
+    [ "$wt" = "$MAIN_REPO" ] && continue
+
+    local wt_branch
+    wt_branch="$(git -C "$wt" branch --show-current)"
+    if [ -z "$wt_branch" ]; then
+      echo "→ Skipping $wt (detached HEAD)"
+      continue
+    fi
+
+    if git merge-base --is-ancestor "$wt_branch" "$remote/main" 2>/dev/null; then
+      echo "→ Skipping $wt_branch (already in $remote/main)"
+      continue
+    fi
+
+    echo
+    echo "═══ Shipping $wt_branch ═══"
+    if ship_worktree "$wt" "$wt_branch" "$remote"; then
+      shipped=$((shipped + 1))
+    else
+      failed=$((failed + 1))
+      echo "✗ Failed to ship $wt_branch — leaving in place"
+    fi
+  done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
+
+  echo
+  echo "→ Shipped: $shipped, failed: $failed"
+
+  if [ "$shipped" -gt 0 ]; then
+    echo
+    cmd_ship_ready
+  fi
+}
+
 case "${1:-}" in
   new)  shift; cmd_new "$@" ;;
   done) shift; cmd_done "$@" ;;
   list|ls) shift; cmd_list "$@" ;;
   sync) shift; cmd_sync "$@" ;;
+  ship-ready) shift; cmd_ship_ready "$@" ;;
+  ship-all) shift; cmd_ship_all "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown command: $1"; echo; usage; exit 1 ;;
 esac
