@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import useSWR from 'swr'
-import { ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import Navbar from '@/components/Navbar'
 import { apiClient, extractErrorMessage } from '@/services/api/client'
 import { authService } from '@/services/auth'
@@ -16,7 +15,7 @@ import {
   XENDIT_BANKS,
   settingsSchema,
 } from '@/services/schemas/settings'
-import type { AffiliateProperty, PropertiesResponse } from '@/services/types'
+import type { PayoutSettings } from '@/services/types'
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   stripe: 'Stripe',
@@ -25,31 +24,25 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   bank: 'Bank Transfer',
 }
 
-function settingsFromProperty(p: AffiliateProperty): SettingsFormValues {
+function formValuesFromSettings(s: PayoutSettings): SettingsFormValues {
   return {
-    paymentMethod: (PAYMENT_METHODS as readonly string[]).includes(p.paymentMethod)
-      ? (p.paymentMethod as PaymentMethod)
+    paymentMethod: (PAYMENT_METHODS as readonly string[]).includes(s.paymentMethod)
+      ? (s.paymentMethod as PaymentMethod)
       : 'stripe',
-    paypalEmail: p.paypalEmail || '',
-    bankIban: p.bankIban || '',
-    bankAccountHolder: p.bankAccountHolder || '',
-    bankSwiftBic: p.bankSwiftBic || '',
-    bankName: p.bankName || '',
-    bankCountry: p.bankCountry || '',
-    xenditChannelCode: p.xenditChannelCode || 'ID_BCA',
-    xenditAccountNumber: p.xenditAccountNumber || '',
-    xenditAccountHolderName: p.xenditAccountHolderName || '',
+    paypalEmail: s.paypalEmail || '',
+    bankIban: s.bankIban || '',
+    bankAccountHolder: s.bankAccountHolder || '',
+    bankSwiftBic: s.bankSwiftBic || '',
+    bankName: s.bankName || '',
+    bankCountry: s.bankCountry || '',
+    xenditChannelCode: s.xenditChannelCode || 'ID_BCA',
+    xenditAccountNumber: s.xenditAccountNumber || '',
+    xenditAccountHolderName: s.xenditAccountHolderName || '',
   }
 }
 
-function propertiesDiffer(properties: AffiliateProperty[]): boolean {
-  if (properties.length < 2) return false
-  const first = JSON.stringify(settingsFromProperty(properties[0]))
-  return properties.slice(1).some((p) => JSON.stringify(settingsFromProperty(p)) !== first)
-}
-
 export default function SettingsPage() {
-  const { data, error: loadError } = useSWR<PropertiesResponse>('/affiliate/properties')
+  const { data, error: loadError, mutate } = useSWR<PayoutSettings>('/affiliate/payout-settings')
 
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
@@ -75,12 +68,9 @@ export default function SettingsPage() {
   })
 
   const paymentMethod = watch('paymentMethod')
-  const properties = data?.properties ?? []
-  const drift = propertiesDiffer(properties)
 
   useEffect(() => {
-    const first = data?.properties?.[0]
-    if (first) reset(settingsFromProperty(first))
+    if (data) reset(formValuesFromSettings(data))
   }, [data, reset])
 
   const handleValidateBank = async () => {
@@ -116,7 +106,7 @@ export default function SettingsPage() {
     setSuccess('')
     setSaving(true)
     try {
-      await apiClient.patch('/affiliate/me', {
+      const saved = await apiClient.patch<PayoutSettings>('/affiliate/payout-settings', {
         paymentMethod: values.paymentMethod,
         ...(values.paymentMethod === 'paypal' && { paypalEmail: values.paypalEmail.trim() }),
         ...(values.paymentMethod === 'bank' && {
@@ -132,6 +122,7 @@ export default function SettingsPage() {
           xenditAccountHolderName: values.xenditAccountHolderName.trim(),
         }),
       })
+      mutate(saved, { revalidate: false })
       setSuccess('Payment settings saved')
     } catch (err) {
       setTopError(extractErrorMessage(err, 'Failed to save'))
@@ -165,26 +156,6 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
           <p className="text-sm text-gray-500 mt-1">Manage your payout preferences</p>
         </div>
-
-        {properties.length > 1 && !drift && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-            <InformationCircleIcon className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-blue-800">
-              These payout settings apply to all {properties.length} of your properties.
-            </p>
-          </div>
-        )}
-
-        {drift && (
-          <div className="mb-4 p-3 bg-warning-50 border border-warning-200 rounded-lg flex items-start gap-2">
-            <ExclamationTriangleIcon className="w-4 h-4 text-warning-700 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-warning-800">
-              Your properties currently have different payout settings. Showing the
-              configuration from <strong>{properties[0].hotelName}</strong>. Saving will
-              overwrite the others.
-            </p>
-          </div>
-        )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Payout Method</h2>
