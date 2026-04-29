@@ -272,6 +272,9 @@ export default function RoomTypeForm({
   const [weekendSurcharge, setWeekendSurcharge] = useState(form.weekendSurcharge || '+0%')
   const [cancellationPolicy, setCancellationPolicy] = useState(form.cancellationPolicy || 'Free until 7 days before')
   const [flexibleRateEnabled, setFlexibleRateEnabled] = useState(form.flexibleRateEnabled ?? true)
+  const [flexibleCancellationType, setFlexibleCancellationType] = useState<'free' | 'partial_refund'>(form.flexibleCancellationType ?? 'free')
+  const [partialRefundCancelWindowDays, setPartialRefundCancelWindowDays] = useState(form.partialRefundCancelWindowDays ?? 30)
+  const [partialRefundAmountPercent, setPartialRefundAmountPercent] = useState(form.partialRefundAmountPercent ?? 50)
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 5)
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
@@ -312,13 +315,16 @@ export default function RoomTypeForm({
       weekendSurcharge,
       cancellationPolicy,
       flexibleRateEnabled,
+      flexibleCancellationType,
+      partialRefundCancelWindowDays,
+      partialRefundAmountPercent,
       nonRefundableEnabled,
       nonRefundableDiscount,
       nonRefundableCancellationPolicy,
       dailyRates,
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, dailyRates])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, flexibleCancellationType, partialRefundCancelWindowDays, partialRefundAmountPercent, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     const updated = { ...form, ...updates }
@@ -1113,27 +1119,105 @@ export default function RoomTypeForm({
                     </button>
                     <svg className="w-4 h-4 text-primary-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
                     <span className="text-[12px] font-semibold text-gray-900">Flexible rate</span>
-                    <span className="text-[11px] text-gray-400">(free cancellation)</span>
+                    <span className="text-[11px] text-gray-400">
+                      {flexibleCancellationType === 'partial_refund' ? '(partial refund)' : '(free cancellation)'}
+                    </span>
                   </div>
                   {flexibleRateEnabled && (
-                    <div className="mt-3 ml-[52px]">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[11px] text-gray-500">Cancellation policy:</span>
-                        <select
-                          value={cancellationPolicy}
-                          onChange={(e) => setCancellationPolicy(e.target.value)}
-                          className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
-                          style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
-                        >
-                          <option>Free until 1 day before</option>
-                          <option>Free until 2 days before</option>
-                          <option>Free until 3 days before</option>
-                          <option>Free until 5 days before</option>
-                          <option>Free until 7 days before</option>
-                          <option>Free until 14 days before</option>
-                          <option>Free until 30 days before</option>
-                        </select>
+                    <div className="mt-3 ml-[52px] space-y-3">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Cancellation type</div>
+                        <div className="inline-flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setFlexibleCancellationType('free')}
+                            className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors border ${flexibleCancellationType === 'free' ? 'bg-primary-50 border-primary-500 text-primary-600' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                          >
+                            Free cancellation
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFlexibleCancellationType('partial_refund')}
+                            className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors border ${flexibleCancellationType === 'partial_refund' ? 'bg-primary-50 border-primary-500 text-primary-600' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                          >
+                            Partial refund
+                          </button>
+                        </div>
                       </div>
+                      {flexibleCancellationType === 'free' && (
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] text-gray-500">Cancellation policy:</span>
+                          <select
+                            value={cancellationPolicy}
+                            onChange={(e) => setCancellationPolicy(e.target.value)}
+                            className="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                            style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
+                          >
+                            <option>Free until 1 day before</option>
+                            <option>Free until 2 days before</option>
+                            <option>Free until 3 days before</option>
+                            <option>Free until 5 days before</option>
+                            <option>Free until 7 days before</option>
+                            <option>Free until 14 days before</option>
+                            <option>Free until 30 days before</option>
+                          </select>
+                        </div>
+                      )}
+                      {flexibleCancellationType === 'partial_refund' && (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-gray-500 w-[110px]">Cancel window:</span>
+                            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => setPartialRefundCancelWindowDays(Math.max(1, partialRefundCancelWindowDays - 1))}
+                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                              >&minus;</button>
+                              <input
+                                type="number"
+                                min={1}
+                                max={365}
+                                value={partialRefundCancelWindowDays}
+                                onChange={(e) => setPartialRefundCancelWindowDays(Math.max(1, Math.min(365, parseInt(e.target.value) || 1)))}
+                                className="w-[50px] px-1 py-1.5 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPartialRefundCancelWindowDays(Math.min(365, partialRefundCancelWindowDays + 1))}
+                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                              >+</button>
+                            </div>
+                            <span className="text-[11px] text-gray-500">days before check-in</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-gray-500 w-[110px]">Refund amount:</span>
+                            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => setPartialRefundAmountPercent(Math.max(1, partialRefundAmountPercent - 1))}
+                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                              >&minus;</button>
+                              <input
+                                type="number"
+                                min={1}
+                                max={99}
+                                value={partialRefundAmountPercent}
+                                onChange={(e) => setPartialRefundAmountPercent(Math.max(1, Math.min(99, parseInt(e.target.value) || 1)))}
+                                className="w-[50px] px-1 py-1.5 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPartialRefundAmountPercent(Math.min(99, partialRefundAmountPercent + 1))}
+                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+                              >+</button>
+                            </div>
+                            <span className="text-[11px] text-gray-500">% of booking total</span>
+                          </div>
+                          <div className="rounded-lg bg-primary-50/60 border border-primary-100 px-3 py-2 text-[11px] text-primary-700 leading-relaxed">
+                            Policy preview &mdash; Guests who cancel at least <span className="font-semibold">{partialRefundCancelWindowDays} days</span> before check-in receive a <span className="font-semibold">{partialRefundAmountPercent}% refund</span>. Cancellations after this point are non-refundable.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

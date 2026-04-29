@@ -34,6 +34,9 @@ export interface RoomType {
   weekendSurcharge: string
   cancellationPolicy: string
   flexibleRateEnabled: boolean
+  flexibleCancellationType: 'free' | 'partial_refund'
+  partialRefundCancelWindowDays: number
+  partialRefundAmountPercent: number
   nonRefundableEnabled: boolean
   nonRefundableDiscount: number
   nonRefundableCancellationPolicy: string
@@ -70,6 +73,9 @@ export interface RoomTypeCreate {
   weekendSurcharge?: string
   cancellationPolicy?: string
   flexibleRateEnabled?: boolean
+  flexibleCancellationType?: 'free' | 'partial_refund'
+  partialRefundCancelWindowDays?: number
+  partialRefundAmountPercent?: number
   nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
   nonRefundableCancellationPolicy?: string
