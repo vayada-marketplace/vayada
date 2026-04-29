@@ -18,7 +18,12 @@ from app.repositories.affiliate_repo import AffiliateRepository
 from app.models.booking import BookingCreate, BookingResponse
 from app.services import stripe_service, xendit_service
 from app.services.availability_service import compute_stay_pricing, remaining_for_stay
+from app.services.currency_service import get_exchange_rate
 from app.services.payout_service import calculate_split, fetch_billing_config, schedule_payouts
+from app.services.room_type_service import resolve_last_minute_discount
+from app.services.channex.ari_push import push_availability_for_room_type
+from app.services.channex.orchestrator import push_ari_for_booking
+from app.services.channex.outbound import handle_vayada_cancellation as channex_handle_cancellation
 from app.services.email_service import (
     send_booking_request_notification,
     send_guest_booking_requested,
@@ -30,7 +35,9 @@ from app.services.email_service import (
     send_guest_booking_withdrawn,
     send_host_booking_accepted,
     send_host_guest_cancelled,
+    send_host_booking_expired,
 )
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +143,6 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # Apply last-minute discount (based on days before check-in)
     import json as _json
-    from app.services.room_type_service import resolve_last_minute_discount
     lm_discount_pct = 0
     lm_discount_amount = 0.0
     days_before = (data.check_in - date.today()).days
@@ -172,7 +178,6 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
         addon_map = {a["id"]: a for a in all_addons}
         room_currency = (room.get("currency") or "EUR").upper()
-        from app.services.currency_service import get_exchange_rate
         rate_cache: dict = {}
         for aid in addon_ids:
             addon = addon_map.get(aid)
@@ -505,7 +510,6 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         )
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
-    from app.services.channex_sync_service import push_availability_for_room_type
     asyncio.create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
 
     return {
@@ -636,7 +640,6 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
             send_host_booking_accepted(hotel["contact_email"], updated)
         )
 
-    from app.services.channex_sync_service import push_ari_for_booking
     asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
@@ -692,7 +695,6 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
     )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
 
@@ -741,7 +743,6 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
 
@@ -861,7 +862,6 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
         )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    from app.services.channex_sync_service import handle_vayada_cancellation as channex_handle_cancellation, push_ari_for_booking
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
 
@@ -903,7 +903,6 @@ async def expire_booking(booking_id: str) -> None:
     updated = await BookingRepository.get_by_id(booking_id)
     asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
     if hotel:
-        from app.services.email_service import send_host_booking_expired
         asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
 
 
@@ -944,7 +943,6 @@ async def _get_hotel_id_for_user(user_id: str) -> str:
     Previously this bypassed the helper and always picked the
     first hotel row — fine for single-hotel accounts, a silent
     data-routing bug for multi-hotel accounts."""
-    from app.utils import get_hotel_id
     try:
         return await get_hotel_id(user_id)
     except Exception:

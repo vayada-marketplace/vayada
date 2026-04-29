@@ -6,17 +6,24 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
+from app.config import settings as app_settings
+from app.database import Database
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.services import xendit_service
+from app.services.booking_service import expire_booking
 from app.services.email_service import send_affiliate_payout_notification
 from app.services.payout_service import (
     dispatch_stripe_transfer,
     dispatch_xendit_payout,
     handle_payout_failure,
 )
+from app.services.xendit_service import XenditError
+from app.services.channex.inbound import poll_bookings_for_hotel
+from app.services.channex.orchestrator import push_ari_for_hotel
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +32,6 @@ scheduler = AsyncIOScheduler()
 
 async def expire_pending_bookings():
     """Find and expire bookings where host hasn't responded in time."""
-    from app.services.booking_service import expire_booking
-
     now = datetime.now(timezone.utc)
     expired = await BookingRepository.list_expired_pending(now)
     for row in expired:
@@ -182,8 +187,6 @@ async def process_affiliate_payouts():
 
 async def poll_xendit_processing_payouts():
     """Poll Xendit for payouts stuck in 'processing' in case webhooks failed."""
-    from app.services.xendit_service import XenditError
-
     stale = await PayoutRepository.list_processing_xendit(older_than_minutes=30)
     for payout in stale:
         payout_id = str(payout["id"])
@@ -219,8 +222,6 @@ async def poll_xendit_processing_payouts():
 
 async def cancel_stale_unpaid_bookings():
     """Cancel pending bookings where payment was never completed (30+ min old)."""
-    from app.database import Database
-
     result = await Database.fetch(
         """
         UPDATE bookings
@@ -238,9 +239,6 @@ async def cancel_stale_unpaid_bookings():
 
 async def poll_channex_bookings():
     """Poll all active Channex connections for new booking revisions."""
-    from app.repositories.channex_mapping_repo import ChannexConnectionRepository
-    from app.services.channex_sync_service import poll_bookings_for_hotel
-
     connections = await ChannexConnectionRepository.list_active()
     for conn in connections:
         hotel_id = str(conn["hotel_id"])
@@ -252,9 +250,6 @@ async def poll_channex_bookings():
 
 async def full_channex_ari_sync():
     """Daily full availability + rates push to Channex for all active connections."""
-    from app.repositories.channex_mapping_repo import ChannexConnectionRepository
-    from app.services.channex_sync_service import push_ari_for_hotel
-
     connections = await ChannexConnectionRepository.list_active()
     for conn in connections:
         hotel_id = str(conn["hotel_id"])
@@ -266,8 +261,6 @@ async def full_channex_ari_sync():
 
 def setup_scheduler():
     """Configure and return the scheduler with all jobs."""
-    from app.config import settings as app_settings
-
     scheduler.add_job(
         expire_pending_bookings,
         trigger=IntervalTrigger(minutes=1),

@@ -23,6 +23,10 @@ from app.models.channex import (
     ConnectedChannel,
     ConnectedChannelsResponse,
 )
+from app.services import channex_service
+from app.services.channex.provisioning import provision_property
+from app.services.channex.orchestrator import push_ari_for_hotel
+from app.services.channex.inbound import poll_bookings_for_hotel
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,6 @@ async def channex_enable(
     Creates the Channex connection, provisions the property, room types,
     and rate plans — all in one step. Uses the platform-wide API key.
     """
-    from app.services import channex_service
-    from app.services.channex_sync_service import provision_property
 
     hotel_id = await get_hotel_id(user_id)
 
@@ -136,7 +138,6 @@ async def channex_provision(
     user_id: str = Depends(require_hotel_admin),
 ):
     """Re-provision: create any new room types and rate plans in Channex."""
-    from app.services.channex_sync_service import provision_property
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -198,7 +199,6 @@ async def channex_sync_ari(
     user_id: str = Depends(require_hotel_admin),
 ):
     """Trigger a full availability + rates push to Channex."""
-    from app.services.channex_sync_service import push_ari_for_hotel
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -216,7 +216,6 @@ async def channex_sync_bookings(
     user_id: str = Depends(require_hotel_admin),
 ):
     """Poll Channex booking revision feed and import new bookings."""
-    from app.services.channex_sync_service import poll_bookings_for_hotel
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -238,7 +237,6 @@ async def channex_list_channels(
     Used by the calendar legend to only show OTAs the hotel actually
     has wired up via the channel manager.
     """
-    from app.services import channex_service
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -298,7 +296,6 @@ async def channex_update_markups(
     """Upsert per-channel markup percentages, ensure per-channel rate plans
     exist in Channex, and trigger an ARI re-sync so the updated prices
     propagate to OTAs."""
-    from app.services.channex_sync_service import provision_property, push_ari_for_hotel
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -344,7 +341,6 @@ async def channex_iframe_url(
     (Booking.com, Airbnb, Expedia, etc.) and map rooms/rates
     without leaving the PMS UI.
     """
-    from app.services import channex_service
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
