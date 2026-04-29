@@ -60,8 +60,29 @@ async def stripe_webhook(request: Request):
             )
             logger.info("Payment captured via webhook: %s", pi_id)
 
+            booking_id = str(payment["booking_id"])
+            booking = await BookingRepository.get_by_id(booking_id)
+
+            # Instant-book hotels capture automatically — when Stripe confirms
+            # the charge the booking should jump straight to confirmed without
+            # waiting for a host accept. capture_card=False because Stripe
+            # already captured.
+            if booking and booking["status"] == "pending":
+                from app.database import Database
+                hotel_row = await Database.fetchrow(
+                    "SELECT instant_book FROM hotels WHERE id = $1",
+                    booking["hotel_id"],
+                )
+                if hotel_row and hotel_row.get("instant_book"):
+                    from app.services.booking_service import _finalize_accepted_booking
+                    try:
+                        await _finalize_accepted_booking(booking_id, capture_card=False)
+                    except Exception as e:
+                        logger.error(
+                            "Instant-book finalize failed for %s: %s", booking_id, e
+                        )
+
             # Send payment confirmation email to guest
-            booking = await BookingRepository.get_by_id(str(payment["booking_id"]))
             if booking and booking.get("guest_email"):
                 import asyncio
                 from app.services.email_service import send_guest_payment_confirmed
@@ -207,18 +228,28 @@ async def _handle_invoice_callback(data: dict):
     booking_id = str(payment["booking_id"])
 
     if invoice_status == "PAID":
-        # Guest has paid — mark payment as captured and notify host
+        # Guest has paid — mark payment as captured.
         await PaymentRepository.update_status(payment_id, "captured")
         await BookingRepository.update_payment_status(booking_id, "authorized")
 
-        # Notify host to accept/reject
         booking = await BookingRepository.get_by_id(booking_id)
         if booking:
             from app.database import Database
             hotel = await Database.fetchrow(
-                "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+                "SELECT contact_email, instant_book FROM hotels WHERE id = $1",
+                booking["hotel_id"],
             )
-            if hotel:
+            if hotel and hotel.get("instant_book") and booking["status"] == "pending":
+                # Skip the request flow; finalize and email guest+host as accepted.
+                from app.services.booking_service import _finalize_accepted_booking
+                try:
+                    await _finalize_accepted_booking(booking_id, capture_card=False)
+                except Exception as e:
+                    logger.error(
+                        "Instant-book finalize failed for %s: %s", booking_id, e
+                    )
+            elif hotel:
+                # Request flow — notify host to accept/reject
                 from app.services.email_service import send_booking_request_notification
                 asyncio.create_task(
                     send_booking_request_notification(hotel["contact_email"], booking)

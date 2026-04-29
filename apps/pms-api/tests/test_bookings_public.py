@@ -156,6 +156,109 @@ class TestCreateBooking:
         )
         assert resp.status_code == 400
 
+    @patch("app.services.channex_sync_service.push_ari_for_booking", new_callable=AsyncMock)
+    async def test_create_booking_instant_book_pay_at_property(
+        self,
+        mock_channex,
+        client,
+        hotel_with_rooms,
+    ):
+        """When hotel.instant_book is true, pay-at-property bookings skip the
+        request flow: status='confirmed', no host_response_deadline, payouts
+        scheduled, payment_status='pay_at_property'.
+        """
+        from app.database import Database
+
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+        await create_test_payment_settings(
+            str(hotel["id"]), pay_at_property_enabled=True
+        )
+        await Database.execute(
+            "UPDATE hotels SET instant_book = true WHERE id = $1", hotel["id"]
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Jane",
+                "guestLastName": "Smith",
+                "guestEmail": "jane@example.com",
+                "guestPhone": "+9876543210",
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-13",
+                "adults": 2,
+                "children": 0,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        booking_resp = body["booking"]
+        assert booking_resp["status"] == "confirmed"
+        assert booking_resp["hostResponseDeadline"] is None
+        assert body["paymentMethod"] == "pay_at_property"
+
+        # Verify the row in the DB reflects the finalized state.
+        row = await Database.fetchrow(
+            "SELECT status, payment_status, host_response_deadline, "
+            "       property_payout_amount, platform_fee_amount "
+            "FROM bookings WHERE id = $1",
+            booking_resp["id"],
+        )
+        assert row["status"] == "confirmed"
+        assert row["payment_status"] == "pay_at_property"
+        assert row["host_response_deadline"] is None
+        # _finalize_accepted_booking ran the split + write, so payout and fee
+        # amounts should be populated (not the row defaults of NULL/0).
+        assert row["property_payout_amount"] is not None
+
+    @patch("app.services.channex_sync_service.push_ari_for_booking", new_callable=AsyncMock)
+    async def test_create_booking_request_flow_pay_at_property(
+        self,
+        mock_channex,
+        client,
+        hotel_with_rooms,
+    ):
+        """Sanity: when instant_book is false (default), pay-at-property still
+        creates a pending booking with a host_response_deadline.
+        """
+        from app.database import Database
+
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+        await create_test_payment_settings(
+            str(hotel["id"]), pay_at_property_enabled=True
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Jane",
+                "guestLastName": "Smith",
+                "guestEmail": "jane@example.com",
+                "guestPhone": "+9876543210",
+                "checkIn": "2026-09-10",
+                "checkOut": "2026-09-13",
+                "adults": 2,
+                "children": 0,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        booking_resp = resp.json()["booking"]
+        assert booking_resp["status"] == "pending"
+        assert booking_resp["hostResponseDeadline"] is not None
+
+        row = await Database.fetchrow(
+            "SELECT status, host_response_deadline FROM bookings WHERE id = $1",
+            booking_resp["id"],
+        )
+        assert row["status"] == "pending"
+        assert row["host_response_deadline"] is not None
+
     async def test_create_booking_below_min_stay(self, client, cleanup_database):
         import json as _json
         from app.database import Database

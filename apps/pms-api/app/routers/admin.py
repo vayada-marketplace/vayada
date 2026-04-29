@@ -3,8 +3,9 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Depends
 
+from app.config import settings as app_settings
 from app.dependencies import require_hotel_admin
-from app.database import Database, AuthDatabase
+from app.database import Database, AuthDatabase, BookingEngineDatabase
 from app.utils import get_hotel_id, parse_jsonb
 from app.models.hotel import (
     HotelRegister,
@@ -173,6 +174,7 @@ async def get_hotel(user_id: str = Depends(require_hotel_admin)):
         "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
         "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
         "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
+        "instant_book": bool(row.get("instant_book", False)),
     }
 
 
@@ -191,7 +193,8 @@ async def update_hotel(
     idx = 1
     for field in ("slug", "name", "contact_email", "last_minute_discount",
                    "property_type", "timezone", "country", "state", "city",
-                   "address", "zip_code", "phone", "latitude", "longitude"):
+                   "address", "zip_code", "phone", "latitude", "longitude",
+                   "instant_book"):
         if field in data:
             val = data[field]
             if field == "last_minute_discount":
@@ -210,6 +213,25 @@ async def update_hotel(
         f"UPDATE hotels SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *",
         *values,
     )
+
+    # Sync instant_book to booking_db so the booking-engine frontend (which
+    # reads /api/hotels/{slug} from the BE backend) can adjust the checkout
+    # CTA copy. Surface failures: silent drift here would show guests a
+    # "Submit Booking Request" button that immediately confirms — exactly the
+    # contradictory UX we're trying to avoid.
+    if "instant_book" in data and app_settings.BOOKING_ENGINE_DATABASE_URL:
+        try:
+            await BookingEngineDatabase.execute(
+                "UPDATE booking_hotels SET instant_book = $2 WHERE id = $1",
+                str(hotel["id"]), bool(data["instant_book"]),
+            )
+        except Exception as e:
+            logger.error("Failed to sync instant_book to booking engine: %s", e)
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to sync booking-acceptance setting to booking engine. Please retry.",
+            )
+
     lm = row.get("last_minute_discount")
     return {
         "id": str(row["id"]),
@@ -227,6 +249,7 @@ async def update_hotel(
         "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
         "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
         "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
+        "instant_book": bool(row.get("instant_book", False)),
     }
 
 

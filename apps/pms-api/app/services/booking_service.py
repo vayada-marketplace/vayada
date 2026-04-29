@@ -157,10 +157,11 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     Returns booking data + client_secret for Stripe.
     """
     hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email, last_minute_discount FROM hotels WHERE slug = $1", slug
+        "SELECT id, name, contact_email, last_minute_discount, instant_book FROM hotels WHERE slug = $1", slug
     )
     if not hotel:
         raise ValueError("Hotel not found")
+    instant_book = bool(hotel.get("instant_book"))
 
     hotel_id = str(hotel["id"])
     room = await RoomTypeRepository.get_by_id(data.room_type_id)
@@ -363,7 +364,14 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         if not hotel_settings or not hotel_settings.get("xendit_payments_enabled"):
             raise ValueError("Xendit payments are not enabled for this hotel")
 
-    deadline = datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
+    # Bank transfer is the only path that always stays in the request flow, even
+    # when instant_book is on — there's no money yet, so we can't auto-confirm.
+    use_request_flow = (not instant_book) or payment_method == "bank_transfer"
+    deadline = (
+        datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
+        if use_request_flow
+        else None
+    )
 
     booking_data = {
         "hotel_id": hotel_id,
@@ -439,6 +447,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     client_secret = None
     xendit_invoice_url = None
 
+    capture_method = "manual" if use_request_flow else "automatic"
+
     if payment_method == "card":
         # Get hotel payment settings to determine provider
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
@@ -452,6 +462,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                     amount=amount_cents,
                     currency=room["currency"],
                     metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+                    capture_method=capture_method,
                 )
             except Exception:
                 await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
@@ -473,7 +484,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                     stripe_account = hotel_settings["stripe_connect_account_id"]
 
             if stripe_account:
-                # Create Stripe PaymentIntent (manual capture = authorization hold)
+                # Create Stripe PaymentIntent. Manual capture for the request
+                # flow (auth-hold until host accepts), automatic capture under
+                # instant-book.
                 amount_cents = int(math.ceil(total_amount * 100))
                 try:
                     pi = await stripe_service.create_payment_intent(
@@ -481,6 +494,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                         currency=room["currency"],
                         metadata={"booking_id": booking_id, "hotel_id": hotel_id},
                         stripe_account=stripe_account,
+                        capture_method=capture_method,
                     )
                 except Exception:
                     # Clean up the booking if Stripe fails
@@ -533,7 +547,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         )
 
     elif payment_method == "bank_transfer":
-        # Bank transfer — guest transfers directly, hotel verifies manually
+        # Bank transfer — guest transfers directly, hotel verifies manually.
+        # Always uses the request flow (no money has moved, so we cannot
+        # auto-confirm even when the hotel has instant-book on).
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
         if not hotel_settings or not hotel_settings.get("bank_transfer"):
             raise ValueError("Bank transfer is not enabled for this hotel")
@@ -557,22 +573,27 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             currency=room["currency"],
             payment_method="pay_at_property",
         )
-        # Update booking payment status
         await BookingRepository.update_payment_status(booking_id, "pay_at_property")
-        # Notify host immediately for pay-at-property
-        booking = await BookingRepository.get_by_id(booking_id)
-        asyncio.create_task(
-            send_booking_request_notification(hotel["contact_email"], booking)
-        )
+        if use_request_flow:
+            booking = await BookingRepository.get_by_id(booking_id)
+            asyncio.create_task(
+                send_booking_request_notification(hotel["contact_email"], booking)
+            )
+        else:
+            # Instant-book: confirm right away. _finalize_accepted_booking
+            # sends the host + guest "accepted" emails.
+            await _finalize_accepted_booking(booking_id, capture_card=False)
 
     # Fetch full booking for response
     booking = await BookingRepository.get_by_id(booking_id)
     response = _booking_to_response(booking)
 
-    # Send guest confirmation of request
-    asyncio.create_task(
-        send_guest_booking_requested(data.guest_email, booking)
-    )
+    # Send guest "request received" email only for the request flow.
+    # _finalize_accepted_booking handles the equivalent under instant-book.
+    if use_request_flow:
+        asyncio.create_task(
+            send_guest_booking_requested(data.guest_email, booking)
+        )
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
     from app.services.channex_sync_service import push_availability_for_room_type
@@ -613,19 +634,23 @@ async def confirm_payment_authorized(booking_id: str) -> dict:
     return {"status": "authorized"}
 
 
-async def host_accept_booking(booking_id: str, user_id: str) -> dict:
-    """Host accepts a pending booking — captures payment if card."""
-    hotel_id = await _get_hotel_id_for_user(user_id)
-    booking = await BookingRepository.get_by_id(booking_id)
-    if not booking or str(booking["hotel_id"]) != hotel_id:
-        raise ValueError("Booking not found")
-    if booking["status"] != "pending":
-        raise ValueError("Booking is not in pending state")
+async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = True) -> dict:
+    """Shared accept path: capture payment if needed, compute split, schedule
+    payouts, mark booking confirmed, send accepted-emails, push Channex.
 
+    Used by host_accept_booking (request flow) and by the instant-book branch
+    in create_booking_request / payment webhooks. ``capture_card=False`` skips
+    the manual Stripe capture step (e.g. when the PaymentIntent was created
+    with automatic capture and Stripe captured at confirm time).
+    """
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+
+    hotel_id = str(booking["hotel_id"])
     payment_method = booking.get("payment_method", "card")
 
-    if payment_method == "card":
-        # Capture payment via Stripe
+    if payment_method == "card" and capture_card:
         payment = await PaymentRepository.get_by_booking_id(booking_id)
         if payment and payment.get("stripe_payment_intent_id"):
             await stripe_service.capture_payment_intent(
@@ -635,15 +660,14 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
                 str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
             )
     elif payment_method == "xendit":
-        # Xendit Invoice payments are already captured when guest pays
-        # Just verify the payment is in the right state
+        # Xendit Invoice payments are already captured when guest pays —
+        # just make sure the row reflects that.
         payment = await PaymentRepository.get_by_booking_id(booking_id)
         if payment and payment["status"] != "captured":
             await PaymentRepository.update_status(
                 str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
             )
 
-    # Calculate split using plan-aware fee engine.
     billing = await fetch_billing_config(hotel_id)
 
     has_affiliate = booking.get("affiliate_id") is not None
@@ -667,7 +691,6 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
         effective_affiliate_commission_pct=affiliate_commission_pct,
     )
 
-    # Update booking
     if payment_method in ("card", "xendit"):
         new_payment_status = "captured"
     else:
@@ -680,7 +703,6 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
         payment_status=new_payment_status,
     )
 
-    # Schedule payouts
     if payment_method in ("card", "xendit"):
         await schedule_payouts(
             booking_id=booking_id,
@@ -693,7 +715,6 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
             check_out=booking["check_out"],
         )
 
-    # Send guest confirmation and host confirmation
     updated = await BookingRepository.get_by_id(booking_id)
     asyncio.create_task(
         send_guest_booking_accepted(updated["guest_email"], updated)
@@ -706,11 +727,21 @@ async def host_accept_booking(booking_id: str, user_id: str) -> dict:
             send_host_booking_accepted(hotel["contact_email"], updated)
         )
 
-    # Sync availability to Channex (fire-and-forget)
     from app.services.channex_sync_service import push_ari_for_booking
     asyncio.create_task(push_ari_for_booking(booking_id))
 
     return updated
+
+
+async def host_accept_booking(booking_id: str, user_id: str) -> dict:
+    """Host accepts a pending booking — captures payment if card."""
+    hotel_id = await _get_hotel_id_for_user(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+    return await _finalize_accepted_booking(booking_id, capture_card=True)
 
 
 async def host_reject_booking(booking_id: str, user_id: str, reason: str | None = None) -> dict:
