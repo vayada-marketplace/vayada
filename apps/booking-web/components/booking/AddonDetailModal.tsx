@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import { useTranslations } from 'next-intl'
 import { Addon } from '@/lib/types'
 import { useCurrency } from '@/contexts/CurrencyContext'
 
@@ -30,6 +31,7 @@ export default function AddonDetailModal({
 }: AddonDetailModalProps) {
   const [imgIndex, setImgIndex] = useState(0)
   const { formatPrice } = useCurrency()
+  const t = useTranslations('addons')
 
   if (!open) return null
 
@@ -109,14 +111,14 @@ export default function AddonDetailModal({
 
           {/* About this experience */}
           <div className="mb-5">
-            <h3 className="text-base font-bold text-gray-900 mb-2">About this experience</h3>
+            <h3 className="text-base font-bold text-gray-900 mb-2">{t('aboutThisExperience')}</h3>
             <p className="text-sm text-gray-600 leading-relaxed">{addon.description}</p>
           </div>
 
           {/* Highlights */}
           {addon.highlights && addon.highlights.length > 0 && (
             <div className="mb-5">
-              <h3 className="text-base font-bold text-gray-900 mb-2">Highlights</h3>
+              <h3 className="text-base font-bold text-gray-900 mb-2">{t('highlights')}</h3>
               <div className="flex flex-wrap gap-2">
                 {addon.highlights.map((h) => (
                   <span key={h} className="text-sm px-3 py-1.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200 font-medium">
@@ -130,7 +132,7 @@ export default function AddonDetailModal({
           {/* What's included */}
           {addon.includedItems && addon.includedItems.length > 0 && (
             <div className="mb-5">
-              <h3 className="text-base font-bold text-gray-900 mb-2">What&apos;s included</h3>
+              <h3 className="text-base font-bold text-gray-900 mb-2">{t('whatsIncluded')}</h3>
               <div className="grid grid-cols-2 gap-1.5">
                 {addon.includedItems.map((item) => (
                   <span key={item} className="flex items-center gap-2 text-sm text-gray-600">
@@ -147,7 +149,7 @@ export default function AddonDetailModal({
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-t border-gray-200 flex-shrink-0 bg-white">
           <div>
             <p className="text-xs text-gray-500">
-              {addon.perPerson ? 'Price per person' : addon.perNight ? 'Price per night' : 'Price'}
+              {addon.perPerson ? t('pricePerPerson') : addon.perNight ? t('pricePerNight') : t('priceLabel')}
             </p>
             <p className="text-2xl font-bold text-gray-900">
               {formatPrice(addon.price, addon.currency)}
@@ -164,12 +166,12 @@ export default function AddonDetailModal({
             {isAdded ? (
               <>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                Added to Trip
+                {t('addedToTrip')}
               </>
             ) : (
               <>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add to Trip
+                {t('addToTrip')}
               </>
             )}
           </button>

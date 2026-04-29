@@ -100,7 +100,15 @@
     "addonsTotal": "Total des suppléments",
     "backToRooms": "Retour aux chambres",
     "proceedToGuest": "Passer aux informations client",
-    "selectDays": "Sélectionnez les jours :"
+    "selectDays": "Sélectionnez les jours :",
+    "aboutThisExperience": "À propos de cette expérience",
+    "highlights": "Points forts",
+    "whatsIncluded": "Ce qui est inclus",
+    "pricePerPerson": "Prix par personne",
+    "pricePerNight": "Prix par nuit",
+    "priceLabel": "Prix",
+    "addedToTrip": "Ajouté au séjour",
+    "addToTrip": "Ajouter au séjour"
   },
   "book": {
     "guestInformation": "Informations client",

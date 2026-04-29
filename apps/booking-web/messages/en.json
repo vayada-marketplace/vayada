@@ -100,7 +100,15 @@
     "addonsTotal": "Add-ons total",
     "backToRooms": "Back to Rooms",
     "proceedToGuest": "Proceed to Guest Information",
-    "selectDays": "Select which days:"
+    "selectDays": "Select which days:",
+    "aboutThisExperience": "About this experience",
+    "highlights": "Highlights",
+    "whatsIncluded": "What's included",
+    "pricePerPerson": "Price per person",
+    "pricePerNight": "Price per night",
+    "priceLabel": "Price",
+    "addedToTrip": "Added to Trip",
+    "addToTrip": "Add to Trip"
   },
   "book": {
     "guestInformation": "Guest Information",

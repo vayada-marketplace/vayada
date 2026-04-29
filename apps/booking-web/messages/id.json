@@ -100,7 +100,15 @@
     "addonsTotal": "Total tambahan",
     "backToRooms": "Kembali ke Kamar",
     "proceedToGuest": "Lanjut ke Informasi Tamu",
-    "selectDays": "Pilih hari:"
+    "selectDays": "Pilih hari:",
+    "aboutThisExperience": "Tentang pengalaman ini",
+    "highlights": "Sorotan",
+    "whatsIncluded": "Yang termasuk",
+    "pricePerPerson": "Harga per orang",
+    "pricePerNight": "Harga per malam",
+    "priceLabel": "Harga",
+    "addedToTrip": "Ditambahkan ke Perjalanan",
+    "addToTrip": "Tambah ke Perjalanan"
   },
   "book": {
     "guestInformation": "Informasi Tamu",
