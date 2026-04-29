@@ -842,14 +842,19 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
 async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
     """Compute (refund_amount, refund_pct, free_days_for_display) for a booking.
 
-    For flexible bookings with the room's flexible_cancellation_type set to
-    'partial_refund', the room's own (window, percent) overrides the hotel-wide
-    cancellation policy. Otherwise the hotel-wide policy applies.
+    Non-refundable rate plans always return 0 refund — the guest accepted that
+    in exchange for the discounted price. For flexible bookings with the room's
+    flexible_cancellation_type set to 'partial_refund', the room's own
+    (window, percent) overrides the hotel-wide cancellation policy. Otherwise
+    the hotel-wide policy applies.
     """
     hotel_id = str(booking["hotel_id"])
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
     free_days = policy["free_cancellation_days"] if policy else 7
     partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
+
+    if booking.get("rate_type") == "nonrefundable":
+        return 0.0, 0.0, free_days
 
     check_in = booking["check_in"]
     days_until = (check_in - date.today()).days
