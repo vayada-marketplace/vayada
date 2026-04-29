@@ -474,13 +474,6 @@ export default function SetupPage() {
         } catch {
           // Non-fatal: benefits can be added later from Settings
         }
-        if (selectedPms === 'vayada') {
-          try {
-            await pmsClient.put('/admin/benefits', { benefits })
-          } catch {
-            // Non-fatal: PMS sync may fail if not using vayada PMS
-          }
-        }
       }
 
       // Auto-select the newly created hotel
