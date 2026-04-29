@@ -345,6 +345,79 @@ class TestAdminRoomTypes:
         )
         assert resp.status_code == 404
 
+    async def test_create_room_defaults_flexible_cancellation_type_to_free(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Default Room",
+                "description": "",
+                "baseRate": 100.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+                "bedType": "Queen",
+                "amenities": [],
+                "features": [],
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["flexibleCancellationType"] == "free"
+        assert body["partialRefundCancelWindowDays"] == 30
+        assert body["partialRefundAmountPercent"] == 50
+
+    async def test_update_to_partial_refund_cancellation_type(
+        self, client, hotel_with_rooms
+    ):
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.patch(
+            f"/admin/room-types/{room['id']}",
+            json={
+                "flexibleCancellationType": "partial_refund",
+                "partialRefundCancelWindowDays": 14,
+                "partialRefundAmountPercent": 75,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["flexibleCancellationType"] == "partial_refund"
+        assert body["partialRefundCancelWindowDays"] == 14
+        assert body["partialRefundAmountPercent"] == 75
+
+    async def test_invalid_flexible_cancellation_type_rejected(
+        self, client, hotel_with_rooms
+    ):
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.patch(
+            f"/admin/room-types/{room['id']}",
+            json={"flexibleCancellationType": "bogus"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 422
+
+    async def test_invalid_partial_refund_percent_rejected(
+        self, client, hotel_with_rooms
+    ):
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.patch(
+            f"/admin/room-types/{room['id']}",
+            json={"partialRefundAmountPercent": 150},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 422
+
 
 # ── Admin Bookings ────────────────────────────────────────────────
 

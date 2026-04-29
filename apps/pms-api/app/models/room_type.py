@@ -133,6 +133,9 @@ class RoomTypeCreate(BaseModel):
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
+    flexible_cancellation_type: str = "free"
+    partial_refund_cancel_window_days: int = 30
+    partial_refund_amount_percent: int = 50
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
@@ -145,6 +148,27 @@ class RoomTypeCreate(BaseModel):
     def validate_size(cls, v: int) -> int:
         if v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("flexible_cancellation_type")
+    @classmethod
+    def validate_flexible_cancellation_type(cls, v: str) -> str:
+        if v not in ("free", "partial_refund"):
+            raise ValueError("flexible_cancellation_type must be 'free' or 'partial_refund'")
+        return v
+
+    @field_validator("partial_refund_cancel_window_days")
+    @classmethod
+    def validate_partial_refund_window(cls, v: int) -> int:
+        if v < 1 or v > 365:
+            raise ValueError("partial_refund_cancel_window_days must be between 1 and 365")
+        return v
+
+    @field_validator("partial_refund_amount_percent")
+    @classmethod
+    def validate_partial_refund_percent(cls, v: int) -> int:
+        if v < 1 or v > 99:
+            raise ValueError("partial_refund_amount_percent must be between 1 and 99")
         return v
 
     @field_validator("operating_periods")
@@ -190,6 +214,9 @@ class RoomTypeUpdate(BaseModel):
     weekend_surcharge: Optional[str] = None
     cancellation_policy: Optional[str] = None
     flexible_rate_enabled: Optional[bool] = None
+    flexible_cancellation_type: Optional[str] = None
+    partial_refund_cancel_window_days: Optional[int] = None
+    partial_refund_amount_percent: Optional[int] = None
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
     non_refundable_cancellation_policy: Optional[str] = None
@@ -202,6 +229,27 @@ class RoomTypeUpdate(BaseModel):
     def validate_size(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("flexible_cancellation_type")
+    @classmethod
+    def validate_flexible_cancellation_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("free", "partial_refund"):
+            raise ValueError("flexible_cancellation_type must be 'free' or 'partial_refund'")
+        return v
+
+    @field_validator("partial_refund_cancel_window_days")
+    @classmethod
+    def validate_partial_refund_window(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 1 or v > 365):
+            raise ValueError("partial_refund_cancel_window_days must be between 1 and 365")
+        return v
+
+    @field_validator("partial_refund_amount_percent")
+    @classmethod
+    def validate_partial_refund_percent(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 1 or v > 99):
+            raise ValueError("partial_refund_amount_percent must be between 1 and 99")
         return v
 
     @field_validator("operating_periods")
@@ -248,6 +296,9 @@ class RoomTypeResponse(BaseModel):
     benefits: List[str] = []
     flexible_rate_enabled: bool = True
     cancellation_policy: str = "Free until 7 days before"
+    flexible_cancellation_type: str = "free"
+    partial_refund_cancel_window_days: int = 30
+    partial_refund_amount_percent: int = 50
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
@@ -283,6 +334,9 @@ class RoomTypeAdminResponse(BaseModel):
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
+    flexible_cancellation_type: str = "free"
+    partial_refund_cancel_window_days: int = 30
+    partial_refund_amount_percent: int = 50
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"

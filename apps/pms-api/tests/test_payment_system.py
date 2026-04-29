@@ -3,7 +3,7 @@ Tests for the payment system: Stripe integration, host approval flow,
 payment settings, cancellation policies, and payouts.
 """
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch, AsyncMock, MagicMock
 from tests.conftest import (
     create_test_user,
@@ -551,6 +551,104 @@ class TestGuestCancellation:
             json={"guest_email": "cancel@test.com"},
         )
         assert resp.status_code == 400
+
+    async def test_cancel_preview_partial_refund_within_window(
+        self, client, cleanup_database
+    ):
+        """Room with partial-refund cancellation type returns the configured
+        percentage when guest cancels at least N days before check-in."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await Database.execute(
+            "UPDATE room_types SET flexible_cancellation_type = 'partial_refund', "
+            "partial_refund_cancel_window_days = 30, partial_refund_amount_percent = 50 "
+            "WHERE id = $1",
+            str(room["id"]),
+        )
+
+        check_in = (date.today() + timedelta(days=35)).isoformat()
+        check_out = (date.today() + timedelta(days=39)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            check_in=check_in, check_out=check_out,
+            status="confirmed", payment_method="card", payment_status="captured",
+            guest_email="partial@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel-preview",
+            json={"guest_email": "partial@test.com"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["refundPercentage"] == 50
+        assert body["refundAmount"] == 300.0  # 50% of 4 nights × €150
+
+    async def test_cancel_preview_partial_refund_after_window(
+        self, client, cleanup_database
+    ):
+        """Cancellation after the window returns 0 refund regardless of
+        the hotel-wide free_cancellation_days policy."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(
+            str(hotel["id"]), free_cancellation_days=7
+        )
+        await Database.execute(
+            "UPDATE room_types SET flexible_cancellation_type = 'partial_refund', "
+            "partial_refund_cancel_window_days = 30, partial_refund_amount_percent = 50 "
+            "WHERE id = $1",
+            str(room["id"]),
+        )
+
+        check_in = (date.today() + timedelta(days=20)).isoformat()
+        check_out = (date.today() + timedelta(days=24)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            check_in=check_in, check_out=check_out,
+            status="confirmed", payment_method="card", payment_status="captured",
+            guest_email="partial@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel-preview",
+            json={"guest_email": "partial@test.com"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["refundPercentage"] == 0
+        assert body["refundAmount"] == 0
+
+    async def test_cancel_preview_free_cancellation_unchanged(
+        self, client, cleanup_database
+    ):
+        """Default free-cancellation rooms still use the hotel-wide policy."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(
+            str(hotel["id"]), free_cancellation_days=7
+        )
+
+        check_in = (date.today() + timedelta(days=14)).isoformat()
+        check_out = (date.today() + timedelta(days=18)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]), str(room["id"]),
+            check_in=check_in, check_out=check_out,
+            status="confirmed", payment_method="card", payment_status="captured",
+            guest_email="free@test.com",
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel-preview",
+            json={"guest_email": "free@test.com"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["refundPercentage"] == 100
+        assert body["refundAmount"] == 600.0
 
 
 # ── Booking Status Polling ───────────────────────────────────────

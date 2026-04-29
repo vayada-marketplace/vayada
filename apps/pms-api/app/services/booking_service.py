@@ -839,6 +839,38 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     return updated
 
 
+async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
+    """Compute (refund_amount, refund_pct, free_days_for_display) for a booking.
+
+    For flexible bookings with the room's flexible_cancellation_type set to
+    'partial_refund', the room's own (window, percent) overrides the hotel-wide
+    cancellation policy. Otherwise the hotel-wide policy applies.
+    """
+    hotel_id = str(booking["hotel_id"])
+    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+    free_days = policy["free_cancellation_days"] if policy else 7
+    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
+
+    check_in = booking["check_in"]
+    days_until = (check_in - date.today()).days
+    total_amount = float(booking["total_amount"])
+
+    if booking.get("rate_type") == "flexible":
+        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
+        if room_type and room_type.get("flexible_cancellation_type") == "partial_refund":
+            window = room_type.get("partial_refund_cancel_window_days") or 30
+            percent = float(room_type.get("partial_refund_amount_percent") or 50)
+            if days_until >= window:
+                return round(total_amount * percent / 100, 2), percent, window
+            return 0.0, 0.0, window
+
+    if days_until >= free_days:
+        return total_amount, 100.0, free_days
+    if partial_pct > 0:
+        return round(total_amount * partial_pct / 100, 2), partial_pct, free_days
+    return 0.0, 0.0, free_days
+
+
 async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
     """Calculate refund details without actually cancelling."""
     booking = await BookingRepository.get_by_id(booking_id)
@@ -849,24 +881,8 @@ async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
     if booking["guest_email"].lower() != guest_email.lower():
         raise ValueError("Email does not match booking")
 
-    hotel_id = str(booking["hotel_id"])
-    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
-    free_days = policy["free_cancellation_days"] if policy else 7
-    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
-
-    check_in = booking["check_in"]
-    days_until = (check_in - date.today()).days
-
-    total_amount = float(booking["total_amount"])
-    refund_amount = 0.0
-    refund_pct = 0.0
-
-    if days_until >= free_days:
-        refund_amount = total_amount
-        refund_pct = 100.0
-    elif partial_pct > 0:
-        refund_amount = round(total_amount * partial_pct / 100, 2)
-        refund_pct = partial_pct
+    refund_amount, refund_pct, free_days = await _compute_cancellation_refund(booking)
+    days_until = (booking["check_in"] - date.today()).days
 
     return {
         "refundAmount": refund_amount,
@@ -887,24 +903,7 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     if booking["guest_email"].lower() != guest_email.lower():
         raise ValueError("Email does not match booking")
 
-    hotel_id = str(booking["hotel_id"])
-    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
-    free_days = policy["free_cancellation_days"] if policy else 7
-    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
-
-    check_in = booking["check_in"]
-    days_until = (check_in - date.today()).days
-
-    total_amount = float(booking["total_amount"])
-    refund_amount = 0.0
-    refund_pct = 0.0
-
-    if days_until >= free_days:
-        refund_amount = total_amount
-        refund_pct = 100.0
-    elif partial_pct > 0:
-        refund_amount = round(total_amount * partial_pct / 100, 2)
-        refund_pct = partial_pct
+    refund_amount, refund_pct, _ = await _compute_cancellation_refund(booking)
 
     # Process refund if card payment
     if booking.get("payment_method") == "card" and refund_amount > 0:
