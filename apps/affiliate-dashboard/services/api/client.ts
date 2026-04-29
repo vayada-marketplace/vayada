@@ -24,6 +24,18 @@ export class ApiErrorResponse extends Error {
   }
 }
 
+export function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiErrorResponse) {
+    if (typeof err.data.detail === 'string' && err.data.detail) return err.data.detail
+    if (Array.isArray(err.data.detail) && err.data.detail.length > 0) {
+      return err.data.detail[0].msg
+    }
+    return err.message || fallback
+  }
+  if (err instanceof Error) return err.message || fallback
+  return fallback
+}
+
 export class ApiClient {
   private baseURL: string
   private TOKEN_KEY = 'access_token'

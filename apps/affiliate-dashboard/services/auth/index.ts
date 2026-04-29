@@ -3,6 +3,8 @@
  * Uses the booking engine auth backend (port 8001)
  */
 
+import { ApiError, ApiErrorResponse } from '@/services/api/client'
+
 const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'
 
 const TOKEN_KEY = 'access_token'
@@ -97,15 +99,16 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   const response = await fetch(url, { ...options, headers })
 
   const contentType = response.headers.get('content-type')
-  const data = contentType?.includes('application/json')
-    ? await response.json()
-    : await response.text()
+  const isJson = contentType?.includes('application/json') ?? false
+  const text = await response.text()
+  const data = isJson && text ? JSON.parse(text) : text || null
 
   if (!response.ok) {
-    const error = new Error(data?.detail || `API Error: ${response.status}`)
-    ;(error as any).status = response.status
-    ;(error as any).data = data
-    throw error
+    const errorData: ApiError =
+      data && typeof data === 'object' && 'detail' in data
+        ? (data as ApiError)
+        : { detail: typeof data === 'string' && data ? data : `API Error: ${response.status}` }
+    throw new ApiErrorResponse(response.status, errorData)
   }
 
   return data as T

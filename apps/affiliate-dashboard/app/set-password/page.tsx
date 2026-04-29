@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
+import { ApiErrorResponse } from '@/services/api/client'
 
 function SetPasswordPageInner() {
   const router = useRouter()
@@ -41,13 +42,11 @@ function SetPasswordPageInner() {
       await authService.setPassword({ token, new_password: password })
       setSuccess(true)
     } catch (err) {
-      if (err instanceof Error) {
-        const e = err as any
-        if (e.data?.detail) {
-          setError(e.data.detail)
-        } else {
-          setError(err.message || 'Failed to set password. The link may have expired.')
-        }
+      if (err instanceof ApiErrorResponse) {
+        const detail = typeof err.data.detail === 'string' ? err.data.detail : null
+        setError(detail || err.message || 'Failed to set password. The link may have expired.')
+      } else if (err instanceof Error) {
+        setError(err.message || 'Failed to set password. The link may have expired.')
       } else {
         setError('An unexpected error occurred.')
       }

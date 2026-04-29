@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
+import { ApiErrorResponse } from '@/services/api/client'
 import LoginForm from '@/components/auth/LoginForm'
 
 function LoginPageInner() {
@@ -21,15 +22,16 @@ function LoginPageInner() {
       await authService.login({ email, password })
       router.push('/')
     } catch (error) {
-      if (error instanceof Error) {
-        const err = error as any
-        if (err.status === 401) {
+      if (error instanceof ApiErrorResponse) {
+        if (error.status === 401) {
           setSubmitError('Invalid email or password.')
-        } else if (err.status === 403) {
+        } else if (error.status === 403) {
           setSubmitError('Your account has been suspended. Please contact support.')
         } else {
           setSubmitError(error.message || 'An unexpected error occurred. Please try again.')
         }
+      } else if (error instanceof Error) {
+        setSubmitError(error.message || 'An unexpected error occurred. Please try again.')
       } else {
         setSubmitError('An unexpected error occurred. Please try again.')
       }

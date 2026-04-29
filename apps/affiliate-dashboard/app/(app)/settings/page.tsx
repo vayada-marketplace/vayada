@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
-import { apiClient } from '@/services/api/client'
+import { apiClient, extractErrorMessage } from '@/services/api/client'
 import { authService } from '@/services/auth'
 
 interface Property {
@@ -91,8 +91,8 @@ export default function SettingsPage() {
       } else {
         setSuccess('Account validated successfully')
       }
-    } catch (err: any) {
-      setError(err.message || 'Bank account validation failed')
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Bank account validation failed'))
     } finally {
       setValidating(false)
     }
@@ -147,8 +147,8 @@ export default function SettingsPage() {
         } : {}),
       })
       setSuccess('Payment settings saved')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save')
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to save'))
     } finally {
       setSaving(false)
     }
