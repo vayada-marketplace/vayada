@@ -65,6 +65,9 @@ export interface RoomType {
   benefits: string[]
   flexibleRateEnabled: boolean
   cancellationPolicy?: string
+  flexibleCancellationType?: 'free' | 'partial_refund'
+  partialRefundCancelWindowDays?: number
+  partialRefundAmountPercent?: number
   originalRate?: number | null
   lastMinuteDiscountPercent?: number | null
   ratePaymentMethods?: Record<string, string[]> | null

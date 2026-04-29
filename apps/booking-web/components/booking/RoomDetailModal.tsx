@@ -269,7 +269,11 @@ export default function RoomDetailModal({
                     <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
-                      <p className="text-xs text-gray-500">Free cancellation until {getFreeCancellationDays(room.cancellationPolicy)} days before</p>
+                      <p className="text-xs text-gray-500">
+                        {room.flexibleCancellationType === 'partial_refund'
+                          ? `${room.partialRefundAmountPercent ?? 50}% refund if cancelled at least ${room.partialRefundCancelWindowDays ?? 30} days before`
+                          : `Free cancellation until ${getFreeCancellationDays(room.cancellationPolicy)} days before`}
+                      </p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">

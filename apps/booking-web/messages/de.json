@@ -69,6 +69,7 @@
     "rateOptions": "Tarifoptionen",
     "flexibleRate": "Flexibler Tarif",
     "flexibleDesc": "Kostenlose Stornierung bis {days} Tage vorher",
+    "partialRefundDesc": "{percent}% Rückerstattung bei Stornierung mindestens {days} Tage vorher",
     "nonRefundableRate": "Nicht erstattbarer Tarif",
     "nonRefundableDesc": "Nicht erstattbar",
     "off": "-15% RABATT",

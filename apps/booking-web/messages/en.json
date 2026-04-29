@@ -70,6 +70,7 @@
     "rateOptions": "Rate Options",
     "flexibleRate": "Flexible Rate",
     "flexibleDesc": "Free cancellation until {days} days before",
+    "partialRefundDesc": "{percent}% refund if cancelled at least {days} days before",
     "nonRefundableRate": "Non-Refundable Rate",
     "nonRefundableDesc": "Non-refundable",
     "off": "-15% OFF",

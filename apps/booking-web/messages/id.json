@@ -69,6 +69,7 @@
     "rateOptions": "Pilihan Tarif",
     "flexibleRate": "Tarif Fleksibel",
     "flexibleDesc": "Pembatalan gratis hingga {days} hari sebelumnya",
+    "partialRefundDesc": "Pengembalian dana {percent}% jika dibatalkan minimal {days} hari sebelumnya",
     "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",
