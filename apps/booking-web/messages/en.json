@@ -41,8 +41,7 @@
     "rooms": "Rooms",
     "addons": "Add-ons",
     "details": "Details",
-    "payment": "Payment",
-    "confirmation": "Confirmation"
+    "payment": "Payment"
   },
   "home": {
     "yourStay": "Your Stay",
@@ -124,7 +123,6 @@
     "backToAddons": "Back to Add-ons",
     "backToRooms": "Back to rooms",
     "proceedToPayment": "Proceed to Payment",
-    "completeBooking": "Complete Booking",
     "continueToPayment": "Continue to Payment",
     "booking": "Booking...",
     "fillRequired": "Please fill in all required fields.",
@@ -186,6 +184,7 @@
   },
   "myBooking": {
     "title": "My Booking",
+    "notFound": "No booking found with that reference and email.",
     "lookUp": "Look Up Your Booking",
     "lookUpDesc": "Enter your booking reference and email address to view your reservation details.",
     "reference": "Booking Reference",
