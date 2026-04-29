@@ -108,7 +108,7 @@ function PaymentPageContent() {
   const room = rooms.find((r) => r.id === roomId) || rooms[0]
   const nights = calculateNights(checkIn, checkOut)
   const nightlyRateBase = isNonRefundable
-    ? getNonRefundableRate(room.baseRate, room?.nonRefundableRate)
+    ? getNonRefundableRate(room?.baseRate ?? 0, room?.nonRefundableRate)
     : room?.baseRate ?? 0
   const roomCurrency = room?.currency || hotel?.currency || 'EUR'
   // Per-night rate rounded in the displayed currency so nightly × nights equals
