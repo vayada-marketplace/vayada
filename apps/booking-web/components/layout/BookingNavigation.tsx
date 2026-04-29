@@ -689,10 +689,11 @@ export default function BookingNavigation() {
   const [langOpen, setLangOpen] = useState(false)
   const [currOpen, setCurrOpen] = useState(false)
 
-  const availableLanguages = useMemo(() =>
-    LANGUAGES.filter((l) => hotel?.supportedLanguages?.includes(l.code)),
-    [hotel?.supportedLanguages]
-  )
+  const availableLanguages = useMemo(() => {
+    const codes = new Set<string>(hotel?.supportedLanguages ?? [])
+    if (hotel?.defaultLanguage) codes.add(hotel.defaultLanguage)
+    return LANGUAGES.filter((l) => codes.has(l.code))
+  }, [hotel?.defaultLanguage, hotel?.supportedLanguages])
   const selectedLangLabel = LANGUAGES.find((l) => l.code === locale)?.label.slice(0, 2).toUpperCase() || 'EN'
 
   const currencyItems = useMemo(() => {

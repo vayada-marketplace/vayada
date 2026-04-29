@@ -31,6 +31,7 @@ export const MOCK_HOTEL: Hotel = {
   ],
   checkInTime: '15:00',
   checkOutTime: '11:00',
+  defaultLanguage: 'en',
   supportedLanguages: ['en'],
   bookingFilters: [],
   contact: {
