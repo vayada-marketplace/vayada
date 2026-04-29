@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { apiClient } from '@/services/api/client'
+import DataState from '@/components/DataState'
 
 interface Payout {
   id: string
@@ -56,43 +57,40 @@ export default function PayoutHistory() {
         </a>
       </div>
 
-      {payouts === null && !error && (
-        <p className="text-sm text-muted py-4">Loading payouts…</p>
-      )}
-
-      {error && (
-        <p className="text-sm text-muted py-4">Couldn&apos;t load payouts.</p>
-      )}
-
-      {payouts && payouts.length === 0 && (
-        <p className="text-sm text-muted py-4">No payouts yet.</p>
-      )}
-
-      {payouts && payouts.length > 0 && (
-        <div className="space-y-3">
-          {payouts.map((payout) => (
-            <div
-              key={payout.id}
-              className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0"
-            >
-              <div className="flex items-center gap-3">
-                <CheckCircleIcon className="w-5 h-5 text-success-500" />
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    {formatAmount(payout.amount, payout.currency)}
-                  </p>
-                  <p className="text-xs text-muted">
-                    {formatDate(payout.date)} &middot; {METHOD_LABELS[payout.method] || payout.method}
-                  </p>
+      <DataState
+        data={payouts}
+        error={error}
+        isEmpty={(p) => p.length === 0}
+        loadingLabel="Loading payouts…"
+        errorLabel="Couldn't load payouts."
+        emptyLabel="No payouts yet."
+      >
+        {(items) => (
+          <div className="space-y-3">
+            {items.map((payout) => (
+              <div
+                key={payout.id}
+                className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0"
+              >
+                <div className="flex items-center gap-3">
+                  <CheckCircleIcon className="w-5 h-5 text-success-500" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {formatAmount(payout.amount, payout.currency)}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {formatDate(payout.date)} &middot; {METHOD_LABELS[payout.method] || payout.method}
+                    </p>
+                  </div>
                 </div>
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-success-50 text-success-700">
+                  Paid
+                </span>
               </div>
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-success-50 text-success-700">
-                Paid
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </DataState>
     </div>
   )
 }

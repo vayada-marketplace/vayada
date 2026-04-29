@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { CursorArrowRaysIcon, CreditCardIcon, UserPlusIcon } from '@heroicons/react/24/outline'
 import { apiClient } from '@/services/api/client'
+import DataState from '@/components/DataState'
 
 type ActivityType = 'click' | 'booking' | 'signup'
 
@@ -67,39 +68,36 @@ export default function RecentActivity() {
         </a>
       </div>
 
-      {activities === null && !error && (
-        <p className="text-sm text-muted py-4">Loading activity…</p>
-      )}
-
-      {error && (
-        <p className="text-sm text-muted py-4">Couldn&apos;t load activity.</p>
-      )}
-
-      {activities && activities.length === 0 && (
-        <p className="text-sm text-muted py-4">No activity yet. Share your referral link to get started.</p>
-      )}
-
-      {activities && activities.length > 0 && (
-        <div className="space-y-3">
-          {activities.map((activity) => {
-            const Icon = iconMap[activity.type]
-            return (
-              <div
-                key={`${activity.type}-${activity.ts}-${activity.property}`}
-                className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
-              >
-                <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}>
-                  <Icon className="w-4 h-4" />
+      <DataState
+        data={activities}
+        error={error}
+        isEmpty={(a) => a.length === 0}
+        loadingLabel="Loading activity…"
+        errorLabel="Couldn't load activity."
+        emptyLabel="No activity yet. Share your referral link to get started."
+      >
+        {(items) => (
+          <div className="space-y-3">
+            {items.map((activity) => {
+              const Icon = iconMap[activity.type]
+              return (
+                <div
+                  key={`${activity.type}-${activity.ts}-${activity.property}`}
+                  className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
+                >
+                  <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{message(activity)}</p>
+                    <p className="text-xs text-muted mt-0.5">{activity.property} &middot; {timeAgo(activity.ts)}</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{message(activity)}</p>
-                  <p className="text-xs text-muted mt-0.5">{activity.property} &middot; {timeAgo(activity.ts)}</p>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
+              )
+            })}
+          </div>
+        )}
+      </DataState>
     </div>
   )
 }

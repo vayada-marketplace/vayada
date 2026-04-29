@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/services/api/client'
+import DataState from '@/components/DataState'
 
 interface MonthData {
   month: string
@@ -23,39 +24,31 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   IDR: 'Rp',
 }
 
+const MESSAGE_CLASSNAME = 'h-40 flex items-center justify-center text-sm text-muted'
+
 export default function EarningsChart() {
   const [period, setPeriod] = useState<Period>('6m')
-  const [data, setData] = useState<MonthData[]>([])
-  const [currency, setCurrency] = useState('EUR')
-  const [loading, setLoading] = useState(true)
+  const [response, setResponse] = useState<EarningsResponse | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    setResponse(null)
     setError(false)
     apiClient
       .get<EarningsResponse>(`/affiliate/earnings?period=${period}`)
       .then((res) => {
         if (cancelled) return
-        setData(res.months)
-        setCurrency(res.currency)
+        setResponse(res)
       })
       .catch(() => {
         if (cancelled) return
         setError(true)
       })
-      .finally(() => {
-        if (cancelled) return
-        setLoading(false)
-      })
     return () => {
       cancelled = true
     }
   }, [period])
-
-  const maxEarnings = data.length > 0 ? Math.max(...data.map((d) => d.earnings), 1) : 1
-  const symbol = CURRENCY_SYMBOLS[currency] || currency + ' '
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -78,35 +71,39 @@ export default function EarningsChart() {
         </div>
       </div>
 
-      {loading && (
-        <div className="h-40 flex items-center justify-center text-sm text-muted">
-          Loading…
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="h-40 flex items-center justify-center text-sm text-muted">
-          Couldn&apos;t load earnings.
-        </div>
-      )}
-
-      {!loading && !error && data.length > 0 && (
-        <div className="flex items-end gap-3 h-40">
-          {data.map((d) => (
-            <div key={d.month} className="flex-1 flex flex-col items-center gap-1.5">
-              <span className="text-xs font-medium text-gray-700">
-                {symbol}
-                {Math.round(d.earnings).toLocaleString()}
-              </span>
-              <div
-                className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
-                style={{ height: `${(d.earnings / maxEarnings) * 100}%` }}
-              />
-              <span className="text-xs text-muted">{d.label}</span>
+      <DataState
+        data={response}
+        error={error}
+        isEmpty={(r) => r.months.length === 0}
+        loadingLabel="Loading…"
+        errorLabel="Couldn't load earnings."
+        emptyLabel="No earnings yet."
+        loadingClassName={MESSAGE_CLASSNAME}
+        errorClassName={MESSAGE_CLASSNAME}
+        emptyClassName={MESSAGE_CLASSNAME}
+      >
+        {(res) => {
+          const maxEarnings = Math.max(...res.months.map((d) => d.earnings), 1)
+          const symbol = CURRENCY_SYMBOLS[res.currency] || res.currency + ' '
+          return (
+            <div className="flex items-end gap-3 h-40">
+              {res.months.map((d) => (
+                <div key={d.month} className="flex-1 flex flex-col items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-700">
+                    {symbol}
+                    {Math.round(d.earnings).toLocaleString()}
+                  </span>
+                  <div
+                    className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
+                    style={{ height: `${(d.earnings / maxEarnings) * 100}%` }}
+                  />
+                  <span className="text-xs text-muted">{d.label}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )
+        }}
+      </DataState>
     </div>
   )
 }
