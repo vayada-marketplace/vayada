@@ -37,22 +37,17 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { slug } = useSlug()
   const baseCurrency = hotel?.currency || 'EUR'
 
-  const [selectedCurrency, setSelectedCurrencyState] = useState<string>(() => {
-    if (typeof window !== 'undefined' && slug) {
-      return localStorage.getItem(getStorageKey(slug)) || baseCurrency
-    }
-    return baseCurrency
-  })
+  // Always start with the hotel's base currency so SSR and the first client
+  // render agree. The effect below replaces it with the persisted choice once
+  // we're definitively on the client and the slug has been resolved.
+  const [selectedCurrency, setSelectedCurrencyState] = useState<string>(baseCurrency)
   const [rates, setRates] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
 
-  // Sync default currency when hotel loads
   useEffect(() => {
     if (!hotel || !slug) return
-    const stored = typeof window !== 'undefined' ? localStorage.getItem(getStorageKey(slug)) : null
-    if (!stored) {
-      setSelectedCurrencyState(hotel.currency)
-    }
+    const stored = localStorage.getItem(getStorageKey(slug))
+    setSelectedCurrencyState(stored || hotel.currency)
   }, [hotel, slug])
 
   // Fetch exchange rates with retry
