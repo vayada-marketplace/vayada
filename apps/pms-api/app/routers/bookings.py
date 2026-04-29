@@ -141,8 +141,13 @@ async def get_payment_settings(slug: str):
             "SELECT pay_at_property_enabled, online_card_payment, bank_transfer "
             "FROM booking_hotels WHERE slug = $1", slug,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Falling back to PMS settings would surface stale flags; log so the
+        # discrepancy is visible if booking_db is down (audit item #13).
+        logger.warning(
+            "booking_db payment-flag lookup failed for slug %s: %s; falling back to PMS settings",
+            slug, e,
+        )
 
     if be_payment_flags:
         pay_at_property = be_payment_flags.get("pay_at_property_enabled", False)
@@ -209,7 +214,11 @@ async def get_payment_settings(slug: str):
                     "bankName": be_hotel.get("payout_bank_name") or "",
                     "swift": be_hotel.get("payout_swift") or "",
                 }
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "booking_db pay-at-hotel lookup failed for slug %s: %s; using defaults",
+            slug, e,
+        )
         result["payAtHotelMethods"] = ["cash", "card"]
         result["termsText"] = ""
         result["cancellationPolicyText"] = ""

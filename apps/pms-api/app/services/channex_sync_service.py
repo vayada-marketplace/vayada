@@ -15,6 +15,7 @@ from app.repositories.channex_mapping_repo import (
     ChannexChannelMarkupRepository,
 )
 from app.services import channex_service
+from app.services.hotel_identity_service import get_currency as get_be_currency
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +48,8 @@ async def provision_property(hotel_id: str) -> dict:
         raise ValueError("Hotel not found")
 
     # Currency is owned by booking_db.booking_hotels (see
-    # memory/project_hotel_data_ownership.md). Fall back to USD only
-    # if the booking engine row is missing, which shouldn't happen in
-    # practice since hotel ids are unified across both DBs.
-    currency = "USD"
-    if app_settings.BOOKING_ENGINE_DATABASE_URL:
-        try:
-            be_currency = await BookingEngineDatabase.fetchval(
-                "SELECT currency FROM booking_hotels WHERE id = $1",
-                hotel_id,
-            )
-            if be_currency:
-                currency = be_currency
-        except Exception as e:
-            logger.warning("Failed to read currency from booking engine for Channex provisioning: %s", e)
+    # memory/project_hotel_data_ownership.md).
+    currency = await get_be_currency(hotel_id)
 
     # Step 1: Create property in Channex (or skip if already exists)
     if conn.get("channex_property_id"):

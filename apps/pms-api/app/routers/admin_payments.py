@@ -19,6 +19,7 @@ from app.models.payment import (
     XenditBankDetailsRequest,
 )
 from app.services import stripe_service, xendit_service
+from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.services.xendit_service import XenditError
 
 logger = logging.getLogger(__name__)
@@ -27,26 +28,10 @@ router = APIRouter(prefix="/admin", tags=["admin-payments"])
 
 
 async def _get_booking_engine_currency(user_id: str) -> str:
-    """Fetch the currency set during onboarding from the booking engine DB.
-
-    Uses get_hotel_id() so that when X-Hotel-Id is set, we look up
-    the currency of the *selected* hotel, not whatever WHERE user_id
-    LIMIT 1 happened to return. Because PMS and booking-engine hotel
-    ids are unified after the multi-hotel-ids migration, we can join
-    directly by id across DBs.
-    """
-    if not app_settings.BOOKING_ENGINE_DATABASE_URL:
-        return "EUR"
-    try:
-        hotel_id = await get_hotel_id(user_id)
-        currency = await BookingEngineDatabase.fetchval(
-            "SELECT currency FROM booking_hotels WHERE id = $1",
-            hotel_id,
-        )
-        return currency or "EUR"
-    except Exception as e:
-        logger.warning("Failed to fetch currency from booking engine DB: %s", e)
-        return "EUR"
+    """Resolve the user's hotel-id (honoring X-Hotel-Id) then fetch the
+    authoritative currency from booking_db."""
+    hotel_id = await get_hotel_id(user_id)
+    return await get_be_currency(hotel_id)
 
 
 # ── Payment Settings ──────────────────────────────────────────────

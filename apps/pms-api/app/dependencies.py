@@ -5,7 +5,7 @@ import jwt
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import settings
-from app.database import AuthDatabase, Database
+from app.database import AuthDatabase
 from app.utils import set_current_hotel_id_override
 
 
@@ -117,54 +117,3 @@ async def require_super_admin(
     return user_id
 
 
-async def get_current_hotel(
-    request: Request,
-    user_id: str = Depends(require_hotel_admin),
-) -> dict | None:
-    """
-    Resolve the hotel the current request is operating on.
-
-    Priority:
-      1. `X-Hotel-Id` request header — the multi-hotel-safe mode. The
-         header value must identify a hotel owned by the authenticated
-         user, otherwise 403.
-      2. Legacy fallback: the user's oldest hotel (ordered by
-         created_at). Preserved so that clients that haven't been
-         updated to send the header still work in single-hotel mode.
-         A future commit will remove this fallback entirely once all
-         clients are updated.
-
-    Returns the hotel row as a dict, or None if the user has no
-    hotels at all (new users mid-onboarding). Routers that require
-    a hotel should depend on `require_current_hotel` instead.
-    """
-    header_id = request.headers.get("X-Hotel-Id")
-    if header_id:
-        hotel = await Database.fetchrow(
-            "SELECT * FROM hotels WHERE id = $1 AND user_id = $2",
-            header_id, user_id,
-        )
-        if not hotel:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Hotel not found or not owned by this user",
-            )
-        return dict(hotel)
-
-    row = await Database.fetchrow(
-        "SELECT * FROM hotels WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",
-        user_id,
-    )
-    return dict(row) if row else None
-
-
-async def require_current_hotel(
-    hotel: dict | None = Depends(get_current_hotel),
-) -> dict:
-    """Same as get_current_hotel but raises 404 when the user has no hotel."""
-    if not hotel:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No hotel found for this user. Create one via POST /admin/register-hotel first.",
-        )
-    return hotel

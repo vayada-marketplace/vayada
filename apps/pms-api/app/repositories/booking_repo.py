@@ -265,14 +265,20 @@ class BookingRepository:
         if not row:
             return None
 
-        # Recalculate total_amount if dates or rate changed
+        # Recalculate total_amount if dates or rate changed. Mirror the
+        # booking-creation formula so addons and promo discount survive
+        # an admin edit (the last-minute discount is already baked into
+        # the stored nightly_rate).
         if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
             current = await BookingRepository.get_by_id(booking_id)
             ci = date.fromisoformat(str(current["check_in"]))
             co = date.fromisoformat(str(current["check_out"]))
             nights = max(1, (co - ci).days)
             rate = float(current["nightly_rate"])
-            total = round(rate * nights, 2)
+            rooms = int(current.get("number_of_rooms") or 1)
+            addon_total = float(current.get("addon_total") or 0)
+            promo_discount = float(current.get("promo_discount") or 0)
+            total = round(rate * nights * rooms + addon_total - promo_discount, 2)
             await Database.execute(
                 "UPDATE bookings SET total_amount = $2, updated_at = now() WHERE id = $1",
                 booking_id, total,
