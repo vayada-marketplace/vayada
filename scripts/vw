@@ -28,8 +28,9 @@ vw — vayada worktree helper
 
   vw list                       Show all active worktrees.
 
-  vw sync                       Rebase every worktree branch on origin/main and
-                                re-init submodules.
+  vw sync                       Pull main repo, rebase every worktree branch
+                                on origin/main, and re-init submodules in all
+                                worktrees (main repo included).
 
   vw ship-ready                 Scan all worktrees; for each whose branch tip
                                 is already in origin/main (the agent shipped),
@@ -189,6 +190,30 @@ cmd_sync() {
 
   echo "→ Fetching $remote/main"
   git fetch "$remote" main --quiet
+
+  # Sync the main repo too: ship-all pushes from worktrees advance
+  # $remote/main, so the main repo's local branch and submodule HEADs drift
+  # behind unless we pull and re-checkout submodule SHAs explicitly.
+  local main_branch
+  main_branch="$(git -C "$MAIN_REPO" branch --show-current)"
+  if [ "$main_branch" != "main" ]; then
+    echo "→ Skipping main repo ($main_branch checked out, not main)"
+  else
+    # Snap submodules to currently-recorded SHAs first so autostash doesn't
+    # re-apply stale pointers on top of the new parent commit.
+    git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null || true
+
+    if ! git -C "$MAIN_REPO" merge-base --is-ancestor "$remote/main" main 2>/dev/null; then
+      echo "→ Pulling main repo (rebase --autostash)"
+      if ! git -C "$MAIN_REPO" -c rebase.autostash=true pull --rebase "$remote" main --quiet; then
+        echo "   pull --rebase failed — resolve manually in $MAIN_REPO"
+      fi
+    fi
+
+    if ! git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null; then
+      echo "   submodule update failed in main repo — resolve manually"
+    fi
+  fi
 
   while IFS= read -r wt; do
     [ "$wt" = "$MAIN_REPO" ] && continue
