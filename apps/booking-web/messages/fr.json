@@ -179,16 +179,6 @@
     "authorizationNote": "Votre carte ne sera débitée que si l'hôte accepte votre réservation dans les 24 heures.",
     "continueToPayment": "Continuer vers le paiement"
   },
-  "availability": {
-    "title": "Vérifier la disponibilité",
-    "checkIn": "Arrivée",
-    "checkOut": "Départ",
-    "adults": "Adultes",
-    "children": "Enfants",
-    "roomsAvailable": "{count} chambres disponibles",
-    "totalLabel": "{amount} total",
-    "maxGuests": "Max {count} voyageurs"
-  },
   "myBooking": {
     "title": "Ma réservation",
     "lookUp": "Rechercher votre réservation",

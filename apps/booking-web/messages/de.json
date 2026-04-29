@@ -178,16 +178,6 @@
     "authorizationNote": "Ihre Karte wird nur belastet, wenn der Gastgeber Ihre Buchung innerhalb von 24 Stunden annimmt.",
     "continueToPayment": "Weiter zur Zahlung"
   },
-  "availability": {
-    "title": "Verfügbarkeit prüfen",
-    "checkIn": "Check-in",
-    "checkOut": "Check-out",
-    "adults": "Erwachsene",
-    "children": "Kinder",
-    "roomsAvailable": "{count} Zimmer verfügbar",
-    "totalLabel": "{amount} gesamt",
-    "maxGuests": "Max. {count} Gäste"
-  },
   "myBooking": {
     "title": "Meine Buchung",
     "lookUp": "Buchung nachschlagen",

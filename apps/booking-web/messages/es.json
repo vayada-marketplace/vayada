@@ -179,16 +179,6 @@
     "authorizationNote": "Tu tarjeta solo se cobrará si el anfitrión acepta tu reserva en un plazo de 24 horas.",
     "continueToPayment": "Continuar al pago"
   },
-  "availability": {
-    "title": "Consultar Disponibilidad",
-    "checkIn": "Entrada",
-    "checkOut": "Salida",
-    "adults": "Adultos",
-    "children": "Niños",
-    "roomsAvailable": "{count} habitaciones disponibles",
-    "totalLabel": "{amount} total",
-    "maxGuests": "Máx {count} huéspedes"
-  },
   "myBooking": {
     "title": "Mi Reserva",
     "lookUp": "Consulta Tu Reserva",

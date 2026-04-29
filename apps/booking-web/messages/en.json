@@ -184,16 +184,6 @@
     "authorizationNote": "Your card will only be charged if the host accepts your booking within 24 hours.",
     "continueToPayment": "Continue to Payment"
   },
-  "availability": {
-    "title": "Check Availability",
-    "checkIn": "Check-in",
-    "checkOut": "Check-out",
-    "adults": "Adults",
-    "children": "Children",
-    "roomsAvailable": "{count} rooms available",
-    "totalLabel": "{amount} total",
-    "maxGuests": "Max {count} guests"
-  },
   "myBooking": {
     "title": "My Booking",
     "lookUp": "Look Up Your Booking",
