@@ -13,7 +13,7 @@ import bcrypt
 import secrets
 
 from app.database import Database, AuthDatabase, PmsDatabase
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, get_admin_user
 from app.routers.chat import create_system_message
 from app.routers.collaborations import (
     get_collaboration_deliverables,
@@ -68,34 +68,6 @@ from app.models.admin import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-# Admin dependency - checks if user is admin
-async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
-    """
-    Verify that the current user is an admin.
-    """
-    user = await UserRepository.get_by_id(user_id, columns="id, type, status")
-
-    if not user:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    if user['type'] != 'admin':
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
-        )
-
-    if user['status'] == 'suspended':
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Admin account is suspended"
-        )
-
-    return user_id
 
 
 @router.get("/users", response_model=UserListResponse, status_code=http_status.HTTP_200_OK)

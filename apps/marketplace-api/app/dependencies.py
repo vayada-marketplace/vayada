@@ -114,6 +114,31 @@ async def get_current_user_id_allow_pending(credentials: HTTPAuthorizationCreden
     return user_id
 
 
+async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
+    """Verify that the current user is an admin and not suspended."""
+    user = await UserRepository.get_by_id(user_id, columns="id, type, status")
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if user['type'] != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    if user['status'] == 'suspended':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin account is suspended",
+        )
+
+    return user_id
+
+
 async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) -> str:
     """
     Get current creator ID from user ID.

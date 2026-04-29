@@ -16,26 +16,11 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.database import Database
-from app.dependencies import get_current_user_id
-from app.repositories.user_repo import UserRepository
+from app.dependencies import get_admin_user, get_current_user_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# ── Dependencies ────────────────────────────────────────────────
-
-
-async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
-    user = await UserRepository.get_by_id(user_id, columns="id, type, status")
-    if not user:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user["type"] != "admin":
-        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    if user["status"] == "suspended":
-        raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Account suspended")
-    return str(user["id"])
 
 
 # ── Models ──────────────────────────────────────────────────────
