@@ -274,9 +274,14 @@ function BookPageContent() {
                   {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                     const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                     const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
+                    const annotation = addon.perNight
+                      ? (qty < nights ? ` (${qty}/${nights} ${tc('nights', { count: nights })})` : '')
+                      : addon.perPerson
+                        ? ` (${qty}/${adultsParam} ${tc('guests').toLowerCase()})`
+                        : qty > 1 ? ` ×${qty}` : ''
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
-                        <p className="text-sm text-gray-700">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights} nights)` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</p>
+                        <p className="text-sm text-gray-700">{addon.name}{annotation}</p>
                         <p className="text-sm font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</p>
                       </div>
                     )
@@ -508,9 +513,14 @@ function BookPageContent() {
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                   const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
+                  const annotation = addon.perNight
+                    ? (qty < nights ? ` (${qty}/${nights})` : '')
+                    : addon.perPerson
+                      ? ` (${qty}/${adultsParam})`
+                      : qty > 1 ? ` ×${qty}` : ''
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
+                      <span className="text-gray-500">{addon.name}{annotation}</span>
                       <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                     </div>
                   )
