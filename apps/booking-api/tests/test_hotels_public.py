@@ -31,6 +31,26 @@ class TestGetHotel:
         body = resp.json()
         assert body["name"] == hotel["name"]
 
+    async def test_get_hotel_instant_book_default_false(self, client, hotel_with_property):
+        """instantBook defaults to false and is exposed on the hotel response so
+        the booking-engine frontend can branch its checkout copy.
+        """
+        hotel = hotel_with_property["hotel"]
+        resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert resp.status_code == 200
+        assert resp.json()["instantBook"] is False
+
+    async def test_get_hotel_instant_book_true(self, client, hotel_with_property):
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        await Database.execute(
+            "UPDATE booking_hotels SET instant_book = true WHERE id = $1", hotel["id"]
+        )
+        resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert resp.status_code == 200
+        assert resp.json()["instantBook"] is True
+
 
 class TestGetRooms:
     async def test_get_rooms_empty(self, client, hotel_with_property):
