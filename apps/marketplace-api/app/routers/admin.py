@@ -10,13 +10,26 @@ import logging
 import json
 import bcrypt
 
-from app.database import Database, AuthDatabase
+import secrets
+
+from app.database import Database, AuthDatabase, PmsDatabase
 from app.dependencies import get_current_user_id
-from app.routers.collaborations import get_collaboration_deliverables
+from app.routers.chat import create_system_message
+from app.routers.collaborations import (
+    get_collaboration_deliverables,
+    _get_party_email_and_name,
+    _send_email_background,
+    _notify_vayada_team,
+)
+from app.email_service import (
+    create_collaboration_response_email_html,
+    create_collaboration_approved_email_html,
+)
 from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 
 # Import models from centralized location
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
@@ -30,7 +43,10 @@ from app.models.hotels import (
     HotelProfileResponse,
 )
 from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse, PlatformResponse
-from app.models.collaborations import CollaborationResponse
+from app.models.collaborations import (
+    CollaborationResponse,
+    RespondToCollaborationRequest,
+)
 from app.models.admin import (
     UserResponse,
     UserListResponse,
@@ -1881,10 +1897,273 @@ async def get_admin_collaborations(
             ))
 
         return CollaborationListResponse(collaborations=collaborations, total=total)
-        
+
     except Exception as e:
         logger.error(f"Error fetching admin collaborations: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch collaborations: {str(e)}"
         )
+
+
+async def _build_admin_collaboration_response(collaboration_id: str) -> CollaborationResponse:
+    """Re-fetch and build the standard collaboration response payload."""
+    updated = await CollaborationRepository.get_full(collaboration_id)
+    creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
+    creator_name = creator_user['name'] if creator_user else 'Unknown'
+    plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
+
+    return CollaborationResponse(
+        id=str(updated['id']),
+        initiator_type=updated['initiator_type'],
+        status=updated['status'],
+        creator_id=str(updated['creator_id']),
+        creator_name=creator_name,
+        creator_profile_picture=updated['creator_profile_picture'],
+        hotel_id=str(updated['hotel_id']),
+        hotel_name=updated['hotel_name'],
+        listing_id=str(updated['listing_id']),
+        listing_name=updated['listing_name'],
+        listing_location=updated['listing_location'],
+        collaboration_type=updated['collaboration_type'],
+        free_stay_min_nights=updated['free_stay_min_nights'],
+        free_stay_max_nights=updated['free_stay_max_nights'],
+        paid_amount=updated['paid_amount'],
+        currency=updated.get('currency'),
+        discount_percentage=updated['discount_percentage'],
+        stay_nights=updated['free_stay_min_nights'] if updated['free_stay_min_nights'] == updated['free_stay_max_nights'] else None,
+        travel_date_from=updated['travel_date_from'],
+        travel_date_to=updated['travel_date_to'],
+        preferred_date_from=updated['preferred_date_from'],
+        preferred_date_to=updated['preferred_date_to'],
+        preferred_months=updated['preferred_months'],
+        why_great_fit=updated['why_great_fit'],
+        platform_deliverables=plat_delivs_resp,
+        consent=updated['consent'],
+        created_at=updated['created_at'],
+        updated_at=updated['updated_at'],
+        responded_at=updated['responded_at'],
+        cancelled_at=updated['cancelled_at'],
+        completed_at=updated['completed_at'],
+        hotel_agreed_at=updated['hotel_agreed_at'],
+        creator_agreed_at=updated['creator_agreed_at'],
+        term_last_updated_at=updated['term_last_updated_at'],
+        creator_fee=updated.get('creator_fee'),
+        affiliate_referral_code=updated.get('affiliate_referral_code'),
+        affiliate_link=updated.get('affiliate_link'),
+    )
+
+
+@router.post("/collaborations/{collaboration_id}/respond", response_model=CollaborationResponse)
+async def admin_respond_to_collaboration(
+    collaboration_id: str,
+    request: RespondToCollaborationRequest,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Admin accepts or declines a pending collaboration on behalf of the hotel.
+
+    Only valid for creator-initiated, pending collaborations.
+    Accept moves status to 'negotiating' and sets hotel_agreed_at.
+    Decline moves status to 'declined'.
+    """
+    collab = await CollaborationRepository.get_by_id(collaboration_id)
+    if not collab:
+        raise HTTPException(status_code=404, detail="Collaboration not found")
+
+    if collab['status'] != 'pending':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot respond to collaboration with status '{collab['status']}'. Only 'pending' requests can be accepted/declined."
+        )
+
+    if collab['initiator_type'] != 'creator':
+        raise HTTPException(
+            status_code=400,
+            detail="Admin can only respond on behalf of the hotel for creator-initiated requests."
+        )
+
+    new_status = "negotiating" if request.status == "accepted" else "declined"
+
+    updates = ["status = $1", "responded_at = NOW()", "updated_at = NOW()"]
+    params = [new_status, collaboration_id]
+    if request.status == "accepted":
+        updates.append("hotel_agreed_at = NOW()")
+
+    query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = ${len(params)}"
+
+    pool = await Database.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(query, *params)
+
+            if request.status == "accepted":
+                msg = "✅ Vayada admin (on behalf of Hotel) is ready to discuss the collaboration terms."
+                if request.response_message:
+                    msg += f"\n\nMessage: {request.response_message}"
+                await create_system_message(collaboration_id, msg, conn=conn)
+                await create_system_message(collaboration_id, "💬 Chat is now open! Discuss and finalize the terms.", conn=conn)
+            else:
+                msg = "❌ Vayada admin (on behalf of Hotel) has declined the collaboration request."
+                if request.response_message:
+                    msg += f"\n\nMessage: {request.response_message}"
+                await create_system_message(collaboration_id, msg, conn=conn)
+
+    response = await _build_admin_collaboration_response(collaboration_id)
+
+    # Notify the creator (initiator) that the hotel responded.
+    creator_email, creator_email_name = await _get_party_email_and_name(
+        "creator", creator_id=str(collab['creator_id'])
+    )
+    if creator_email:
+        accepted = request.status == "accepted"
+        html = create_collaboration_response_email_html(
+            recipient_name=creator_email_name or "there",
+            responder_name=response.hotel_name,
+            accepted=accepted,
+            collaboration_type=collab['collaboration_type'],
+            listing_name=response.listing_name,
+            listing_location=response.listing_location,
+            response_message=request.response_message,
+        )
+        subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
+        _send_email_background(creator_email, subject, html)
+        _notify_vayada_team(subject, html)
+
+    return response
+
+
+@router.post("/collaborations/{collaboration_id}/approve", response_model=CollaborationResponse)
+async def admin_approve_collaboration(
+    collaboration_id: str,
+    admin_id: str = Depends(get_admin_user)
+):
+    """
+    Admin approves the current terms on behalf of the hotel.
+
+    Sets hotel_agreed_at = NOW(). If the creator has already agreed, the
+    collaboration flips to 'accepted' and the affiliate record is provisioned.
+    """
+    collab = await CollaborationRepository.get_by_id(collaboration_id)
+    if not collab:
+        raise HTTPException(status_code=404, detail="Collaboration not found")
+
+    if collab['status'] not in ('pending', 'negotiating'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot approve collaboration with status '{collab['status']}'."
+        )
+
+    other_agreed = collab['creator_agreed_at'] is not None
+    updates = ["hotel_agreed_at = NOW()", "updated_at = NOW()"]
+    new_status = None
+    if other_agreed:
+        updates.append("status = 'accepted'")
+        updates.append("responded_at = NOW()")
+        new_status = 'accepted'
+    elif collab['status'] == 'pending':
+        # Approving from pending without responding first — treat like an accept
+        # so the conversation can move forward.
+        updates.append("status = 'negotiating'")
+
+    query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = $1"
+    pool = await Database.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(query, collaboration_id)
+            await create_system_message(
+                collaboration_id,
+                "✅ Vayada admin (on behalf of Hotel) approved the terms.",
+                conn=conn,
+            )
+            if new_status == 'accepted':
+                await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
+
+    creator_email, creator_email_name = await _get_party_email_and_name(
+        "creator", creator_id=str(collab['creator_id'])
+    )
+    hotel_email, hotel_email_name = await _get_party_email_and_name(
+        "hotel", hotel_id=str(collab['hotel_id'])
+    )
+
+    if new_status == 'accepted':
+        affiliate_link = None
+        try:
+            from app.config import settings as _cfg
+            if _cfg.PMS_DATABASE_URL:
+                hotel_profile = await HotelRepository.get_profile_by_id(
+                    str(collab['hotel_id']), columns="user_id"
+                )
+                if hotel_profile:
+                    pms_hotel = await PmsDatabase.fetchrow(
+                        "SELECT id, slug FROM hotels WHERE user_id = $1",
+                        hotel_profile['user_id'],
+                    )
+                    if pms_hotel:
+                        referral_code = secrets.token_urlsafe(8)
+                        commission = collab.get('creator_fee') or Decimal('5.00')
+                        social_media = ''
+                        platform_rows = await Database.fetch(
+                            "SELECT name, handle FROM creator_platforms WHERE creator_id = $1",
+                            str(collab['creator_id']),
+                        )
+                        if platform_rows:
+                            social_media = ', '.join(
+                                f"{r['name']}: @{r['handle']}" for r in platform_rows if r.get('handle')
+                            )
+                        pms_affiliate = await PmsDatabase.fetchrow(
+                            """
+                            INSERT INTO affiliates (
+                                hotel_id, referral_code, full_name, email,
+                                social_media, user_type, commission_pct, status
+                            ) VALUES ($1, $2, $3, $4, $5, 'creator', $6, 'approved')
+                            RETURNING id, referral_code
+                            """,
+                            pms_hotel['id'], referral_code,
+                            creator_email_name or 'Unknown',
+                            creator_email or '',
+                            social_media,
+                            commission,
+                        )
+                        if pms_affiliate:
+                            slug = pms_hotel['slug']
+                            affiliate_link = f"https://{slug}.booking.vayada.com?ref={referral_code}"
+                            await Database.execute(
+                                """
+                                UPDATE collaborations
+                                SET affiliate_referral_code = $1, affiliate_link = $2
+                                WHERE id = $3
+                                """,
+                                referral_code, affiliate_link, collaboration_id,
+                            )
+        except Exception as aff_err:
+            logger.error(f"Failed to create affiliate for collaboration {collaboration_id}: {aff_err}")
+
+        for email, name in [(creator_email, creator_email_name), (hotel_email, hotel_email_name)]:
+            if email:
+                link_for_email = affiliate_link if email == creator_email else None
+                html = create_collaboration_approved_email_html(
+                    recipient_name=name or "there",
+                    other_party_name="Hotel",
+                    collaboration_type=collab['collaboration_type'],
+                    listing_name=(await CollaborationRepository.get_full(collaboration_id))['listing_name'],
+                    listing_location=None,
+                    both_approved=True,
+                    affiliate_link=link_for_email,
+                )
+                _send_email_background(email, "Collaboration Confirmed!", html)
+        _notify_vayada_team("Collaboration Confirmed!", html)
+    else:
+        if creator_email:
+            updated_full = await CollaborationRepository.get_full(collaboration_id)
+            html = create_collaboration_approved_email_html(
+                recipient_name=creator_email_name or "there",
+                other_party_name=updated_full['hotel_name'],
+                collaboration_type=collab['collaboration_type'],
+                listing_name=updated_full['listing_name'],
+                listing_location=updated_full.get('listing_location'),
+                both_approved=False,
+            )
+            _send_email_background(creator_email, "Terms Approved — Your Confirmation Needed", html)
+
+    return await _build_admin_collaboration_response(collaboration_id)

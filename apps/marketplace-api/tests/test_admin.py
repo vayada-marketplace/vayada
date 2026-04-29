@@ -737,6 +737,138 @@ class TestAdminGetCollaborations:
         assert len(data["collaborations"]) >= 1
 
 
+class TestAdminRespondToCollaboration:
+    """Tests for POST /admin/collaborations/{id}/respond"""
+
+    async def test_admin_accepts_pending_collaboration(
+        self, client: AsyncClient, test_admin, test_collaboration
+    ):
+        """Admin accepting a pending creator-initiated collab moves it to negotiating."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        response = await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "accepted", "response_message": "Approved by admin"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "negotiating"
+        assert data["hotel_agreed_at"] is not None
+
+    async def test_admin_declines_pending_collaboration(
+        self, client: AsyncClient, test_admin, test_collaboration
+    ):
+        """Admin can decline a pending collab on behalf of the hotel."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        response = await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "declined"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "declined"
+
+    async def test_admin_cannot_respond_to_non_pending(
+        self, client: AsyncClient, test_admin, test_collaboration
+    ):
+        """Admin cannot respond once the collaboration has moved past pending."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        # First admin-accept moves it to negotiating
+        await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "accepted"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+
+        response = await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "declined"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+        assert response.status_code == 400
+
+    async def test_admin_respond_not_found(
+        self, client: AsyncClient, test_admin
+    ):
+        response = await client.post(
+            "/admin/collaborations/00000000-0000-0000-0000-000000000000/respond",
+            json={"status": "accepted"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+        assert response.status_code == 404
+
+    async def test_non_admin_cannot_respond(
+        self, client: AsyncClient, test_creator, test_collaboration
+    ):
+        collab_id = str(test_collaboration["collaboration"]["id"])
+        response = await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "accepted"},
+            headers=get_auth_headers(test_creator["token"]),
+        )
+        assert response.status_code == 403
+
+
+class TestAdminApproveCollaboration:
+    """Tests for POST /admin/collaborations/{id}/approve"""
+
+    async def test_admin_approve_marks_hotel_agreed(
+        self, client: AsyncClient, test_admin, test_collaboration
+    ):
+        """Approving with no creator agreement yet just marks hotel_agreed_at."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        response = await client.post(
+            f"/admin/collaborations/{collab_id}/approve",
+            headers=get_auth_headers(test_admin["token"]),
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hotel_agreed_at"] is not None
+        # No creator agreement yet -> not yet finalized
+        assert data["status"] != "accepted"
+
+    async def test_admin_approve_finalizes_when_creator_already_agreed(
+        self, client: AsyncClient, test_admin, test_collaboration
+    ):
+        """If creator has already approved, admin approval flips status to accepted."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        # Admin accepts (moves to negotiating, sets hotel_agreed_at)
+        await client.post(
+            f"/admin/collaborations/{collab_id}/respond",
+            json={"status": "accepted"},
+            headers=get_auth_headers(test_admin["token"]),
+        )
+        # Creator approves
+        await client.post(
+            f"/collaborations/{collab_id}/approve",
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
+        )
+
+        # Confirm finalized
+        collab = await Database.fetchrow(
+            "SELECT status FROM collaborations WHERE id = $1",
+            test_collaboration["collaboration"]["id"],
+        )
+        assert collab["status"] == "accepted"
+
+    async def test_admin_approve_not_found(
+        self, client: AsyncClient, test_admin
+    ):
+        response = await client.post(
+            "/admin/collaborations/00000000-0000-0000-0000-000000000000/approve",
+            headers=get_auth_headers(test_admin["token"]),
+        )
+        assert response.status_code == 404
+
+
 class TestAdminAuthorization:
     """Tests for admin authorization"""
 
