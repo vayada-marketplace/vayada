@@ -1,24 +1,17 @@
 import logging
-import re
 from datetime import date
-from typing import Any, List
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel
-from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
+from app.dependencies import require_hotel_admin, get_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import (
-    HOTEL_FIELD_DEFAULTS,
     PropertySettingsResponse,
     PropertySettingsUpdate,
     hotel_default,
 )
-from app.models.setup import SetupStatusResponse, SetupPrefillData
 from app.models.utils import parse_json, slugify
-from app.database import Database, MarketplaceDatabase
-from app.config import settings
-from app.services import cloudflare_service
 from app.services.billing_service import (
     apply_pending_plan_switch_if_due,
     compute_fixed_plan_projected_fee,
@@ -29,65 +22,6 @@ from app.services.billing_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# ── Setup status ───────────────────────────────────────────────────
-
-_SETUP_COLUMNS = "name, contact_email, contact_phone, contact_address, timezone, currency"
-
-_SETUP_FIELD_MAP = {
-    "name": "property_name",
-    "contact_email": "reservation_email",
-    "contact_phone": "phone_number",
-    "contact_address": "address",
-    "timezone": "timezone",
-    "currency": "currency",
-}
-
-_ALL_SETUP_FIELDS = list(_SETUP_FIELD_MAP.values())
-
-
-async def _get_marketplace_prefill(user_id: str) -> SetupPrefillData | None:
-    if not settings.MARKETPLACE_DATABASE_URL:
-        return None
-    try:
-        row = await MarketplaceDatabase.fetchrow(
-            "SELECT name, email, phone, location, picture "
-            "FROM hotel_profiles WHERE user_id = $1",
-            user_id,
-        )
-        if not row:
-            return None
-        return SetupPrefillData(
-            property_name=row['name'] or None,
-            reservation_email=row['email'] or None,
-            phone_number=row['phone'] or None,
-            address=row['location'] or None,
-            hero_image=row['picture'] or None,
-        )
-    except Exception as e:
-        logger.warning(f"Could not fetch marketplace prefill data: {e}")
-        return None
-
-
-@router.get("/settings/setup-status", response_model=SetupStatusResponse)
-async def get_setup_status(
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict | None = Depends(get_current_hotel),
-):
-    if not hotel:
-        prefill = await _get_marketplace_prefill(user_id)
-        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill)
-
-    hotel_data = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns=_SETUP_COLUMNS)
-    if not hotel_data:
-        prefill = await _get_marketplace_prefill(user_id)
-        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill)
-
-    missing = [api_name for db_col, api_name in _SETUP_FIELD_MAP.items() if not hotel_data.get(db_col)]
-    prefill = await _get_marketplace_prefill(user_id) if missing else None
-
-    return SetupStatusResponse(setup_complete=len(missing) == 0, missing_fields=missing, prefill_data=prefill)
-
 
 # ── Property settings ──────────────────────────────────────────────
 
@@ -379,93 +313,3 @@ async def update_property_settings(
     return await _hotel_to_property_settings(result)
 
 
-# ── Custom domain management ─────────────────────────────────────
-
-_DOMAIN_RE = re.compile(
-    r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"
-)
-
-
-@router.post("/settings/custom-domain")
-async def connect_custom_domain(
-    data: dict,
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict = Depends(require_current_hotel),
-):
-    domain = (data.get("domain") or "").strip().lower()
-    if not domain or not _DOMAIN_RE.match(domain):
-        raise HTTPException(status_code=400, detail="Invalid domain format")
-
-    # Check not already taken by another hotel
-    existing = await BookingHotelRepository.get_by_custom_domain(domain)
-    if existing and str(existing["id"]) != str(hotel["id"]):
-        raise HTTPException(status_code=409, detail="This domain is already in use by another property")
-
-    # If already connected to this hotel, just return current status
-    if existing and str(existing["id"]) == str(hotel["id"]):
-        cf_status = await cloudflare_service.get_hostname_status(domain)
-        return {
-            "domain": domain,
-            "status": cf_status.get("status", "pending") if cf_status else "pending",
-            "ssl_status": cf_status.get("ssl_status", "initializing") if cf_status else "initializing",
-        }
-
-    # Register with Cloudflare
-    try:
-        cf_result = await cloudflare_service.create_custom_hostname(domain)
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except Exception as e:
-        logger.error("Cloudflare create failed for %s: %s", domain, e)
-        raise HTTPException(status_code=502, detail=f"Failed to register domain: {e}")
-
-    # Save to DB
-    await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": domain})
-
-    return {
-        "domain": domain,
-        "status": cf_result.get("status", "pending"),
-        "ssl_status": cf_result.get("ssl", {}).get("status", "initializing"),
-    }
-
-
-@router.delete("/settings/custom-domain")
-async def disconnect_custom_domain(
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict = Depends(require_current_hotel),
-):
-    current_domain = hotel.get("custom_domain")
-    if not current_domain:
-        raise HTTPException(status_code=404, detail="No custom domain configured")
-
-    # Remove from Cloudflare
-    try:
-        await cloudflare_service.delete_custom_hostname(current_domain)
-    except Exception as e:
-        logger.warning("Cloudflare delete failed for %s: %s", current_domain, e)
-
-    # Clear from DB
-    await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": None})
-    return {"removed": current_domain}
-
-
-@router.get("/settings/custom-domain/status")
-async def get_custom_domain_status(
-    user_id: str = Depends(require_hotel_admin),
-    hotel: dict = Depends(require_current_hotel),
-):
-    current_domain = hotel.get("custom_domain")
-    if not current_domain:
-        return {"configured": False}
-
-    status = await cloudflare_service.get_hostname_status(current_domain)
-    if not status:
-        return {"configured": True, "domain": current_domain, "status": "unknown", "ssl_status": "unknown"}
-
-    return {
-        "configured": True,
-        "domain": current_domain,
-        "status": status["status"],
-        "ssl_status": status["ssl_status"],
-        "verification_errors": status.get("verification_errors", []),
-    }
