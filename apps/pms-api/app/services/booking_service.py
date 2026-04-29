@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 import math
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -77,25 +79,444 @@ def _booking_to_response(booking: dict) -> BookingResponse:
     )
 
 
+@dataclass
+class BookingPricing:
+    """Resolved totals for a booking: nightly rate (post-discount), per-stay
+    room cost, addons, promo + last-minute discount, and the final amount."""
+    nightly_rate: float
+    room_total: float
+    addon_total: float
+    addon_names: list[str] = field(default_factory=list)
+    promo_code: Optional[str] = None
+    promo_discount: float = 0.0
+    last_minute_discount_pct: int = 0
+    last_minute_discount_amount: float = 0.0
+    total_amount: float = 0.0
+
+
+@dataclass
+class PaymentOutcome:
+    """Result of dispatching the chosen payment method."""
+    client_secret: Optional[str] = None
+    xendit_invoice_url: Optional[str] = None
+
+
+async def _assign_room_unit(
+    room_type_id: str, check_in: date, check_out: date
+) -> Optional[str]:
+    """Pick the lowest-numbered available room unit for the stay window.
+    Returns the room id, or None if every unit is booked."""
+    row = await Database.fetchrow(
+        """
+        SELECT r.id FROM rooms r
+        WHERE r.room_type_id = $1
+          AND r.status = 'available'
+          AND r.id NOT IN (
+            SELECT b.room_id FROM bookings b
+            WHERE b.room_id IS NOT NULL
+              AND b.status IN ('pending', 'confirmed')
+              AND b.check_in < $3
+              AND b.check_out > $2
+          )
+        ORDER BY r.sort_order,
+                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                 r.room_number
+        LIMIT 1
+        """,
+        room_type_id, check_in, check_out,
+    )
+    return str(row["id"]) if row else None
+
+
+async def _fetch_hotel_addons(slug: str) -> list[dict]:
+    """Fetch the hotel's addons from the booking-engine API.
+    Returns an empty list on any failure (logged)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/addons"
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.warning("Failed to fetch addons for %s: %s", slug, e)
+        return []
+
+
+async def _validate_promo_code(slug: str, code: str) -> dict:
+    """Validate a promo code against the booking-engine API.
+    Returns the API response, or ``{"valid": False}`` on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/validate-promo",
+                params={"code": code},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.warning("Failed to validate promo for %s: %s", slug, e)
+        return {"valid": False}
+
+
+async def _increment_promo_use(slug: str, code: str) -> None:
+    """Best-effort: bump the promo's use count after a successful booking."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/increment-promo",
+                params={"code": code},
+            )
+    except Exception as e:
+        logger.warning("Failed to increment promo use count: %s", e)
+
+
+async def _compute_addon_total(
+    slug: str,
+    addon_ids: list[str],
+    addon_quantities: dict,
+    room_currency: str,
+    adults: int,
+    nights: int,
+) -> tuple[float, list[str]]:
+    """Sum the addon prices for a stay, converting to ``room_currency`` so the
+    booking total matches what the guest saw at checkout. Returns
+    (total, addon_names)."""
+    if not addon_ids:
+        return 0.0, []
+
+    all_addons = await _fetch_hotel_addons(slug)
+    addon_map = {a["id"]: a for a in all_addons}
+    room_currency = room_currency.upper()
+    rate_cache: dict = {}
+    addon_total = 0.0
+    addon_names: list[str] = []
+
+    for aid in addon_ids:
+        addon = addon_map.get(aid)
+        if not addon:
+            continue
+        addon_names.append(addon.get("name", "Unknown"))
+        price = float(addon["price"])
+        if addon.get("perPerson"):
+            price *= adults
+        if addon.get("perNight"):
+            qty = addon_quantities.get(aid, nights)
+            qty = max(1, min(qty, nights))
+            price *= qty
+        addon_currency = (addon.get("currency") or room_currency).upper()
+        if addon_currency != room_currency:
+            if addon_currency not in rate_cache:
+                try:
+                    rate_cache[addon_currency] = await get_exchange_rate(
+                        addon_currency, room_currency
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to fetch addon exchange rate %s -> %s: %s",
+                        addon_currency, room_currency, e,
+                    )
+                    rate_cache[addon_currency] = 1.0
+            price = price * rate_cache[addon_currency]
+        addon_total += price
+
+    return round(addon_total, 2), addon_names
+
+
+async def _compute_booking_pricing(
+    slug: str,
+    data: BookingCreate,
+    hotel: dict,
+    room: dict,
+    nights: int,
+) -> BookingPricing:
+    """Resolve the full pricing surface for a booking: nightly rates,
+    addons, promo code, and last-minute-discount stacking. Pure-ish: only
+    side effect is best-effort HTTP fetches to booking-engine, all of
+    which fail open."""
+    pricing = compute_stay_pricing(
+        room, data.check_in, data.check_out, data.adults, data.rate_type
+    )
+    room_total = round(pricing.room_total * data.number_of_rooms, 2)
+
+    # Last-minute discount based on days before check-in
+    days_before = (data.check_in - date.today()).days
+    hotel_lm_raw = hotel.get("last_minute_discount")
+    hotel_lm_config = json.loads(hotel_lm_raw) if isinstance(hotel_lm_raw, str) else hotel_lm_raw if hotel_lm_raw else None
+    room_lm_raw = room.get("last_minute_discount")
+    room_lm_config = json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw if room_lm_raw else None
+    lm_pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before) or 0
+    lm_discount_amount = 0.0
+    if lm_pct > 0:
+        lm_discount_amount = round(room_total * (lm_pct / 100), 2)
+        room_total = round(room_total - lm_discount_amount, 2)
+
+    nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
+
+    # Addons
+    addon_total, addon_names = await _compute_addon_total(
+        slug,
+        data.addon_ids or [],
+        data.addon_quantities or {},
+        room.get("currency") or "EUR",
+        data.adults,
+        nights,
+    )
+
+    subtotal = room_total + addon_total
+
+    # Promo
+    promo_code_str: Optional[str] = None
+    promo_discount = 0.0
+    if data.promo_code:
+        promo_result = await _validate_promo_code(slug, data.promo_code)
+        if promo_result.get("valid"):
+            promo_code_str = promo_result["code"]
+            discount_type = promo_result["discountType"]
+            discount_value = float(promo_result["discountValue"])
+            if discount_type == "percentage":
+                promo_discount = round(subtotal * (discount_value / 100), 2)
+            else:
+                promo_discount = min(discount_value, subtotal)
+
+    # Promo vs last-minute stacking — keep only the larger discount unless
+    # the hotel opted in via stackWithPromo.
+    stack_with_promo = (hotel_lm_config or {}).get("stackWithPromo", False)
+    if not stack_with_promo and lm_discount_amount > 0 and promo_discount > 0:
+        if promo_discount > lm_discount_amount:
+            # Promo wins — undo the last-minute discount.
+            room_total = round(room_total + lm_discount_amount, 2)
+            nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
+            subtotal = room_total + addon_total
+            lm_pct = 0
+            lm_discount_amount = 0.0
+        else:
+            # Last-minute wins — drop promo.
+            promo_discount = 0.0
+            promo_code_str = None
+
+    total_amount = round(subtotal - promo_discount, 2)
+
+    return BookingPricing(
+        nightly_rate=nightly_rate,
+        room_total=room_total,
+        addon_total=addon_total,
+        addon_names=addon_names,
+        promo_code=promo_code_str,
+        promo_discount=promo_discount,
+        last_minute_discount_pct=lm_pct,
+        last_minute_discount_amount=lm_discount_amount,
+        total_amount=total_amount,
+    )
+
+
+async def _create_card_payment(
+    booking_id: str,
+    hotel_id: str,
+    hotel_settings: Optional[dict],
+    currency: str,
+    total_amount: float,
+    capture_method: str,
+) -> str:
+    """Create a Stripe PaymentIntent (platform or Connect, depending on
+    provider). Cleans up the booking row if Stripe fails. Returns the
+    client_secret."""
+    provider = hotel_settings.get("payment_provider", "stripe") if hotel_settings else "stripe"
+    amount_cents = int(math.ceil(total_amount * 100))
+
+    if provider == "vayada":
+        # vayada Payment: charge on platform Stripe account (no Connect)
+        try:
+            pi = await stripe_service.create_payment_intent(
+                amount=amount_cents,
+                currency=currency,
+                metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+                capture_method=capture_method,
+            )
+        except Exception:
+            await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+            raise
+
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="card",
+            stripe_pi_id=pi["id"],
+        )
+        return pi["client_secret"]
+
+    # Stripe Connect — hotel's own connected account
+    stripe_account = None
+    if hotel_settings and hotel_settings.get("stripe_connect_account_id"):
+        if hotel_settings.get("stripe_connect_onboarded"):
+            stripe_account = hotel_settings["stripe_connect_account_id"]
+
+    if not stripe_account:
+        # Don't silently downgrade to pay-at-property: the guest picked
+        # "card" specifically, so surfacing a different outcome silently
+        # is a trust/UX bug. If the /payment-settings gating is doing
+        # its job, this branch is unreachable from the UI.
+        await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+        raise ValueError(
+            "This hotel has not finished setting up online payments. "
+            "Please contact the hotel or choose another payment method."
+        )
+
+    try:
+        pi = await stripe_service.create_payment_intent(
+            amount=amount_cents,
+            currency=currency,
+            metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+            stripe_account=stripe_account,
+            capture_method=capture_method,
+        )
+    except Exception:
+        await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+        raise
+
+    await PaymentRepository.create(
+        booking_id=booking_id,
+        amount=total_amount,
+        currency=currency,
+        payment_method="card",
+        stripe_pi_id=pi["id"],
+    )
+    return pi["client_secret"]
+
+
+async def _create_xendit_payment(
+    booking_id: str,
+    booking_reference: str,
+    hotel: dict,
+    hotel_id: str,
+    currency: str,
+    total_amount: float,
+    guest_email: str,
+) -> str:
+    """Create a Xendit invoice, store the payment record, and return the
+    hosted-checkout URL. Cleans up the booking on Xendit failure."""
+    try:
+        invoice = await xendit_service.create_invoice(
+            external_id=f"booking-{booking_id}",
+            amount=total_amount,
+            currency=currency,
+            payer_email=guest_email,
+            description=f"Booking {booking_reference} at {hotel['name']}",
+            success_redirect_url=(
+                f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/booking/"
+                f"{booking_id}/confirmation"
+            ),
+            failure_redirect_url=(
+                f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/payment?failed=true"
+            ),
+            metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+        )
+    except Exception:
+        await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+        raise
+
+    await PaymentRepository.create(
+        booking_id=booking_id,
+        amount=total_amount,
+        currency=currency,
+        payment_method="xendit",
+        xendit_invoice_id=invoice["id"],
+        xendit_invoice_url=invoice["invoice_url"],
+    )
+    return invoice["invoice_url"]
+
+
+async def _process_payment_method(
+    payment_method: str,
+    booking_id: str,
+    booking_row: dict,
+    hotel: dict,
+    hotel_id: str,
+    hotel_settings: Optional[dict],
+    currency: str,
+    total_amount: float,
+    guest_email: str,
+    use_request_flow: bool,
+    capture_method: str,
+) -> PaymentOutcome:
+    """Dispatch the payment-method-specific work after the booking row
+    exists. Card / Xendit raise (and clean up) on provider failure;
+    bank-transfer and pay-at-property always succeed but trigger emails."""
+    outcome = PaymentOutcome()
+
+    if payment_method == "card":
+        outcome.client_secret = await _create_card_payment(
+            booking_id, hotel_id, hotel_settings, currency,
+            total_amount, capture_method,
+        )
+
+    elif payment_method == "xendit":
+        outcome.xendit_invoice_url = await _create_xendit_payment(
+            booking_id, booking_row["booking_reference"],
+            hotel, hotel_id, currency, total_amount, guest_email,
+        )
+
+    elif payment_method == "bank_transfer":
+        # Bank transfer — guest transfers directly, hotel verifies manually.
+        # Always uses the request flow (no money has moved, so we cannot
+        # auto-confirm even when the hotel has instant-book on).
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="bank_transfer",
+        )
+        await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
+        booking = await BookingRepository.get_by_id(booking_id)
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
+    else:
+        # Pay at property
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="pay_at_property",
+        )
+        await BookingRepository.update_payment_status(booking_id, "pay_at_property")
+        if use_request_flow:
+            booking = await BookingRepository.get_by_id(booking_id)
+            asyncio.create_task(
+                send_booking_request_notification(hotel["contact_email"], booking)
+            )
+        else:
+            # Instant-book: confirm right away. _finalize_accepted_booking
+            # sends the host + guest "accepted" emails.
+            await _finalize_accepted_booking(booking_id, capture_card=False)
+
+    return outcome
+
+
 async def create_booking_request(slug: str, data: BookingCreate) -> dict:
-    """
-    New guest-facing flow: creates booking + payment intent (if card).
-    Returns booking data + client_secret for Stripe.
-    """
+    """New guest-facing flow: validates + prices + creates booking +
+    dispatches payment. Returns booking data + provider-specific
+    handles (Stripe client_secret or Xendit invoice URL)."""
+    # ── Validate hotel + room ──────────────────────────────────────
     hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email, last_minute_discount, instant_book FROM hotels WHERE slug = $1", slug
+        "SELECT id, name, contact_email, last_minute_discount, instant_book "
+        "FROM hotels WHERE slug = $1",
+        slug,
     )
     if not hotel:
         raise ValueError("Hotel not found")
+    hotel_id = str(hotel["id"])
     instant_book = bool(hotel.get("instant_book"))
 
-    hotel_id = str(hotel["id"])
     room = await RoomTypeRepository.get_by_id(data.room_type_id)
     if not room or str(room["hotel_id"]) != hotel_id:
         raise ValueError("Room type not found")
     if not room["is_active"]:
         raise ValueError("Room type is not available")
 
+    # ── Validate stay window (availability, nights, min-stay, advance) ──
     available = await remaining_for_stay(
         data.room_type_id, room["total_rooms"], data.check_in, data.check_out
     )
@@ -113,7 +534,6 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             f"This room requires a minimum stay of {min_stay} nights for the selected dates"
         )
 
-    # Check minimum advance booking days
     min_advance = room.get("minimum_advance_days") or 0
     if min_advance > 0:
         days_until_checkin = (data.check_in - date.today()).days
@@ -122,13 +542,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                 f"This room requires booking at least {min_advance} days in advance"
             )
 
-    # Validate the selected payment method is allowed for this rate. If
-    # the room has a `rate_payment_methods` override, enforce it; otherwise
-    # fall through to the hotel-level enabled methods (checked further below).
+    # ── Validate payment method against the rate's allow-list ──────
     rate_methods_raw = room.get("rate_payment_methods")
     if rate_methods_raw:
-        import json as _j
-        rate_methods = _j.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
+        rate_methods = json.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
         allowed = rate_methods.get(data.rate_type) if isinstance(rate_methods, dict) else None
         if allowed is not None and data.payment_method not in allowed:
             raise ValueError(
@@ -136,157 +553,46 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                 f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
             )
 
-    pricing = compute_stay_pricing(
-        room, data.check_in, data.check_out, data.adults, data.rate_type
-    )
-    room_total = round(pricing.room_total * data.number_of_rooms, 2)
+    # ── Compute pricing (rooms + addons + promo + last-minute discount) ──
+    pricing = await _compute_booking_pricing(slug, data, hotel, room, nights)
 
-    # Apply last-minute discount (based on days before check-in)
-    import json as _json
-    lm_discount_pct = 0
-    lm_discount_amount = 0.0
-    days_before = (data.check_in - date.today()).days
-    hotel_lm_raw = hotel.get("last_minute_discount")
-    hotel_lm_config = _json.loads(hotel_lm_raw) if isinstance(hotel_lm_raw, str) else hotel_lm_raw if hotel_lm_raw else None
-    room_lm_raw = room.get("last_minute_discount")
-    room_lm_config = _json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw if room_lm_raw else None
-    pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before)
-    if pct and pct > 0:
-        lm_discount_pct = pct
-        lm_discount_amount = round(room_total * (pct / 100), 2)
-        room_total = round(room_total - lm_discount_amount, 2)
-
-    # Average nightly rate for display/record
-    nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
-
-    # Calculate addon total from booking engine
-    addon_total = 0.0
-    addon_ids = data.addon_ids or []
-    addon_names = []
-    addon_quantities = data.addon_quantities or {}
-    if addon_ids:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/addons"
-                )
-                resp.raise_for_status()
-                all_addons = resp.json()
-        except Exception as e:
-            logger.warning("Failed to fetch addons for %s: %s", slug, e)
-            all_addons = []
-
-        addon_map = {a["id"]: a for a in all_addons}
-        room_currency = (room.get("currency") or "EUR").upper()
-        rate_cache: dict = {}
-        for aid in addon_ids:
-            addon = addon_map.get(aid)
-            if not addon:
-                continue
-            addon_names.append(addon.get("name", "Unknown"))
-            price = float(addon["price"])
-            if addon.get("perPerson"):
-                price *= data.adults
-            if addon.get("perNight"):
-                qty = addon_quantities.get(aid, nights)
-                qty = max(1, min(qty, nights))
-                price *= qty
-            # Convert addon price to room currency so the booking total
-            # matches what the frontend showed the guest. The booking
-            # engine frontend does the same conversion in payment/page.tsx.
-            addon_currency = (addon.get("currency") or room_currency).upper()
-            if addon_currency != room_currency:
-                if addon_currency not in rate_cache:
-                    try:
-                        rate_cache[addon_currency] = await get_exchange_rate(
-                            addon_currency, room_currency
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to fetch addon exchange rate %s -> %s: %s",
-                            addon_currency, room_currency, e,
-                        )
-                        rate_cache[addon_currency] = 1.0
-                price = price * rate_cache[addon_currency]
-            addon_total += price
-        addon_total = round(addon_total, 2)
-
-    subtotal = room_total + addon_total
-
-    # Validate and apply promo code
-    promo_discount = 0.0
-    promo_code_str = None
-    if data.promo_code:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/validate-promo",
-                    params={"code": data.promo_code},
-                )
-                resp.raise_for_status()
-                promo_result = resp.json()
-        except Exception as e:
-            logger.warning("Failed to validate promo for %s: %s", slug, e)
-            promo_result = {"valid": False}
-
-        if promo_result.get("valid"):
-            promo_code_str = promo_result["code"]
-            discount_type = promo_result["discountType"]
-            discount_value = float(promo_result["discountValue"])
-            if discount_type == "percentage":
-                promo_discount = round(subtotal * (discount_value / 100), 2)
-            else:
-                promo_discount = min(discount_value, subtotal)
-
-    # Handle promo vs last-minute stacking
-    stack_with_promo = (hotel_lm_config or {}).get("stackWithPromo", False)
-    if not stack_with_promo and lm_discount_amount > 0 and promo_discount > 0:
-        # Keep only the larger discount
-        if promo_discount > lm_discount_amount:
-            # Promo wins — undo last-minute discount
-            room_total = round(room_total + lm_discount_amount, 2)
-            nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
-            subtotal = room_total + addon_total
-            lm_discount_pct = 0
-            lm_discount_amount = 0.0
-        else:
-            # Last-minute wins — drop promo
-            promo_discount = 0.0
-            promo_code_str = None
-
-    total_amount = round(subtotal - promo_discount, 2)
-
-    # Resolve affiliate
+    # ── Resolve affiliate ──────────────────────────────────────────
     affiliate_id = None
     if data.referral_code:
         affiliate = await Database.fetchrow(
-            "SELECT id FROM affiliates WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
-            hotel_id,
-            data.referral_code,
+            "SELECT id FROM affiliates "
+            "WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
+            hotel_id, data.referral_code,
         )
         if affiliate:
             affiliate_id = str(affiliate["id"])
 
-    # Validate payment method
+    # ── Validate hotel-level payment-method enablement ─────────────
     payment_method = data.payment_method
-    if payment_method == "pay_at_property":
+    hotel_settings = None
+    if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    if payment_method == "pay_at_property":
         if not hotel_settings or not hotel_settings["pay_at_property_enabled"]:
             raise ValueError("Pay at property is not enabled for this hotel")
     elif payment_method == "xendit":
-        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
         if not hotel_settings or not hotel_settings.get("xendit_payments_enabled"):
             raise ValueError("Xendit payments are not enabled for this hotel")
+    elif payment_method == "bank_transfer":
+        if not hotel_settings or not hotel_settings.get("bank_transfer"):
+            raise ValueError("Bank transfer is not enabled for this hotel")
 
-    # Bank transfer is the only path that always stays in the request flow, even
-    # when instant_book is on — there's no money yet, so we can't auto-confirm.
+    # Bank transfer is the only path that always stays in the request flow,
+    # even when instant_book is on — there's no money yet, so we can't
+    # auto-confirm.
     use_request_flow = (not instant_book) or payment_method == "bank_transfer"
     deadline = (
         datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
-        if use_request_flow
-        else None
+        if use_request_flow else None
     )
+    capture_method = "manual" if use_request_flow else "automatic"
 
+    # ── Persist booking row + auto-assign a room unit ──────────────
     booking_data = {
         "hotel_id": hotel_id,
         "room_type_id": data.room_type_id,
@@ -302,9 +608,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "check_out": data.check_out,
         "adults": data.adults,
         "children": data.children,
-        "nightly_rate": nightly_rate,
+        "nightly_rate": pricing.nightly_rate,
         "number_of_rooms": data.number_of_rooms,
-        "total_amount": total_amount,
+        "total_amount": pricing.total_amount,
         "currency": room["currency"],
         "referral_code": data.referral_code,
         "affiliate_id": affiliate_id,
@@ -312,198 +618,46 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "payment_status": "unpaid",
         "host_response_deadline": deadline,
         "rate_type": data.rate_type,
-        "addon_ids": addon_ids,
-        "addon_names": addon_names,
-        "addon_total": addon_total,
-        "addon_quantities": addon_quantities,
-        "promo_code": promo_code_str,
-        "promo_discount": promo_discount,
-        "last_minute_discount_percent": lm_discount_pct,
-        "last_minute_discount_amount": lm_discount_amount,
+        "addon_ids": data.addon_ids or [],
+        "addon_names": pricing.addon_names,
+        "addon_total": pricing.addon_total,
+        "addon_quantities": data.addon_quantities or {},
+        "promo_code": pricing.promo_code,
+        "promo_discount": pricing.promo_discount,
+        "last_minute_discount_percent": pricing.last_minute_discount_pct,
+        "last_minute_discount_amount": pricing.last_minute_discount_amount,
     }
-    # Auto-assign an available room unit
-    available_room = await Database.fetchrow(
-        """
-        SELECT r.id FROM rooms r
-        WHERE r.room_type_id = $1
-          AND r.status = 'available'
-          AND r.id NOT IN (
-            SELECT b.room_id FROM bookings b
-            WHERE b.room_id IS NOT NULL
-              AND b.status IN ('pending', 'confirmed')
-              AND b.check_in < $3
-              AND b.check_out > $2
-          )
-        ORDER BY r.sort_order,
-                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
-                 r.room_number
-        LIMIT 1
-        """,
-        data.room_type_id, data.check_in, data.check_out,
-    )
-    if available_room:
-        booking_data["room_id"] = str(available_room["id"])
+    room_id = await _assign_room_unit(data.room_type_id, data.check_in, data.check_out)
+    if room_id:
+        booking_data["room_id"] = room_id
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
 
-    # Increment promo code use count
-    if promo_code_str:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(
-                    f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/increment-promo",
-                    params={"code": promo_code_str},
-                )
-        except Exception as e:
-            logger.warning("Failed to increment promo use count: %s", e)
+    if pricing.promo_code:
+        await _increment_promo_use(slug, pricing.promo_code)
 
-    client_secret = None
-    xendit_invoice_url = None
+    # ── Dispatch the chosen payment method ─────────────────────────
+    outcome = await _process_payment_method(
+        payment_method=payment_method,
+        booking_id=booking_id,
+        booking_row=booking_row,
+        hotel=hotel,
+        hotel_id=hotel_id,
+        hotel_settings=hotel_settings,
+        currency=room["currency"],
+        total_amount=pricing.total_amount,
+        guest_email=data.guest_email,
+        use_request_flow=use_request_flow,
+        capture_method=capture_method,
+    )
 
-    capture_method = "manual" if use_request_flow else "automatic"
-
-    if payment_method == "card":
-        # Get hotel payment settings to determine provider
-        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-        provider = hotel_settings.get("payment_provider", "stripe") if hotel_settings else "stripe"
-
-        if provider == "vayada":
-            # vayada Payment: charge on platform Stripe account (no Connect)
-            amount_cents = int(math.ceil(total_amount * 100))
-            try:
-                pi = await stripe_service.create_payment_intent(
-                    amount=amount_cents,
-                    currency=room["currency"],
-                    metadata={"booking_id": booking_id, "hotel_id": hotel_id},
-                    capture_method=capture_method,
-                )
-            except Exception:
-                await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
-                raise
-            client_secret = pi["client_secret"]
-
-            await PaymentRepository.create(
-                booking_id=booking_id,
-                amount=total_amount,
-                currency=room["currency"],
-                payment_method="card",
-                stripe_pi_id=pi["id"],
-            )
-        else:
-            # Stripe Connect — hotel's own connected account
-            stripe_account = None
-            if hotel_settings and hotel_settings.get("stripe_connect_account_id"):
-                if hotel_settings.get("stripe_connect_onboarded"):
-                    stripe_account = hotel_settings["stripe_connect_account_id"]
-
-            if stripe_account:
-                # Create Stripe PaymentIntent. Manual capture for the request
-                # flow (auth-hold until host accepts), automatic capture under
-                # instant-book.
-                amount_cents = int(math.ceil(total_amount * 100))
-                try:
-                    pi = await stripe_service.create_payment_intent(
-                        amount=amount_cents,
-                        currency=room["currency"],
-                        metadata={"booking_id": booking_id, "hotel_id": hotel_id},
-                        stripe_account=stripe_account,
-                        capture_method=capture_method,
-                    )
-                except Exception:
-                    # Clean up the booking if Stripe fails
-                    await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
-                    raise
-                client_secret = pi["client_secret"]
-
-                # Create payment record
-                await PaymentRepository.create(
-                    booking_id=booking_id,
-                    amount=total_amount,
-                    currency=room["currency"],
-                    payment_method="card",
-                    stripe_pi_id=pi["id"],
-                )
-            else:
-                # Don't silently downgrade to pay-at-property: the guest picked
-                # "card" specifically, so surfacing a different outcome silently
-                # is a trust/UX bug. If the /payment-settings gating is doing
-                # its job, this branch is unreachable from the UI.
-                await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
-                raise ValueError("This hotel has not finished setting up online payments. Please contact the hotel or choose another payment method.")
-
-    elif payment_method == "xendit":
-        # Create Xendit Invoice — supports QRIS, e-wallets, VA, cards
-        booking_ref = booking_row["booking_reference"]
-        try:
-            invoice = await xendit_service.create_invoice(
-                external_id=f"booking-{booking_id}",
-                amount=total_amount,
-                currency=room["currency"],
-                payer_email=data.guest_email,
-                description=f"Booking {booking_ref} at {hotel['name']}",
-                success_redirect_url=f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/booking/{booking_id}/confirmation",
-                failure_redirect_url=f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/payment?failed=true",
-                metadata={"booking_id": booking_id, "hotel_id": hotel_id},
-            )
-        except Exception:
-            await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
-            raise
-        xendit_invoice_url = invoice["invoice_url"]
-
-        await PaymentRepository.create(
-            booking_id=booking_id,
-            amount=total_amount,
-            currency=room["currency"],
-            payment_method="xendit",
-            xendit_invoice_id=invoice["id"],
-            xendit_invoice_url=invoice["invoice_url"],
-        )
-
-    elif payment_method == "bank_transfer":
-        # Bank transfer — guest transfers directly, hotel verifies manually.
-        # Always uses the request flow (no money has moved, so we cannot
-        # auto-confirm even when the hotel has instant-book on).
-        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-        if not hotel_settings or not hotel_settings.get("bank_transfer"):
-            raise ValueError("Bank transfer is not enabled for this hotel")
-        await PaymentRepository.create(
-            booking_id=booking_id,
-            amount=total_amount,
-            currency=room["currency"],
-            payment_method="bank_transfer",
-        )
-        await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
-        booking = await BookingRepository.get_by_id(booking_id)
-        asyncio.create_task(
-            send_booking_request_notification(hotel["contact_email"], booking)
-        )
-
-    else:
-        # Pay at property
-        await PaymentRepository.create(
-            booking_id=booking_id,
-            amount=total_amount,
-            currency=room["currency"],
-            payment_method="pay_at_property",
-        )
-        await BookingRepository.update_payment_status(booking_id, "pay_at_property")
-        if use_request_flow:
-            booking = await BookingRepository.get_by_id(booking_id)
-            asyncio.create_task(
-                send_booking_request_notification(hotel["contact_email"], booking)
-            )
-        else:
-            # Instant-book: confirm right away. _finalize_accepted_booking
-            # sends the host + guest "accepted" emails.
-            await _finalize_accepted_booking(booking_id, capture_card=False)
-
-    # Fetch full booking for response
+    # ── Build response + side effects ──────────────────────────────
     booking = await BookingRepository.get_by_id(booking_id)
     response = _booking_to_response(booking)
 
-    # Send guest "request received" email only for the request flow.
-    # _finalize_accepted_booking handles the equivalent under instant-book.
+    # Guest "request received" email only for the request flow;
+    # _finalize_accepted_booking sends the equivalent under instant-book.
     if use_request_flow:
         asyncio.create_task(
             send_guest_booking_requested(data.guest_email, booking)
@@ -514,8 +668,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     return {
         "booking": response.model_dump(by_alias=True),
-        "clientSecret": client_secret,
-        "xenditInvoiceUrl": xendit_invoice_url,
+        "clientSecret": outcome.client_secret,
+        "xenditInvoiceUrl": outcome.xendit_invoice_url,
         "paymentMethod": payment_method,
     }
 
