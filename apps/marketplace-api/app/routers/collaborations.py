@@ -4,7 +4,7 @@ Collaboration routes for creators and hotels
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from datetime import datetime
-from app.database import Database, PmsDatabase
+from app.database import Database
 from app.dependencies import get_current_user_id, get_current_hotel_profile_id
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
@@ -13,8 +13,7 @@ from app.repositories.collaboration_repo import CollaborationRepository
 import logging
 import json
 import uuid
-import secrets
-from decimal import Decimal
+from app.services.affiliate import AffiliateProvisioningService
 from app.services.chat_system import create_system_message
 from app.services.notifications import (
     get_party_email_and_name,
@@ -852,64 +851,14 @@ async def approve_collaboration_terms(
             "hotel", hotel_id=str(collab['hotel_id']))
 
         if new_status == 'accepted':
-            # Auto-create affiliate in PMS
-            affiliate_link = None
-            try:
-                from app.config import settings as _cfg
-                if _cfg.PMS_DATABASE_URL:
-                    # Get hotel's user_id from marketplace DB
-                    hotel_profile = await HotelRepository.get_profile_by_id(
-                        str(collab['hotel_id']), columns="user_id")
-                    if hotel_profile:
-                        # Look up the hotel in PMS using the shared user_id
-                        pms_hotel = await PmsDatabase.fetchrow(
-                            "SELECT id, slug FROM hotels WHERE user_id = $1",
-                            hotel_profile['user_id']
-                        )
-                        if pms_hotel:
-                            referral_code = secrets.token_urlsafe(8)
-                            commission = collab.get('creator_fee') or Decimal('5.00')
-                            # Get creator social media platforms
-                            social_media = ''
-                            platform_rows = await Database.fetch(
-                                "SELECT name, handle FROM creator_platforms WHERE creator_id = $1",
-                                str(collab['creator_id'])
-                            )
-                            if platform_rows:
-                                social_media = ', '.join(
-                                    f"{r['name']}: @{r['handle']}" for r in platform_rows if r.get('handle')
-                                )
-
-                            pms_affiliate = await PmsDatabase.fetchrow(
-                                """
-                                INSERT INTO affiliates (
-                                    hotel_id, referral_code, full_name, email,
-                                    social_media, user_type, commission_pct, status
-                                ) VALUES ($1, $2, $3, $4, $5, 'creator', $6, 'approved')
-                                RETURNING id, referral_code
-                                """,
-                                pms_hotel['id'], referral_code,
-                                creator_email_name or 'Unknown',
-                                creator_email or '',
-                                social_media,
-                                commission
-                            )
-                            if pms_affiliate:
-                                affiliate_link = _cfg.AFFILIATE_LINK_TEMPLATE.format(
-                                    slug=pms_hotel['slug'],
-                                    referral_code=referral_code,
-                                )
-                                # Store on collaboration record
-                                await Database.execute(
-                                    """
-                                    UPDATE collaborations
-                                    SET affiliate_referral_code = $1, affiliate_link = $2
-                                    WHERE id = $3
-                                    """,
-                                    referral_code, affiliate_link, collaboration_id
-                                )
-            except Exception as aff_err:
-                logger.error(f"Failed to create affiliate for collaboration {collaboration_id}: {aff_err}")
+            affiliate_link = await AffiliateProvisioningService.provision_for_accepted_collab(
+                collaboration_id,
+                creator_id=str(collab['creator_id']),
+                hotel_id=str(collab['hotel_id']),
+                creator_email=creator_email,
+                creator_name=creator_email_name,
+                commission=collab.get('creator_fee'),
+            )
 
             # Both approved — notify both parties
             for email, name in [(creator_email, creator_email_name), (hotel_email, hotel_email_name)]:
