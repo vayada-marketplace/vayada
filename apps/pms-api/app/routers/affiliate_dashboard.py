@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict
 
 from app.dependencies import require_affiliate
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.affiliate_payout_settings_repo import (
+    AffiliatePayoutSettingsRepository,
+    PAYOUT_COLUMNS,
+)
 from app.database import Database, AuthDatabase
 
 logger = logging.getLogger(__name__)
@@ -92,6 +96,21 @@ class ProfileUpdate(BaseModel):
     bank_swift_bic: Optional[str] = None
     bank_name: Optional[str] = None
     bank_country: Optional[str] = None
+    xendit_channel_code: Optional[str] = None
+    xendit_account_number: Optional[str] = None
+    xendit_account_holder_name: Optional[str] = None
+
+
+class PayoutSettings(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    payment_method: str
+    paypal_email: str
+    bank_iban: str
+    bank_account_holder: str
+    bank_swift_bic: str
+    bank_name: str
+    bank_country: str
     xendit_channel_code: Optional[str] = None
     xendit_account_number: Optional[str] = None
     xendit_account_holder_name: Optional[str] = None
@@ -393,16 +412,13 @@ async def get_payouts(user_id: str = Depends(require_affiliate)):
     return {"payouts": payouts}
 
 
-@router.patch("/me")
-async def update_profile(
-    data: ProfileUpdate,
-    user_id: str = Depends(require_affiliate),
-):
-    affiliates = await AffiliateRepository.list_by_user_id(user_id)
-    if not affiliates:
-        raise HTTPException(status_code=404, detail="No affiliate records found")
-
-    updates = {}
+def _build_payout_updates(data: ProfileUpdate) -> dict:
+    """Translate the wire-format ProfileUpdate into a column-keyed dict
+    suitable for both the canonical payout-settings table and the
+    legacy mirror on `affiliates`. Performs uppercasing + enum
+    validation along the way.
+    """
+    updates: dict = {}
     if data.payment_method is not None:
         if data.payment_method not in ("stripe", "paypal", "bank", "xendit"):
             raise HTTPException(status_code=400, detail="Invalid payment method")
@@ -428,23 +444,41 @@ async def update_profile(
         updates["xendit_account_number"] = data.xendit_account_number
     if data.xendit_account_holder_name is not None:
         updates["xendit_account_holder_name"] = data.xendit_account_holder_name
+    return updates
 
-    # When switching to xendit, require all bank details
+
+async def _save_payout_settings(user_id: str, data: ProfileUpdate) -> dict:
+    """Write payout settings for a user: canonical row in
+    affiliate_payout_settings, plus a mirror update on every
+    `affiliates` row for the same user so the existing payout service
+    (which reads payment_method etc. from the affiliate row at payout
+    time) keeps working unchanged.
+    """
+    affiliates = await AffiliateRepository.list_by_user_id(user_id)
+    if not affiliates:
+        raise HTTPException(status_code=404, detail="No affiliate records found")
+
+    updates = _build_payout_updates(data)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # When switching to xendit, require all bank details — check the
+    # post-update merged view so partial updates don't fail spuriously.
+    existing = await AffiliatePayoutSettingsRepository.get_or_default(user_id)
     if updates.get("payment_method") == "xendit":
-        existing = affiliates[0]
         final_code = updates.get("xendit_channel_code") or existing.get("xendit_channel_code")
         final_number = updates.get("xendit_account_number") or existing.get("xendit_account_number")
         final_name = updates.get("xendit_account_holder_name") or existing.get("xendit_account_holder_name")
         if not final_code or not final_number or not final_name:
             raise HTTPException(status_code=400, detail="All Xendit bank details are required")
 
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
+    saved = await AffiliatePayoutSettingsRepository.upsert(user_id, updates)
 
-    # Update all affiliate records for this user
+    # Mirror to each affiliates row so the payout service keeps reading
+    # the right fields. This loop will go away once payouts read from
+    # the canonical table directly.
     set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates.keys()))
     values = list(updates.values())
-
     for a in affiliates:
         await Database.execute(
             f"UPDATE affiliates SET {set_clauses}, updated_at = now() WHERE id = $1",
@@ -452,6 +486,48 @@ async def update_profile(
             *values,
         )
 
+    return saved
+
+
+def _payout_response(row: dict) -> PayoutSettings:
+    return PayoutSettings(
+        payment_method=row["payment_method"],
+        paypal_email=row.get("paypal_email") or "",
+        bank_iban=row.get("bank_iban") or "",
+        bank_account_holder=row.get("bank_account_holder") or "",
+        bank_swift_bic=row.get("bank_swift_bic") or "",
+        bank_name=row.get("bank_name") or "",
+        bank_country=row.get("bank_country") or "",
+        xendit_channel_code=row.get("xendit_channel_code"),
+        xendit_account_number=row.get("xendit_account_number"),
+        xendit_account_holder_name=row.get("xendit_account_holder_name"),
+    )
+
+
+@router.get("/payout-settings", response_model=PayoutSettings)
+async def get_payout_settings(user_id: str = Depends(require_affiliate)):
+    row = await AffiliatePayoutSettingsRepository.get_or_default(user_id)
+    return _payout_response(row)
+
+
+@router.patch("/payout-settings", response_model=PayoutSettings)
+async def update_payout_settings(
+    data: ProfileUpdate,
+    user_id: str = Depends(require_affiliate),
+):
+    saved = await _save_payout_settings(user_id, data)
+    return _payout_response(saved)
+
+
+@router.patch("/me")
+async def update_profile(
+    data: ProfileUpdate,
+    user_id: str = Depends(require_affiliate),
+):
+    """Legacy alias for PATCH /payout-settings — kept so older clients
+    that still hit /me don't break. New clients should use
+    /payout-settings."""
+    await _save_payout_settings(user_id, data)
     return {"message": "Profile updated"}
 
 
