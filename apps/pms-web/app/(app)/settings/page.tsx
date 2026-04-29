@@ -167,6 +167,10 @@ export default function SettingsPage() {
   const [longitude, setLongitude] = useState('')
   const [savingProperty, setSavingProperty] = useState(false)
 
+  // Booking engine
+  const [instantBook, setInstantBook] = useState(false)
+  const [savingInstantBook, setSavingInstantBook] = useState(false)
+
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {
@@ -198,6 +202,7 @@ export default function SettingsPage() {
         if (h.phone) setPhone(h.phone)
         if (h.latitude != null) setLatitude(String(h.latitude))
         if (h.longitude != null) setLongitude(String(h.longitude))
+        setInstantBook(Boolean(h.instant_book))
       })
       .catch(() => {})
   }, [])
@@ -245,6 +250,23 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to save property details')
     } finally {
       setSavingProperty(false)
+    }
+  }
+
+  const toggleInstantBook = async (next: boolean) => {
+    setSavingInstantBook(true)
+    setError('')
+    setSuccess('')
+    const previous = instantBook
+    setInstantBook(next)
+    try {
+      await apiClient.patch('/admin/hotel', { instant_book: next })
+      setSuccess(next ? 'Instant booking enabled' : 'Booking requests re-enabled')
+    } catch (err: any) {
+      setInstantBook(previous)
+      setError(err.message || 'Failed to update booking acceptance setting')
+    } finally {
+      setSavingInstantBook(false)
     }
   }
 
@@ -410,6 +432,45 @@ export default function SettingsPage() {
           >
             {savingProperty ? 'Saving...' : 'Save'}
           </button>
+        </div>
+
+        {/* Booking Engine — accept mode */}
+        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Booking Engine</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Choose how new bookings from your booking engine are accepted.
+          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-900">
+                Accept bookings instantly
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {instantBook
+                  ? 'New bookings are confirmed immediately. Card payments are charged at booking time and the guest receives an instant confirmation.'
+                  : 'New bookings arrive as requests. You have 24 hours to accept or reject — card payments are only authorized until you confirm.'}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Bank-transfer bookings always require manual review since no payment has been received yet.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={instantBook}
+              disabled={savingInstantBook}
+              onClick={() => toggleInstantBook(!instantBook)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-50 ${
+                instantBook ? 'bg-primary-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                  instantBook ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Currency */}
