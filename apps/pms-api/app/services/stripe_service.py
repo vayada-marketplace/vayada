@@ -15,12 +15,18 @@ async def create_payment_intent(
     currency: str,
     metadata: dict,
     stripe_account: Optional[str] = None,
+    capture_method: str = "manual",
 ) -> dict:
-    """Create a PaymentIntent with manual capture (authorization hold)."""
+    """Create a PaymentIntent.
+
+    Defaults to manual capture (the request flow holds an authorization until
+    the host accepts). Pass ``capture_method="automatic"`` for instant-book
+    hotels that capture as soon as the guest confirms payment.
+    """
     params = {
         "amount": amount,
         "currency": currency.lower(),
-        "capture_method": "manual",
+        "capture_method": capture_method,
         "metadata": metadata,
     }
     if stripe_account:
