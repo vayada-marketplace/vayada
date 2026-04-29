@@ -1,9 +1,8 @@
 import json
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from app.dependencies import require_hotel_admin, require_current_hotel
-from app.database import PmsDatabase
-from app.config import settings
+from app.dependencies import require_current_hotel
+from app.database import Database
 
 router = APIRouter()
 
@@ -22,18 +21,17 @@ class BenefitsUpdate(BaseModel):
     benefits: list[str]
 
 
-# Benefits are stored on PMS hotels.benefits JSONB column. After the
-# multi-hotel-ids unification, hotel["id"] from require_current_hotel
-# is the same UUID as the PMS hotel row, so no separate lookup is
-# needed — query PMS by id directly.
+# Benefits are stored on booking_hotels.benefits, keyed by the booking
+# hotel id. Storing them here (rather than on pms.hotels.benefits) keeps
+# the canonical id used by both admin frontends — the X-Hotel-Id header
+# always carries booking_hotels.id — so reads/writes line up regardless
+# of whether the PMS row was created via the multi-hotel-ids unification
+# (id-matched) or predates it (id mismatch but linked by user_id+slug).
 
 @router.get("/benefits", response_model=BenefitsResponse)
 async def get_benefits(hotel: dict = Depends(require_current_hotel)):
-    if not settings.PMS_DATABASE_URL:
-        return BenefitsResponse(benefits=[])
-    hotel_id = str(hotel["id"])
-    row = await PmsDatabase.fetchrow(
-        "SELECT benefits FROM hotels WHERE id = $1", hotel_id
+    row = await Database.fetchrow(
+        "SELECT benefits FROM booking_hotels WHERE id = $1", str(hotel["id"])
     )
     return BenefitsResponse(
         benefits=_parse_jsonb(row["benefits"]) if row else []
@@ -45,12 +43,9 @@ async def update_benefits(
     data: BenefitsUpdate,
     hotel: dict = Depends(require_current_hotel),
 ):
-    if not settings.PMS_DATABASE_URL:
-        return BenefitsResponse(benefits=data.benefits)
-    hotel_id = str(hotel["id"])
-    await PmsDatabase.execute(
-        "UPDATE hotels SET benefits = $1::jsonb WHERE id = $2",
+    await Database.execute(
+        "UPDATE booking_hotels SET benefits = $1::jsonb WHERE id = $2",
         json.dumps(data.benefits),
-        hotel_id,
+        str(hotel["id"]),
     )
     return BenefitsResponse(benefits=data.benefits)
