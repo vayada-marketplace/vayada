@@ -1,5 +1,5 @@
 import { Booking } from '@/lib/types'
-import { ApiError, pms } from './client'
+import { pms } from './client'
 
 export interface BookingRequestResponse {
   booking: Booking
@@ -96,11 +96,10 @@ export const bookingService = {
   async getPaymentSettings(slug: string): Promise<PaymentSettings> {
     try {
       return await pms.get<PaymentSettings>(`/api/hotels/${slug}/payment-settings`)
-    } catch (err) {
-      if (err instanceof ApiError) {
-        return { payAtPropertyEnabled: false, freeCancellationDays: 7 }
-      }
-      throw err
+    } catch {
+      // Settings endpoint is best-effort — return a permissive default so the
+      // checkout form still renders if the backend is briefly unreachable.
+      return { payAtPropertyEnabled: false, freeCancellationDays: 7 }
     }
   },
 
