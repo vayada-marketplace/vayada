@@ -1,6 +1,5 @@
 import { Booking } from '@/lib/types'
-
-const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
+import { ApiError, pms } from './client'
 
 export interface BookingRequestResponse {
   booking: Booking
@@ -47,22 +46,6 @@ export interface CancelPreview {
   currency: string
 }
 
-async function handleResponse<T>(res: Response, fallbackMessage: string): Promise<T> {
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: fallbackMessage }))
-    throw new Error(err.detail || fallbackMessage)
-  }
-  return res.json()
-}
-
-async function postJson(url: string, body?: unknown): Promise<Response> {
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    ...(body !== undefined && { body: JSON.stringify(body) }),
-  })
-}
-
 export const bookingService = {
   async create(slug: string, data: {
     roomTypeId: string
@@ -86,46 +69,42 @@ export const bookingService = {
     addonQuantities?: Record<string, number>
     promoCode?: string
   }): Promise<BookingRequestResponse> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings`, data)
-    return handleResponse(res, 'Booking failed')
+    return pms.post(`/api/hotels/${slug}/bookings`, data)
   },
 
   async confirmAuthorization(slug: string, bookingId: string): Promise<void> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/confirm-authorization`)
-    await handleResponse(res, 'Confirmation failed')
+    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/confirm-authorization`)
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/withdraw`, { guest_email: guestEmail })
-    await handleResponse(res, 'Withdrawal failed')
+    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/withdraw`, { guest_email: guestEmail })
   },
 
   async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/cancel-preview`, { guest_email: guestEmail })
-    return handleResponse(res, 'Preview failed')
+    return pms.post(`/api/hotels/${slug}/bookings/${bookingId}/cancel-preview`, { guest_email: guestEmail })
   },
 
   async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings/${bookingId}/cancel`, { guest_email: guestEmail })
-    await handleResponse(res, 'Cancellation failed')
+    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/cancel`, { guest_email: guestEmail })
   },
 
   async getStatus(slug: string, reference: string, email: string): Promise<BookingStatus> {
     const params = new URLSearchParams({ reference, email })
-    const res = await fetch(`${PMS_URL}/api/hotels/${slug}/bookings/status?${params}`)
-    return handleResponse(res, 'Status check failed')
+    return pms.get(`/api/hotels/${slug}/bookings/status?${params}`)
   },
 
   async getPaymentSettings(slug: string): Promise<PaymentSettings> {
-    const res = await fetch(`${PMS_URL}/api/hotels/${slug}/payment-settings`)
-    if (!res.ok) {
-      return { payAtPropertyEnabled: false, freeCancellationDays: 7 }
+    try {
+      return await pms.get<PaymentSettings>(`/api/hotels/${slug}/payment-settings`)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        return { payAtPropertyEnabled: false, freeCancellationDays: 7 }
+      }
+      throw err
     }
-    return res.json()
   },
 
   async lookup(slug: string, bookingReference: string, guestEmail: string): Promise<Booking> {
-    const res = await postJson(`${PMS_URL}/api/hotels/${slug}/bookings/lookup`, { bookingReference, guestEmail })
-    return handleResponse(res, 'Booking not found')
+    return pms.post(`/api/hotels/${slug}/bookings/lookup`, { bookingReference, guestEmail })
   },
 }

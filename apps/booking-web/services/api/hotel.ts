@@ -1,18 +1,15 @@
 import { Hotel, RoomType, Addon } from '@/lib/types'
-import { apiClient } from './client'
-
-const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
+import { bookingEngine, pms } from './client'
 
 export const hotelService = {
   async getHotel(slug: string, locale: string = 'en'): Promise<Hotel> {
     const langParam = locale !== 'en' ? `?lang=${locale}` : ''
-    return apiClient.get<Hotel>(`/api/hotels/${slug}${langParam}`)
+    return bookingEngine.get<Hotel>(`/api/hotels/${slug}${langParam}`)
   },
 
   async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
-    const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
     try {
-      await fetch(`${base}/api/hotels/${slug}/affiliates/${referralCode}/click`, {
+      await fetch(`${pms.baseURL}/api/hotels/${slug}/affiliates/${referralCode}/click`, {
         method: 'POST',
         keepalive: true,
       })
@@ -27,27 +24,27 @@ export const hotelService = {
     if (checkOut) params.set('check_out', checkOut)
     if (adults) params.set('adults', String(adults))
     const qs = params.toString()
-    const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
-    const res = await fetch(`${base}/api/hotels/${slug}/rooms${qs ? `?${qs}` : ''}`)
-    if (!res.ok) throw new Error(`API error: ${res.status}`)
-    return res.json()
+    return pms.get<RoomType[]>(`/api/hotels/${slug}/rooms${qs ? `?${qs}` : ''}`)
   },
 
   async getAddons(slug: string): Promise<Addon[]> {
-    return apiClient.get<Addon[]>(`/api/hotels/${slug}/addons`)
+    return bookingEngine.get<Addon[]>(`/api/hotels/${slug}/addons`)
   },
 
   async getUnavailableDates(slug: string, start: string, end: string): Promise<{
     dates: string[]
     minStayByArrival: Record<string, number>
   }> {
-    const base = PMS_URL || process.env.NEXT_PUBLIC_API_URL || ''
-    const res = await fetch(`${base}/api/hotels/${slug}/unavailable-dates?start=${start}&end=${end}`)
-    if (!res.ok) return { dates: [], minStayByArrival: {} }
-    const data = await res.json()
-    return {
-      dates: data.dates || [],
-      minStayByArrival: data.min_stay_by_arrival || {},
+    try {
+      const data = await pms.get<{ dates?: string[]; min_stay_by_arrival?: Record<string, number> }>(
+        `/api/hotels/${slug}/unavailable-dates?start=${start}&end=${end}`,
+      )
+      return {
+        dates: data.dates || [],
+        minStayByArrival: data.min_stay_by_arrival || {},
+      }
+    } catch {
+      return { dates: [], minStayByArrival: {} }
     }
   },
 
@@ -58,6 +55,6 @@ export const hotelService = {
     discountValue?: number
     message: string
   }> {
-    return apiClient.get(`/api/hotels/${slug}/validate-promo?code=${encodeURIComponent(code)}`)
+    return bookingEngine.get(`/api/hotels/${slug}/validate-promo?code=${encodeURIComponent(code)}`)
   },
 }

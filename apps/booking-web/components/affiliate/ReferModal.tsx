@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { pms } from '@/services/api/client'
 
-const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || ''
+const PMS_URL = pms.baseURL
 
 function formatApiError(err: any, fallback: string): string {
   const detail = err?.detail

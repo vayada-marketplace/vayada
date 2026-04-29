@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import { useHotel, useSlug } from '@/contexts/HotelContext'
-import { apiClient } from '@/services/api/client'
+import { bookingEngine } from '@/services/api/client'
 
 interface CurrencyContextValue {
   selectedCurrency: string
@@ -65,7 +65,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       const maxRetries = 3
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          const data = await apiClient.get<{ base: string; rates: Record<string, number> }>(
+          const data = await bookingEngine.get<{ base: string; rates: Record<string, number> }>(
             `/api/exchange-rates?base=${baseCurrency}`
           )
           if (!cancelled) {
