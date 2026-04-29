@@ -159,7 +159,7 @@ cmd_done() {
 
   echo "→ Moving Linear ticket $ticket to In Review"
   claude -p "Use the linear MCP server to move ticket $ticket to the In Review state. Reply with one short line: success or the error." \
-    2>&1 | sed 's/^/   /' || echo "   (failed; move it manually in Linear)"
+    </dev/null 2>&1 | sed 's/^/   /' || echo "   (failed; move it manually in Linear)"
 
   echo "→ Deinitializing submodules in worktree"
   ( cd "$worktree" && git submodule deinit --all -f --quiet ) || true
