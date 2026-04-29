@@ -651,6 +651,7 @@ export default function CalendarPage() {
           initialRoomId={prefill?.roomId}
           initialCheckIn={prefill?.startDate}
           initialCheckOut={prefill?.endDate}
+          connectedChannelKeys={connectedChannelKeys}
         />
       )}
 
