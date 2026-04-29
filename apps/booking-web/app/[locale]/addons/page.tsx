@@ -64,7 +64,11 @@ export default function AddonsPage() {
 
   const selectedIds = Object.keys(selections)
 
-  const getMaxQuantity = (addon: { perNight?: boolean }) => addon.perNight ? nights : 10
+  const getMaxQuantity = (addon: { perNight?: boolean; perPerson?: boolean }) => {
+    if (addon.perNight) return nights
+    if (addon.perPerson) return Math.max(1, adultsParam)
+    return 10
+  }
 
   const toggleAddon = (id: string) => {
     setSelections((prev) => {
@@ -94,7 +98,7 @@ export default function AddonsPage() {
     })
   }
 
-  const setQuantity = (id: string, qty: number, addon: { perNight?: boolean }) => {
+  const setQuantity = (id: string, qty: number, addon: { perNight?: boolean; perPerson?: boolean }) => {
     const max = getMaxQuantity(addon)
     const clamped = Math.max(1, Math.min(qty, max))
     setSelections((prev) => ({ ...prev, [id]: clamped }))
@@ -183,8 +187,12 @@ export default function AddonsPage() {
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
                         </button>
-                        <span className="w-8 text-center text-sm font-semibold text-gray-900">
-                          {addon.perNight ? `${selections[addon.id]}/${nights}` : selections[addon.id]}
+                        <span className="w-10 text-center text-sm font-semibold text-gray-900">
+                          {addon.perNight
+                            ? `${selections[addon.id]}/${nights}`
+                            : addon.perPerson
+                              ? `${selections[addon.id]}/${adultsParam}`
+                              : selections[addon.id]}
                         </span>
                         <button
                           onClick={() => setQuantity(addon.id, selections[addon.id] + 1, addon)}
@@ -271,7 +279,9 @@ export default function AddonsPage() {
                       <p className="text-xs text-gray-500">
                         {addon.perNight
                           ? `${qty} / ${tc('nights', { count: nights })}`
-                          : qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
+                          : addon.perPerson
+                            ? `${qty} / ${adultsParam} ${tc('guests').toLowerCase()}`
+                            : qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}
                         {addon.perPerson ? ` · ${tc('perPerson')}` : ''}
                       </p>
                     </div>

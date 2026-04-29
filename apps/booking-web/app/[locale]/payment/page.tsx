@@ -687,9 +687,14 @@ function PaymentPageContent() {
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                   const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
+                  const annotation = addon.perNight
+                    ? (qty < nights ? ` (${qty}/${nights})` : '')
+                    : addon.perPerson
+                      ? ` (${qty}/${adultsParam})`
+                      : qty > 1 ? ` ×${qty}` : ''
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
-                      <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
+                      <span className="text-gray-500">{addon.name}{annotation}</span>
                       <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                     </div>
                   )
@@ -868,9 +873,14 @@ function StripePaymentPage({
             {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
               const qty = addon.perNight ? (addonQuantities?.[addon.id] ?? nights) : (addonQuantities?.[addon.id] ?? 1)
               const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
+              const annotation = addon.perNight
+                ? (qty < nights ? ` (${qty}/${nights})` : '')
+                : addon.perPerson
+                  ? ` (${qty}/${adults})`
+                  : qty > 1 ? ` ×${qty}` : ''
               return (
                 <div key={addon.id} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>
+                  <span className="text-gray-500">{addon.name}{annotation}</span>
                   <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
                 </div>
               )
