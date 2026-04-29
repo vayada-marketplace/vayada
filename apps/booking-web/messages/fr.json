@@ -188,7 +188,10 @@
     "confirmPaymentDesc": "Finalisez votre paiement pour soumettre la demande de réservation. Votre carte sera autorisée mais pas débitée tant que l'hôte n'aura pas accepté.",
     "authorizePayment": "Autoriser le paiement",
     "authorizationNote": "Votre carte ne sera débitée que si l'hôte accepte votre réservation dans les 24 heures.",
-    "continueToPayment": "Continuer vers le paiement"
+    "continueToPayment": "Continuer vers le paiement",
+    "xenditTitle": "QRIS / E-Wallet / Virement bancaire",
+    "xenditNote": "OVO, DANA, ShopeePay, GoPay ou virement bancaire indonésien via Xendit",
+    "xenditExplanation": "Vous serez redirigé vers une page de paiement sécurisée où vous pourrez payer avec QRIS, OVO, DANA, ShopeePay, GoPay ou par virement bancaire. L'hôte examinera votre réservation une fois le paiement confirmé."
   },
   "myBooking": {
     "title": "Ma réservation",

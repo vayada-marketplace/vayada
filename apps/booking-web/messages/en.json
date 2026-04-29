@@ -188,7 +188,10 @@
     "confirmPaymentDesc": "Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.",
     "authorizePayment": "Authorize Payment",
     "authorizationNote": "Your card will only be charged if the host accepts your booking within 24 hours.",
-    "continueToPayment": "Continue to Payment"
+    "continueToPayment": "Continue to Payment",
+    "xenditTitle": "QRIS / E-Wallet / Bank Transfer",
+    "xenditNote": "OVO, DANA, ShopeePay, GoPay, or Indonesian bank transfer via Xendit",
+    "xenditExplanation": "You will be redirected to a secure payment page where you can pay with QRIS, OVO, DANA, ShopeePay, GoPay, or bank transfer. The host will review your booking after payment is confirmed."
   },
   "myBooking": {
     "title": "My Booking",

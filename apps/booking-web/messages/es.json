@@ -188,7 +188,10 @@
     "confirmPaymentDesc": "Completa tu pago para enviar la solicitud de reserva. Tu tarjeta será autorizada pero no se cobrará hasta que el anfitrión acepte.",
     "authorizePayment": "Autorizar pago",
     "authorizationNote": "Tu tarjeta solo se cobrará si el anfitrión acepta tu reserva en un plazo de 24 horas.",
-    "continueToPayment": "Continuar al pago"
+    "continueToPayment": "Continuar al pago",
+    "xenditTitle": "QRIS / Monedero electrónico / Transferencia bancaria",
+    "xenditNote": "OVO, DANA, ShopeePay, GoPay o transferencia bancaria indonesia mediante Xendit",
+    "xenditExplanation": "Serás redirigido a una página de pago segura donde podrás pagar con QRIS, OVO, DANA, ShopeePay, GoPay o transferencia bancaria. El anfitrión revisará tu reserva una vez confirmado el pago."
   },
   "myBooking": {
     "title": "Mi Reserva",

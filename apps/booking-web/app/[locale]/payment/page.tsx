@@ -367,9 +367,9 @@ function PaymentPageContent() {
                           <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
-                          <span className="font-semibold text-sm text-gray-900">QRIS / E-Wallet / Bank Transfer</span>
+                          <span className="font-semibold text-sm text-gray-900">{t('xenditTitle')}</span>
                         </div>
-                        <p className="text-xs text-gray-500 ml-7">OVO, DANA, ShopeePay, GoPay, or Indonesian bank transfer via Xendit</p>
+                        <p className="text-xs text-gray-500 ml-7">{t('xenditNote')}</p>
                       </div>
                     </div>
                   </button>
@@ -460,7 +460,7 @@ function PaymentPageContent() {
               ) : paymentMethod === 'xendit' ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
-                    You will be redirected to a secure payment page where you can pay with QRIS, OVO, DANA, ShopeePay, GoPay, or bank transfer. The host will review your booking after payment is confirmed.
+                    {t('xenditExplanation')}
                   </div>
                 </div>
               ) : paymentMethod === 'bank_transfer' ? (

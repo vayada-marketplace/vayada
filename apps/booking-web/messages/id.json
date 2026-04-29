@@ -188,7 +188,10 @@
     "confirmPaymentDesc": "Selesaikan pembayaran Anda untuk mengirim permintaan pemesanan. Kartu Anda akan diotorisasi tetapi tidak dikenakan biaya sampai tuan rumah menerima.",
     "authorizePayment": "Otorisasi Pembayaran",
     "authorizationNote": "Kartu Anda hanya akan dikenakan biaya jika tuan rumah menerima pemesanan Anda dalam 24 jam.",
-    "continueToPayment": "Lanjutkan ke Pembayaran"
+    "continueToPayment": "Lanjutkan ke Pembayaran",
+    "xenditTitle": "QRIS / E-Wallet / Transfer Bank",
+    "xenditNote": "OVO, DANA, ShopeePay, GoPay, atau transfer bank Indonesia via Xendit",
+    "xenditExplanation": "Anda akan diarahkan ke halaman pembayaran aman tempat Anda dapat membayar dengan QRIS, OVO, DANA, ShopeePay, GoPay, atau transfer bank. Tuan rumah akan meninjau pemesanan Anda setelah pembayaran dikonfirmasi."
   },
   "myBooking": {
     "title": "Pemesanan Saya",

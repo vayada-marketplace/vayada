@@ -188,7 +188,10 @@
     "confirmPaymentDesc": "Schließen Sie Ihre Zahlung ab, um die Buchungsanfrage zu senden. Ihre Karte wird autorisiert, aber erst belastet, wenn der Gastgeber annimmt.",
     "authorizePayment": "Zahlung autorisieren",
     "authorizationNote": "Ihre Karte wird nur belastet, wenn der Gastgeber Ihre Buchung innerhalb von 24 Stunden annimmt.",
-    "continueToPayment": "Weiter zur Zahlung"
+    "continueToPayment": "Weiter zur Zahlung",
+    "xenditTitle": "QRIS / E-Wallet / Banküberweisung",
+    "xenditNote": "OVO, DANA, ShopeePay, GoPay oder indonesische Banküberweisung über Xendit",
+    "xenditExplanation": "Sie werden zu einer sicheren Zahlungsseite weitergeleitet, auf der Sie mit QRIS, OVO, DANA, ShopeePay, GoPay oder per Banküberweisung bezahlen können. Der Gastgeber prüft Ihre Buchung, sobald die Zahlung bestätigt wurde."
   },
   "myBooking": {
     "title": "Meine Buchung",
