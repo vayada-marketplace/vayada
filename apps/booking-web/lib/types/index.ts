@@ -43,6 +43,7 @@ export interface Hotel {
   branding?: HotelBranding
   supportedLanguages: string[]
   referAGuestEnabled?: boolean
+  instantBook?: boolean
 }
 
 export interface RoomType {
