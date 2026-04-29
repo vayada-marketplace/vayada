@@ -10,12 +10,11 @@ import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { bookingService } from '@/services/api/booking'
-import { calculateNights, formatDate } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { getNonRefundableRate, calculatePromoDiscount } from '@/lib/constants/booking'
 import { COUNTRIES } from '@/lib/constants/countries'
-import { hotelService } from '@/services/api/hotel'
 import { trackEvent } from '@/services/api/tracking'
+import { usePricing } from '@/lib/hooks/usePricing'
 
 const ARRIVAL_TIMES = Array.from({ length: 24 }, (_, i) => {
   const h = i.toString().padStart(2, '0')
@@ -29,7 +28,7 @@ function BookPageContent() {
   const tc = useTranslations('common')
   const ts = useTranslations('steps')
   const { hotel } = useHotel()
-  const { rooms, refetchRooms } = useRooms()
+  const { refetchRooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
@@ -67,17 +66,6 @@ function BookPageContent() {
       ]
   const currentStep = hasAddons ? 3 : 2
 
-  const room = rooms.find((r) => r.id === roomId) || rooms[0]
-  const nights = calculateNights(checkIn, checkOut)
-  const nightlyRateBase = rateType === 'nonrefundable'
-    ? getNonRefundableRate(room?.baseRate ?? 0, room?.nonRefundableRate)
-    : room?.baseRate ?? 0
-  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
-  // Per-night rate rounded in the displayed currency so that nightly × nights
-  // matches the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0
-  const roomTotal = nightlyRate * nights * roomsParam
-
   const addonEntries = (searchParams.get('addons') || '').split(',').filter(Boolean)
   const selectedAddonIds: string[] = []
   const addonQuantities: Record<string, number> = {}
@@ -86,40 +74,27 @@ function BookPageContent() {
     selectedAddonIds.push(id)
     if (qtyStr) addonQuantities[id] = parseInt(qtyStr)
   }
-  // Sum addon line totals in the displayed currency. Each line is rounded in
-  // the displayed currency first so its shown price matches the contribution.
-  const addonTotal = (() => {
-    let total = 0
-    for (const addon of addons) {
-      if (!selectedAddonIds.includes(addon.id)) continue
-      // perPerson addons: qty already counts the people opting in (the on-card "/person" stepper); don't multiply by room occupancy.
-      const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-      total += convertAndRound(addon.price * qty, addon.currency)
-    }
-    return total
-  })()
   const promoCodeParam = searchParams.get('promoCode') || ''
-  const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
 
-  useEffect(() => {
-    if (promoCodeParam && slug) {
-      hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
-        if (res.valid) {
-          const subtotal = roomTotal + addonTotal
-          // Fixed-amount promos are stored in the hotel's base currency; convert to
-          // the displayed currency so the discount matches the shown subtotal.
-          const value = res.discountType === 'fixed'
-            ? convertAndRound(res.discountValue!, roomCurrency)
-            : res.discountValue!
-          const amount = calculatePromoDiscount(subtotal, res.discountType!, value)
-          setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
-        }
-      }).catch(() => {})
-    }
-  }, [promoCodeParam, slug, roomTotal, addonTotal, roomCurrency, convertAndRound])
-
-  const discountAmount = promoDiscount?.amount ?? 0
-  const grandTotal = roomTotal + addonTotal - discountAmount
+  const {
+    room,
+    nights,
+    nightlyRate,
+    roomTotal,
+    addonTotal,
+    promoDiscount,
+    discountAmount,
+    grandTotal,
+  } = usePricing({
+    roomId,
+    checkIn,
+    checkOut,
+    rateType,
+    roomsParam,
+    selectedAddonIds,
+    addonQuantities,
+    promoCode: promoCodeParam,
+  })
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')

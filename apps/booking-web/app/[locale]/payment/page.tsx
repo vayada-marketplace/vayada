@@ -11,11 +11,11 @@ import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import StripeProvider from '@/components/StripeProvider'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
-import { calculateNights, formatDate } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
-import { getNonRefundableRate, calculatePromoDiscount, getFreeCancellationDays } from '@/lib/constants/booking'
-import { hotelService } from '@/services/api/hotel'
+import { getFreeCancellationDays } from '@/lib/constants/booking'
+import { usePricing } from '@/lib/hooks/usePricing'
 
 interface GuestDetails {
   roomTypeId: string
@@ -75,7 +75,7 @@ function PaymentPageContent() {
   const ts = useTranslations('steps')
   const tb = useTranslations('book')
   const { hotel } = useHotel()
-  const { rooms, refetchRooms } = useRooms()
+  const { refetchRooms } = useRooms()
   const { addons } = useAddons()
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
   const { slug } = useSlug()
@@ -105,50 +105,29 @@ function PaymentPageContent() {
   const rateType = searchParams.get('rateType') || 'flexible'
   const isNonRefundable = rateType === 'nonrefundable'
 
-  const room = rooms.find((r) => r.id === roomId) || rooms[0]
-  const nights = calculateNights(checkIn, checkOut)
-  const nightlyRateBase = isNonRefundable
-    ? getNonRefundableRate(room?.baseRate ?? 0, room?.nonRefundableRate)
-    : room?.baseRate ?? 0
-  const roomCurrency = room?.currency || hotel?.currency || 'EUR'
-  // Per-night rate rounded in the displayed currency so nightly × nights equals
-  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0
-  const roomTotal = nightlyRate * nights * roomsParam
-
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
-  const addonTotal = (() => {
-    let total = 0
-    for (const addon of addons) {
-      if (!selectedAddonIds.includes(addon.id)) continue
-      // perPerson addons: qty already counts the people opting in (the on-card "/person" stepper); don't multiply by room occupancy.
-      const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-      total += convertAndRound(addon.price * qty, addon.currency)
-    }
-    return total
-  })()
   const promoCodeParam = searchParams.get('promoCode') || ''
-  const [promoDiscount, setPromoDiscount] = useState<{ type: string; value: number; amount: number } | null>(null)
 
-  useEffect(() => {
-    if (promoCodeParam && slug) {
-      hotelService.validatePromoCode(slug, promoCodeParam).then((res) => {
-        if (res.valid) {
-          const subtotal = roomTotal + addonTotal
-          const value = res.discountType === 'fixed'
-            ? convertAndRound(res.discountValue!, roomCurrency)
-            : res.discountValue!
-          const amount = calculatePromoDiscount(subtotal, res.discountType!, value)
-          setPromoDiscount({ type: res.discountType!, value: res.discountValue!, amount })
-        }
-      }).catch(() => {})
-    }
-  }, [promoCodeParam, slug, roomTotal, addonTotal, roomCurrency, convertAndRound])
-
-  const discountAmount = promoDiscount?.amount ?? 0
-  const grandTotal = roomTotal + addonTotal - discountAmount
+  const {
+    room,
+    nights,
+    roomTotal,
+    addonTotal,
+    promoDiscount,
+    discountAmount,
+    grandTotal,
+  } = usePricing({
+    roomId,
+    checkIn,
+    checkOut,
+    rateType,
+    roomsParam,
+    selectedAddonIds,
+    addonQuantities,
+    promoCode: promoCodeParam,
+  })
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit' | 'bank_transfer'>('pay_at_property')
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false)
   const [onlineCardPayment, setOnlineCardPayment] = useState(false)
