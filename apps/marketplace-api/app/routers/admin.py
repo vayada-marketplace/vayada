@@ -2098,8 +2098,10 @@ async def admin_approve_collaboration(
                             commission,
                         )
                         if pms_affiliate:
-                            slug = pms_hotel['slug']
-                            affiliate_link = f"https://{slug}.booking.vayada.com?ref={referral_code}"
+                            affiliate_link = _cfg.AFFILIATE_LINK_TEMPLATE.format(
+                                slug=pms_hotel['slug'],
+                                referral_code=referral_code,
+                            )
                             await Database.execute(
                                 """
                                 UPDATE collaborations

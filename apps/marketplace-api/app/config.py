@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     S3_PUBLIC_URL_EXPIRY: int = Field(3600, description="Public URL expiry time in seconds (default: 1 hour)")
     S3_USE_PUBLIC_URLS: bool = Field(True, description="Whether to use public URLs or signed URLs")
     
+    # Affiliate / Booking Engine Configuration
+    AFFILIATE_LINK_TEMPLATE: str = Field(
+        "https://{slug}.booking.vayada.com?ref={referral_code}",
+        description="Format string for hotel affiliate links. Receives 'slug' and 'referral_code' via str.format().",
+    )
+
     # Image Upload Configuration
     MAX_IMAGE_SIZE_MB: int = Field(50, description="Maximum image file size in MB")
     ALLOWED_IMAGE_TYPES: List[str] = Field(default_factory=lambda: ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif", "image/avif"], description="Allowed MIME types for image uploads")
