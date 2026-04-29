@@ -263,18 +263,14 @@ async def create_hotel(
     always creates a new booking_hotels row and returns its id so
     the caller can then pass that id to the PMS register-hotel
     endpoint and to X-Hotel-Id headers going forward.
+
+    The superadmin variant (POST /admin/superadmin/hotels) deliberately
+    differs in slug-collision handling — it appends a user-id suffix
+    rather than 409ing — because superadmin creates hotels on behalf of
+    users who can't pick a different name interactively.
     """
-    try:
-        result = await _create_hotel_from_settings(data, user_id)
-        return await _hotel_to_property_settings(result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create hotel: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create property. Please try again.",
-        )
+    result = await _create_hotel_from_settings(data, user_id)
+    return await _hotel_to_property_settings(result)
 
 
 @router.patch("/settings/property", response_model=PropertySettingsResponse)
