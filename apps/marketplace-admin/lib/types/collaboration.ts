@@ -69,6 +69,8 @@ export interface Collaboration {
     updated_at: string;     // ISO DateTime
     completed_at?: string;  // ISO DateTime (if completed)
     cancelled_at?: string;  // ISO DateTime (if cancelled)
+    hotel_agreed_at?: string;   // ISO DateTime, set when hotel approves terms
+    creator_agreed_at?: string; // ISO DateTime, set when creator approves terms
 }
 
 // Response Interface

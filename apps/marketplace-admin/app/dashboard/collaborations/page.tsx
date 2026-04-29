@@ -385,6 +385,7 @@ export default function CollaborationsPage() {
                 isOpen={!!selectedCollaboration}
                 onClose={() => setSelectedCollaboration(null)}
                 collaboration={selectedCollaboration}
+                onActionComplete={fetchCollaborations}
             />
             </div>
         </div>

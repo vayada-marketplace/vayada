@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { AdminCollaborationsResponse } from '@/lib/types/collaboration';
+import { AdminCollaborationsResponse, Collaboration } from '@/lib/types/collaboration';
 
 export const collaborationsService = {
     /**
@@ -23,5 +23,29 @@ export const collaborationsService = {
 
         const endpoint = `/admin/collaborations?${params.toString()}`;
         return apiClient.get<AdminCollaborationsResponse>(endpoint);
-    }
+    },
+
+    /**
+     * Accept or decline a pending collaboration on behalf of the hotel.
+     */
+    respondAsHotel: async (
+        collaborationId: string,
+        status: 'accepted' | 'declined',
+        responseMessage?: string
+    ): Promise<Collaboration> => {
+        return apiClient.post<Collaboration>(
+            `/admin/collaborations/${collaborationId}/respond`,
+            { status, response_message: responseMessage }
+        );
+    },
+
+    /**
+     * Approve current terms on behalf of the hotel. Finalizes the collaboration
+     * when the creator has already approved.
+     */
+    approveAsHotel: async (collaborationId: string): Promise<Collaboration> => {
+        return apiClient.post<Collaboration>(
+            `/admin/collaborations/${collaborationId}/approve`
+        );
+    },
 };

@@ -1,13 +1,21 @@
+'use client'
+
+import { useState } from 'react';
 import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { Avatar } from '../ui/Avatar';
+import { Textarea } from '../ui/Textarea';
 import { Collaboration, CollaborationStatus } from '../../lib/types/collaboration';
 import { getCurrencySymbol } from '../../lib/utils/getCurrencySymbol';
+import { collaborationsService } from '../../services/api';
+import { ApiErrorResponse } from '../../services/api/client';
 
 interface CollaborationDetailModalProps {
     isOpen: boolean;
     onClose: () => void;
     collaboration: Collaboration | null;
+    onActionComplete?: () => void;
 }
 
 const statusVariantMap: Record<CollaborationStatus, 'success' | 'warning' | 'info' | 'danger' | 'neutral'> = {
@@ -23,7 +31,12 @@ export function CollaborationDetailModal({
     isOpen,
     onClose,
     collaboration,
+    onActionComplete,
 }: CollaborationDetailModalProps) {
+    const [actionInFlight, setActionInFlight] = useState<null | 'accept' | 'decline' | 'approve'>(null);
+    const [error, setError] = useState('');
+    const [responseMessage, setResponseMessage] = useState('');
+
     if (!collaboration) return null;
 
     const formatDate = (dateString?: string) => {
@@ -44,10 +57,44 @@ export function CollaborationDetailModal({
         }
     };
 
+    const handleClose = () => {
+        setError('');
+        setResponseMessage('');
+        setActionInFlight(null);
+        onClose();
+    };
+
+    const runAction = async (action: 'accept' | 'decline' | 'approve') => {
+        setActionInFlight(action);
+        setError('');
+        try {
+            if (action === 'accept') {
+                await collaborationsService.respondAsHotel(collaboration.id, 'accepted', responseMessage || undefined);
+            } else if (action === 'decline') {
+                await collaborationsService.respondAsHotel(collaboration.id, 'declined', responseMessage || undefined);
+            } else {
+                await collaborationsService.approveAsHotel(collaboration.id);
+            }
+            onActionComplete?.();
+            handleClose();
+        } catch (err) {
+            const message = err instanceof ApiErrorResponse
+                ? (err.data.detail as string) || 'Action failed'
+                : 'Unexpected error';
+            setError(message);
+        } finally {
+            setActionInFlight(null);
+        }
+    };
+
+    const canRespond = collaboration.status === 'pending' && collaboration.initiator_type === 'creator';
+    const canApprove = collaboration.status === 'negotiating' && !collaboration.hotel_agreed_at;
+    const showActions = canRespond || canApprove;
+
     return (
         <Modal
             isOpen={isOpen}
-            onClose={onClose}
+            onClose={handleClose}
             title="Collaboration Details"
             size="lg"
         >
@@ -156,6 +203,66 @@ export function CollaborationDetailModal({
                     {collaboration.completed_at && <span>Completed: {formatDate(collaboration.completed_at)}</span>}
                     {collaboration.cancelled_at && <span>Cancelled: {formatDate(collaboration.cancelled_at)}</span>}
                 </div>
+
+                {/* Admin Actions */}
+                {showActions && (
+                    <div className="pt-4 border-t border-gray-200 space-y-3">
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-900">Act on behalf of {collaboration.hotel_name}</h4>
+                            <p className="text-xs text-gray-500">
+                                {canRespond
+                                    ? 'The hotel has not yet responded to this creator application.'
+                                    : 'Approve the current terms. The creator must also approve before the collaboration is finalized.'}
+                            </p>
+                        </div>
+
+                        {canRespond && (
+                            <Textarea
+                                placeholder="Optional message to the creator…"
+                                value={responseMessage}
+                                onChange={(e) => setResponseMessage(e.target.value)}
+                                rows={2}
+                            />
+                        )}
+
+                        {error && (
+                            <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800">
+                                {error}
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            {canRespond && (
+                                <>
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => runAction('decline')}
+                                        disabled={actionInFlight !== null}
+                                        className="border-red-300 text-red-700 hover:bg-red-50"
+                                    >
+                                        {actionInFlight === 'decline' ? 'Declining…' : 'Decline'}
+                                    </Button>
+                                    <Button
+                                        variant="primary"
+                                        onClick={() => runAction('accept')}
+                                        disabled={actionInFlight !== null}
+                                    >
+                                        {actionInFlight === 'accept' ? 'Accepting…' : 'Accept on behalf of Hotel'}
+                                    </Button>
+                                </>
+                            )}
+                            {canApprove && (
+                                <Button
+                                    variant="primary"
+                                    onClick={() => runAction('approve')}
+                                    disabled={actionInFlight !== null}
+                                >
+                                    {actionInFlight === 'approve' ? 'Approving…' : 'Approve on behalf of Hotel'}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                )}
 
             </div>
         </Modal>
