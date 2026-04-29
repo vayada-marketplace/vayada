@@ -23,25 +23,6 @@ router = APIRouter(prefix="/collaborations", tags=["chat"])
 
 
 # ============================================
-# HELPERS
-# ============================================
-
-async def create_system_message(
-    collaboration_id: str,
-    content: str,
-    metadata: dict = None,
-    conn = None
-):
-    """Helper to insert a system message into chat"""
-    await ChatRepository.create_system_message(
-        collaboration_id,
-        content,
-        json.dumps(metadata) if metadata else None,
-        conn=conn
-    )
-
-
-# ============================================
 # ENDPOINTS
 # ============================================
 

@@ -14,12 +14,12 @@ import secrets
 
 from app.database import Database, AuthDatabase, PmsDatabase
 from app.dependencies import get_current_user_id, get_admin_user
-from app.routers.chat import create_system_message
-from app.routers.collaborations import (
-    get_collaboration_deliverables,
-    _get_party_email_and_name,
-    _send_email_background,
-    _notify_vayada_team,
+from app.routers.collaborations import get_collaboration_deliverables
+from app.services.chat_system import create_system_message
+from app.services.notifications import (
+    get_party_email_and_name,
+    send_email_background,
+    notify_vayada_team,
 )
 from app.email_service import (
     create_collaboration_response_email_html,
@@ -1984,7 +1984,7 @@ async def admin_respond_to_collaboration(
     response = await _build_admin_collaboration_response(collaboration_id)
 
     # Notify the creator (initiator) that the hotel responded.
-    creator_email, creator_email_name = await _get_party_email_and_name(
+    creator_email, creator_email_name = await get_party_email_and_name(
         "creator", creator_id=str(collab['creator_id'])
     )
     if creator_email:
@@ -1999,8 +1999,8 @@ async def admin_respond_to_collaboration(
             response_message=request.response_message,
         )
         subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
-        _send_email_background(creator_email, subject, html)
-        _notify_vayada_team(subject, html)
+        send_email_background(creator_email, subject, html)
+        notify_vayada_team(subject, html)
 
     return response
 
@@ -2051,10 +2051,10 @@ async def admin_approve_collaboration(
             if new_status == 'accepted':
                 await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
 
-    creator_email, creator_email_name = await _get_party_email_and_name(
+    creator_email, creator_email_name = await get_party_email_and_name(
         "creator", creator_id=str(collab['creator_id'])
     )
-    hotel_email, hotel_email_name = await _get_party_email_and_name(
+    hotel_email, hotel_email_name = await get_party_email_and_name(
         "hotel", hotel_id=str(collab['hotel_id'])
     )
 
@@ -2123,8 +2123,8 @@ async def admin_approve_collaboration(
                     both_approved=True,
                     affiliate_link=link_for_email,
                 )
-                _send_email_background(email, "Collaboration Confirmed!", html)
-        _notify_vayada_team("Collaboration Confirmed!", html)
+                send_email_background(email, "Collaboration Confirmed!", html)
+        notify_vayada_team("Collaboration Confirmed!", html)
     else:
         if creator_email:
             updated_full = await CollaborationRepository.get_full(collaboration_id)
@@ -2136,6 +2136,6 @@ async def admin_approve_collaboration(
                 listing_location=updated_full.get('listing_location'),
                 both_approved=False,
             )
-            _send_email_background(creator_email, "Terms Approved — Your Confirmation Needed", html)
+            send_email_background(creator_email, "Terms Approved — Your Confirmation Needed", html)
 
     return await _build_admin_collaboration_response(collaboration_id)

@@ -13,12 +13,16 @@ from app.repositories.collaboration_repo import CollaborationRepository
 import logging
 import json
 import uuid
-import asyncio
 import secrets
 from decimal import Decimal
-from .chat import create_system_message
+from app.services.chat_system import create_system_message
+from app.services.notifications import (
+    get_party_email_and_name,
+    send_email_background,
+    notify_vayada_team,
+    notify_marketplace_admin,
+)
 from app.email_service import (
-    send_email,
     create_collaboration_request_email_html,
     create_collaboration_response_email_html,
     create_collaboration_counter_offer_email_html,
@@ -47,67 +51,6 @@ router = APIRouter(prefix="/collaborations", tags=["collaborations"])
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
-
-async def _get_party_email_and_name(
-    party: str,
-    creator_id: Optional[str] = None,
-    hotel_id: Optional[str] = None,
-) -> tuple:
-    """
-    Resolve (email, name) for a collaboration party.
-    party: "creator" or "hotel"
-    """
-    try:
-        if party == "creator" and creator_id:
-            creator = await CreatorRepository.get_by_id(creator_id, columns="user_id")
-            if creator:
-                user = await UserRepository.get_by_id(creator['user_id'], columns="email, name")
-                if user:
-                    return user['email'], user['name']
-        elif party == "hotel" and hotel_id:
-            hotel = await HotelRepository.get_profile_by_id(hotel_id, columns="user_id, name")
-            if hotel:
-                user = await UserRepository.get_by_id(hotel['user_id'], columns="email, name")
-                if user:
-                    return user['email'], hotel['name']
-    except Exception as e:
-        logger.error(f"Failed to resolve {party} email: {e}")
-    return None, None
-
-
-VAYADA_COLLABORATIONS_EMAIL = "collaborations@vayada.com"
-MARKETPLACE_ADMIN_EMAIL = "p.paetzold@vayada.com"
-
-# Strong references to in-flight background email tasks.
-# asyncio's event loop only keeps weak references to tasks, so without this set
-# the GC can collect a fire-and-forget task before SMTP completes and the email
-# is silently dropped (cause of VAY-241 missed admin notifications).
-_background_tasks: set = set()
-
-
-def _send_email_background(to_email: str, subject: str, html_body: str):
-    """Fire-and-forget email sending — never blocks the response."""
-    task = asyncio.create_task(_send_email_safe(to_email, subject, html_body))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
-
-def _notify_vayada_team(subject: str, html_body: str):
-    """Send a copy to the vayada collaborations team."""
-    _send_email_background(VAYADA_COLLABORATIONS_EMAIL, f"[Internal] {subject}", html_body)
-
-
-def _notify_marketplace_admin(subject: str, html_body: str):
-    """Send a copy of marketplace activity to the marketplace admin (p.paetzold)."""
-    _send_email_background(MARKETPLACE_ADMIN_EMAIL, f"[Marketplace] {subject}", html_body)
-
-
-async def _send_email_safe(to_email: str, subject: str, html_body: str):
-    try:
-        await send_email(to_email, subject, html_body)
-    except Exception as e:
-        logger.error(f"Background email to {to_email} failed: {e}")
-
 
 async def get_collaboration_deliverables(collaboration_id: str) -> List[PlatformDeliverablesItem]:
     """
@@ -295,9 +238,9 @@ async def create_collaboration(
         platform_deliverables_response = await get_collaboration_deliverables(str(collaboration['id']))
         
         # Fetch contact info for both parties (used by recipient + admin notifications)
-        creator_email_addr, creator_display_name = await _get_party_email_and_name(
+        creator_email_addr, creator_display_name = await get_party_email_and_name(
             "creator", creator_id=creator_id)
-        hotel_email_addr, hotel_display_name = await _get_party_email_and_name(
+        hotel_email_addr, hotel_display_name = await get_party_email_and_name(
             "hotel", hotel_id=hotel_id)
 
         # Send email notification to the recipient
@@ -318,8 +261,8 @@ async def create_collaboration(
                 listing_location=listing.get('location'),
                 why_great_fit=request.why_great_fit,
             )
-            _send_email_background(recipient_email, "New Collaboration Request on vayada", html)
-            _notify_vayada_team("New Collaboration Request on vayada", html)
+            send_email_background(recipient_email, "New Collaboration Request on vayada", html)
+            notify_vayada_team("New Collaboration Request on vayada", html)
 
         admin_html = create_admin_collaboration_request_email_html(
             creator_name=creator_display_name or (creator_user_info['name'] if creator_user_info else 'Unknown'),
@@ -332,7 +275,7 @@ async def create_collaboration(
             initiator_type=request.initiator_type,
             why_great_fit=request.why_great_fit,
         )
-        _notify_marketplace_admin("New collaboration request", admin_html)
+        notify_marketplace_admin("New collaboration request", admin_html)
 
         return CollaborationResponse(
             id=str(collaboration['id']),
@@ -481,11 +424,11 @@ async def respond_to_collaboration_request(
 
         # Send email to the initiator about the response
         if collab['initiator_type'] == "creator":
-            initiator_email, initiator_name = await _get_party_email_and_name(
+            initiator_email, initiator_name = await get_party_email_and_name(
                 "creator", creator_id=str(collab['creator_id']))
             responder_name = updated['hotel_name']
         else:
-            initiator_email, initiator_name = await _get_party_email_and_name(
+            initiator_email, initiator_name = await get_party_email_and_name(
                 "hotel", hotel_id=str(collab['hotel_id']))
             responder_name = creator_name
 
@@ -501,15 +444,15 @@ async def respond_to_collaboration_request(
                 response_message=request.response_message,
             )
             subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
-            _send_email_background(initiator_email, subject, html)
-            _notify_vayada_team(subject, html)
+            send_email_background(initiator_email, subject, html)
+            notify_vayada_team(subject, html)
 
         # Admin notification — only when the hotel is the responder (per ticket spec)
         if collab['initiator_type'] == "creator":
             accepted = request.status == "accepted"
             creator_email_addr = initiator_email
             creator_display_name = initiator_name
-            hotel_email_addr, hotel_display_name = await _get_party_email_and_name(
+            hotel_email_addr, hotel_display_name = await get_party_email_and_name(
                 "hotel", hotel_id=str(collab['hotel_id']))
             admin_html = create_admin_collaboration_response_email_html(
                 creator_name=creator_display_name or creator_name,
@@ -526,7 +469,7 @@ async def respond_to_collaboration_request(
                 "Hotel accepted collaboration request"
                 if accepted else "Hotel declined collaboration request"
             )
-            _notify_marketplace_admin(admin_subject, admin_html)
+            notify_marketplace_admin(admin_subject, admin_html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
@@ -772,11 +715,11 @@ async def update_collaboration_terms(
 
         # Send email to the other party about the counter-offer
         if is_creator:
-            other_email, other_name = await _get_party_email_and_name(
+            other_email, other_name = await get_party_email_and_name(
                 "hotel", hotel_id=str(current_collab['hotel_id']))
             sender_display = creator_name
         else:
-            other_email, other_name = await _get_party_email_and_name(
+            other_email, other_name = await get_party_email_and_name(
                 "creator", creator_id=str(current_collab['creator_id']))
             sender_display = updated['hotel_name']
 
@@ -791,7 +734,7 @@ async def update_collaboration_terms(
                 changes_summary=" | ".join(diff_summary),
                 listing_location=updated.get('listing_location'),
             )
-            _send_email_background(other_email, "New Counter-Offer on Your Collaboration", html)
+            send_email_background(other_email, "New Counter-Offer on Your Collaboration", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
@@ -903,9 +846,9 @@ async def approve_collaboration_terms(
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         # Send email notifications for approval
-        creator_email, creator_email_name = await _get_party_email_and_name(
+        creator_email, creator_email_name = await get_party_email_and_name(
             "creator", creator_id=str(collab['creator_id']))
-        hotel_email, hotel_email_name = await _get_party_email_and_name(
+        hotel_email, hotel_email_name = await get_party_email_and_name(
             "hotel", hotel_id=str(collab['hotel_id']))
 
         if new_status == 'accepted':
@@ -980,8 +923,8 @@ async def approve_collaboration_terms(
                         both_approved=True,
                         affiliate_link=link_for_email,
                     )
-                    _send_email_background(email, "Collaboration Confirmed!", html)
-                _notify_vayada_team("Collaboration Confirmed!", html)
+                    send_email_background(email, "Collaboration Confirmed!", html)
+                notify_vayada_team("Collaboration Confirmed!", html)
         else:
             # Only one side approved — notify the other party to approve
             if is_creator:
@@ -1000,7 +943,7 @@ async def approve_collaboration_terms(
                     listing_location=updated.get('listing_location'),
                     both_approved=False,
                 )
-                _send_email_background(other_email, "Terms Approved — Your Confirmation Needed", html)
+                send_email_background(other_email, "Terms Approved — Your Confirmation Needed", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
@@ -1110,11 +1053,11 @@ async def cancel_collaboration(
 
         # Send email to the other party about the cancellation
         if is_creator:
-            other_email, other_name = await _get_party_email_and_name(
+            other_email, other_name = await get_party_email_and_name(
                 "hotel", hotel_id=str(collab['hotel_id']))
             canceller_display = creator_name
         else:
-            other_email, other_name = await _get_party_email_and_name(
+            other_email, other_name = await get_party_email_and_name(
                 "creator", creator_id=str(collab['creator_id']))
             canceller_display = updated['hotel_name']
 
@@ -1128,8 +1071,8 @@ async def cancel_collaboration(
                 listing_location=updated.get('listing_location'),
                 reason=request.reason,
             )
-            _send_email_background(other_email, "Collaboration Cancelled", html)
-            _notify_vayada_team("Collaboration Cancelled", html)
+            send_email_background(other_email, "Collaboration Cancelled", html)
+            notify_vayada_team("Collaboration Cancelled", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
 
