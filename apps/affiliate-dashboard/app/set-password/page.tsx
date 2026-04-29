@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 
-export default function SetPasswordPage() {
+function SetPasswordPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams.get('token') || ''
@@ -162,5 +162,13 @@ export default function SetPasswordPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function SetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <SetPasswordPageInner />
+    </Suspense>
   )
 }

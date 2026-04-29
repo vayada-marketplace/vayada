@@ -31,16 +31,27 @@ export default function EarningsChart() {
   const [error, setError] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     setError(false)
     apiClient
       .get<EarningsResponse>(`/affiliate/earnings?period=${period}`)
       .then((res) => {
+        if (cancelled) return
         setData(res.months)
         setCurrency(res.currency)
       })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (cancelled) return
+        setError(true)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [period])
 
   const maxEarnings = data.length > 0 ? Math.max(...data.map((d) => d.earnings), 1) : 1

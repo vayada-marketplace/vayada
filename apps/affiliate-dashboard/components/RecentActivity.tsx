@@ -81,11 +81,11 @@ export default function RecentActivity() {
 
       {activities && activities.length > 0 && (
         <div className="space-y-3">
-          {activities.map((activity, i) => {
+          {activities.map((activity) => {
             const Icon = iconMap[activity.type]
             return (
               <div
-                key={`${activity.type}-${activity.ts}-${i}`}
+                key={`${activity.type}-${activity.ts}-${activity.property}`}
                 className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
               >
                 <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}>
