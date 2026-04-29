@@ -78,10 +78,18 @@ async def _get_party_email_and_name(
 VAYADA_COLLABORATIONS_EMAIL = "collaborations@vayada.com"
 MARKETPLACE_ADMIN_EMAIL = "p.paetzold@vayada.com"
 
+# Strong references to in-flight background email tasks.
+# asyncio's event loop only keeps weak references to tasks, so without this set
+# the GC can collect a fire-and-forget task before SMTP completes and the email
+# is silently dropped (cause of VAY-241 missed admin notifications).
+_background_tasks: set = set()
+
 
 def _send_email_background(to_email: str, subject: str, html_body: str):
     """Fire-and-forget email sending — never blocks the response."""
-    asyncio.ensure_future(_send_email_safe(to_email, subject, html_body))
+    task = asyncio.create_task(_send_email_safe(to_email, subject, html_body))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 def _notify_vayada_team(subject: str, html_body: str):
