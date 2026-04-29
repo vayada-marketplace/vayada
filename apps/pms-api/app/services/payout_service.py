@@ -6,8 +6,12 @@ from app.config import settings as app_settings
 from app.database import BookingEngineDatabase
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.services import stripe_service, xendit_service
 
 logger = logging.getLogger(__name__)
+
+
+MAX_PAYOUT_RETRIES = 3
 
 
 # Defaults match the pricing PDF and are used when a hotel row predates the
@@ -155,4 +159,77 @@ async def schedule_payouts(
             amount=affiliate_commission,
             currency=currency,
             scheduled_for=batch_date,
+        )
+
+
+# ── Provider dispatchers ─────────────────────────────────────────────
+
+
+async def dispatch_stripe_transfer(
+    payout_id: str,
+    amount: float,
+    currency: str,
+    destination_account: str,
+    metadata: dict,
+) -> str:
+    """Submit a Stripe Connect transfer and mark the payout completed.
+    Stripe transfers are synchronous, so we go straight to ``completed``.
+    Returns the Stripe transfer id."""
+    amount_cents = int(amount * 100)
+    result = await stripe_service.create_transfer(
+        amount=amount_cents,
+        currency=currency,
+        destination_account=destination_account,
+        metadata=metadata,
+    )
+    await PayoutRepository.update_status(
+        payout_id, "completed", stripe_transfer_id=result["id"]
+    )
+    return result["id"]
+
+
+async def dispatch_xendit_payout(
+    payout_id: str,
+    amount: float,
+    currency: str,
+    *,
+    reference_id: str,
+    channel_code: str,
+    account_number: str,
+    account_holder_name: str,
+    description: str,
+) -> str:
+    """Submit a Xendit payout. Xendit payouts are async — the row stays in
+    ``processing`` and is finalized either by webhook or
+    ``poll_xendit_processing_payouts``. Returns the Xendit payout id."""
+    result = await xendit_service.create_payout(
+        reference_id=reference_id,
+        channel_code=channel_code,
+        account_number=account_number,
+        account_holder_name=account_holder_name,
+        amount=int(amount),
+        currency=currency,
+        description=description,
+    )
+    await PayoutRepository.update_status(
+        payout_id, "processing", xendit_payout_id=result["id"]
+    )
+    return result["id"]
+
+
+async def handle_payout_failure(
+    payout_id: str, retry_count: int, error: Exception, label: str = "Payout",
+) -> None:
+    """Either schedule a retry or mark the payout permanently failed."""
+    if retry_count < MAX_PAYOUT_RETRIES:
+        await PayoutRepository.increment_retry(payout_id, str(error))
+        logger.info(
+            "%s %s scheduled for retry (%d/%d)",
+            label, payout_id, retry_count + 1, MAX_PAYOUT_RETRIES,
+        )
+    else:
+        await PayoutRepository.update_status(payout_id, "failed")
+        logger.error(
+            "%s %s permanently failed after %d retries",
+            label, payout_id, MAX_PAYOUT_RETRIES,
         )

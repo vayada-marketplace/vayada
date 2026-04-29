@@ -10,15 +10,17 @@ from app.repositories.booking_repo import BookingRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
-from app.services import stripe_service
 from app.services import xendit_service
 from app.services.email_service import send_affiliate_payout_notification
+from app.services.payout_service import (
+    dispatch_stripe_transfer,
+    dispatch_xendit_payout,
+    handle_payout_failure,
+)
 
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
-
-MAX_PAYOUT_RETRIES = 3
 
 
 async def expire_pending_bookings():
@@ -37,7 +39,7 @@ async def expire_pending_bookings():
 
 
 async def process_property_payouts():
-    """Process due hotel payouts via Stripe Connect transfers."""
+    """Process due hotel payouts via Stripe Connect transfers / Xendit."""
     now = datetime.now(timezone.utc)
     due = await PayoutRepository.list_due_payouts(now)
 
@@ -55,7 +57,6 @@ async def process_property_payouts():
                 continue
 
             provider = settings.get("payment_provider", "stripe")
-
             if provider == "vayada":
                 # vayada Payment: payouts are handled manually — skip auto-processing
                 logger.info("Skipping auto-payout %s for hotel %s (vayada provider, manual payout)", payout_id, hotel_id)
@@ -68,58 +69,43 @@ async def process_property_payouts():
                     logger.warning("No Xendit bank details for hotel %s, skipping payout %s", hotel_id, payout_id)
                     await PayoutRepository.update_status(payout_id, "scheduled")
                     continue
-
-                amount = int(float(payout["amount"]))
-                result = await xendit_service.create_payout(
+                xendit_id = await dispatch_xendit_payout(
+                    payout_id,
+                    float(payout["amount"]),
+                    payout["currency"],
                     reference_id=f"hotel-{payout_id}",
                     channel_code=settings["xendit_channel_code"],
                     account_number=settings["xendit_account_number"],
                     account_holder_name=settings["xendit_account_holder_name"],
-                    amount=amount,
-                    currency=payout["currency"],
                     description=f"Hotel payout for booking {payout.get('booking_reference', '')}",
                 )
-
-                # Xendit payouts are async — stay in 'processing' until webhook confirms
-                await PayoutRepository.update_status(
-                    payout_id, "processing", xendit_payout_id=result["id"]
-                )
-                logger.info("Submitted hotel payout %s to Xendit, xendit_id=%s", payout_id, result["id"])
+                logger.info("Submitted hotel payout %s to Xendit, xendit_id=%s", payout_id, xendit_id)
             else:
                 if not settings.get("stripe_connect_account_id"):
                     logger.warning("No Stripe Connect account for hotel %s, skipping payout %s", hotel_id, payout_id)
                     await PayoutRepository.update_status(payout_id, "scheduled")
                     continue
-
-                amount_cents = int(float(payout["amount"]) * 100)
-                result = await stripe_service.create_transfer(
-                    amount=amount_cents,
-                    currency=payout["currency"],
+                transfer_id = await dispatch_stripe_transfer(
+                    payout_id,
+                    float(payout["amount"]),
+                    payout["currency"],
                     destination_account=settings["stripe_connect_account_id"],
                     metadata={
                         "payout_id": payout_id,
                         "booking_id": str(payout["booking_id"]),
                     },
                 )
-
-                await PayoutRepository.update_status(
-                    payout_id, "completed", stripe_transfer_id=result["id"]
-                )
-                logger.info("Completed hotel payout %s via Stripe, transfer %s", payout_id, result["id"])
+                logger.info("Completed hotel payout %s via Stripe, transfer %s", payout_id, transfer_id)
 
         except Exception as e:
             logger.error("Failed to process payout %s: %s", payout_id, e)
-            retry_count = payout.get("retry_count", 0) or 0
-            if retry_count < MAX_PAYOUT_RETRIES:
-                await PayoutRepository.increment_retry(payout_id, str(e))
-                logger.info("Payout %s scheduled for retry (%d/%d)", payout_id, retry_count + 1, MAX_PAYOUT_RETRIES)
-            else:
-                await PayoutRepository.update_status(payout_id, "failed")
-                logger.error("Payout %s permanently failed after %d retries", payout_id, MAX_PAYOUT_RETRIES)
+            await handle_payout_failure(
+                payout_id, payout.get("retry_count", 0) or 0, e, label="Payout"
+            )
 
 
 async def process_affiliate_payouts():
-    """Monthly batch: process affiliate payouts via Stripe Connect transfers."""
+    """Monthly batch: process affiliate payouts via Stripe Connect / Xendit."""
     now = datetime.now(timezone.utc)
     # Process previous month
     if now.month == 1:
@@ -144,37 +130,28 @@ async def process_affiliate_payouts():
                 if not affiliate.get("xendit_account_number"):
                     logger.info("Affiliate %s missing Xendit bank details, skipping payout %s", affiliate_id, payout_id)
                     continue
-
                 await PayoutRepository.update_status(payout_id, "processing")
-
-                amount = int(float(payout["amount"]))
-                result = await xendit_service.create_payout(
+                xendit_id = await dispatch_xendit_payout(
+                    payout_id,
+                    float(payout["amount"]),
+                    payout["currency"],
                     reference_id=f"affiliate-{payout_id}",
                     channel_code=affiliate["xendit_channel_code"],
                     account_number=affiliate["xendit_account_number"],
                     account_holder_name=affiliate["xendit_account_holder_name"],
-                    amount=amount,
-                    currency=payout["currency"],
                     description=f"Affiliate payout for booking {payout.get('booking_reference', '')}",
                 )
-
-                # Xendit payouts are async — stay in 'processing' until webhook confirms
-                await PayoutRepository.update_status(
-                    payout_id, "processing", xendit_payout_id=result["id"]
-                )
-                logger.info("Submitted affiliate payout %s to Xendit, xendit_id=%s", payout_id, result["id"])
+                logger.info("Submitted affiliate payout %s to Xendit, xendit_id=%s", payout_id, xendit_id)
 
             elif payment_method == "stripe":
                 if not affiliate.get("stripe_connect_account_id") or not affiliate.get("stripe_connect_onboarded"):
                     logger.info("Affiliate %s not Stripe-onboarded, skipping payout %s for manual handling", affiliate_id, payout_id)
                     continue
-
                 await PayoutRepository.update_status(payout_id, "processing")
-
-                amount_cents = int(float(payout["amount"]) * 100)
-                result = await stripe_service.create_transfer(
-                    amount=amount_cents,
-                    currency=payout["currency"],
+                transfer_id = await dispatch_stripe_transfer(
+                    payout_id,
+                    float(payout["amount"]),
+                    payout["currency"],
                     destination_account=affiliate["stripe_connect_account_id"],
                     metadata={
                         "payout_id": payout_id,
@@ -182,12 +159,7 @@ async def process_affiliate_payouts():
                         "affiliate_id": affiliate_id,
                     },
                 )
-
-                await PayoutRepository.update_status(
-                    payout_id, "completed", stripe_transfer_id=result["id"]
-                )
-                logger.info("Completed affiliate payout %s via Stripe, transfer %s", payout_id, result["id"])
-
+                logger.info("Completed affiliate payout %s via Stripe, transfer %s", payout_id, transfer_id)
                 await send_affiliate_payout_notification(
                     affiliate_email=affiliate["email"],
                     affiliate_name=affiliate["full_name"],
@@ -203,13 +175,9 @@ async def process_affiliate_payouts():
 
         except Exception as e:
             logger.error("Failed to process affiliate payout %s: %s", payout_id, e)
-            retry_count = payout.get("retry_count", 0) or 0
-            if retry_count < MAX_PAYOUT_RETRIES:
-                await PayoutRepository.increment_retry(payout_id, str(e))
-                logger.info("Affiliate payout %s scheduled for retry (%d/%d)", payout_id, retry_count + 1, MAX_PAYOUT_RETRIES)
-            else:
-                await PayoutRepository.update_status(payout_id, "failed")
-                logger.error("Affiliate payout %s permanently failed after %d retries", payout_id, MAX_PAYOUT_RETRIES)
+            await handle_payout_failure(
+                payout_id, payout.get("retry_count", 0) or 0, e, label="Affiliate payout"
+            )
 
 
 async def poll_xendit_processing_payouts():
