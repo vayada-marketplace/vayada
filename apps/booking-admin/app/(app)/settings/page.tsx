@@ -930,7 +930,7 @@ export default function SettingsPage() {
               </div>
               <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
               <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
-                <span className="text-3xl font-bold text-gray-900">€{(settings.fixed_plan_projected_monthly_fee ?? settings.billing_fixed_fee ?? 30).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                <span className="text-3xl font-bold text-gray-900">${(settings.fixed_plan_projected_monthly_fee ?? settings.billing_fixed_fee ?? 30).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                 <p className="text-[11px] text-gray-400 mt-1">per month</p>
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {typeof settings.active_room_count === 'number'
