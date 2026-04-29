@@ -7,21 +7,24 @@ Helper scripts for the Vayada monorepo.
 Bash helper for running multiple Linear tickets in parallel via git worktrees.
 Each ticket gets its own worktree at `~/git/vayada-<TICKET>` on a branch named
 after the ticket, with submodules initialized and `.env` files copied from the
-main repo. A new Warp tab opens running Claude Code with a 3-phase prompt
-(plan → implement → ship).
+main repo. A new Warp tab opens running Claude Code with a 2-phase prompt
+(plan → implement & commit). Merging into `main` and pushing is done later
+by `vw ship-all`, not by the agent.
 
 | Command | What it does |
 | --- | --- |
 | `vw new <TICKET> [--install]` | Create worktree on branch `<TICKET>` off `main`, init submodules, copy `.env` files, and open a Warp tab running Claude Code on the ticket. `--install` also runs `npm install` / `pip install` in submodules. Bare numbers are auto-prefixed (`vw new 295` → `VAY-295`). |
 | `vw done <TICKET>` | Move the Linear ticket to **In Review**, deinit submodules, remove the worktree, and delete the local branch. |
 | `vw list` (or `vw ls`) | List all active worktrees (`git worktree list`). |
-| `vw sync` | Fetch `origin/main`, then rebase every worktree branch on it and re-init submodules. Skips worktrees already merged or in a dirty state. |
-| `vw ship-ready` | Scan all worktrees; for every branch already merged into `origin/main` (the agent shipped), run `vw done`. Runs `vw sync` at the end. |
+| `vw sync` | Fetch `origin/main`, fast-forward the main repo, rebase every worktree branch on `origin/main`, and re-init submodules in all worktrees (main repo included). Skips worktrees already merged or in a dirty state. |
+| `vw ship-all` | Ship every worktree sequentially: commit any uncommitted submodule work on a feature branch, merge each submodule's feature branch into its `main` and push, bump submodule pointers in the parent, and push the parent branch to `origin/main`. Runs `ship-ready` at the end. |
+| `vw ship-ready` | Scan all worktrees; for every branch already in `origin/main`, run `vw done`. Runs `vw sync` at the end. |
 
-The Claude Code prompt baked into `vw new` instructs the agent to direct-push
-to `main` (no PRs), commit submodule changes on a feature branch, fast-forward
-merge into the submodule's `main`, then bump submodule pointers in the parent
-repo and push.
+The Claude Code prompt baked into `vw new` tells the agent to commit
+everything locally — feature branch + commits inside each touched submodule,
+plus a "Bump submodules" commit in the parent worktree — and then stop. No
+merge to main, no push, no PRs. Run `vw ship-all` from the main repo when
+you're ready to ship one or more worktrees.
 
 ## `run_migration.sh`
 
