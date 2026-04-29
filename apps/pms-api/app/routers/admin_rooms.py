@@ -11,6 +11,13 @@ from app.repositories.booking_repo import BookingRepository
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
 from app.models.room import RoomCreate, RoomUpdate, RoomResponse
+from app.models.calendar import (
+    CalendarResponse,
+    CalendarRoomType,
+    CalendarRoom,
+    CalendarBooking,
+    CalendarBlock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +126,7 @@ async def delete_room(
         )
 
 
-@router.get("/calendar")
+@router.get("/calendar", response_model=CalendarResponse)
 async def get_calendar(
     start: date = Query(...),
     end: date = Query(...),
@@ -131,59 +138,59 @@ async def get_calendar(
     bookings = await BookingRepository.list_by_hotel_in_range(hotel_id, start, end)
     blocks = await RoomBlockRepository.list_by_hotel_in_range(hotel_id, start, end)
 
-    return {
-        "roomTypes": [
-            {
-                "id": str(rt["id"]),
-                "name": rt["name"],
-                "category": rt.get("category", ""),
-                "totalRooms": rt["total_rooms"],
-                "baseRate": float(rt["base_rate"]),
-                "maxOccupancy": rt.get("max_occupancy", 2),
-                "currency": rt["currency"],
-            }
+    return CalendarResponse(
+        room_types=[
+            CalendarRoomType(
+                id=str(rt["id"]),
+                name=rt["name"],
+                category=rt.get("category", "") or "",
+                total_rooms=rt["total_rooms"],
+                base_rate=float(rt["base_rate"]),
+                max_occupancy=rt.get("max_occupancy", 2),
+                currency=rt["currency"],
+            )
             for rt in room_types
         ],
-        "rooms": [
-            {
-                "id": str(r["id"]),
-                "roomTypeId": str(r["room_type_id"]),
-                "roomTypeName": r["room_type_name"],
-                "roomNumber": r["room_number"],
-                "floor": r["floor"],
-                "status": r["status"],
-            }
+        rooms=[
+            CalendarRoom(
+                id=str(r["id"]),
+                room_type_id=str(r["room_type_id"]),
+                room_type_name=r["room_type_name"],
+                room_number=r["room_number"],
+                floor=r["floor"],
+                status=r["status"],
+            )
             for r in rooms
         ],
-        "bookings": [
-            {
-                "id": str(b["id"]),
-                "roomTypeId": str(b["room_type_id"]),
-                "roomName": b["room_name"],
-                "guestFirstName": b["guest_first_name"],
-                "guestLastName": b["guest_last_name"],
-                "checkIn": str(b["check_in"]),
-                "checkOut": str(b["check_out"]),
-                "status": b["status"],
-                "roomId": str(b["room_id"]) if b.get("room_id") else None,
-                "roomNumber": b.get("room_number"),
-                "channel": b.get("channel", "direct"),
-                "bookingReference": b["booking_reference"],
-            }
+        bookings=[
+            CalendarBooking(
+                id=str(b["id"]),
+                room_type_id=str(b["room_type_id"]),
+                room_name=b["room_name"],
+                guest_first_name=b["guest_first_name"],
+                guest_last_name=b["guest_last_name"],
+                check_in=str(b["check_in"]),
+                check_out=str(b["check_out"]),
+                status=b["status"],
+                room_id=str(b["room_id"]) if b.get("room_id") else None,
+                room_number=b.get("room_number"),
+                channel=b.get("channel", "direct") or "direct",
+                booking_reference=b["booking_reference"],
+            )
             for b in bookings
         ],
-        "blocks": [
-            {
-                "id": str(bl["id"]),
-                "roomTypeId": str(bl["room_type_id"]),
-                "roomId": str(bl["room_id"]) if bl.get("room_id") else None,
-                "roomNumber": bl.get("room_number"),
-                "startDate": str(bl["start_date"]),
-                "endDate": str(bl["end_date"]),
-                "blockedCount": bl["blocked_count"],
-                "reason": bl["reason"],
-                "createdAt": bl["created_at"].isoformat(),
-            }
+        blocks=[
+            CalendarBlock(
+                id=str(bl["id"]),
+                room_type_id=str(bl["room_type_id"]),
+                room_id=str(bl["room_id"]) if bl.get("room_id") else None,
+                room_number=bl.get("room_number"),
+                start_date=str(bl["start_date"]),
+                end_date=str(bl["end_date"]),
+                blocked_count=bl["blocked_count"],
+                reason=bl["reason"],
+                created_at=bl["created_at"].isoformat(),
+            )
             for bl in blocks
         ],
-    }
+    )

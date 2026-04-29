@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Any, Optional, List
 
 
 def to_camel(string: str) -> str:
@@ -85,3 +85,25 @@ class SetupStatusResponse(BaseModel):
     registered: bool
     setup_complete: bool
     room_count: int
+
+
+class HotelDetailsResponse(BaseModel):
+    """Full hotel detail surface returned by GET/PATCH /admin/hotel."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    slug: str
+    name: str
+    contact_email: str = ""
+    property_type: str = "guest_house"
+    timezone: str = ""
+    country: str = ""
+    state: str = ""
+    city: str = ""
+    address: str = ""
+    zip_code: str = ""
+    phone: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    last_minute_discount: Optional[Any] = None
+    instant_book: bool = False

@@ -345,3 +345,10 @@ class RoomTypeAdminResponse(BaseModel):
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
     created_at: str
     updated_at: str
+
+
+class UnavailableDatesResponse(BaseModel):
+    """Public /api/hotels/{slug}/unavailable-dates: dates where every room
+    type is fully booked, plus per-arrival min-stay constraints."""
+    dates: List[str] = []
+    min_stay_by_arrival: Dict[str, int] = {}

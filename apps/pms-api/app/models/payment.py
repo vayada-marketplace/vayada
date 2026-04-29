@@ -85,6 +85,14 @@ class CancellationPolicy(BaseModel):
     partial_refund_pct: float = 0.00
 
 
+class PaymentSettingsResponse(BaseModel):
+    """Wrapper for GET /admin/payment-settings: payment settings + cancellation policy."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    payment_settings: HotelPaymentSettings
+    cancellation_policy: CancellationPolicy
+
+
 class CancellationPolicyUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 

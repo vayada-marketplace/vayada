@@ -11,6 +11,7 @@ from app.services import hotel_identity_service
 from app.models.hotel import (
     HotelRegister,
     HotelResponse,
+    HotelDetailsResponse,
     HotelBenefitsUpdate,
     HotelBenefitsResponse,
     GuestFormSettingsResponse,
@@ -36,27 +37,27 @@ def _hotel_response(row: dict, slug: str = None, name: str = None, contact_email
     )
 
 
-def _hotel_to_dict(row: dict) -> dict:
+def _hotel_to_details(row: dict) -> HotelDetailsResponse:
     """Serialize a full hotel row for the GET/PATCH endpoints."""
     lm = row.get("last_minute_discount")
-    return {
-        "id": str(row["id"]),
-        "slug": row["slug"],
-        "name": row["name"],
-        "contact_email": row.get("contact_email", ""),
-        "property_type": row.get("property_type", "guest_house"),
-        "timezone": row.get("timezone", ""),
-        "country": row.get("country", ""),
-        "state": row.get("state", ""),
-        "city": row.get("city", ""),
-        "address": row.get("address", ""),
-        "zip_code": row.get("zip_code", ""),
-        "phone": row.get("phone", ""),
-        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
-        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
-        "last_minute_discount": json.loads(lm) if isinstance(lm, str) else lm,
-        "instant_book": bool(row.get("instant_book", False)),
-    }
+    return HotelDetailsResponse(
+        id=str(row["id"]),
+        slug=row["slug"],
+        name=row["name"],
+        contact_email=row.get("contact_email", "") or "",
+        property_type=row.get("property_type", "guest_house") or "guest_house",
+        timezone=row.get("timezone", "") or "",
+        country=row.get("country", "") or "",
+        state=row.get("state", "") or "",
+        city=row.get("city", "") or "",
+        address=row.get("address", "") or "",
+        zip_code=row.get("zip_code", "") or "",
+        phone=row.get("phone", "") or "",
+        latitude=float(row["latitude"]) if row.get("latitude") is not None else None,
+        longitude=float(row["longitude"]) if row.get("longitude") is not None else None,
+        last_minute_discount=json.loads(lm) if isinstance(lm, str) else lm,
+        instant_book=bool(row.get("instant_book", False)),
+    )
 
 
 # ── Hotel Registration ─────────────────────────────────────────────
@@ -129,7 +130,7 @@ async def register_hotel(
     return _hotel_response(row)
 
 
-@router.get("/hotel")
+@router.get("/hotel", response_model=HotelDetailsResponse)
 async def get_hotel(user_id: str = Depends(require_hotel_admin)):
     """Get the current hotel's details including last-minute discount config.
 
@@ -141,10 +142,10 @@ async def get_hotel(user_id: str = Depends(require_hotel_admin)):
     row = await HotelRepository.get_by_id(hotel_id)
     if not row:
         raise HTTPException(status_code=404, detail="Hotel not found")
-    return _hotel_to_dict(row)
+    return _hotel_to_details(row)
 
 
-@router.patch("/hotel")
+@router.patch("/hotel", response_model=HotelDetailsResponse)
 async def update_hotel(
     data: dict,
     user_id: str = Depends(require_hotel_admin),
@@ -169,7 +170,7 @@ async def update_hotel(
                 detail="Failed to sync booking-acceptance setting to booking engine. Please retry.",
             )
 
-    return _hotel_to_dict(row)
+    return _hotel_to_details(row)
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)

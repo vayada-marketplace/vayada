@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.models.room_type import RoomTypeResponse
+from app.models.room_type import RoomTypeResponse, UnavailableDatesResponse
 from app.services.room_type_service import get_rooms_for_guest, get_hotel_id_by_slug
 from app.repositories.room_type_repo import RoomTypeRepository
 
@@ -28,7 +28,7 @@ async def get_rooms(
     return rooms
 
 
-@router.get("/{slug}/unavailable-dates")
+@router.get("/{slug}/unavailable-dates", response_model=UnavailableDatesResponse)
 async def get_unavailable_dates(
     slug: str,
     start: date = Query(...),
@@ -43,11 +43,11 @@ async def get_unavailable_dates(
     """
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
-        return {"dates": [], "min_stay_by_arrival": {}}
+        return UnavailableDatesResponse()
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     if not rooms:
-        return {"dates": [], "min_stay_by_arrival": {}}
+        return UnavailableDatesResponse()
 
     seasons_by_room = {str(r["id"]): RoomTypeRepository._parse_seasons(r) for r in rooms}
 
@@ -85,4 +85,7 @@ async def get_unavailable_dates(
                 min_stay_by_arrival[current.isoformat()] = lowest
         current = next_day
 
-    return {"dates": unavailable, "min_stay_by_arrival": min_stay_by_arrival}
+    return UnavailableDatesResponse(
+        dates=unavailable,
+        min_stay_by_arrival=min_stay_by_arrival,
+    )

@@ -13,6 +13,7 @@ from app.models.payment import (
     HotelPaymentSettingsUpdate,
     CancellationPolicy,
     CancellationPolicyUpdate,
+    PaymentSettingsResponse,
     StripeConnectAccountRequest,
     XenditBankDetailsRequest,
 )
@@ -35,7 +36,7 @@ async def _get_booking_engine_currency(user_id: str) -> str:
 # ── Payment Settings ──────────────────────────────────────────────
 
 
-@router.get("/payment-settings")
+@router.get("/payment-settings", response_model=PaymentSettingsResponse)
 async def get_payment_settings(
     user_id: str = Depends(require_hotel_admin),
 ):
@@ -48,8 +49,8 @@ async def get_payment_settings(
     # memory/project_hotel_data_ownership.md.
     currency = await _get_booking_engine_currency(user_id)
 
-    return {
-        "paymentSettings": HotelPaymentSettings(
+    return PaymentSettingsResponse(
+        payment_settings=HotelPaymentSettings(
             stripe_connect_account_id=settings["stripe_connect_account_id"] if settings else None,
             stripe_connect_onboarded=settings["stripe_connect_onboarded"] if settings else False,
             platform_fee_type=settings["platform_fee_type"] if settings else "percentage",
@@ -64,12 +65,12 @@ async def get_payment_settings(
             xendit_account_number=settings.get("xendit_account_number") if settings else None,
             xendit_account_holder_name=settings.get("xendit_account_holder_name") if settings else None,
             default_currency=currency,
-        ).model_dump(by_alias=True),
-        "cancellationPolicy": CancellationPolicy(
+        ),
+        cancellation_policy=CancellationPolicy(
             free_cancellation_days=policy["free_cancellation_days"] if policy else 7,
             partial_refund_pct=float(policy["partial_refund_pct"]) if policy else 0.00,
-        ).model_dump(by_alias=True),
-    }
+        ),
+    )
 
 
 @router.patch("/payment-settings")
