@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from app.database import Database
 
 
@@ -57,6 +57,79 @@ class PaymentRepository:
             stripe_pi_id,
         )
         return dict(row) if row else None
+
+    @staticmethod
+    async def list_by_booking_ids(booking_ids: List[str]) -> List[dict]:
+        if not booking_ids:
+            return []
+        rows = await Database.fetch(
+            """
+            SELECT * FROM payments
+            WHERE booking_id = ANY($1::uuid[])
+            ORDER BY created_at ASC
+            """,
+            booking_ids,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def list_by_hotel(
+        hotel_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[dict]:
+        rows = await Database.fetch(
+            """
+            SELECT p.*, b.booking_reference, b.guest_first_name,
+                   b.guest_last_name, b.created_at AS booking_created_at
+            FROM payments p
+            JOIN bookings b ON b.id = p.booking_id
+            WHERE b.hotel_id = $1
+            ORDER BY p.created_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            hotel_id, limit, offset,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def count_by_hotel(hotel_id: str) -> int:
+        count = await Database.fetchval(
+            """
+            SELECT COUNT(*) FROM payments p
+            JOIN bookings b ON b.id = p.booking_id
+            WHERE b.hotel_id = $1
+            """,
+            hotel_id,
+        )
+        return count or 0
+
+    @staticmethod
+    async def create_manual(
+        booking_id: str,
+        amount: float,
+        currency: str,
+        payment_method: str,
+        reference: Optional[str] = None,
+        recorded_by: Optional[str] = None,
+    ) -> dict:
+        """Record a payment that was made offline (cash, bank transfer, …).
+
+        Goes straight to status='captured' since the operator is logging
+        money already received.
+        """
+        row = await Database.fetchrow(
+            """
+            INSERT INTO payments (
+                booking_id, amount, currency, payment_method,
+                status, reference, recorded_by, captured_at
+            ) VALUES ($1, $2, $3, $4, 'captured', $5, $6, now())
+            RETURNING *
+            """,
+            booking_id, amount, currency, payment_method, reference, recorded_by,
+        )
+        return dict(row)
 
     @staticmethod
     async def update_status(payment_id: str, status: str, **kwargs) -> dict:

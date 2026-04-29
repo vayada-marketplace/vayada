@@ -13,6 +13,7 @@ from app.routers.admin import router as admin_router
 from app.routers.admin_rooms import router as admin_rooms_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_payments import router as admin_payments_router
+from app.routers.admin_financials import router as admin_financials_router
 from app.routers.admin_affiliates import router as admin_affiliates_router
 from app.routers.admin_channex import router as admin_channex_router
 from app.routers.upload import router as upload_router
@@ -105,6 +106,7 @@ app.include_router(admin_router, dependencies=_admin_deps)
 app.include_router(admin_rooms_router, dependencies=_admin_deps)
 app.include_router(admin_bookings_router, dependencies=_admin_deps)
 app.include_router(admin_payments_router, dependencies=_admin_deps)
+app.include_router(admin_financials_router, dependencies=_admin_deps)
 app.include_router(admin_affiliates_router, dependencies=_admin_deps)
 app.include_router(admin_channex_router, dependencies=_admin_deps)
 app.include_router(upload_router)
