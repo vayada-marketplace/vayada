@@ -5,6 +5,7 @@ from datetime import date
 
 from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.availability_service import remaining_for_stay
 from app.models.room_type import RoomTypeResponse
 from app.utils import parse_jsonb
 
@@ -72,17 +73,12 @@ async def get_rooms_for_guest(
 
         total = room["total_rooms"]
         if check_in and check_out:
-            # Check if the stay falls within operating periods
             if not RoomTypeRepository.is_date_in_operating_periods(room, check_in):
                 remaining = 0
             else:
-                booked = await RoomTypeRepository.count_booked(
-                    str(room["id"]), check_in, check_out
+                remaining = await remaining_for_stay(
+                    str(room["id"]), total, check_in, check_out
                 )
-                blocked = await RoomTypeRepository.count_blocked(
-                    str(room["id"]), check_in, check_out
-                )
-                remaining = max(0, total - booked - blocked)
         else:
             remaining = total
 

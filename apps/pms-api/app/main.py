@@ -10,7 +10,9 @@ from app.dependencies import capture_hotel_header
 from app.routers.rooms import router as rooms_router
 from app.routers.bookings import router as bookings_router
 from app.routers.admin import router as admin_router
+from app.routers.admin_room_types import router as admin_room_types_router
 from app.routers.admin_rooms import router as admin_rooms_router
+from app.routers.admin_room_blocks import router as admin_room_blocks_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_payments import router as admin_payments_router
 from app.routers.admin_financials import router as admin_financials_router
@@ -103,7 +105,9 @@ _admin_deps = [Depends(capture_hotel_header)]
 app.include_router(rooms_router)
 app.include_router(bookings_router)
 app.include_router(admin_router, dependencies=_admin_deps)
+app.include_router(admin_room_types_router, dependencies=_admin_deps)
 app.include_router(admin_rooms_router, dependencies=_admin_deps)
+app.include_router(admin_room_blocks_router, dependencies=_admin_deps)
 app.include_router(admin_bookings_router, dependencies=_admin_deps)
 app.include_router(admin_payments_router, dependencies=_admin_deps)
 app.include_router(admin_financials_router, dependencies=_admin_deps)

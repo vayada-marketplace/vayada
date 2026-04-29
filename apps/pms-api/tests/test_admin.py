@@ -468,7 +468,7 @@ class TestAdminRoomTypes:
         room = hotel_with_rooms["room"]
 
         with patch(
-            "app.routers.admin_rooms.push_cancellation_policy_for_room_type",
+            "app.routers.admin_room_types.push_cancellation_policy_for_room_type",
             new_callable=AsyncMock,
         ) as push:
             resp = await client.patch(
@@ -492,7 +492,7 @@ class TestAdminRoomTypes:
         room = hotel_with_rooms["room"]
 
         with patch(
-            "app.routers.admin_rooms.push_cancellation_policy_for_room_type",
+            "app.routers.admin_room_types.push_cancellation_policy_for_room_type",
             new_callable=AsyncMock,
         ) as push:
             resp = await client.patch(

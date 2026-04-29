@@ -17,9 +17,9 @@ from app.repositories.cancellation_policy_repo import CancellationPolicyReposito
 from app.repositories.affiliate_repo import AffiliateRepository
 from app.models.booking import BookingCreate, BookingResponse
 from app.services import stripe_service, xendit_service
+from app.services.availability_service import compute_stay_pricing, remaining_for_stay
 from app.services.payout_service import calculate_split, fetch_billing_config, schedule_payouts
 from app.services.email_service import (
-    send_hotel_notification,
     send_booking_request_notification,
     send_guest_booking_requested,
     send_guest_booking_accepted,
@@ -70,87 +70,6 @@ def _booking_to_response(booking: dict) -> BookingResponse:
     )
 
 
-async def create_booking(slug: str, data: BookingCreate) -> BookingResponse:
-    """Legacy create_booking — still used for admin-created bookings without payment flow."""
-    hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email FROM hotels WHERE slug = $1", slug
-    )
-    if not hotel:
-        raise ValueError("Hotel not found")
-
-    hotel_id = str(hotel["id"])
-    room = await RoomTypeRepository.get_by_id(data.room_type_id)
-    if not room or str(room["hotel_id"]) != hotel_id:
-        raise ValueError("Room type not found")
-    if not room["is_active"]:
-        raise ValueError("Room type is not available")
-
-    booked = await RoomTypeRepository.count_booked(
-        data.room_type_id, data.check_in, data.check_out
-    )
-    blocked = await RoomTypeRepository.count_blocked(
-        data.room_type_id, data.check_in, data.check_out
-    )
-    if booked + blocked >= room["total_rooms"]:
-        raise ValueError("No rooms available for the selected dates")
-
-    nights = _nights(data.check_in, data.check_out)
-    if nights <= 0:
-        raise ValueError("Check-out must be after check-in")
-
-    seasons = RoomTypeRepository._parse_seasons(room)
-    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
-    if min_stay and nights < min_stay:
-        raise ValueError(
-            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
-        )
-
-    base_rate, _ = RoomTypeRepository.resolve_rate(room, data.check_in, data.adults)
-    nightly_rate = base_rate
-    total_amount = nightly_rate * nights
-
-    affiliate_id = None
-    if data.referral_code:
-        affiliate = await Database.fetchrow(
-            "SELECT id FROM affiliates WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
-            hotel_id,
-            data.referral_code,
-        )
-        if affiliate:
-            affiliate_id = str(affiliate["id"])
-
-    booking_data = {
-        "hotel_id": hotel_id,
-        "room_type_id": data.room_type_id,
-        "guest_first_name": data.guest_first_name,
-        "guest_last_name": data.guest_last_name,
-        "guest_email": data.guest_email,
-        "guest_phone": data.guest_phone,
-        "guest_country": data.guest_country,
-        "special_requests": data.special_requests,
-        "estimated_arrival_time": data.estimated_arrival_time,
-        "number_of_guests": data.number_of_guests,
-        "check_in": data.check_in,
-        "check_out": data.check_out,
-        "adults": data.adults,
-        "children": data.children,
-        "nightly_rate": nightly_rate,
-        "total_amount": total_amount,
-        "currency": room["currency"],
-        "referral_code": data.referral_code,
-        "affiliate_id": affiliate_id,
-    }
-    booking_row = await BookingRepository.create(booking_data)
-    booking = await BookingRepository.get_by_id(str(booking_row["id"]))
-    response = _booking_to_response(booking)
-
-    asyncio.create_task(
-        send_hotel_notification(hotel["contact_email"], booking)
-    )
-
-    return response
-
-
 async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     """
     New guest-facing flow: creates booking + payment intent (if card).
@@ -170,13 +89,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     if not room["is_active"]:
         raise ValueError("Room type is not available")
 
-    booked = await RoomTypeRepository.count_booked(
-        data.room_type_id, data.check_in, data.check_out
+    available = await remaining_for_stay(
+        data.room_type_id, room["total_rooms"], data.check_in, data.check_out
     )
-    blocked = await RoomTypeRepository.count_blocked(
-        data.room_type_id, data.check_in, data.check_out
-    )
-    available = room["total_rooms"] - booked - blocked
     if available < data.number_of_rooms:
         raise ValueError("Not enough rooms available for the selected dates")
 
@@ -214,16 +129,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
                 f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
             )
 
-    room_total = 0.0
-    for i in range(nights):
-        night_date = data.check_in + timedelta(days=i)
-        resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room, night_date, data.adults)
-        if data.rate_type == "nonrefundable":
-            night_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
-        else:
-            night_rate = resolved_base
-        room_total += night_rate
-    room_total = round(room_total * data.number_of_rooms, 2)
+    pricing = compute_stay_pricing(
+        room, data.check_in, data.check_out, data.adults, data.rate_type
+    )
+    room_total = round(pricing.room_total * data.number_of_rooms, 2)
 
     # Apply last-minute discount (based on days before check-in)
     import json as _json

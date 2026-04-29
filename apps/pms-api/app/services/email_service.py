@@ -100,32 +100,6 @@ async def _send_email(to: str, subject: str, html_body: str):
         logger.warning("Failed to send email to %s: %s", to, e)
 
 
-# ── Legacy (still used for admin-created bookings) ────────────────
-
-async def send_hotel_notification(hotel_email: str, booking: dict):
-    if not hotel_email:
-        return
-
-    booking_id = booking.get("id", "")
-    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
-
-    subject = f"New Booking: {booking['booking_reference']}"
-    content = f"""
-    <h2>New Booking Received</h2>
-    <p class="detail"><strong>Guest:</strong> {booking['guest_first_name']} {booking['guest_last_name']}</p>
-    <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
-    {_booking_details_html(booking)}
-    <hr class="divider">
-    <p class="detail">Please review this booking and confirm or cancel it in the PMS.</p>
-    <a href="{pms_link}" class="btn">Review in PMS</a>
-    """
-    await _send_email(hotel_email, subject, _wrap_html(content))
-
-    # Also notify vayada ops
-    if settings.VAYADA_OPS_EMAIL and settings.VAYADA_OPS_EMAIL != hotel_email:
-        await _send_email(settings.VAYADA_OPS_EMAIL, subject, _wrap_html(content))
-
-
 async def send_guest_confirmation(guest_email: str, booking: dict):
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     content = f"""
