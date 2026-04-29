@@ -4,17 +4,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
-
-interface Payout {
-  id: string
-  date: string
-  amount: number
-  currency: string
-  method: string
-  reference: string | null
-  bookingCount: number
-  status: string
-}
+import type { Payout, PayoutsResponse } from '@/services/types'
 
 const METHOD_LABELS: Record<string, string> = {
   bank: 'Bank Transfer',
@@ -43,7 +33,7 @@ export default function PayoutHistory() {
 
   useEffect(() => {
     apiClient
-      .get<{ payouts: Payout[] }>('/affiliate/payouts')
+      .get<PayoutsResponse>('/affiliate/payouts')
       .then((res) => setPayouts(res.payouts))
       .catch(() => setError(true))
   }, [])

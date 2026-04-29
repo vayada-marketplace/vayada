@@ -3,19 +3,9 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
+import type { EarningsPeriod, EarningsResponse } from '@/services/types'
 
-interface MonthData {
-  month: string
-  label: string
-  earnings: number
-}
-
-interface EarningsResponse {
-  months: MonthData[]
-  currency: string
-}
-
-type Period = '6m' | '3m' | '1m'
+type Period = Extract<EarningsPeriod, '6m' | '3m' | '1m'>
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: '€',

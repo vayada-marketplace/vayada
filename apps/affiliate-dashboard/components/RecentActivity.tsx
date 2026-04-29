@@ -4,15 +4,7 @@ import { useEffect, useState } from 'react'
 import { CursorArrowRaysIcon, CreditCardIcon, UserPlusIcon } from '@heroicons/react/24/outline'
 import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
-
-type ActivityType = 'click' | 'booking' | 'signup'
-
-interface Activity {
-  type: ActivityType
-  ts: string
-  property: string
-  count: number
-}
+import type { ActivitiesResponse, Activity } from '@/services/types'
 
 const iconMap = {
   click: CursorArrowRaysIcon,
@@ -54,7 +46,7 @@ export default function RecentActivity() {
 
   useEffect(() => {
     apiClient
-      .get<{ activities: Activity[] }>('/affiliate/activity?limit=10')
+      .get<ActivitiesResponse>('/affiliate/activity?limit=10')
       .then((res) => setActivities(res.activities))
       .catch(() => setError(true))
   }, [])

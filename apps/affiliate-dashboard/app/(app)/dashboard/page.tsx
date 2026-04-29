@@ -10,38 +10,17 @@ import RecentActivity from '@/components/RecentActivity'
 import PerformanceTips from '@/components/PerformanceTips'
 import { apiClient } from '@/services/api/client'
 import { authService } from '@/services/auth'
-
-interface DashboardStats {
-  totalEarned: number
-  totalBookings: number
-  totalClicks: number
-  conversionRate: number
-  propertyCount: number
-  outstandingBalance: number
-}
-
-interface Property {
-  affiliateId: string
-  hotelId: string
-  hotelName: string
-  hotelSlug: string
-  referralCode: string
-  commissionPct: number
-  status: string
-  bookingCount: number
-  totalRevenue: number
-  totalCommission: number
-  clickCount: number
-  conversionRate: number
-  paymentMethod: string
-  stripeConnectOnboarded: boolean
-}
+import type {
+  AffiliateProperty,
+  DashboardStats,
+  PropertiesResponse,
+} from '@/services/types'
 
 const PROPERTY_COLORS = ['#0f766e', '#1e3a5f', '#6b21a8', '#b45309', '#be123c', '#047857']
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [properties, setProperties] = useState<Property[]>([])
+  const [properties, setProperties] = useState<AffiliateProperty[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -53,7 +32,7 @@ export default function DashboardPage() {
       try {
         const [dashData, propData] = await Promise.all([
           apiClient.get<DashboardStats>('/affiliate/dashboard'),
-          apiClient.get<{ properties: Property[] }>('/affiliate/properties'),
+          apiClient.get<PropertiesResponse>('/affiliate/properties'),
         ])
         setStats(dashData)
         setProperties(propData.properties)

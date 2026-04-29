@@ -4,22 +4,7 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { apiClient, extractErrorMessage } from '@/services/api/client'
 import { authService } from '@/services/auth'
-
-interface Property {
-  affiliateId: string
-  hotelName: string
-  paymentMethod: string
-  paypalEmail: string
-  bankIban: string
-  bankAccountHolder: string
-  bankSwiftBic: string
-  bankName: string
-  bankCountry: string
-  xenditChannelCode: string | null
-  xenditAccountNumber: string | null
-  xenditAccountHolderName: string | null
-  stripeConnectOnboarded: boolean
-}
+import type { PropertiesResponse } from '@/services/types'
 
 const XENDIT_BANKS = [
   { code: 'ID_BCA', name: 'BCA' },
@@ -52,7 +37,7 @@ export default function SettingsPage() {
   const userInitials = authService.getUserInitials()
 
   useEffect(() => {
-    apiClient.get<{ properties: Property[] }>('/affiliate/properties')
+    apiClient.get<PropertiesResponse>('/affiliate/properties')
       .then((res) => {
         const first = res.properties?.[0]
         if (first) {
