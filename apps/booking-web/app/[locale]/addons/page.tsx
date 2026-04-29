@@ -13,13 +13,13 @@ import { ADDON_CATEGORIES } from '@/lib/constants/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { calculateNights } from '@/lib/utils'
+import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 
 export default function AddonsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const t = useTranslations('addons')
   const tc = useTranslations('common')
-  const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { addons } = useAddons()
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency()
@@ -27,7 +27,7 @@ export default function AddonsPage() {
   const [selections, setSelections] = useState<Record<string, number>>({})
   const [selectedDates, setSelectedDates] = useState<Record<string, string[]>>({})
   const [detailIndex, setDetailIndex] = useState<number | null>(null)
-  const currentStep = 2
+  const { steps: STEPS, currentStep } = useBookingSteps('addons')
 
   const checkIn = searchParams.get('checkIn') || ''
   const checkOut = searchParams.get('checkOut') || ''
@@ -45,13 +45,6 @@ export default function AddonsPage() {
     }
     return dates
   })()
-
-  const STEPS = [
-    { number: 1, label: ts('rooms') },
-    { number: 2, label: ts('addons') },
-    { number: 3, label: ts('details') },
-    { number: 4, label: ts('payment') },
-  ]
 
   const availableCategories = ADDON_CATEGORIES.filter(
     (cat) => cat.key === 'all' || addons.some((a) => a.category === cat.key)

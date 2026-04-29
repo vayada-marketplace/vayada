@@ -16,6 +16,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate, getFreeCancellationDays } from '@/lib/constants/booking'
 import { trackEvent } from '@/services/api/tracking'
 import { hotelService } from '@/services/api/hotel'
+import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 
 interface AppliedPromo {
   code: string
@@ -88,7 +89,6 @@ function HomePageContent() {
   const locale = useLocale()
   const t = useTranslations('home')
   const tc = useTranslations('common')
-  const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { rooms, loading: roomsLoading, roomsLoading: roomsRefetching, refetchRooms } = useRooms()
   const { addons } = useAddons()
@@ -240,19 +240,7 @@ function HomePageContent() {
     return result
   })()
 
-  const hasAddons = addons.length > 0
-  const STEPS = hasAddons
-    ? [
-        { number: 1, label: ts('rooms') },
-        { number: 2, label: ts('addons') },
-        { number: 3, label: ts('details') },
-        { number: 4, label: ts('payment') },
-      ]
-    : [
-        { number: 1, label: ts('rooms') },
-        { number: 2, label: ts('details') },
-        { number: 3, label: ts('confirmation') },
-      ]
+  const { steps: STEPS, hasAddons } = useBookingSteps('rooms')
 
   const toggleFilter = (filter: string) => {
     setActiveFilters((prev) =>

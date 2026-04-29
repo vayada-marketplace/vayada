@@ -15,6 +15,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 import { COUNTRIES } from '@/lib/constants/countries'
 import { trackEvent } from '@/services/api/tracking'
 import { usePricing } from '@/lib/hooks/usePricing'
+import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 
 const ARRIVAL_TIMES = Array.from({ length: 24 }, (_, i) => {
   const h = i.toString().padStart(2, '0')
@@ -26,7 +27,6 @@ function BookPageContent() {
   const locale = useLocale()
   const t = useTranslations('book')
   const tc = useTranslations('common')
-  const ts = useTranslations('steps')
   const { hotel } = useHotel()
   const { refetchRooms } = useRooms()
   const { addons } = useAddons()
@@ -51,20 +51,7 @@ function BookPageContent() {
   const roomsParam = parseInt(searchParams.get('rooms') || '1')
   const rateType = searchParams.get('rateType') || 'flexible'
 
-  const hasAddons = addons.length > 0
-  const STEPS = hasAddons
-    ? [
-        { number: 1, label: ts('rooms') },
-        { number: 2, label: ts('addons') },
-        { number: 3, label: ts('details') },
-        { number: 4, label: ts('payment') },
-      ]
-    : [
-        { number: 1, label: ts('rooms') },
-        { number: 2, label: ts('details') },
-        { number: 3, label: ts('payment') },
-      ]
-  const currentStep = hasAddons ? 3 : 2
+  const { steps: STEPS, currentStep } = useBookingSteps('details')
 
   const addonEntries = (searchParams.get('addons') || '').split(',').filter(Boolean)
   const selectedAddonIds: string[] = []

@@ -16,6 +16,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
 import { getFreeCancellationDays } from '@/lib/constants/booking'
 import { usePricing } from '@/lib/hooks/usePricing'
+import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 
 interface GuestDetails {
   roomTypeId: string
@@ -93,14 +94,7 @@ function PaymentPageContent() {
   }, [])
   const childrenParam = parseInt(searchParams.get('children') || '0')
   const roomsParam = parseInt(searchParams.get('rooms') || '1')
-  const currentStep = 4
-
-  const STEPS = [
-    { number: 1, label: ts('rooms') },
-    { number: 2, label: ts('addons') },
-    { number: 3, label: ts('details') },
-    { number: 4, label: ts('payment') },
-  ]
+  const { steps: STEPS, currentStep } = useBookingSteps('payment')
 
   const rateType = searchParams.get('rateType') || 'flexible'
   const isNonRefundable = rateType === 'nonrefundable'
