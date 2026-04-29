@@ -83,6 +83,29 @@ class CollaborationRepository:
             row = await Database.fetchrow(query, listing_id)
         return dict(row) if row else None
 
+    @staticmethod
+    async def is_user_participant(
+        collaboration_id: str,
+        user_id: str,
+        *,
+        conn: Optional[asyncpg.Connection] = None,
+    ) -> bool:
+        """Return True if user_id is the creator or hotel participant on the collaboration."""
+        query = """
+            SELECT 1
+            FROM collaborations c
+            JOIN creators cr ON cr.id = c.creator_id
+            JOIN hotel_profiles hp ON hp.id = c.hotel_id
+            WHERE c.id = $1
+              AND (cr.user_id = $2 OR hp.user_id = $2)
+            LIMIT 1
+        """
+        if conn:
+            row = await conn.fetchrow(query, collaboration_id, user_id)
+        else:
+            row = await Database.fetchrow(query, collaboration_id, user_id)
+        return row is not None
+
     # ── collaboration_deliverables ──
 
     @staticmethod

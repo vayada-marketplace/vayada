@@ -10,6 +10,7 @@ import logging
 from app.dependencies import get_current_user_id
 from app.repositories.user_repo import UserRepository
 from app.repositories.chat_repo import ChatRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 from app.models.chat import (
     CreateChatMessageRequest,
     ChatMessageResponse,
@@ -112,7 +113,11 @@ async def send_chat_message(
     user_id: str = Depends(get_current_user_id)
 ):
     """Send a text message"""
-    # TODO: Verify access
+    if not await CollaborationRepository.is_user_participant(collaboration_id, user_id):
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to message in this collaboration",
+        )
 
     row = await ChatRepository.send_message(collaboration_id, user_id, request.content, request.message_type)
 
