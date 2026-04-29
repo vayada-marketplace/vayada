@@ -19,6 +19,7 @@ from app.s3_service import upload_file_to_s3, generate_file_key, delete_file_fro
 from app.image_processing import validate_image, process_image, generate_thumbnail, get_image_info
 from app.config import settings
 from app.auth import create_email_verification_token
+from app.services.listings import ListingService, build_listing_response
 from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse
 from app.models.hotels import (
     HotelProfileStatusHasDefaults,
@@ -648,7 +649,6 @@ async def create_hotel_listing(
     Allows pending users for profile completion.
     """
     try:
-        # Verify user is a hotel and get hotel profile
         hotel_profile_id = await get_current_hotel_profile_id(user_id)
 
         # If the owning user is already verified, the new listing inherits that
@@ -656,120 +656,11 @@ async def create_hotel_listing(
         user = await UserRepository.get_by_id(user_id, columns="status")
         initial_status = 'verified' if user and user['status'] == 'verified' else 'pending'
 
-        # Use transaction to ensure atomicity
-        pool = await Database.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                # Create listing
-                listing = await conn.fetchrow(
-                    """
-                    INSERT INTO hotel_listings
-                    (hotel_profile_id, name, location, description, accommodation_type, images, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    RETURNING id, name, location, description, accommodation_type, images,
-                              status, created_at, updated_at
-                    """,
-                    hotel_profile_id,
-                    request.name,
-                    request.location,
-                    request.description,
-                    request.accommodationType,
-                    request.images,
-                    initial_status
-                )
-                
-                listing_id = listing['id']
-                
-                # Create collaboration offerings
-                offerings_response = []
-                for offering in request.collaborationOfferings:
-                    offering_record = await conn.fetchrow(
-                        """
-                        INSERT INTO listing_collaboration_offerings
-                        (listing_id, collaboration_type, availability_months, platforms,
-                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-                         commission_percentage)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
-                        RETURNING id, collaboration_type, availability_months, platforms,
-                                  free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
-                                  discount_percentage, commission_percentage, created_at, updated_at
-                        """,
-                        listing_id,
-                        offering.collaborationType,
-                        offering.availabilityMonths,
-                        offering.platforms,
-                        offering.freeStayMinNights,
-                        offering.freeStayMaxNights,
-                        offering.paidMaxAmount,
-                        offering.discountPercentage,
-                        offering.currency,
-                        offering.commissionPercentage
-                    )
+        data = await ListingService.create(
+            hotel_profile_id, request, initial_status=initial_status,
+        )
+        return build_listing_response(data, hotel_profile_id=hotel_profile_id)
 
-                    offerings_response.append(CollaborationOfferingResponse.model_validate({
-                        "id": str(offering_record['id']),
-                        "listing_id": str(listing_id),
-                        "collaboration_type": offering_record['collaboration_type'],
-                        "availability_months": offering_record['availability_months'],
-                        "platforms": offering_record['platforms'],
-                        "free_stay_min_nights": offering_record['free_stay_min_nights'],
-                        "free_stay_max_nights": offering_record['free_stay_max_nights'],
-                        "paid_max_amount": offering_record['paid_max_amount'],
-                        "currency": offering_record['currency'],
-                        "discount_percentage": offering_record['discount_percentage'],
-                        "commission_percentage": offering_record['commission_percentage'],
-                        "created_at": offering_record['created_at'],
-                        "updated_at": offering_record['updated_at']
-                    }))
-                
-                # Create creator requirements
-                requirements = await conn.fetchrow(
-                    """
-                    INSERT INTO listing_creator_requirements
-                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    RETURNING id, platforms, min_followers, target_countries,
-                              target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
-                    """,
-                    listing_id,
-                    request.creatorRequirements.platforms,
-                    request.creatorRequirements.minFollowers,
-                    request.creatorRequirements.topCountries,
-                    request.creatorRequirements.targetAgeMin,
-                    request.creatorRequirements.targetAgeMax,
-                    request.creatorRequirements.targetAgeGroups or [],
-                    request.creatorRequirements.creatorTypes or []
-                )
-
-                requirements_response = CreatorRequirementsResponse.model_validate({
-                    "id": str(requirements['id']),
-                    "listing_id": str(listing_id),
-                    "platforms": requirements['platforms'],
-                    "min_followers": requirements['min_followers'],
-                    "target_countries": requirements['target_countries'],
-                    "target_age_min": requirements['target_age_min'],
-                    "target_age_max": requirements['target_age_max'],
-                    "target_age_groups": requirements['target_age_groups'],
-                    "creator_types": requirements['creator_types'],
-                    "created_at": requirements['created_at'],
-                    "updated_at": requirements['updated_at']
-                })
-        
-        return ListingResponse.model_validate({
-            "id": str(listing_id),
-            "hotel_profile_id": hotel_profile_id,
-            "name": listing['name'],
-            "location": listing['location'],
-            "description": listing['description'],
-            "accommodation_type": listing['accommodation_type'],
-            "images": listing['images'],
-            "status": listing['status'],
-            "created_at": listing['created_at'],
-            "updated_at": listing['updated_at'],
-            "collaboration_offerings": offerings_response,
-            "creator_requirements": requirements_response
-        })
-        
     except HTTPException:
         raise
     except ValueError as e:
@@ -784,65 +675,6 @@ async def create_hotel_listing(
         )
 
 
-async def _get_listing_with_details(listing_id: str, hotel_profile_id: str) -> dict:
-    """Helper function to fetch a listing with its offerings and requirements"""
-    # Verify listing belongs to hotel
-    listing = await HotelRepository.get_listing(listing_id, hotel_profile_id)
-
-    if not listing:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-
-    # Get collaboration offerings
-    offerings_data = await HotelRepository.get_offerings(listing_id)
-
-    offerings_response = [
-        CollaborationOfferingResponse.model_validate({
-            "id": str(o['id']),
-            "listing_id": str(o['listing_id']),
-            "collaboration_type": o['collaboration_type'],
-            "availability_months": o['availability_months'],
-            "platforms": o['platforms'],
-            "free_stay_min_nights": o['free_stay_min_nights'],
-            "free_stay_max_nights": o['free_stay_max_nights'],
-            "paid_max_amount": o['paid_max_amount'],
-            "currency": o.get('currency'),
-            "discount_percentage": o['discount_percentage'],
-            "commission_percentage": o.get('commission_percentage'),
-            "created_at": o['created_at'],
-            "updated_at": o['updated_at']
-        })
-        for o in offerings_data
-    ]
-
-    # Get creator requirements
-    requirements = await HotelRepository.get_requirements(listing_id)
-
-    requirements_response = None
-    if requirements:
-        requirements_response = CreatorRequirementsResponse.model_validate({
-            "id": str(requirements['id']),
-            "listing_id": str(listing['id']),
-            "platforms": requirements['platforms'],
-            "min_followers": requirements['min_followers'],
-            "target_countries": requirements['target_countries'],
-            "target_age_min": requirements['target_age_min'],
-            "target_age_max": requirements['target_age_max'],
-            "target_age_groups": requirements['target_age_groups'],
-            "creator_types": requirements['creator_types'],
-            "created_at": requirements['created_at'],
-            "updated_at": requirements['updated_at']
-        })
-
-    return {
-        "listing": listing,
-        "offerings": offerings_response,
-        "requirements": requirements_response
-    }
-
-
 @router.put("/me/listings/{listing_id}", response_model=ListingResponse, status_code=http_status.HTTP_200_OK)
 async def update_hotel_listing(
     listing_id: str,
@@ -853,114 +685,17 @@ async def update_hotel_listing(
     Update a hotel listing. Supports partial updates - only provided fields will be updated.
     """
     try:
-        # Verify user is a hotel and get hotel profile
         hotel_profile_id = await get_current_hotel_profile_id(user_id)
-        
-        # Get current listing data
-        listing_data = await _get_listing_with_details(listing_id, hotel_profile_id)
-        current_listing = listing_data["listing"]
-        old_images = current_listing.get('images') or []
 
-        # Use transaction to ensure atomicity
-        pool = await Database.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                # Build dynamic UPDATE query for listing
-                update_fields = []
-                update_values = []
-                param_counter = 1
-                
-                if request.name is not None:
-                    update_fields.append(f"name = ${param_counter}")
-                    update_values.append(request.name)
-                    param_counter += 1
-                
-                if request.location is not None:
-                    update_fields.append(f"location = ${param_counter}")
-                    update_values.append(request.location)
-                    param_counter += 1
-                
-                if request.description is not None:
-                    update_fields.append(f"description = ${param_counter}")
-                    update_values.append(request.description)
-                    param_counter += 1
-                
-                if request.accommodationType is not None:
-                    update_fields.append(f"accommodation_type = ${param_counter}")
-                    update_values.append(request.accommodationType)
-                    param_counter += 1
-                
-                if request.images is not None:
-                    update_fields.append(f"images = ${param_counter}")
-                    update_values.append(request.images)
-                    param_counter += 1
-                
-                # Update listing if there are fields to update
-                if update_fields:
-                    update_fields.append("updated_at = now()")
-                    update_values.append(listing_id)  # WHERE clause parameter
-                    
-                    update_query = f"""
-                        UPDATE hotel_listings 
-                        SET {', '.join(update_fields)}
-                        WHERE id = ${param_counter}
-                    """
-                    await conn.execute(update_query, *update_values)
-                
-                # Update collaboration offerings if provided (replace strategy)
-                if request.collaborationOfferings is not None:
-                    # Delete existing offerings
-                    await conn.execute(
-                        "DELETE FROM listing_collaboration_offerings WHERE listing_id = $1",
-                        listing_id
-                    )
-                    
-                    # Insert new offerings
-                    for offering in request.collaborationOfferings:
-                        await conn.execute(
-                            """
-                            INSERT INTO listing_collaboration_offerings
-                            (listing_id, collaboration_type, availability_months, platforms,
-                             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-                             commission_percentage)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
-                            """,
-                            listing_id,
-                            offering.collaborationType,
-                            offering.availabilityMonths,
-                            offering.platforms,
-                            offering.freeStayMinNights,
-                            offering.freeStayMaxNights,
-                            offering.paidMaxAmount,
-                            offering.discountPercentage,
-                            offering.currency,
-                            offering.commissionPercentage
-                        )
-                
-                # Update creator requirements if provided
-                if request.creatorRequirements is not None:
-                    # Delete existing requirements
-                    await conn.execute(
-                        "DELETE FROM listing_creator_requirements WHERE listing_id = $1",
-                        listing_id
-                    )
+        existing = await ListingService.get_with_details(listing_id, hotel_profile_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Listing not found"
+            )
+        old_images = existing["listing"].get('images') or []
 
-                    # Insert new requirements
-                    await conn.execute(
-                        """
-                        INSERT INTO listing_creator_requirements
-                        (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        """,
-                        listing_id,
-                        request.creatorRequirements.platforms,
-                        request.creatorRequirements.minFollowers,
-                        request.creatorRequirements.topCountries,
-                        request.creatorRequirements.targetAgeMin,
-                        request.creatorRequirements.targetAgeMax,
-                        request.creatorRequirements.targetAgeGroups or [],
-                        request.creatorRequirements.creatorTypes or []
-                    )
+        await ListingService.update(listing_id, request)
 
         # Delete removed images from S3 if images were updated
         if request.images is not None:
@@ -971,34 +706,15 @@ async def update_hotel_listing(
                     image_key = extract_key_from_url(image_url)
                     if image_key:
                         await delete_file_from_s3(image_key)
-                        # Also try to delete thumbnail
                         thumbnail_key = image_key.replace('/images/', '/thumbnails/')
                         await delete_file_from_s3(thumbnail_key)
                         logger.info(f"Deleted removed listing image from S3: {image_key}")
                 except Exception as e:
                     logger.warning(f"Failed to delete image from S3: {e}")
 
-        # Fetch updated listing with details
-        updated_data = await _get_listing_with_details(listing_id, hotel_profile_id)
-        updated_listing = updated_data["listing"]
-        updated_offerings = updated_data["offerings"]
-        updated_requirements = updated_data["requirements"]
-        
-        return ListingResponse.model_validate({
-            "id": str(updated_listing['id']),
-            "hotel_profile_id": str(updated_listing['hotel_profile_id']),
-            "name": updated_listing['name'],
-            "location": updated_listing['location'],
-            "description": updated_listing['description'],
-            "accommodation_type": updated_listing['accommodation_type'],
-            "images": updated_listing['images'] or [],
-            "status": updated_listing['status'],
-            "created_at": updated_listing['created_at'],
-            "updated_at": updated_listing['updated_at'],
-            "collaboration_offerings": updated_offerings,
-            "creator_requirements": updated_requirements
-        })
-        
+        updated = await ListingService.get_with_details(listing_id, hotel_profile_id)
+        return build_listing_response(updated, hotel_profile_id=hotel_profile_id)
+
     except HTTPException:
         raise
     except ValueError as e:
@@ -1022,42 +738,18 @@ async def delete_hotel_listing(
     Delete a hotel listing and all associated data (offerings, requirements).
     """
     try:
-        # Verify user is a hotel and get hotel profile
         hotel_profile_id = await get_current_hotel_profile_id(user_id)
-        
-        # Verify listing exists and belongs to hotel
+
         listing = await HotelRepository.get_listing(listing_id, hotel_profile_id, columns="id")
-        
         if not listing:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Listing not found"
             )
-        
-        # Use transaction to ensure atomicity
-        pool = await Database.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                # Delete collaboration offerings (cascade should handle this, but being explicit)
-                await conn.execute(
-                    "DELETE FROM listing_collaboration_offerings WHERE listing_id = $1",
-                    listing_id
-                )
-                
-                # Delete creator requirements (cascade should handle this, but being explicit)
-                await conn.execute(
-                    "DELETE FROM listing_creator_requirements WHERE listing_id = $1",
-                    listing_id
-                )
-                
-                # Delete the listing itself
-                await conn.execute(
-                    "DELETE FROM hotel_listings WHERE id = $1",
-                    listing_id
-                )
-        
+
+        await ListingService.delete(listing_id)
         return None
-        
+
     except HTTPException:
         raise
     except Exception as e:
