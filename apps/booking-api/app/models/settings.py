@@ -1,5 +1,51 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Any, Optional
+
+
+# Single source of truth for property defaults, keyed by booking_hotels
+# DB column name. Used by the GET (filling NULLs in the row), the
+# zero-state default response (when a user has no hotel yet), and the
+# create-from-settings path. Adding a new defaulted field means editing
+# this dict only — no scattered ``or 'EUR'`` fallbacks across helpers.
+HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
+    "timezone": "UTC",
+    "currency": "EUR",
+    "default_language": "en",
+    "supported_languages": ["en"],
+    "supported_currencies": [],
+    "check_in_time": "15:00",
+    "check_out_time": "11:00",
+    "pay_at_hotel_methods": ["cash", "card"],
+    "free_cancellation_days": 7,
+    "email_notifications": True,
+    "new_booking_alerts": True,
+    "payment_alerts": True,
+    "weekly_reports": False,
+    "refer_a_guest_enabled": False,
+    "special_requests_enabled": True,
+    "arrival_time_enabled": False,
+    "guest_count_enabled": False,
+    "pay_at_property_enabled": False,
+    "online_card_payment": False,
+    "bank_transfer": False,
+    "payout_account_type": "iban",
+    "billing_active_plan": "commission",
+    "billing_commission_rate": 5,
+    "billing_fixed_fee": 49,
+    "booking_engine_fee_pct": 2.0,
+    "channel_manager_fee_pct": 3.0,
+    "affiliate_platform_fee_pct": 2.0,
+    "fixed_base_fee": 30,
+    "fixed_rooms_included": 1,
+    "fixed_per_extra_room_fee": 5,
+}
+
+
+def hotel_default(column: str, fallback: Any = "") -> Any:
+    """Return the default for ``column`` from ``HOTEL_FIELD_DEFAULTS``,
+    or ``fallback`` (empty string) for unmapped columns — most string
+    fields default to empty so listing each one is noise."""
+    return HOTEL_FIELD_DEFAULTS.get(column, fallback)
 
 
 class PropertySettingsResponse(BaseModel):

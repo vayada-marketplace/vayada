@@ -5,6 +5,7 @@ import json
 from typing import Optional
 
 from app.database import Database
+from app.models.settings import HOTEL_FIELD_DEFAULTS as _D
 
 
 class BookingHotelRepository:
@@ -98,34 +99,37 @@ class BookingHotelRepository:
         supported_languages: list,
         user_id: str,
         *,
-        default_language: str = 'en',
+        # Defaults sourced from app.models.settings.HOTEL_FIELD_DEFAULTS so
+        # the canonical values live in exactly one place. Adding a new
+        # column with a non-empty default = update the dict only.
+        default_language: str = _D['default_language'],
         supported_currencies: list | None = None,
         contact_whatsapp: str = '',
         contact_address: str = '',
-        check_in_time: str = '15:00',
-        check_out_time: str = '11:00',
+        check_in_time: str = _D['check_in_time'],
+        check_out_time: str = _D['check_out_time'],
         check_in_from: str = '',
         check_in_until: str = '',
         check_out_from: str = '',
         check_out_until: str = '',
-        pay_at_property_enabled: bool = False,
-        online_card_payment: bool = False,
-        bank_transfer: bool = False,
-        free_cancellation_days: int = 7,
-        email_notifications: bool = True,
-        new_booking_alerts: bool = True,
-        payment_alerts: bool = True,
-        weekly_reports: bool = False,
-        special_requests_enabled: bool = True,
-        arrival_time_enabled: bool = False,
-        guest_count_enabled: bool = False,
-        refer_a_guest_enabled: bool = False,
+        pay_at_property_enabled: bool = _D['pay_at_property_enabled'],
+        online_card_payment: bool = _D['online_card_payment'],
+        bank_transfer: bool = _D['bank_transfer'],
+        free_cancellation_days: int = _D['free_cancellation_days'],
+        email_notifications: bool = _D['email_notifications'],
+        new_booking_alerts: bool = _D['new_booking_alerts'],
+        payment_alerts: bool = _D['payment_alerts'],
+        weekly_reports: bool = _D['weekly_reports'],
+        special_requests_enabled: bool = _D['special_requests_enabled'],
+        arrival_time_enabled: bool = _D['arrival_time_enabled'],
+        guest_count_enabled: bool = _D['guest_count_enabled'],
+        refer_a_guest_enabled: bool = _D['refer_a_guest_enabled'],
         social_instagram: str = '',
         social_facebook: str = '',
         social_tiktok: str = '',
         social_youtube: str = '',
         payout_account_holder: str = '',
-        payout_account_type: str = 'iban',
+        payout_account_type: str = _D['payout_account_type'],
         payout_iban: str = '',
         payout_account_number: str = '',
         payout_bank_name: str = '',
