@@ -92,11 +92,9 @@ function BookPageContent() {
     let total = 0
     for (const addon of addons) {
       if (!selectedAddonIds.includes(addon.id)) continue
+      // perPerson addons: qty already counts the people opting in (the on-card "/person" stepper); don't multiply by room occupancy.
       const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-      let price = addon.price
-      if (addon.perPerson) price *= adultsParam
-      price *= qty
-      total += convertAndRound(price, addon.currency)
+      total += convertAndRound(addon.price * qty, addon.currency)
     }
     return total
   })()
@@ -275,10 +273,7 @@ function BookPageContent() {
                 <div className="pb-5 border-b border-gray-100">
                   {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                     const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-                    let unitPrice = addon.price
-                    if (addon.perPerson) unitPrice *= adultsParam
-                    unitPrice *= qty
-                    const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
+                    const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
                     return (
                       <div key={addon.id} className="flex items-center justify-between pt-3">
                         <p className="text-sm text-gray-700">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights} nights)` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</p>
@@ -512,10 +507,7 @@ function BookPageContent() {
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
                   const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-                  let unitPrice = addon.price
-                  if (addon.perPerson) unitPrice *= adultsParam
-                  unitPrice *= qty
-                  const unitPriceDisplay = convertAndRound(unitPrice, addon.currency)
+                  const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}{addon.perNight && qty < nights ? ` (${qty}/${nights})` : qty > 1 && !addon.perNight ? ` ×${qty}` : ''}</span>

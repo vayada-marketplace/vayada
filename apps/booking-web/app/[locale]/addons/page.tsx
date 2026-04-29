@@ -13,7 +13,6 @@ import { ADDON_CATEGORIES } from '@/lib/mock/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { calculateNights } from '@/lib/utils'
-import { calculateAddonTotal } from '@/lib/constants/booking'
 
 export default function AddonsPage() {
   const router = useRouter()
@@ -259,9 +258,8 @@ export default function AddonsPage() {
             <div className="space-y-3 mb-5">
               {addons.filter((a) => selections[a.id] !== undefined).map((addon) => {
                 const qty = selections[addon.id]
-                let computedPrice = addon.price
-                if (addon.perPerson) computedPrice *= adultsParam
-                computedPrice *= qty
+                // For perPerson addons, qty already counts the people opting in (the on-card "/person" stepper); don't multiply by room occupancy.
+                const computedPrice = addon.price * qty
                 return (
                 <div key={addon.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-gray-100">
                   <div className="flex items-center gap-3">
@@ -303,10 +301,7 @@ export default function AddonsPage() {
                   for (const addon of addons) {
                     if (!selectedIds.includes(addon.id)) continue
                     const qty = selections[addon.id] ?? 1
-                    let price = addon.price
-                    if (addon.perPerson) price *= adultsParam
-                    price *= qty
-                    total += convertAndRound(price, addon.currency)
+                    total += convertAndRound(addon.price * qty, addon.currency)
                   }
                   return formatPrice(total, selectedCurrency)
                 })()}
