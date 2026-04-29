@@ -7,9 +7,9 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
 from app.services.channex_sync_service import push_cancellation_policy_for_room_type
+from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.utils import parse_jsonb, get_hotel_id
-from app.database import Database, BookingEngineDatabase
-from app.config import settings as app_settings
+from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.room_repo import RoomRepository
 from app.models.room_type import (
@@ -144,19 +144,9 @@ async def create_room_type(
 
     # Force the room currency to the hotel's authoritative currency so a
     # buggy or stale frontend payload can never create rooms with a
-    # different currency than the property. Currency lives in
-    # booking_hotels.currency (booking_db is the single source of truth
-    # for hotel identity fields — see memory/project_hotel_data_ownership.md).
-    if app_settings.BOOKING_ENGINE_DATABASE_URL:
-        try:
-            be_currency = await BookingEngineDatabase.fetchval(
-                "SELECT currency FROM booking_hotels WHERE id = $1",
-                hotel_id,
-            )
-            if be_currency:
-                payload["currency"] = be_currency
-        except Exception as e:
-            logger.warning("Failed to fetch booking engine currency for room creation: %s", e)
+    # different currency than the property — see
+    # memory/project_hotel_data_ownership.md.
+    payload["currency"] = await get_be_currency(hotel_id)
 
     if payload.get("monthly_rates"):
         payload["monthly_rates"] = {

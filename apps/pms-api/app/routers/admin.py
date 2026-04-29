@@ -3,11 +3,11 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.config import settings as app_settings
 from app.dependencies import require_hotel_admin
-from app.database import AuthDatabase, BookingEngineDatabase
+from app.database import AuthDatabase
 from app.utils import get_hotel_id, parse_jsonb
 from app.repositories.hotel_repo import HotelRepository
+from app.services import hotel_identity_service
 from app.models.hotel import (
     HotelRegister,
     HotelResponse,
@@ -155,17 +155,13 @@ async def update_hotel(
     if not row:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    # Sync instant_book to booking_db so the booking-engine frontend (which
-    # reads /api/hotels/{slug} from the BE backend) can adjust the checkout
-    # CTA copy. Surface failures: silent drift here would show guests a
-    # "Submit Booking Request" button that immediately confirms — exactly the
-    # contradictory UX we're trying to avoid.
-    if "instant_book" in data and app_settings.BOOKING_ENGINE_DATABASE_URL:
+    # Sync instant_book to booking_db so the booking-engine frontend can
+    # adjust the checkout CTA copy. Surface failures: silent drift here
+    # would show guests a "Submit Booking Request" button that immediately
+    # confirms — exactly the contradictory UX we're trying to avoid.
+    if "instant_book" in data:
         try:
-            await BookingEngineDatabase.execute(
-                "UPDATE booking_hotels SET instant_book = $2 WHERE id = $1",
-                hotel_id, bool(data["instant_book"]),
-            )
+            await hotel_identity_service.set_instant_book(hotel_id, data["instant_book"])
         except Exception as e:
             logger.error("Failed to sync instant_book to booking engine: %s", e)
             raise HTTPException(

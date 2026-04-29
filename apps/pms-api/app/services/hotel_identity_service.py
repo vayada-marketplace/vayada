@@ -1,12 +1,15 @@
-"""Reads from the booking-engine DB, which owns hotel-identity fields
-(currency, slug, payment-method flags, terms text). PMS reads from here
-rather than its own ``hotels`` table for those fields — see
+"""Reads + writes against the booking-engine DB, which owns hotel-identity
+fields (currency, slug, payment-method flags, terms text). PMS reads from
+here rather than its own ``hotels`` table for those fields — see
 memory/project_hotel_data_ownership.md.
 
-Routers should funnel cross-DB lookups through this module so the boundary
-stays auditable and fallback behavior is consistent.
+All cross-DB SQL funnels through this module so the boundary stays
+auditable. Reads swallow failures and return ``None`` / defaults so guest
+endpoints can degrade gracefully; writes propagate exceptions so admin
+endpoints can return 502.
 """
 import logging
+from typing import Optional
 
 from app.config import settings as app_settings
 from app.database import BookingEngineDatabase
@@ -14,6 +17,17 @@ from app.database import BookingEngineDatabase
 logger = logging.getLogger(__name__)
 
 DEFAULT_CURRENCY = "EUR"
+
+_PAYMENT_FLAG_COLUMNS = {
+    "pay_at_property_enabled", "online_card_payment", "bank_transfer",
+}
+
+
+def _is_configured() -> bool:
+    return bool(app_settings.BOOKING_ENGINE_DATABASE_URL)
+
+
+# ── Reads (lenient — log + None on failure) ──────────────────────────
 
 
 async def get_currency(hotel_id: str) -> str:
@@ -24,7 +38,7 @@ async def get_currency(hotel_id: str) -> str:
     hotel ids are unified across PMS and booking_db, so the row should
     exist whenever the connection works.
     """
-    if not app_settings.BOOKING_ENGINE_DATABASE_URL:
+    if not _is_configured():
         return DEFAULT_CURRENCY
     try:
         currency = await BookingEngineDatabase.fetchval(
@@ -38,3 +52,100 @@ async def get_currency(hotel_id: str) -> str:
             hotel_id, e, DEFAULT_CURRENCY,
         )
         return DEFAULT_CURRENCY
+
+
+async def get_payment_flags_by_slug(slug: str) -> Optional[dict]:
+    """Read pay_at_property_enabled / online_card_payment / bank_transfer
+    for a hotel by slug. Returns ``None`` if BE-DB is unconfigured, the
+    row is missing, or the query fails (failure is logged)."""
+    if not _is_configured():
+        return None
+    try:
+        row = await BookingEngineDatabase.fetchrow(
+            "SELECT pay_at_property_enabled, online_card_payment, bank_transfer "
+            "FROM booking_hotels WHERE slug = $1",
+            slug,
+        )
+    except Exception as e:
+        logger.warning("booking_db payment-flag lookup failed for slug %s: %s", slug, e)
+        return None
+    return dict(row) if row else None
+
+
+async def get_guest_payment_info_by_slug(slug: str) -> Optional[dict]:
+    """Read pay-at-hotel methods, bank details, terms + cancellation
+    policy text for a hotel by slug. Returns ``None`` on any failure."""
+    if not _is_configured():
+        return None
+    try:
+        row = await BookingEngineDatabase.fetchrow(
+            "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
+            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text "
+            "FROM booking_hotels WHERE slug = $1",
+            slug,
+        )
+    except Exception as e:
+        logger.warning("booking_db pay-at-hotel lookup failed for slug %s: %s", slug, e)
+        return None
+    return dict(row) if row else None
+
+
+async def list_addons(hotel_id: str) -> list[dict]:
+    """List a hotel's addons (id, price, currency). Empty list if BE-DB
+    is unconfigured. DB errors propagate."""
+    if not _is_configured():
+        return []
+    rows = await BookingEngineDatabase.fetch(
+        "SELECT id, price, currency FROM booking_addons WHERE hotel_id = $1",
+        hotel_id,
+    )
+    return [dict(r) for r in rows]
+
+
+# ── Writes (strict — propagate errors so caller can 502) ─────────────
+
+
+async def set_currency(hotel_id: str, currency: str) -> None:
+    """Write the authoritative currency. No-op if BE-DB is unconfigured."""
+    if not _is_configured():
+        return
+    await BookingEngineDatabase.execute(
+        "UPDATE booking_hotels SET currency = $2 WHERE id = $1",
+        hotel_id, currency,
+    )
+
+
+async def update_addon_price(addon_id: str, price: float, currency: str) -> None:
+    """Update a single addon's price + currency."""
+    if not _is_configured():
+        return
+    await BookingEngineDatabase.execute(
+        "UPDATE booking_addons SET price = $1, currency = $2 WHERE id = $3",
+        price, currency, addon_id,
+    )
+
+
+async def set_payment_flags(hotel_id: str, fields: dict) -> None:
+    """Write the allow-listed payment-method flags
+    (pay_at_property_enabled / online_card_payment / bank_transfer).
+    No-op if no allowed fields remain or BE-DB unconfigured."""
+    filtered = {k: v for k, v in fields.items() if k in _PAYMENT_FLAG_COLUMNS}
+    if not filtered or not _is_configured():
+        return
+    sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(filtered))
+    vals = list(filtered.values())
+    await BookingEngineDatabase.execute(
+        f"UPDATE booking_hotels SET {sets} WHERE id = $1",
+        hotel_id, *vals,
+    )
+
+
+async def set_instant_book(hotel_id: str, instant_book: bool) -> None:
+    """Write the instant_book flag (drives checkout-CTA copy on the
+    booking-engine frontend)."""
+    if not _is_configured():
+        return
+    await BookingEngineDatabase.execute(
+        "UPDATE booking_hotels SET instant_book = $2 WHERE id = $1",
+        hotel_id, bool(instant_book),
+    )

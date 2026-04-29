@@ -15,7 +15,8 @@ from app.services.booking_service import (
 )
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
-from app.database import Database, BookingEngineDatabase
+from app.database import Database
+from app.services import hotel_identity_service
 from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
@@ -134,20 +135,8 @@ async def get_payment_settings(slug: str):
 
     # Read payment method flags from booking engine DB (authoritative source —
     # the booking admin settings page writes there). Fall back to PMS settings
-    # if the booking engine DB is unavailable.
-    be_payment_flags = None
-    try:
-        be_payment_flags = await BookingEngineDatabase.fetchrow(
-            "SELECT pay_at_property_enabled, online_card_payment, bank_transfer "
-            "FROM booking_hotels WHERE slug = $1", slug,
-        )
-    except Exception as e:
-        # Falling back to PMS settings would surface stale flags; log so the
-        # discrepancy is visible if booking_db is down (audit item #13).
-        logger.warning(
-            "booking_db payment-flag lookup failed for slug %s: %s; falling back to PMS settings",
-            slug, e,
-        )
+    # if the booking engine DB is unavailable (helper logs the failure).
+    be_payment_flags = await hotel_identity_service.get_payment_flags_by_slug(slug)
 
     if be_payment_flags:
         pay_at_property = be_payment_flags.get("pay_at_property_enabled", False)
@@ -191,34 +180,24 @@ async def get_payment_settings(slug: str):
         "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
     }
 
-    # Fetch pay-at-hotel methods, bank details, and policy texts from booking engine DB
-    try:
-        be_hotel = await BookingEngineDatabase.fetchrow(
-            "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
-            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text "
-            "FROM booking_hotels WHERE slug = $1",
-            slug,
-        )
-        if be_hotel:
-            import json
-            methods = be_hotel.get("pay_at_hotel_methods")
-            if isinstance(methods, str):
-                methods = json.loads(methods)
-            result["payAtHotelMethods"] = methods or ["cash", "card"]
-            result["termsText"] = be_hotel.get("terms_text") or ""
-            result["cancellationPolicyText"] = be_hotel.get("cancellation_policy_text") or ""
-            if bank_transfer:
-                result["bankDetails"] = {
-                    "accountHolder": be_hotel.get("payout_account_holder") or "",
-                    "iban": be_hotel.get("payout_iban") or "",
-                    "bankName": be_hotel.get("payout_bank_name") or "",
-                    "swift": be_hotel.get("payout_swift") or "",
-                }
-    except Exception as e:
-        logger.warning(
-            "booking_db pay-at-hotel lookup failed for slug %s: %s; using defaults",
-            slug, e,
-        )
+    # Fetch pay-at-hotel methods, bank details, and policy texts from booking engine DB.
+    be_hotel = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
+    if be_hotel:
+        import json
+        methods = be_hotel.get("pay_at_hotel_methods")
+        if isinstance(methods, str):
+            methods = json.loads(methods)
+        result["payAtHotelMethods"] = methods or ["cash", "card"]
+        result["termsText"] = be_hotel.get("terms_text") or ""
+        result["cancellationPolicyText"] = be_hotel.get("cancellation_policy_text") or ""
+        if bank_transfer:
+            result["bankDetails"] = {
+                "accountHolder": be_hotel.get("payout_account_holder") or "",
+                "iban": be_hotel.get("payout_iban") or "",
+                "bankName": be_hotel.get("payout_bank_name") or "",
+                "swift": be_hotel.get("payout_swift") or "",
+            }
+    else:
         result["payAtHotelMethods"] = ["cash", "card"]
         result["termsText"] = ""
         result["cancellationPolicyText"] = ""

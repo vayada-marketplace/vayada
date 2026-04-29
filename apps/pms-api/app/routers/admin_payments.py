@@ -4,8 +4,6 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
-from app.database import BookingEngineDatabase
-from app.config import settings as app_settings
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
 from app.repositories.room_type_repo import RoomTypeRepository
@@ -18,7 +16,7 @@ from app.models.payment import (
     StripeConnectAccountRequest,
     XenditBankDetailsRequest,
 )
-from app.services import stripe_service, xendit_service
+from app.services import stripe_service, xendit_service, hotel_identity_service
 from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.services.xendit_service import XenditError
 
@@ -172,12 +170,9 @@ async def update_payment_settings(
     # fails we raise, because the FX room-rate conversion above has
     # already run — leaving rates converted but currency unchanged is
     # exactly the drift we're trying to eliminate.
-    if new_currency and app_settings.BOOKING_ENGINE_DATABASE_URL:
+    if new_currency:
         try:
-            await BookingEngineDatabase.execute(
-                "UPDATE booking_hotels SET currency = $2 WHERE id = $1",
-                hotel_id, new_currency,
-            )
+            await hotel_identity_service.set_currency(hotel_id, new_currency)
         except Exception as e:
             logger.error("Failed to write currency to booking engine: %s", e)
             raise HTTPException(
@@ -189,10 +184,7 @@ async def update_payment_settings(
         # currently-selected hotel (unified id).
         if old_currency != new_currency:
             try:
-                addons = await BookingEngineDatabase.fetch(
-                    "SELECT id, price, currency FROM booking_addons WHERE hotel_id = $1",
-                    hotel_id,
-                )
+                addons = await hotel_identity_service.list_addons(hotel_id)
                 zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
                 addon_decimals = 0 if zero_decimal else 2
                 converted_count = 0
@@ -206,9 +198,8 @@ async def update_payment_settings(
                         else:
                             addon_rate = await get_exchange_rate(addon_currency, new_currency)
                         new_price = round(float(addon["price"]) * addon_rate, addon_decimals)
-                        await BookingEngineDatabase.execute(
-                            "UPDATE booking_addons SET price = $1, currency = $2 WHERE id = $3",
-                            new_price, new_currency, str(addon["id"]),
+                        await hotel_identity_service.update_addon_price(
+                            str(addon["id"]), new_price, new_currency,
                         )
                         converted_count += 1
                     except Exception as ae:
@@ -218,29 +209,19 @@ async def update_payment_settings(
             except Exception as e:
                 logger.warning("Failed to convert addon prices: %s", e)
 
-    sync_fields = {
-        "pay_at_property_enabled", "online_card_payment", "bank_transfer",
-    }
-    booking_updates = {k: v for k, v in updates.items() if k in sync_fields}
-    if booking_updates and app_settings.BOOKING_ENGINE_DATABASE_URL:
-        # Match on hotel id (unified across PMS and booking_db — see
-        # memory/project_hotel_data_ownership.md) rather than user_id, which
-        # would clobber every hotel owned by a multi-hotel operator.
-        # Surface failures: silent drift here is the root cause of guests
-        # seeing the wrong payment options at checkout.
-        try:
-            sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(booking_updates))
-            vals = list(booking_updates.values())
-            await BookingEngineDatabase.execute(
-                f"UPDATE booking_hotels SET {sets} WHERE id = $1",
-                hotel_id, *vals,
-            )
-        except Exception as e:
-            logger.error("Failed to sync payment methods to booking engine: %s", e)
-            raise HTTPException(
-                status_code=502,
-                detail="Failed to sync payment methods to booking engine. Please retry.",
-            )
+    # Match on hotel id (unified across PMS and booking_db — see
+    # memory/project_hotel_data_ownership.md) rather than user_id, which
+    # would clobber every hotel owned by a multi-hotel operator.
+    # Surface failures: silent drift here is the root cause of guests
+    # seeing the wrong payment options at checkout.
+    try:
+        await hotel_identity_service.set_payment_flags(hotel_id, updates)
+    except Exception as e:
+        logger.error("Failed to sync payment methods to booking engine: %s", e)
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to sync payment methods to booking engine. Please retry.",
+        )
 
     return {"status": "updated"}
 
