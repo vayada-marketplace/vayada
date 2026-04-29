@@ -1,9 +1,9 @@
 """
-Admin routes for user management
+Admin user-management endpoints: list/get/create/update/delete users,
+plus admin-side updates of creator and hotel profiles.
 """
 from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
-from typing import List, Literal, Optional, Union
-from datetime import datetime
+from typing import Literal, Optional
 from decimal import Decimal
 from pydantic import ValidationError
 import logging
@@ -11,63 +11,38 @@ import json
 import bcrypt
 
 from app.database import Database, AuthDatabase
-from app.dependencies import get_current_user_id, get_admin_user
-from app.routers.collaborations import get_collaboration_deliverables
-from app.services.affiliate import AffiliateProvisioningService
-from app.services.chat_system import create_system_message
-from app.services.listings import ListingService, build_listing_response
-from app.services.notifications import (
-    get_party_email_and_name,
-    send_email_background,
-    notify_vayada_team,
-)
-from app.email_service import (
-    create_collaboration_response_email_html,
-    create_collaboration_approved_email_html,
-)
-from app.s3_service import delete_all_objects_in_prefix, delete_file_from_s3, extract_key_from_url
+from app.dependencies import get_admin_user
+from app.s3_service import delete_all_objects_in_prefix
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
-from app.repositories.collaboration_repo import CollaborationRepository
 
-# Import models from centralized location
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
-    CreateListingRequest,
-    UpdateListingRequest,
-    CollaborationOfferingRequest,
-    CreatorRequirementsRequest,
-    ListingResponse,
     UpdateHotelProfileRequest,
     HotelProfileResponse,
+    ListingResponse,
 )
-from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse, PlatformResponse
-from app.models.collaborations import (
-    CollaborationResponse,
-    RespondToCollaborationRequest,
+from app.models.common import (
+    CollaborationOfferingResponse,
+    CreatorRequirementsResponse,
+    PlatformResponse,
 )
 from app.models.admin import (
     UserResponse,
     UserListResponse,
-    CollaborationListResponse,
-    AdminPlatformRequest,
     CreateCreatorProfileRequest,
     CreateHotelProfileRequest,
     CreateUserRequest,
     UpdateUserRequest,
-    AdminPlatformResponse,
     CreatorProfileDetail,
-    AdminCollaborationOfferingResponse,
-    AdminCreatorRequirementsResponse,
-    AdminListingResponse,
     HotelProfileDetail,
     UserDetailResponse,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter()
 
 
 @router.get("/users", response_model=UserListResponse, status_code=http_status.HTTP_200_OK)
@@ -79,46 +54,33 @@ async def get_users(
     search: Optional[str] = Query(None, description="Search by name or email"),
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Get all users with pagination and filtering.
-    
-    - **page**: Page number (starts at 1)
-    - **page_size**: Number of items per page (1-100)
-    - **type**: Filter by user type (creator, hotel, admin)
-    - **status**: Filter by status (pending, verified, rejected, suspended)
-    - **search**: Search by name or email
-    """
+    """Get all users with pagination and filtering."""
     try:
-        # Build WHERE clause
         where_conditions = []
         params = []
         param_counter = 1
-        
+
         if type:
             where_conditions.append(f"type = ${param_counter}")
             params.append(type)
             param_counter += 1
-        
+
         if status:
             where_conditions.append(f"status = ${param_counter}")
             params.append(status)
             param_counter += 1
-        
+
         if search:
-            # Use the same placeholder for both name and email comparisons
             where_conditions.append(f"(name ILIKE ${param_counter} OR email ILIKE ${param_counter})")
-            search_pattern = f"%{search}%"
-            params.append(search_pattern)
+            params.append(f"%{search}%")
             param_counter += 1
-        
+
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-        
-        # Get total count
+
         count_query = f"SELECT COUNT(*) as total FROM users WHERE {where_clause}"
         total_result = await AuthDatabase.fetchrow(count_query, *params)
         total = total_result['total'] if total_result else 0
 
-        # Get users with pagination
         offset = (page - 1) * page_size
         users_query = f"""
             SELECT id, email, name, type, status, email_verified, avatar, created_at, updated_at
@@ -128,9 +90,9 @@ async def get_users(
             LIMIT ${param_counter} OFFSET ${param_counter + 1}
         """
         params.extend([page_size, offset])
-        
+
         users_data = await AuthDatabase.fetch(users_query, *params)
-        
+
         users = [
             UserResponse(
                 id=str(u['id']),
@@ -145,11 +107,11 @@ async def get_users(
             )
             for u in users_data
         ]
-        
+
         logger.info(f"Admin {admin_id} fetched users list (page {page}, total: {total})")
-        
+
         return UserListResponse(users=users, total=total)
-        
+
     except Exception as e:
         logger.error(f"Error fetching users: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -164,14 +126,9 @@ async def get_user_details(
     admin_id: str = Depends(get_admin_user)
 ):
     """
-    Get complete details for a specific user including:
-    - User information
-    - Profile (creator_profile or hotel_profile)
-    - Social media platforms (for creators)
-    - Listings (for hotels)
+    Get complete details for a specific user including profile + listings/platforms.
     """
     try:
-        # Get user info
         user = await UserRepository.get_by_id(
             user_id,
             columns="id, email, name, type, status, email_verified, avatar, created_at, updated_at"
@@ -185,51 +142,43 @@ async def get_user_details(
 
         profile = None
 
-        # Get profile based on user type
         if user['type'] == 'creator':
-            # Get creator profile
             creator_profile = await CreatorRepository.get_by_user_id(
                 user_id,
                 columns="id, user_id, location, short_description, portfolio_link, phone, profile_picture, profile_complete, profile_completed_at, created_at, updated_at"
             )
 
             if creator_profile:
-                # Get platforms
                 platforms_data = await CreatorRepository.get_platforms(
                     creator_profile['id'],
                     columns="id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split, created_at, updated_at"
                 )
-                
+
                 platforms = []
                 for p in platforms_data:
-                    # Parse JSONB fields (asyncpg may return them as strings)
                     def parse_jsonb(value):
                         if value is None:
                             return None
                         if isinstance(value, str):
                             return json.loads(value)
                         return value
-                    
-                    # Convert top_countries from dict to list format if needed
+
                     def convert_top_countries(value):
                         parsed = parse_jsonb(value)
                         if parsed is None:
                             return None
                         if isinstance(parsed, dict):
-                            # Convert dict {"USA": 40, "UK": 25} to [{"country": "USA", "percentage": 40}, ...]
                             return [{"country": k, "percentage": v} for k, v in parsed.items()]
                         return parsed
-                    
-                    # Convert top_age_groups from dict to list format if needed
+
                     def convert_top_age_groups(value):
                         parsed = parse_jsonb(value)
                         if parsed is None:
                             return None
                         if isinstance(parsed, dict):
-                            # Convert dict {"25-34": 45, "35-44": 30} to [{"ageRange": "25-34", "percentage": 45}, ...]
                             return [{"ageRange": k, "percentage": v} for k, v in parsed.items()]
                         return parsed
-                    
+
                     platforms.append(PlatformResponse(
                         id=str(p['id']),
                         name=p['name'],
@@ -242,7 +191,7 @@ async def get_user_details(
                         created_at=p['created_at'],
                         updated_at=p['updated_at']
                     ))
-                
+
                 profile = CreatorProfileDetail(
                     id=str(creator_profile['id']),
                     userId=str(creator_profile['user_id']),
@@ -257,28 +206,25 @@ async def get_user_details(
                     updatedAt=creator_profile['updated_at'],
                     platforms=platforms
                 )
-        
+
         elif user['type'] == 'hotel':
-            # Get hotel profile (email comes from users table, not hotel_profiles)
             hotel_profile = await HotelRepository.get_profile_by_user_id(
                 user_id,
                 columns="id, user_id, name, location, picture, website, about, phone, status, created_at, updated_at"
             )
 
             if hotel_profile:
-                # Get listings
                 listings_data = await HotelRepository.get_listings_by_profile_id(
                     hotel_profile['id'],
                     columns="id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at"
                 )
-                
+
                 listings = []
                 for l in listings_data:
                     listing_id = str(l['id'])
-                    
-                    # Get collaboration offerings for this listing
+
                     offerings_data = await HotelRepository.get_offerings(l['id'])
-                    
+
                     offerings = [
                         CollaborationOfferingResponse(
                             id=str(o['id']),
@@ -297,10 +243,9 @@ async def get_user_details(
                         )
                         for o in offerings_data
                     ]
-                    
-                    # Get creator requirements for this listing
+
                     requirements_data = await HotelRepository.get_requirements(l['id'])
-                    
+
                     requirements = None
                     if requirements_data:
                         requirements = CreatorRequirementsResponse(
@@ -315,7 +260,7 @@ async def get_user_details(
                             created_at=requirements_data['created_at'],
                             updated_at=requirements_data['updated_at']
                         )
-                    
+
                     listings.append(ListingResponse(
                         id=listing_id,
                         hotel_profile_id=str(l['hotel_profile_id']),
@@ -330,7 +275,7 @@ async def get_user_details(
                         collaboration_offerings=offerings,
                         creator_requirements=requirements
                     ))
-                
+
                 profile = HotelProfileDetail(
                     id=str(hotel_profile['id']),
                     user_id=str(hotel_profile['user_id']),
@@ -339,16 +284,16 @@ async def get_user_details(
                     picture=hotel_profile['picture'],
                     website=hotel_profile['website'],
                     about=hotel_profile['about'],
-                    email=user['email'],  # Email comes from users table
+                    email=user['email'],
                     phone=hotel_profile['phone'],
                     status=user['status'],
                     created_at=hotel_profile['created_at'],
                     updated_at=hotel_profile['updated_at'],
                     listings=listings
                 )
-        
+
         logger.info(f"Admin {admin_id} fetched details for user {user_id} (type: {user['type']})")
-        
+
         return UserDetailResponse(
             id=str(user['id']),
             email=user['email'],
@@ -361,7 +306,7 @@ async def get_user_details(
             updated_at=user['updated_at'],
             profile=profile
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -377,34 +322,19 @@ async def create_user(
     request: CreateUserRequest,
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Create a new user (creator or hotel) as admin.
-    
-    - **email**: User's email address (must be unique)
-    - **password**: Password (minimum 8 characters)
-    - **name**: User's name
-    - **type**: User type - either "creator" or "hotel"
-    - **status**: User status (default: "pending")
-    - **emailVerified**: Whether email is verified (default: false)
-    - **avatar**: Optional avatar URL
-    - **creatorProfile**: Optional creator profile data (only for creator type)
-    - **hotelProfile**: Optional hotel profile data (only for hotel type)
-    """
+    """Create a new user (creator or hotel) as admin."""
     try:
-        # Check if email already exists
         if await UserRepository.exists_by_email(request.email):
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
-        # Hash password
+
         password_hash = bcrypt.hashpw(
             request.password.encode('utf-8'),
             bcrypt.gensalt()
         ).decode('utf-8')
-        
-        # Insert user into auth database
+
         user = await AuthDatabase.fetchrow(
             """
             INSERT INTO users (email, password_hash, name, type, status, email_verified, avatar)
@@ -419,13 +349,11 @@ async def create_user(
             request.emailVerified,
             request.avatar
         )
-        
+
         user_id = user['id']
 
         try:
-            # Create profile based on user type (on business Database)
             if request.type == "creator":
-                # Create creator profile
                 profile_data = request.creatorProfile or CreateCreatorProfileRequest()
 
                 creator = await Database.fetchrow(
@@ -444,21 +372,17 @@ async def create_user(
 
                 creator_id = creator['id']
 
-                # Create platforms if provided
                 if profile_data.platforms:
                     for platform in profile_data.platforms:
-                        # Prepare analytics data as JSONB
-                        top_countries_data = None
-                        if platform.topCountries:
-                            top_countries_data = json.dumps(platform.topCountries)
-
-                        top_age_groups_data = None
-                        if platform.topAgeGroups:
-                            top_age_groups_data = json.dumps(platform.topAgeGroups)
-
-                        gender_split_data = None
-                        if platform.genderSplit:
-                            gender_split_data = json.dumps(platform.genderSplit)
+                        top_countries_data = (
+                            json.dumps(platform.topCountries) if platform.topCountries else None
+                        )
+                        top_age_groups_data = (
+                            json.dumps(platform.topAgeGroups) if platform.topAgeGroups else None
+                        )
+                        gender_split_data = (
+                            json.dumps(platform.genderSplit) if platform.genderSplit else None
+                        )
 
                         await CreatorRepository.insert_platform(
                             creator_id,
@@ -472,7 +396,6 @@ async def create_user(
                         )
 
             elif request.type == "hotel":
-                # Create hotel profile
                 profile_data = request.hotelProfile or CreateHotelProfileRequest()
 
                 hotel_profile = await Database.fetchrow(
@@ -491,13 +414,11 @@ async def create_user(
 
                 hotel_profile_id = hotel_profile['id']
 
-                # Create listings if provided
                 if profile_data.listings:
                     pool = await Database.get_pool()
                     async with pool.acquire() as conn:
                         async with conn.transaction():
                             for listing_request in profile_data.listings:
-                                # Create listing
                                 listing = await conn.fetchrow(
                                     """
                                     INSERT INTO hotel_listings
@@ -515,7 +436,6 @@ async def create_user(
 
                                 listing_id = listing['id']
 
-                                # Create collaboration offerings
                                 for offering in listing_request.collaborationOfferings:
                                     await conn.execute(
                                         """
@@ -537,7 +457,6 @@ async def create_user(
                                         offering.commissionPercentage
                                     )
 
-                                # Create creator requirements
                                 await conn.execute(
                                     """
                                     INSERT INTO listing_creator_requirements
@@ -556,9 +475,9 @@ async def create_user(
             # Compensating action: delete user from auth DB if profile creation fails
             await UserRepository.delete(user_id)
             raise
-        
+
         logger.info(f"Admin {admin_id} created user {user_id} (type: {request.type})")
-        
+
         return UserResponse(
             id=str(user['id']),
             email=user['email'],
@@ -570,7 +489,7 @@ async def create_user(
             created_at=user['created_at'],
             updated_at=user['updated_at']
         )
-        
+
     except HTTPException:
         raise
     except ValidationError as e:
@@ -599,19 +518,8 @@ async def update_creator_profile(
     request: UpdateCreatorProfileRequest,
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Update a creator's profile (admin endpoint).
-    Supports partial updates - only provided fields will be updated.
-    
-    If platforms are provided, all existing platforms will be replaced with the new ones.
-    If platforms are not provided, existing platforms remain unchanged.
-    
-    For profile picture:
-    - Option 1: Upload image first using POST /upload/image/creator-profile?target_user_id={user_id}, then include the returned URL in profilePicture field
-    - Option 2: Provide an existing S3 URL directly in profilePicture field
-    """
+    """Update a creator's profile (admin endpoint)."""
     try:
-        # Verify user exists and is a creator
         user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
@@ -626,7 +534,6 @@ async def update_creator_profile(
                 detail="User is not a creator"
             )
 
-        # Get creator profile
         creator = await CreatorRepository.get_by_user_id(
             user_id, columns="id, profile_complete"
         )
@@ -636,42 +543,39 @@ async def update_creator_profile(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Creator profile not found"
             )
-        
+
         creator_id = creator['id']
-        
-        # Update user name on auth database if provided
+
         if request.name is not None:
             await UserRepository.update_name(user_id, request.name)
 
-        # Start transaction - update creator profile and platforms
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Build dynamic UPDATE query for creator profile
                 update_fields = []
                 update_values = []
                 param_counter = 1
-                
+
                 if request.location is not None:
                     update_fields.append(f"location = ${param_counter}")
                     update_values.append(request.location)
                     param_counter += 1
-                
+
                 if request.shortDescription is not None:
                     update_fields.append(f"short_description = ${param_counter}")
                     update_values.append(request.shortDescription)
                     param_counter += 1
-                
+
                 if request.portfolioLink is not None:
                     update_fields.append(f"portfolio_link = ${param_counter}")
                     update_values.append(str(request.portfolioLink))
                     param_counter += 1
-                
+
                 if request.phone is not None:
                     update_fields.append(f"phone = ${param_counter}")
                     update_values.append(request.phone)
                     param_counter += 1
-                
+
                 if request.profilePicture is not None:
                     update_fields.append(f"profile_picture = ${param_counter}")
                     update_values.append(request.profilePicture)
@@ -682,45 +586,45 @@ async def update_creator_profile(
                     update_values.append(request.creatorType)
                     param_counter += 1
 
-                # Update creator profile if there are fields to update
                 if update_fields:
                     update_fields.append("updated_at = now()")
-                    update_values.append(creator_id)  # WHERE clause parameter
-                    
+                    update_values.append(creator_id)
+
                     update_query = f"""
-                        UPDATE creators 
+                        UPDATE creators
                         SET {', '.join(update_fields)}
                         WHERE id = ${param_counter}
                     """
                     await conn.execute(update_query, *update_values)
-                
-                # Update platforms only if provided (replace strategy)
+
                 if request.platforms is not None:
-                    # Delete existing platforms
                     await conn.execute(
                         "DELETE FROM creator_platforms WHERE creator_id = $1",
                         creator_id
                     )
-                    
-                    # Insert new platforms
+
                     for platform in request.platforms:
-                        # Prepare analytics data as JSONB
                         top_countries_data = None
                         if platform.topCountries:
-                            # Convert list of dicts to JSON string
-                            top_countries_data = json.dumps([tc if isinstance(tc, dict) else tc.model_dump() for tc in platform.topCountries])
-                        
+                            top_countries_data = json.dumps(
+                                [tc if isinstance(tc, dict) else tc.model_dump() for tc in platform.topCountries]
+                            )
+
                         top_age_groups_data = None
                         if platform.topAgeGroups:
-                            top_age_groups_data = json.dumps([tag if isinstance(tag, dict) else tag.model_dump() for tag in platform.topAgeGroups])
-                        
+                            top_age_groups_data = json.dumps(
+                                [tag if isinstance(tag, dict) else tag.model_dump() for tag in platform.topAgeGroups]
+                            )
+
                         gender_split_data = None
                         if platform.genderSplit:
-                            gender_split_data = json.dumps(platform.genderSplit if isinstance(platform.genderSplit, dict) else platform.genderSplit.model_dump())
-                        
+                            gender_split_data = json.dumps(
+                                platform.genderSplit if isinstance(platform.genderSplit, dict) else platform.genderSplit.model_dump()
+                            )
+
                         await conn.execute(
                             """
-                            INSERT INTO creator_platforms 
+                            INSERT INTO creator_platforms
                             (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                             """,
@@ -733,8 +637,7 @@ async def update_creator_profile(
                             top_age_groups_data,
                             gender_split_data
                         )
-        
-        # Fetch updated profile with platforms (split across databases)
+
         creator_data = await CreatorRepository.get_by_id(
             creator_id,
             columns="id, location, short_description, portfolio_link, phone, profile_picture, creator_type, created_at, updated_at, profile_complete, user_id"
@@ -744,22 +647,20 @@ async def update_creator_profile(
             creator_data['user_id'], columns="name, status"
         )
 
-        # Get platforms
         platforms_data = await CreatorRepository.get_platforms(
             creator_id,
             columns="id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split, created_at, updated_at"
         )
-        
+
         platforms = []
         for p in platforms_data:
-            # Parse JSONB fields
             def parse_jsonb(value):
                 if value is None:
                     return None
                 if isinstance(value, str):
                     return json.loads(value)
                 return value
-            
+
             platforms.append(PlatformResponse(
                 id=str(p['id']),
                 name=p['name'],
@@ -772,12 +673,11 @@ async def update_creator_profile(
                 created_at=p['created_at'],
                 updated_at=p['updated_at']
             ))
-        
-        # Calculate audience size
+
         audience_size = sum(p['followers'] for p in platforms_data) if platforms_data else 0
-        
+
         logger.info(f"Admin {admin_id} updated creator profile for user {user_id}")
-        
+
         return CreatorProfileResponse(
             id=str(creator_data['id']),
             name=request.name if request.name is not None else user_data['name'],
@@ -793,7 +693,7 @@ async def update_creator_profile(
             createdAt=creator_data['created_at'],
             updatedAt=creator_data['updated_at']
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -810,16 +710,8 @@ async def update_hotel_profile(
     request: UpdateHotelProfileRequest,
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Update a hotel's profile (admin endpoint).
-    Supports partial updates - only provided fields will be updated.
-    
-    For picture:
-    - Option 1: Upload image first using POST /upload/images?target_user_id={user_id}&prefix=hotels, then include the returned URL in picture field
-    - Option 2: Provide an existing S3 URL directly in picture field
-    """
+    """Update a hotel's profile (admin endpoint)."""
     try:
-        # Verify user exists and is a hotel
         user = await UserRepository.get_by_id(user_id, columns="id, type, name")
 
         if not user:
@@ -834,7 +726,6 @@ async def update_hotel_profile(
                 detail="User is not a hotel"
             )
 
-        # Get hotel profile
         hotel = await HotelRepository.get_profile_by_user_id(
             user_id, columns="id, profile_complete"
         )
@@ -844,53 +735,49 @@ async def update_hotel_profile(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Hotel profile not found"
             )
-        
+
         hotel_id = hotel['id']
-        
-        # Build dynamic UPDATE query for hotel_profiles table
+
         update_fields = []
         update_values = []
         param_counter = 1
-        
+
         if request.name is not None:
             update_fields.append(f"name = ${param_counter}")
             update_values.append(request.name)
             param_counter += 1
-        
+
         if request.location is not None:
             update_fields.append(f"location = ${param_counter}")
             update_values.append(request.location)
             param_counter += 1
-        
+
         if request.about is not None:
             update_fields.append(f"about = ${param_counter}")
             update_values.append(request.about)
             param_counter += 1
-        
+
         if request.website is not None:
             update_fields.append(f"website = ${param_counter}")
             update_values.append(str(request.website))
             param_counter += 1
-        
+
         if request.phone is not None:
             update_fields.append(f"phone = ${param_counter}")
             update_values.append(request.phone)
             param_counter += 1
-        
+
         if request.picture is not None:
             update_fields.append(f"picture = ${param_counter}")
             update_values.append(str(request.picture))
             param_counter += 1
-        
-        # Update hotel profile if there are fields to update
+
         if update_fields:
             await HotelRepository.update_profile(hotel_id, update_fields, update_values)
 
-        # Update email in users table if provided (auth database)
         if request.email is not None:
             await UserRepository.update_email(user_id, request.email)
-        
-        # Fetch updated profile (split across databases)
+
         updated_hotel = await HotelRepository.get_profile_by_id(
             hotel_id,
             columns="id, user_id, name, location, about, website, phone, picture, status, created_at, updated_at, profile_complete"
@@ -916,7 +803,7 @@ async def update_hotel_profile(
             created_at=updated_hotel['created_at'],
             updated_at=updated_hotel['updated_at']
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -933,28 +820,15 @@ async def update_user(
     request: UpdateUserRequest,
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Update user fields (admin endpoint).
-    Supports partial updates - only provided fields will be updated.
-    
-    Can update:
-    - name: User's name
-    - email: User's email (must be unique)
-    - status: User status (pending, verified, rejected, suspended)
-    - emailVerified: Whether email is verified
-    - avatar: Avatar URL
-    """
+    """Update user fields (admin endpoint). Partial updates supported."""
     try:
-        # Prevent self-modification of critical fields
         if user_id == admin_id:
-            # Allow admins to update their own name and avatar, but not status or emailVerified
             if request.status is not None or request.emailVerified is not None:
                 raise HTTPException(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Cannot modify your own status or email verification status"
                 )
-        
-        # Verify user exists
+
         user = await UserRepository.get_by_id(
             user_id, columns="id, email, name, type, status, email_verified, avatar"
         )
@@ -964,55 +838,52 @@ async def update_user(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
-        # Check if email is being changed and if it's already taken
+
         if request.email is not None and request.email != user['email']:
             existing_user = await AuthDatabase.fetchrow(
                 "SELECT id FROM users WHERE email = $1 AND id != $2",
                 request.email,
                 user_id
             )
-            
+
             if existing_user:
                 raise HTTPException(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Email already registered"
                 )
-        
-        # Build dynamic UPDATE query
+
         update_fields = []
         update_values = []
         param_counter = 1
-        
+
         if request.name is not None:
             update_fields.append(f"name = ${param_counter}")
             update_values.append(request.name)
             param_counter += 1
-        
+
         if request.email is not None:
             update_fields.append(f"email = ${param_counter}")
             update_values.append(request.email)
             param_counter += 1
-        
+
         if request.status is not None:
             update_fields.append(f"status = ${param_counter}")
             update_values.append(request.status)
             param_counter += 1
-        
+
         if request.emailVerified is not None:
             update_fields.append(f"email_verified = ${param_counter}")
             update_values.append(request.emailVerified)
             param_counter += 1
-        
+
         if request.avatar is not None:
             update_fields.append(f"avatar = ${param_counter}")
             update_values.append(request.avatar)
             param_counter += 1
-        
-        # Update user if there are fields to update
+
         if update_fields:
             update_fields.append("updated_at = now()")
-            update_values.append(user_id)  # WHERE clause parameter
+            update_values.append(user_id)
 
             update_query = f"""
                 UPDATE users
@@ -1023,8 +894,7 @@ async def update_user(
 
         # Cascade verification to the hotel profile and its listings. User
         # verification is the only approval gate for the marketplace, so these
-        # rows should mirror that state instead of staying stuck on the
-        # 'pending' default.
+        # rows should mirror that state instead of staying stuck on 'pending'.
         if request.status == 'verified' and user['type'] == 'hotel':
             await Database.execute(
                 """
@@ -1045,14 +915,13 @@ async def update_user(
                 user_id,
             )
 
-        # Fetch updated user
         updated_user = await UserRepository.get_by_id(
             user_id,
             columns="id, email, name, type, status, email_verified, avatar, created_at, updated_at"
         )
-        
+
         logger.info(f"Admin {admin_id} updated user {user_id} (fields: {list(request.model_dump(exclude_unset=True).keys())})")
-        
+
         return UserResponse(
             id=str(updated_user['id']),
             email=updated_user['email'],
@@ -1064,7 +933,7 @@ async def update_user(
             created_at=updated_user['created_at'],
             updated_at=updated_user['updated_at']
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1076,206 +945,22 @@ async def update_user(
 
 
 async def delete_user_images(user_id: str, user_type: str) -> dict:
-    """
-    Delete all images associated with a user from S3 by deleting the entire user folder.
-    
-    Args:
-        user_id: The user's ID
-        user_type: The user's type ('creator' or 'hotel')
-    
-    Returns:
-        Dictionary with deletion statistics:
-        {
-            "deleted_count": int,
-            "failed_count": int,
-            "total_objects": int
-        }
-    """
-    # Determine the folder prefix based on user type
+    """Delete all images associated with a user from S3 by deleting their folder."""
     if user_type == 'creator':
         prefix = f"creators/{user_id}/"
     elif user_type == 'hotel':
         prefix = f"listings/{user_id}/"
     else:
         logger.warning(f"Unknown user type {user_type}, skipping image deletion")
-        return {
-            "deleted_count": 0,
-            "failed_count": 0,
-            "total_objects": 0
-        }
-    
-    # Delete all objects in the user's folder (includes all images and thumbnails)
+        return {"deleted_count": 0, "failed_count": 0, "total_objects": 0}
+
     stats = await delete_all_objects_in_prefix(prefix)
-    
-    logger.info(f"Deleted images from S3 folder {prefix} for user {user_id}: {stats['deleted_count']} deleted, {stats['failed_count']} failed, {stats['total_objects']} total")
-    
+    logger.info(
+        f"Deleted images from S3 folder {prefix} for user {user_id}: "
+        f"{stats['deleted_count']} deleted, {stats['failed_count']} failed, "
+        f"{stats['total_objects']} total"
+    )
     return stats
-
-
-async def _resolve_admin_hotel_profile_id(user_id: str) -> str:
-    """Look up a hotel user's profile id, raising matching 4xx errors for the admin endpoints."""
-    user = await UserRepository.get_by_id(user_id, columns="id, type")
-    if not user:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    if user['type'] != 'hotel':
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="User is not a hotel"
-        )
-    hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
-    if not hotel_profile:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Hotel profile not found"
-        )
-    return str(hotel_profile['id'])
-
-
-@router.post("/users/{user_id}/listings", response_model=ListingResponse, status_code=http_status.HTTP_201_CREATED)
-async def create_hotel_listing(
-    user_id: str,
-    request: CreateListingRequest,
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Create a listing for an existing hotel user (admin endpoint).
-    """
-    try:
-        logger.info(f"Admin {admin_id} creating listing for hotel user {user_id}")
-        hotel_profile_id = await _resolve_admin_hotel_profile_id(user_id)
-        data = await ListingService.create(hotel_profile_id, request)
-        logger.info(f"Admin {admin_id} created listing for hotel user {user_id}")
-        return build_listing_response(data, hotel_profile_id=hotel_profile_id)
-
-    except HTTPException:
-        raise
-    except ValueError as e:
-        logger.error(f"Value error creating listing: {str(e)}")
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error creating listing: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create listing: {str(e)}"
-        )
-
-
-@router.put("/users/{user_id}/listings/{listing_id}", response_model=ListingResponse, status_code=http_status.HTTP_200_OK)
-async def update_hotel_listing(
-    user_id: str,
-    listing_id: str,
-    request: UpdateListingRequest,
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Update a hotel listing (admin endpoint). Partial updates supported.
-    If collaborationOfferings or creatorRequirements are provided, existing
-    rows are replaced.
-    """
-    try:
-        hotel_profile_id = await _resolve_admin_hotel_profile_id(user_id)
-
-        existing = await ListingService.get_with_details(listing_id, hotel_profile_id)
-        if existing is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Listing not found"
-            )
-
-        await ListingService.update(listing_id, request)
-
-        updated = await ListingService.get_with_details(listing_id, hotel_profile_id)
-        logger.info(f"Admin {admin_id} updated listing {listing_id} for hotel user {user_id}")
-        return build_listing_response(updated, hotel_profile_id=hotel_profile_id)
-
-    except HTTPException:
-        raise
-    except ValueError as e:
-        logger.error(f"Value error updating listing: {str(e)}")
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error updating listing: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update listing: {str(e)}"
-        )
-
-
-@router.delete("/users/{user_id}/listings/{listing_id}", status_code=http_status.HTTP_200_OK)
-async def delete_hotel_listing(
-    user_id: str,
-    listing_id: str,
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Delete a hotel listing and all associated data (admin endpoint).
-
-    Permanently deletes the listing row, its offerings/requirements, and
-    all listing images from S3 (including thumbnails).
-    """
-    try:
-        hotel_profile_id = await _resolve_admin_hotel_profile_id(user_id)
-
-        listing = await HotelRepository.get_listing(
-            listing_id, hotel_profile_id, columns="id, name, images"
-        )
-        if not listing:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Listing not found"
-            )
-
-        deleted_images = 0
-        failed_images = 0
-        if listing['images']:
-            for image_url in listing['images']:
-                if image_url:
-                    s3_key = extract_key_from_url(image_url)
-                    if s3_key:
-                        if await delete_file_from_s3(s3_key):
-                            deleted_images += 1
-                        else:
-                            failed_images += 1
-                        # Thumbnail key: foo.jpg -> foo_thumb.jpg
-                        if '.' in s3_key:
-                            parts = s3_key.rsplit('.', 1)
-                            thumbnail_key = f"{parts[0]}_thumb.{parts[1]}"
-                            if await delete_file_from_s3(thumbnail_key):
-                                deleted_images += 1
-
-        await ListingService.delete(listing_id)
-
-        logger.info(
-            f"Admin {admin_id} deleted listing {listing_id} for hotel user {user_id} "
-            f"(deleted {deleted_images} images, {failed_images} failed)"
-        )
-        return {
-            "message": "Listing deleted successfully",
-            "deleted_listing": {
-                "id": listing_id,
-                "name": listing['name'],
-            },
-            "images_deleted": deleted_images,
-            "images_failed": failed_images,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting listing: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete listing: {str(e)}"
-        )
 
 
 @router.delete("/users/{user_id}", status_code=http_status.HTTP_200_OK)
@@ -1283,27 +968,14 @@ async def delete_user(
     user_id: str,
     admin_id: str = Depends(get_admin_user)
 ):
-    """
-    Delete a user and all associated data (admin endpoint).
-    
-    This will permanently delete:
-    - User account
-    - Creator profile (if creator) - including all platforms
-    - Hotel profile (if hotel) - including all listings, offerings, and requirements
-    - All associated S3 images (profile pictures, listing images, and their thumbnails)
-    - All related records (cascade delete)
-    
-    **Warning**: This action cannot be undone!
-    """
+    """Delete a user and all associated data (admin endpoint)."""
     try:
-        # Prevent self-deletion
         if user_id == admin_id:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete your own account"
             )
-        
-        # Verify user exists and get user info
+
         user = await UserRepository.get_by_id(
             user_id, columns="id, email, name, type, status"
         )
@@ -1314,10 +986,9 @@ async def delete_user(
                 detail="User not found"
             )
 
-        # Delete all images associated with this user from S3
-        image_deletion_stats = await delete_user_images(user_id, user['type'])
+        await delete_user_images(user_id, user['type'])
 
-        # Delete business data first (different DB, no cross-DB cascade)
+        # Cross-DB cascade: marketplace business data, then auth.
         if user['type'] == 'creator':
             creator = await CreatorRepository.get_by_user_id(user_id, columns="id")
             if creator:
@@ -1326,7 +997,6 @@ async def delete_user(
         elif user['type'] == 'hotel':
             hotel = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
             if hotel:
-                # Delete listings and their children
                 listings = await HotelRepository.get_listings_by_profile_id(hotel['id'], columns="id")
                 for listing in listings:
                     await HotelRepository.delete_offerings(listing['id'])
@@ -1334,11 +1004,10 @@ async def delete_user(
                 await Database.execute("DELETE FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
                 await Database.execute("DELETE FROM hotel_profiles WHERE id = $1", hotel['id'])
 
-        # Delete user from auth DB
         await UserRepository.delete(user_id)
-        
+
         logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']}, email: {user['email']})")
-        
+
         return {
             "message": "User deleted successfully",
             "deleted_user": {
@@ -1348,7 +1017,7 @@ async def delete_user(
                 "type": user['type']
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1357,299 +1026,3 @@ async def delete_user(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(e)}"
         )
-
-
-@router.get("/collaborations", response_model=CollaborationListResponse, status_code=http_status.HTTP_200_OK)
-async def get_admin_collaborations(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    search: Optional[str] = Query(None, description="Search by creator name or hotel name"),
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Get all collaborations for admin monitoring.
-    """
-    try:
-        # If searching, find matching user IDs from AuthDatabase
-        search_user_ids = None
-        if search:
-            search_users = await AuthDatabase.fetch(
-                "SELECT id FROM users WHERE name ILIKE $1",
-                f"%{search}%"
-            )
-            search_user_ids = [r['id'] for r in search_users]
-
-        # Build WHERE clause for business data
-        where_conditions = []
-        params = []
-        param_counter = 1
-
-        if status:
-            where_conditions.append(f"c.status = ${param_counter}")
-            params.append(status)
-            param_counter += 1
-
-        if search:
-            # Search by hotel name OR by user name (pre-fetched IDs)
-            if search_user_ids:
-                where_conditions.append(f"(hp.name ILIKE ${param_counter} OR cr.user_id = ANY(${param_counter + 1}::uuid[]))")
-                params.append(f"%{search}%")
-                params.append(search_user_ids)
-                param_counter += 2
-            else:
-                where_conditions.append(f"hp.name ILIKE ${param_counter}")
-                params.append(f"%{search}%")
-                param_counter += 1
-
-        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-
-        # Count query (no JOIN users)
-        count_query = f"""
-            SELECT COUNT(*) as total
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            WHERE {where_clause}
-        """
-        total_result = await Database.fetchrow(count_query, *params)
-        total = total_result['total'] if total_result else 0
-
-        # Data query (no JOIN users, add cr.user_id)
-        offset = (page - 1) * page_size
-        limit_param = param_counter
-        offset_param = param_counter + 1
-
-        data_query = f"""
-            SELECT c.*,
-                   cr.profile_picture as creator_profile_picture,
-                   cr.user_id as creator_user_id,
-                   hp.name as hotel_name,
-                   hl.name as listing_name,
-                   hl.location as listing_location
-            FROM collaborations c
-            JOIN creators cr ON cr.id = c.creator_id
-            JOIN hotel_profiles hp ON hp.id = c.hotel_id
-            JOIN hotel_listings hl ON hl.id = c.listing_id
-            WHERE {where_clause}
-            ORDER BY c.created_at DESC
-            LIMIT ${limit_param} OFFSET ${offset_param}
-        """
-
-        query_params = params + [page_size, offset]
-        rows = await Database.fetch(data_query, *query_params)
-
-        # Batch-fetch user names from AuthDatabase
-        if rows:
-            creator_user_ids = list(set(row['creator_user_id'] for row in rows))
-            user_rows = await AuthDatabase.fetch(
-                "SELECT id, name FROM users WHERE id = ANY($1::uuid[])",
-                creator_user_ids
-            )
-            users_map = {str(u['id']): u['name'] for u in user_rows}
-        else:
-            users_map = {}
-
-        collaborations = []
-        for row in rows:
-            collab_id = str(row['id'])
-            deliverables = await get_collaboration_deliverables(collab_id)
-            collaborations.append(CollaborationResponse.from_db_row(
-                row,
-                creator_name=users_map.get(str(row['creator_user_id']), 'Unknown'),
-                platform_deliverables=deliverables,
-            ))
-
-        return CollaborationListResponse(collaborations=collaborations, total=total)
-
-    except Exception as e:
-        logger.error(f"Error fetching admin collaborations: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaborations: {str(e)}"
-        )
-
-
-async def _build_admin_collaboration_response(collaboration_id: str) -> CollaborationResponse:
-    """Re-fetch and build the standard collaboration response payload."""
-    updated = await CollaborationRepository.get_full(collaboration_id)
-    creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
-    creator_name = creator_user['name'] if creator_user else 'Unknown'
-    plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-    return CollaborationResponse.from_db_row(
-        updated,
-        creator_name=creator_name,
-        platform_deliverables=plat_delivs_resp,
-    )
-
-
-@router.post("/collaborations/{collaboration_id}/respond", response_model=CollaborationResponse)
-async def admin_respond_to_collaboration(
-    collaboration_id: str,
-    request: RespondToCollaborationRequest,
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Admin accepts or declines a pending collaboration on behalf of the hotel.
-
-    Only valid for creator-initiated, pending collaborations.
-    Accept moves status to 'negotiating' and sets hotel_agreed_at.
-    Decline moves status to 'declined'.
-    """
-    collab = await CollaborationRepository.get_by_id(collaboration_id)
-    if not collab:
-        raise HTTPException(status_code=404, detail="Collaboration not found")
-
-    if collab['status'] != 'pending':
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot respond to collaboration with status '{collab['status']}'. Only 'pending' requests can be accepted/declined."
-        )
-
-    if collab['initiator_type'] != 'creator':
-        raise HTTPException(
-            status_code=400,
-            detail="Admin can only respond on behalf of the hotel for creator-initiated requests."
-        )
-
-    new_status = "negotiating" if request.status == "accepted" else "declined"
-
-    updates = ["status = $1", "responded_at = NOW()", "updated_at = NOW()"]
-    params = [new_status, collaboration_id]
-    if request.status == "accepted":
-        updates.append("hotel_agreed_at = NOW()")
-
-    query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = ${len(params)}"
-
-    pool = await Database.get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(query, *params)
-
-            if request.status == "accepted":
-                msg = "✅ Vayada admin (on behalf of Hotel) is ready to discuss the collaboration terms."
-                if request.response_message:
-                    msg += f"\n\nMessage: {request.response_message}"
-                await create_system_message(collaboration_id, msg, conn=conn)
-                await create_system_message(collaboration_id, "💬 Chat is now open! Discuss and finalize the terms.", conn=conn)
-            else:
-                msg = "❌ Vayada admin (on behalf of Hotel) has declined the collaboration request."
-                if request.response_message:
-                    msg += f"\n\nMessage: {request.response_message}"
-                await create_system_message(collaboration_id, msg, conn=conn)
-
-    response = await _build_admin_collaboration_response(collaboration_id)
-
-    # Notify the creator (initiator) that the hotel responded.
-    creator_email, creator_email_name = await get_party_email_and_name(
-        "creator", creator_id=str(collab['creator_id'])
-    )
-    if creator_email:
-        accepted = request.status == "accepted"
-        html = create_collaboration_response_email_html(
-            recipient_name=creator_email_name or "there",
-            responder_name=response.hotel_name,
-            accepted=accepted,
-            collaboration_type=collab['collaboration_type'],
-            listing_name=response.listing_name,
-            listing_location=response.listing_location,
-            response_message=request.response_message,
-        )
-        subject = "Collaboration Request Accepted" if accepted else "Collaboration Request Declined"
-        send_email_background(creator_email, subject, html)
-        notify_vayada_team(subject, html)
-
-    return response
-
-
-@router.post("/collaborations/{collaboration_id}/approve", response_model=CollaborationResponse)
-async def admin_approve_collaboration(
-    collaboration_id: str,
-    admin_id: str = Depends(get_admin_user)
-):
-    """
-    Admin approves the current terms on behalf of the hotel.
-
-    Sets hotel_agreed_at = NOW(). If the creator has already agreed, the
-    collaboration flips to 'accepted' and the affiliate record is provisioned.
-    """
-    collab = await CollaborationRepository.get_by_id(collaboration_id)
-    if not collab:
-        raise HTTPException(status_code=404, detail="Collaboration not found")
-
-    if collab['status'] not in ('pending', 'negotiating'):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot approve collaboration with status '{collab['status']}'."
-        )
-
-    other_agreed = collab['creator_agreed_at'] is not None
-    updates = ["hotel_agreed_at = NOW()", "updated_at = NOW()"]
-    new_status = None
-    if other_agreed:
-        updates.append("status = 'accepted'")
-        updates.append("responded_at = NOW()")
-        new_status = 'accepted'
-    elif collab['status'] == 'pending':
-        # Approving from pending without responding first — treat like an accept
-        # so the conversation can move forward.
-        updates.append("status = 'negotiating'")
-
-    query = f"UPDATE collaborations SET {', '.join(updates)} WHERE id = $1"
-    pool = await Database.get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(query, collaboration_id)
-            await create_system_message(
-                collaboration_id,
-                "✅ Vayada admin (on behalf of Hotel) approved the terms.",
-                conn=conn,
-            )
-            if new_status == 'accepted':
-                await create_system_message(collaboration_id, "🎉 Collaboration Accepted!", conn=conn)
-
-    creator_email, creator_email_name = await get_party_email_and_name(
-        "creator", creator_id=str(collab['creator_id'])
-    )
-    hotel_email, hotel_email_name = await get_party_email_and_name(
-        "hotel", hotel_id=str(collab['hotel_id'])
-    )
-
-    if new_status == 'accepted':
-        affiliate_link = await AffiliateProvisioningService.provision_for_accepted_collab(
-            collaboration_id,
-            creator_id=str(collab['creator_id']),
-            hotel_id=str(collab['hotel_id']),
-            creator_email=creator_email,
-            creator_name=creator_email_name,
-            commission=collab.get('creator_fee'),
-        )
-
-        for email, name in [(creator_email, creator_email_name), (hotel_email, hotel_email_name)]:
-            if email:
-                link_for_email = affiliate_link if email == creator_email else None
-                html = create_collaboration_approved_email_html(
-                    recipient_name=name or "there",
-                    other_party_name="Hotel",
-                    collaboration_type=collab['collaboration_type'],
-                    listing_name=(await CollaborationRepository.get_full(collaboration_id))['listing_name'],
-                    listing_location=None,
-                    both_approved=True,
-                    affiliate_link=link_for_email,
-                )
-                send_email_background(email, "Collaboration Confirmed!", html)
-        notify_vayada_team("Collaboration Confirmed!", html)
-    else:
-        if creator_email:
-            updated_full = await CollaborationRepository.get_full(collaboration_id)
-            html = create_collaboration_approved_email_html(
-                recipient_name=creator_email_name or "there",
-                other_party_name=updated_full['hotel_name'],
-                collaboration_type=collab['collaboration_type'],
-                listing_name=updated_full['listing_name'],
-                listing_location=updated_full.get('listing_location'),
-                both_approved=False,
-            )
-            send_email_background(creator_email, "Terms Approved — Your Confirmation Needed", html)
-
-    return await _build_admin_collaboration_response(collaboration_id)

@@ -211,8 +211,8 @@ def mock_s3_operations():
          patch("app.s3_service.delete_all_objects_in_prefix", side_effect=mock_delete_prefix), \
          patch("app.routers.upload.upload_file_to_s3", side_effect=mock_upload), \
          patch("app.routers.hotels.upload_file_to_s3", side_effect=mock_upload), \
-         patch("app.routers.admin.delete_file_from_s3", side_effect=mock_delete), \
-         patch("app.routers.admin.delete_all_objects_in_prefix", side_effect=mock_delete_prefix):
+         patch("app.routers.admin.listings.delete_file_from_s3", side_effect=mock_delete), \
+         patch("app.routers.admin.users.delete_all_objects_in_prefix", side_effect=mock_delete_prefix):
         yield {"uploaded": uploaded_files, "deleted": deleted_files, "listed": listed_files}
 
 
