@@ -57,6 +57,7 @@ class HotelResponse(BaseModel):
     branding: Optional[HotelBranding] = None
     supported_languages: List[str] = ["en"]
     refer_a_guest_enabled: bool = False
+    instant_book: bool = False
 
 
 class RoomTypeResponse(BaseModel):
