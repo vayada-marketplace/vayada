@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { CursorArrowRaysIcon, CreditCardIcon, UserPlusIcon } from '@heroicons/react/24/outline'
-import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
 import type { ActivitiesResponse, Activity } from '@/services/types'
 
@@ -41,15 +40,7 @@ function message(a: Activity): string {
 }
 
 export default function RecentActivity() {
-  const [activities, setActivities] = useState<Activity[] | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    apiClient
-      .get<ActivitiesResponse>('/affiliate/activity?limit=10')
-      .then((res) => setActivities(res.activities))
-      .catch(() => setError(true))
-  }, [])
+  const { data, error } = useSWR<ActivitiesResponse>('/affiliate/activity?limit=10')
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -61,8 +52,8 @@ export default function RecentActivity() {
       </div>
 
       <DataState
-        data={activities}
-        error={error}
+        data={data ? data.activities : null}
+        error={Boolean(error)}
         isEmpty={(a) => a.length === 0}
         loadingLabel="Loading activity…"
         errorLabel="Couldn't load activity."

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import Navbar from '@/components/Navbar'
 import StatsCard from '@/components/StatsCard'
 import PropertyCard from '@/components/PropertyCard'
@@ -8,46 +8,28 @@ import EarningsChart from '@/components/EarningsChart'
 import PayoutHistory from '@/components/PayoutHistory'
 import RecentActivity from '@/components/RecentActivity'
 import PerformanceTips from '@/components/PerformanceTips'
-import { apiClient } from '@/services/api/client'
 import { authService } from '@/services/auth'
 import { affiliateLink } from '@/services/constants/site'
-import type {
-  AffiliateProperty,
-  DashboardStats,
-  PropertiesResponse,
-} from '@/services/types'
+import type { DashboardStats, PropertiesResponse } from '@/services/types'
 
 const PROPERTY_COLORS = ['#0f766e', '#1e3a5f', '#6b21a8', '#b45309', '#be123c', '#047857']
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [properties, setProperties] = useState<AffiliateProperty[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const { data: stats, error: statsError } = useSWR<DashboardStats>('/affiliate/dashboard')
+  const { data: propertiesData, error: propertiesError } = useSWR<PropertiesResponse>('/affiliate/properties')
 
   const userName = authService.getUserName()
   const userInitials = authService.getUserInitials()
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [dashData, propData] = await Promise.all([
-          apiClient.get<DashboardStats>('/affiliate/dashboard'),
-          apiClient.get<PropertiesResponse>('/affiliate/properties'),
-        ])
-        setStats(dashData)
-        setProperties(propData.properties)
-      } catch (err) {
-        console.error('Failed to load dashboard:', err)
-        setError('Failed to load dashboard data.')
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
+  if (statsError || propertiesError) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-red-600 text-sm">Failed to load dashboard data.</div>
+      </div>
+    )
+  }
 
-  if (loading) {
+  if (!stats || !propertiesData) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-gray-500 text-sm">Loading dashboard...</div>
@@ -55,15 +37,8 @@ export default function DashboardPage() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-        <div className="text-red-600 text-sm">{error}</div>
-      </div>
-    )
-  }
-
-  const avgPerBooking = stats && stats.totalBookings > 0
+  const properties = propertiesData.properties
+  const avgPerBooking = stats.totalBookings > 0
     ? Math.round(stats.totalEarned / stats.totalBookings)
     : 0
 
@@ -78,7 +53,7 @@ export default function DashboardPage() {
             Hey {userName.split(' ')[0]}
           </h1>
           <p className="text-muted mt-1">
-            You&apos;re an affiliate at {stats?.propertyCount || 0} propert{(stats?.propertyCount || 0) === 1 ? 'y' : 'ies'}
+            You&apos;re an affiliate at {stats.propertyCount} propert{stats.propertyCount === 1 ? 'y' : 'ies'}
           </p>
         </div>
 
@@ -86,22 +61,22 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatsCard
             label="Total Earned"
-            value={`$${(stats?.totalEarned || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-            subtitle={`Across ${stats?.propertyCount || 0} properties`}
+            value={`$${stats.totalEarned.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            subtitle={`Across ${stats.propertyCount} properties`}
           />
           <StatsCard
             label="Bookings Referred"
-            value={(stats?.totalBookings || 0).toString()}
+            value={stats.totalBookings.toString()}
             subtitle={`Avg $${avgPerBooking} per booking`}
           />
           <StatsCard
             label="Link Clicks"
-            value={(stats?.totalClicks || 0).toString()}
-            subtitle={`${stats?.conversionRate || 0}% conversion rate`}
+            value={stats.totalClicks.toString()}
+            subtitle={`${stats.conversionRate}% conversion rate`}
           />
           <StatsCard
             label="Outstanding Balance"
-            value={`$${(stats?.outstandingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            value={`$${stats.outstandingBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
             subtitle="Across all properties"
             highlight
           />

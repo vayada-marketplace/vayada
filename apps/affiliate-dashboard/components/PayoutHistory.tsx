@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
-import { apiClient } from '@/services/api/client'
 import DataState from '@/components/DataState'
-import type { Payout, PayoutsResponse } from '@/services/types'
+import type { PayoutsResponse } from '@/services/types'
 
 const METHOD_LABELS: Record<string, string> = {
   bank: 'Bank Transfer',
@@ -28,15 +27,7 @@ function formatAmount(amount: number, currency: string): string {
 }
 
 export default function PayoutHistory() {
-  const [payouts, setPayouts] = useState<Payout[] | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    apiClient
-      .get<PayoutsResponse>('/affiliate/payouts')
-      .then((res) => setPayouts(res.payouts))
-      .catch(() => setError(true))
-  }, [])
+  const { data, error } = useSWR<PayoutsResponse>('/affiliate/payouts')
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -48,8 +39,8 @@ export default function PayoutHistory() {
       </div>
 
       <DataState
-        data={payouts}
-        error={error}
+        data={data ? data.payouts : null}
+        error={Boolean(error)}
         isEmpty={(p) => p.length === 0}
         loadingLabel="Loading payouts…"
         errorLabel="Couldn't load payouts."

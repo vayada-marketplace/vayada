@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { apiClient } from '@/services/api/client'
+import { useState } from 'react'
+import useSWR from 'swr'
 import DataState from '@/components/DataState'
 import { currencySymbol } from '@/services/constants/currency'
 import type { EarningsPeriod, EarningsResponse } from '@/services/types'
@@ -12,27 +12,7 @@ const MESSAGE_CLASSNAME = 'h-40 flex items-center justify-center text-sm text-mu
 
 export default function EarningsChart() {
   const [period, setPeriod] = useState<Period>('6m')
-  const [response, setResponse] = useState<EarningsResponse | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setResponse(null)
-    setError(false)
-    apiClient
-      .get<EarningsResponse>(`/affiliate/earnings?period=${period}`)
-      .then((res) => {
-        if (cancelled) return
-        setResponse(res)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setError(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [period])
+  const { data: response, error } = useSWR<EarningsResponse>(`/affiliate/earnings?period=${period}`)
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -56,8 +36,8 @@ export default function EarningsChart() {
       </div>
 
       <DataState
-        data={response}
-        error={error}
+        data={response ?? null}
+        error={Boolean(error)}
         isEmpty={(r) => r.months.length === 0}
         loadingLabel="Loading…"
         errorLabel="Couldn't load earnings."

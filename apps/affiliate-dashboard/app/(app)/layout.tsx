@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
+import SWRProvider from '@/components/SWRProvider'
 
 export default function AppLayout({
   children,
@@ -24,5 +25,5 @@ export default function AppLayout({
     return null
   }
 
-  return <>{children}</>
+  return <SWRProvider>{children}</SWRProvider>
 }
