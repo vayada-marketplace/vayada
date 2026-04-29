@@ -55,6 +55,7 @@ class HotelResponse(BaseModel):
     custom_filters: Dict[str, str] = {}
     filter_rooms: Dict[str, List[str]] = {}
     branding: Optional[HotelBranding] = None
+    default_language: str = "en"
     supported_languages: List[str] = ["en"]
     refer_a_guest_enabled: bool = False
     instant_book: bool = False
