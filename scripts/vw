@@ -232,9 +232,8 @@ cmd_sync() {
     fi
 
     echo "→ Syncing $wt ($wt_branch)"
-    if ! git -C "$wt" rebase "$remote/main" >/dev/null 2>&1; then
-      echo "   rebase failed — aborting to leave clean state"
-      git -C "$wt" rebase --abort 2>/dev/null || true
+    if ! rebase_with_submodule_autoresolve "$wt" "$remote/main" >/dev/null 2>&1; then
+      echo "   rebase failed — leaving clean state"
       echo "   resolve manually in $wt, or run: vw done $wt_branch"
       continue
     fi
@@ -292,6 +291,95 @@ cmd_ship_ready() {
   else
     echo "✓ Nothing ready to clean up"
   fi
+}
+
+# Try to auto-resolve submodule pointer conflicts in the index. For each
+# conflicted submodule, pick a SHA that is a descendant of both the ours and
+# theirs sides — first via direct ancestor relation, then via the submodule's
+# remote/main (which contains the just-shipped merge commit).
+# Returns 0 only when zero conflicts remain in the index.
+auto_resolve_submodule_conflicts() {
+  local wt="$1"
+  local paths
+  paths="$(git -C "$wt" ls-files -u | awk -F'\t' '{print $2}' | sort -u)"
+  [ -z "$paths" ] && return 0
+
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+
+    # Skip non-submodule conflicts (different mode in any stage).
+    if git -C "$wt" ls-files -u -- "$p" | awk '$1 != "160000"' | grep -q .; then
+      continue
+    fi
+
+    local sha_ours sha_theirs
+    sha_ours="$(git -C "$wt" ls-files -u -- "$p" | awk '$3 == 2 {print $2}')"
+    sha_theirs="$(git -C "$wt" ls-files -u -- "$p" | awk '$3 == 3 {print $2}')"
+    if [ -z "$sha_ours" ] || [ -z "$sha_theirs" ]; then continue; fi
+
+    local pick=""
+    if git -C "$wt/$p" merge-base --is-ancestor "$sha_ours" "$sha_theirs" 2>/dev/null; then
+      pick="$sha_theirs"
+    elif git -C "$wt/$p" merge-base --is-ancestor "$sha_theirs" "$sha_ours" 2>/dev/null; then
+      pick="$sha_ours"
+    else
+      local sub_remote sub_main
+      sub_remote="$(git -C "$wt/$p" config branch.main.remote 2>/dev/null || git -C "$wt/$p" remote | head -n1)"
+      [ -n "$sub_remote" ] && git -C "$wt/$p" fetch "$sub_remote" main --quiet 2>/dev/null || true
+      sub_main="$(git -C "$wt/$p" rev-parse "$sub_remote/main" 2>/dev/null || echo '')"
+      if [ -n "$sub_main" ] \
+         && git -C "$wt/$p" merge-base --is-ancestor "$sha_ours" "$sub_main" 2>/dev/null \
+         && git -C "$wt/$p" merge-base --is-ancestor "$sha_theirs" "$sub_main" 2>/dev/null; then
+        pick="$sub_main"
+      fi
+    fi
+
+    [ -z "$pick" ] && continue
+    git -C "$wt" update-index --cacheinfo "160000,$pick,$p" 2>/dev/null || true
+  done <<< "$paths"
+
+  [ -z "$(git -C "$wt" ls-files -u)" ]
+}
+
+# Rebase $wt onto $base, auto-resolving submodule pointer conflicts where
+# possible. Returns 0 on success; aborts and returns 1 on unresolvable
+# conflicts. Drops empty commits (e.g. a parent "Bump submodules" commit
+# whose pointer change is now redundant after auto-resolution).
+rebase_with_submodule_autoresolve() {
+  local wt="$1" base="$2"
+
+  if GIT_EDITOR=true git -C "$wt" rebase --empty=drop "$base" --quiet 2>/dev/null; then
+    return 0
+  fi
+
+  local i max=20
+  for (( i=0; i<max; i++ )); do
+    local rebase_dir
+    rebase_dir="$(git -C "$wt" rev-parse --git-path rebase-merge 2>/dev/null)"
+    [ ! -d "$rebase_dir" ] && rebase_dir="$(git -C "$wt" rev-parse --git-path rebase-apply 2>/dev/null)"
+    [ ! -d "$rebase_dir" ] && return 0  # Rebase finished
+
+    if ! auto_resolve_submodule_conflicts "$wt"; then
+      git -C "$wt" rebase --abort 2>/dev/null || true
+      return 1
+    fi
+
+    if GIT_EDITOR=true git -C "$wt" rebase --continue --quiet 2>/dev/null; then
+      continue
+    fi
+
+    # --continue failed. If no conflicts remain, current commit is empty
+    # (changes folded into the auto-resolution); skip it.
+    if [ -z "$(git -C "$wt" ls-files -u)" ]; then
+      if ! GIT_EDITOR=true git -C "$wt" rebase --skip --quiet 2>/dev/null; then
+        git -C "$wt" rebase --abort 2>/dev/null || true
+        return 1
+      fi
+    fi
+  done
+
+  git -C "$wt" rebase --abort 2>/dev/null || true
+  return 1
 }
 
 ship_submodule() {
@@ -361,9 +449,10 @@ ship_worktree() {
   fi
 
   # Earlier worktrees may have advanced parent main; rebase if needed.
+  # Auto-resolve submodule pointer conflicts: when ours/theirs diverge but
+  # the just-shipped submodule main contains both, take that merge SHA.
   if ! git -C "$wt" merge-base --is-ancestor "$remote/main" "$ticket" 2>/dev/null; then
-    if ! git -C "$wt" rebase "$remote/main" --quiet; then
-      git -C "$wt" rebase --abort 2>/dev/null || true
+    if ! rebase_with_submodule_autoresolve "$wt" "$remote/main"; then
       echo "  ✗ parent rebase failed — resolve manually in $wt"
       return 1
     fi
