@@ -518,7 +518,9 @@ function PaymentPageContent() {
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-                  {t('payAtPropertyExplanation') || 'No payment is required now. You will pay directly at the property upon check-in. The host will review your booking request.'}
+                  {hotel.instantBook
+                    ? (t('payAtPropertyExplanationInstant') || 'No payment is required now. You will pay directly at the property upon check-in. Your booking will be confirmed instantly.')
+                    : (t('payAtPropertyExplanation') || 'No payment is required now. You will pay directly at the property upon check-in. The host will review your booking request.')}
                 </div>
               )}
             </div>
@@ -631,6 +633,8 @@ function PaymentPageContent() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </>
+                ) : hotel.instantBook ? (
+                  t('confirmBooking') || 'Confirm Booking'
                 ) : (
                   t('submitRequest') || 'Submit Booking Request'
                 )}
@@ -856,7 +860,9 @@ function StripePaymentPage({
         <div className="bg-white rounded-2xl border border-gray-200 p-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">{t('confirmPayment') || 'Confirm Payment'}</h2>
           <p className="text-gray-600 mb-6">
-            {t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.'}
+            {hotel.instantBook
+              ? (t('confirmPaymentDescInstant') || 'Complete your payment to confirm the booking. Your card will be charged now.')
+              : (t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.')}
           </p>
 
           <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
