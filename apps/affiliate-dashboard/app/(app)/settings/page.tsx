@@ -1,145 +1,154 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import useSWR from 'swr'
+import { ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import Navbar from '@/components/Navbar'
 import { apiClient, extractErrorMessage } from '@/services/api/client'
 import { authService } from '@/services/auth'
-import type { PropertiesResponse } from '@/services/types'
+import {
+  DEFAULT_SETTINGS,
+  PAYMENT_METHODS,
+  PaymentMethod,
+  SettingsFormValues,
+  XENDIT_BANKS,
+  settingsSchema,
+} from '@/services/schemas/settings'
+import type { AffiliateProperty, PropertiesResponse } from '@/services/types'
 
-const XENDIT_BANKS = [
-  { code: 'ID_BCA', name: 'BCA' },
-  { code: 'ID_MANDIRI', name: 'Mandiri' },
-  { code: 'ID_BNI', name: 'BNI' },
-  { code: 'ID_BRI', name: 'BRI' },
-  { code: 'ID_PERMATA', name: 'Permata' },
-  { code: 'ID_CIMB', name: 'CIMB Niaga' },
-]
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  stripe: 'Stripe',
+  xendit: 'Xendit',
+  paypal: 'PayPal',
+  bank: 'Bank Transfer',
+}
+
+function settingsFromProperty(p: AffiliateProperty): SettingsFormValues {
+  return {
+    paymentMethod: (PAYMENT_METHODS as readonly string[]).includes(p.paymentMethod)
+      ? (p.paymentMethod as PaymentMethod)
+      : 'stripe',
+    paypalEmail: p.paypalEmail || '',
+    bankIban: p.bankIban || '',
+    bankAccountHolder: p.bankAccountHolder || '',
+    bankSwiftBic: p.bankSwiftBic || '',
+    bankName: p.bankName || '',
+    bankCountry: p.bankCountry || '',
+    xenditChannelCode: p.xenditChannelCode || 'ID_BCA',
+    xenditAccountNumber: p.xenditAccountNumber || '',
+    xenditAccountHolderName: p.xenditAccountHolderName || '',
+  }
+}
+
+function propertiesDiffer(properties: AffiliateProperty[]): boolean {
+  if (properties.length < 2) return false
+  const first = JSON.stringify(settingsFromProperty(properties[0]))
+  return properties.slice(1).some((p) => JSON.stringify(settingsFromProperty(p)) !== first)
+}
 
 export default function SettingsPage() {
-  const [loading, setLoading] = useState(true)
+  const { data, error: loadError } = useSWR<PropertiesResponse>('/affiliate/properties')
+
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
-  const [error, setError] = useState('')
+  const [topError, setTopError] = useState('')
   const [success, setSuccess] = useState('')
-
-  const [paymentMethod, setPaymentMethod] = useState('stripe')
-  const [paypalEmail, setPaypalEmail] = useState('')
-  const [bankIban, setBankIban] = useState('')
-  const [bankAccountHolder, setBankAccountHolder] = useState('')
-  const [bankSwiftBic, setBankSwiftBic] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [bankCountry, setBankCountry] = useState('')
-  const [xenditChannelCode, setXenditChannelCode] = useState('ID_BCA')
-  const [xenditAccountNumber, setXenditAccountNumber] = useState('')
-  const [xenditAccountHolderName, setXenditAccountHolderName] = useState('')
 
   const userName = authService.getUserName()
   const userInitials = authService.getUserInitials()
 
+  const {
+    register,
+    handleSubmit,
+    control,
+    reset,
+    setValue,
+    getValues,
+    trigger,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<SettingsFormValues>({
+    resolver: zodResolver(settingsSchema),
+    defaultValues: DEFAULT_SETTINGS,
+  })
+
+  const paymentMethod = watch('paymentMethod')
+  const properties = data?.properties ?? []
+  const drift = propertiesDiffer(properties)
+
   useEffect(() => {
-    apiClient.get<PropertiesResponse>('/affiliate/properties')
-      .then((res) => {
-        const first = res.properties?.[0]
-        if (first) {
-          setPaymentMethod(first.paymentMethod || 'stripe')
-          setPaypalEmail(first.paypalEmail || '')
-          setBankIban(first.bankIban || '')
-          setBankAccountHolder(first.bankAccountHolder || '')
-          setBankSwiftBic(first.bankSwiftBic || '')
-          setBankName(first.bankName || '')
-          setBankCountry(first.bankCountry || '')
-          setXenditChannelCode(first.xenditChannelCode || 'ID_BCA')
-          setXenditAccountNumber(first.xenditAccountNumber || '')
-          setXenditAccountHolderName(first.xenditAccountHolderName || '')
-        }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+    const first = data?.properties?.[0]
+    if (first) reset(settingsFromProperty(first))
+  }, [data, reset])
 
   const handleValidateBank = async () => {
-    setError('')
+    setTopError('')
     setSuccess('')
-    if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-      setError('Enter a valid account number (5-20 digits) first')
-      return
-    }
+    const ok = await trigger('xenditAccountNumber')
+    if (!ok) return
+    const values = getValues()
     setValidating(true)
     try {
-      const res = await apiClient.post<{ account_holder: string }>('/affiliate/xendit/validate-bank-account', {
-        channelCode: xenditChannelCode,
-        accountNumber: xenditAccountNumber.trim(),
-      })
+      const res = await apiClient.post<{ account_holder: string }>(
+        '/affiliate/xendit/validate-bank-account',
+        {
+          channelCode: values.xenditChannelCode,
+          accountNumber: values.xenditAccountNumber.trim(),
+        },
+      )
       if (res.account_holder) {
-        setXenditAccountHolderName(res.account_holder)
+        setValue('xenditAccountHolderName', res.account_holder, { shouldDirty: true })
         setSuccess(`Account verified — holder: ${res.account_holder}`)
       } else {
         setSuccess('Account validated successfully')
       }
     } catch (err) {
-      setError(extractErrorMessage(err, 'Bank account validation failed'))
+      setTopError(extractErrorMessage(err, 'Bank account validation failed'))
     } finally {
       setValidating(false)
     }
   }
 
-  const handleSave = async () => {
-    setError('')
+  const onSubmit = async (values: SettingsFormValues) => {
+    setTopError('')
     setSuccess('')
-
-    if (paymentMethod === 'xendit') {
-      if (!xenditAccountNumber.trim()) {
-        setError('Account number is required')
-        return
-      }
-      if (!/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-        setError('Account number must be 5-20 digits')
-        return
-      }
-      if (!xenditAccountHolderName.trim()) {
-        setError('Account holder name is required')
-        return
-      }
-    }
-    if (paymentMethod === 'paypal' && !paypalEmail.trim()) {
-      setError('PayPal email is required')
-      return
-    }
-    if (paymentMethod === 'bank') {
-      if (!bankAccountHolder.trim()) { setError('Account holder name is required'); return }
-      if (!bankIban.trim()) { setError('IBAN / account number is required'); return }
-      if (!bankSwiftBic.trim()) { setError('SWIFT / BIC is required'); return }
-      if (!bankName.trim()) { setError('Bank name is required'); return }
-      if (!bankCountry.trim()) { setError('Bank country is required'); return }
-    }
-
     setSaving(true)
     try {
       await apiClient.patch('/affiliate/me', {
-        paymentMethod,
-        ...(paymentMethod === 'paypal' ? { paypalEmail } : {}),
-        ...(paymentMethod === 'bank' ? {
-          bankIban: bankIban.trim().toUpperCase(),
-          bankAccountHolder: bankAccountHolder.trim(),
-          bankSwiftBic: bankSwiftBic.trim().toUpperCase(),
-          bankName: bankName.trim(),
-          bankCountry: bankCountry.trim().toUpperCase(),
-        } : {}),
-        ...(paymentMethod === 'xendit' ? {
-          xenditChannelCode,
-          xenditAccountNumber: xenditAccountNumber.trim(),
-          xenditAccountHolderName: xenditAccountHolderName.trim(),
-        } : {}),
+        paymentMethod: values.paymentMethod,
+        ...(values.paymentMethod === 'paypal' && { paypalEmail: values.paypalEmail.trim() }),
+        ...(values.paymentMethod === 'bank' && {
+          bankIban: values.bankIban.trim().toUpperCase(),
+          bankAccountHolder: values.bankAccountHolder.trim(),
+          bankSwiftBic: values.bankSwiftBic.trim().toUpperCase(),
+          bankName: values.bankName.trim(),
+          bankCountry: values.bankCountry.trim().toUpperCase(),
+        }),
+        ...(values.paymentMethod === 'xendit' && {
+          xenditChannelCode: values.xenditChannelCode,
+          xenditAccountNumber: values.xenditAccountNumber.trim(),
+          xenditAccountHolderName: values.xenditAccountHolderName.trim(),
+        }),
       })
       setSuccess('Payment settings saved')
     } catch (err) {
-      setError(extractErrorMessage(err, 'Failed to save'))
+      setTopError(extractErrorMessage(err, 'Failed to save'))
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) {
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-red-600 text-sm">Failed to load settings.</div>
+      </div>
+    )
+  }
+
+  if (!data) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-gray-500 text-sm">Loading settings...</div>
@@ -157,12 +166,32 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-500 mt-1">Manage your payout preferences</p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        {properties.length > 1 && !drift && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
+            <InformationCircleIcon className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-blue-800">
+              These payout settings apply to all {properties.length} of your properties.
+            </p>
+          </div>
+        )}
+
+        {drift && (
+          <div className="mb-4 p-3 bg-warning-50 border border-warning-200 rounded-lg flex items-start gap-2">
+            <ExclamationTriangleIcon className="w-4 h-4 text-warning-700 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-warning-800">
+              Your properties currently have different payout settings. Showing the
+              configuration from <strong>{properties[0].hotelName}</strong>. Saving will
+              overwrite the others.
+            </p>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">Payout Method</h2>
 
-          {error && (
+          {topError && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
-              {error}
+              {topError}
             </div>
           )}
           {success && (
@@ -172,31 +201,39 @@ export default function SettingsPage() {
           )}
 
           <div className="space-y-4">
-            {/* Payment method selector */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {(['stripe', 'xendit', 'paypal', 'bank'] as const).map((method) => (
-                <button
-                  key={method}
-                  onClick={() => { setPaymentMethod(method); setError(''); setSuccess('') }}
-                  className={`px-3 py-2 text-sm rounded-lg border font-medium transition-colors ${
-                    paymentMethod === method
-                      ? 'border-primary-600 bg-primary-50 text-primary-700'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  {method === 'stripe' ? 'Stripe' : method === 'xendit' ? 'Xendit' : method === 'paypal' ? 'PayPal' : 'Bank Transfer'}
-                </button>
-              ))}
-            </div>
+            <Controller
+              control={control}
+              name="paymentMethod"
+              render={({ field }) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {PAYMENT_METHODS.map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => {
+                        field.onChange(method)
+                        setTopError('')
+                        setSuccess('')
+                      }}
+                      className={`px-3 py-2 text-sm rounded-lg border font-medium transition-colors ${
+                        field.value === method
+                          ? 'border-primary-600 bg-primary-50 text-primary-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {PAYMENT_METHOD_LABELS[method]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            />
 
-            {/* Xendit fields */}
             {paymentMethod === 'xendit' && (
               <div className="space-y-3 pt-2">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Bank</label>
                   <select
-                    value={xenditChannelCode}
-                    onChange={(e) => setXenditChannelCode(e.target.value)}
+                    {...register('xenditChannelCode')}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     {XENDIT_BANKS.map((bank) => (
@@ -206,30 +243,41 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Account Number</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={20}
-                    value={xenditAccountNumber}
-                    onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1234567890"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  <Controller
+                    control={control}
+                    name="xenditAccountNumber"
+                    render={({ field }) => (
+                      <input
+                        {...field}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={20}
+                        onChange={(e) => field.onChange(e.target.value.replace(/\D/g, ''))}
+                        placeholder="1234567890"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    )}
                   />
+                  {errors.xenditAccountNumber && (
+                    <p className="mt-1 text-xs text-red-600">{errors.xenditAccountNumber.message}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
                   <input
+                    {...register('xenditAccountHolderName')}
                     type="text"
-                    value={xenditAccountHolderName}
-                    onChange={(e) => setXenditAccountHolderName(e.target.value)}
                     placeholder="Full name as on bank account"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
+                  {errors.xenditAccountHolderName && (
+                    <p className="mt-1 text-xs text-red-600">{errors.xenditAccountHolderName.message}</p>
+                  )}
                 </div>
                 <button
                   type="button"
                   onClick={handleValidateBank}
-                  disabled={validating || !xenditAccountNumber.trim()}
+                  disabled={validating || !watch('xenditAccountNumber').trim()}
                   className="w-full px-4 py-2 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 disabled:opacity-50 transition-colors"
                 >
                   {validating ? 'Validating...' : 'Validate Bank Account'}
@@ -237,21 +285,21 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* PayPal fields */}
             {paymentMethod === 'paypal' && (
               <div className="pt-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">PayPal Email</label>
                 <input
+                  {...register('paypalEmail')}
                   type="email"
-                  value={paypalEmail}
-                  onChange={(e) => setPaypalEmail(e.target.value)}
                   placeholder="your@email.com"
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
+                {errors.paypalEmail && (
+                  <p className="mt-1 text-xs text-red-600">{errors.paypalEmail.message}</p>
+                )}
               </div>
             )}
 
-            {/* Bank fields */}
             {paymentMethod === 'bank' && (
               <div className="space-y-3 pt-2">
                 <p className="text-xs text-gray-500">
@@ -260,60 +308,90 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Account Holder Name</label>
                   <input
+                    {...register('bankAccountHolder')}
                     type="text"
-                    value={bankAccountHolder}
-                    onChange={(e) => setBankAccountHolder(e.target.value)}
                     placeholder="Full name as on bank account"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
+                  {errors.bankAccountHolder && (
+                    <p className="mt-1 text-xs text-red-600">{errors.bankAccountHolder.message}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">IBAN / Account Number</label>
-                  <input
-                    type="text"
-                    value={bankIban}
-                    onChange={(e) => setBankIban(e.target.value.toUpperCase())}
-                    placeholder="AT89 3704 0044 0532 0130 00"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  <Controller
+                    control={control}
+                    name="bankIban"
+                    render={({ field }) => (
+                      <input
+                        {...field}
+                        type="text"
+                        onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                        placeholder="AT89 3704 0044 0532 0130 00"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    )}
                   />
+                  {errors.bankIban && (
+                    <p className="mt-1 text-xs text-red-600">{errors.bankIban.message}</p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">SWIFT / BIC</label>
-                    <input
-                      type="text"
-                      value={bankSwiftBic}
-                      onChange={(e) => setBankSwiftBic(e.target.value.toUpperCase())}
-                      placeholder="DEUTDEFF"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    <Controller
+                      control={control}
+                      name="bankSwiftBic"
+                      render={({ field }) => (
+                        <input
+                          {...field}
+                          type="text"
+                          onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                          placeholder="DEUTDEFF"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      )}
                     />
+                    {errors.bankSwiftBic && (
+                      <p className="mt-1 text-xs text-red-600">{errors.bankSwiftBic.message}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Country</label>
-                    <input
-                      type="text"
-                      value={bankCountry}
-                      onChange={(e) => setBankCountry(e.target.value.toUpperCase().slice(0, 2))}
-                      placeholder="DE"
-                      maxLength={2}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    <Controller
+                      control={control}
+                      name="bankCountry"
+                      render={({ field }) => (
+                        <input
+                          {...field}
+                          type="text"
+                          maxLength={2}
+                          onChange={(e) => field.onChange(e.target.value.toUpperCase().slice(0, 2))}
+                          placeholder="DE"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      )}
                     />
+                    {errors.bankCountry && (
+                      <p className="mt-1 text-xs text-red-600">{errors.bankCountry.message}</p>
+                    )}
                   </div>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Bank Name</label>
                   <input
+                    {...register('bankName')}
                     type="text"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
                     placeholder="Deutsche Bank"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
+                  {errors.bankName && (
+                    <p className="mt-1 text-xs text-red-600">{errors.bankName.message}</p>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Stripe info */}
             {paymentMethod === 'stripe' && (
               <p className="text-xs text-gray-500 pt-2">
                 Stripe Connect payouts are managed by the property. Contact the property admin if you need to update your Stripe details.
@@ -321,14 +399,14 @@ export default function SettingsPage() {
             )}
 
             <button
-              onClick={handleSave}
-              disabled={saving}
+              type="submit"
+              disabled={saving || isSubmitting}
               className="w-full mt-2 px-4 py-2.5 text-sm font-medium text-white bg-primary-800 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Saving...' : 'Save Payout Settings'}
             </button>
           </div>
-        </div>
+        </form>
       </main>
     </div>
   )
