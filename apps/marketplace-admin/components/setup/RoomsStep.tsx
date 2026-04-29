@@ -684,6 +684,7 @@ export default function RoomsStep({
                                 className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border appearance-none cursor-pointer ${tierColors[season.tier] || 'text-gray-600 bg-gray-100 border-gray-200'}`}
                                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', paddingRight: '20px' }}
                               >
+                                <option value="">—</option>
                                 <option value="Low">Low</option>
                                 <option value="Mid">Mid</option>
                                 <option value="High">High</option>
@@ -752,7 +753,7 @@ export default function RoomsStep({
                 )}
                 {(() => { const hasOverlap = room.seasons.some((a, i) => room.seasons.some((b, j) => i < j && a.from && a.to && b.from && b.to && a.from <= b.to && b.from <= a.to)); return hasOverlap ? <p className="mt-2 text-[11px] text-red-600 font-medium">Season date ranges must not overlap. Please adjust the highlighted seasons.</p> : null })()}
                 <button
-                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: 'Low', from: '', to: '', rate: '', minStay: 1, occupancyRates: {} }] })}
+                  onClick={() => updateRoom({ seasons: [...room.seasons, { name: '', tier: '', from: '', to: '', rate: '', minStay: 1, occupancyRates: {} }] })}
                   className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-medium px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <PlusIcon className="w-3.5 h-3.5" /> Add season
@@ -787,7 +788,7 @@ export default function RoomsStep({
                                 <td className="py-2.5">
                                   <div className="flex items-center gap-2">
                                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || 'text-gray-600 bg-gray-100'}`}>
-                                      {season.tier}
+                                      {season.tier || '—'}
                                     </span>
                                     {season.name
                                       ? <span className="text-[12px] text-gray-700">{season.name}</span>
