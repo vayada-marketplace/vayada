@@ -276,40 +276,17 @@ async def create_collaboration(
         )
         notify_marketplace_admin("New collaboration request", admin_html)
 
-        return CollaborationResponse(
-            id=str(collaboration['id']),
-            initiator_type=collaboration['initiator_type'],
-            status=collaboration['status'],
-            creator_id=str(collaboration['creator_id']),
+        joined_row = {
+            **collaboration,
+            'hotel_name': listing['hotel_name'],
+            'listing_name': listing['name'],
+            'listing_location': listing['location'],
+            'creator_profile_picture': creator_record['profile_picture'],
+        }
+        return CollaborationResponse.from_db_row(
+            joined_row,
             creator_name=creator_user_info['name'] if creator_user_info else 'Unknown',
-            creator_profile_picture=creator_record['profile_picture'],
-            hotel_id=str(collaboration['hotel_id']),
-            hotel_name=listing['hotel_name'],
-            listing_id=str(collaboration['listing_id']),
-            listing_name=listing['name'],
-            listing_location=listing['location'],
-            collaboration_type=collaboration['collaboration_type'],
-            free_stay_min_nights=collaboration['free_stay_min_nights'],
-            free_stay_max_nights=collaboration['free_stay_max_nights'],
-            paid_amount=collaboration['paid_amount'],
-            currency=collaboration.get('currency'),
-            discount_percentage=collaboration['discount_percentage'],
-            travel_date_from=collaboration['travel_date_from'],
-            travel_date_to=collaboration['travel_date_to'],
-            preferred_date_from=collaboration['preferred_date_from'],
-            preferred_date_to=collaboration['preferred_date_to'],
-            preferred_months=collaboration['preferred_months'],
-            why_great_fit=collaboration['why_great_fit'],
             platform_deliverables=platform_deliverables_response,
-            consent=collaboration['consent'],
-            created_at=collaboration['created_at'],
-            updated_at=collaboration['updated_at'],
-            responded_at=collaboration['responded_at'],
-            cancelled_at=collaboration['cancelled_at'],
-            completed_at=collaboration['completed_at'],
-            creator_fee=collaboration['creator_fee'],
-            affiliate_referral_code=collaboration['affiliate_referral_code'],
-            affiliate_link=collaboration['affiliate_link'],
         )
 
     except HTTPException:
@@ -471,44 +448,10 @@ async def respond_to_collaboration_request(
             notify_marketplace_admin(admin_subject, admin_html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-
-        return CollaborationResponse(
-            id=str(updated['id']),
-            initiator_type=updated['initiator_type'],
-            status=updated['status'],
-            creator_id=str(updated['creator_id']),
+        return CollaborationResponse.from_db_row(
+            updated,
             creator_name=creator_name,
-            creator_profile_picture=updated['creator_profile_picture'],
-            hotel_id=str(updated['hotel_id']),
-            hotel_name=updated['hotel_name'],
-            listing_id=str(updated['listing_id']),
-            listing_name=updated['listing_name'],
-            listing_location=updated['listing_location'],
-            collaboration_type=updated['collaboration_type'],
-            free_stay_min_nights=updated['free_stay_min_nights'],
-            free_stay_max_nights=updated['free_stay_max_nights'],
-            paid_amount=updated['paid_amount'],
-            currency=updated.get('currency'),
-            discount_percentage=updated['discount_percentage'],
-            travel_date_from=updated['travel_date_from'],
-            travel_date_to=updated['travel_date_to'],
-            preferred_date_from=updated['preferred_date_from'],
-            preferred_date_to=updated['preferred_date_to'],
-            preferred_months=updated['preferred_months'],
-            why_great_fit=updated['why_great_fit'],
             platform_deliverables=plat_delivs_resp,
-            consent=updated['consent'],
-            created_at=updated['created_at'],
-            updated_at=updated['updated_at'],
-            responded_at=updated['responded_at'],
-            cancelled_at=updated['cancelled_at'],
-            completed_at=updated['completed_at'],
-            hotel_agreed_at=updated['hotel_agreed_at'],
-            creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at'],
-            creator_fee=updated.get('creator_fee'),
-            affiliate_referral_code=updated.get('affiliate_referral_code'),
-            affiliate_link=updated.get('affiliate_link'),
         )
 
     except HTTPException:
@@ -736,45 +679,10 @@ async def update_collaboration_terms(
             send_email_background(other_email, "New Counter-Offer on Your Collaboration", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-
-        return CollaborationResponse(
-            id=str(updated['id']),
-            initiator_type=updated['initiator_type'],
-            status=updated['status'],
-            creator_id=str(updated['creator_id']),
+        return CollaborationResponse.from_db_row(
+            updated,
             creator_name=creator_name,
-            creator_profile_picture=updated['creator_profile_picture'],
-            hotel_id=str(updated['hotel_id']),
-            hotel_name=updated['hotel_name'],
-            listing_id=str(updated['listing_id']),
-            listing_name=updated['listing_name'],
-            listing_location=updated['listing_location'],
-            collaboration_type=updated['collaboration_type'],
-            free_stay_min_nights=updated['free_stay_min_nights'],
-            free_stay_max_nights=updated['free_stay_max_nights'],
-            paid_amount=updated['paid_amount'],
-            currency=updated.get('currency'),
-            discount_percentage=updated['discount_percentage'],
-            stay_nights=updated['free_stay_min_nights'] if updated['free_stay_min_nights'] == updated['free_stay_max_nights'] else None,
-            travel_date_from=updated['travel_date_from'],
-            travel_date_to=updated['travel_date_to'],
-            preferred_date_from=updated['preferred_date_from'],
-            preferred_date_to=updated['preferred_date_to'],
-            preferred_months=updated['preferred_months'],
-            why_great_fit=updated['why_great_fit'],
             platform_deliverables=plat_delivs_resp,
-            consent=updated['consent'],
-            created_at=updated['created_at'],
-            updated_at=updated['updated_at'],
-            responded_at=updated['responded_at'],
-            cancelled_at=updated['cancelled_at'],
-            completed_at=updated['completed_at'],
-            hotel_agreed_at=updated['hotel_agreed_at'],
-            creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at'],
-            creator_fee=updated.get('creator_fee'),
-            affiliate_referral_code=updated.get('affiliate_referral_code'),
-            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -902,43 +810,10 @@ async def approve_collaboration_terms(
         if new_status == 'accepted':
             updated = await CollaborationRepository.get_full(collaboration_id)
 
-        return CollaborationResponse(
-            id=str(updated['id']),
-            initiator_type=updated['initiator_type'],
-            status=updated['status'],
-            creator_id=str(updated['creator_id']),
+        return CollaborationResponse.from_db_row(
+            updated,
             creator_name=creator_name,
-            creator_profile_picture=updated['creator_profile_picture'],
-            hotel_id=str(updated['hotel_id']),
-            hotel_name=updated['hotel_name'],
-            listing_id=str(updated['listing_id']),
-            listing_name=updated['listing_name'],
-            listing_location=updated['listing_location'],
-            collaboration_type=updated['collaboration_type'],
-            free_stay_min_nights=updated['free_stay_min_nights'],
-            free_stay_max_nights=updated['free_stay_max_nights'],
-            paid_amount=updated['paid_amount'],
-            currency=updated.get('currency'),
-            discount_percentage=updated['discount_percentage'],
-            travel_date_from=updated['travel_date_from'],
-            travel_date_to=updated['travel_date_to'],
-            preferred_date_from=updated['preferred_date_from'],
-            preferred_date_to=updated['preferred_date_to'],
-            preferred_months=updated['preferred_months'],
-            why_great_fit=updated['why_great_fit'],
             platform_deliverables=plat_delivs_resp,
-            consent=updated['consent'],
-            created_at=updated['created_at'],
-            updated_at=updated['updated_at'],
-            responded_at=updated['responded_at'],
-            cancelled_at=updated['cancelled_at'],
-            completed_at=updated['completed_at'],
-            hotel_agreed_at=updated['hotel_agreed_at'],
-            creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at'],
-            creator_fee=updated.get('creator_fee'),
-            affiliate_referral_code=updated.get('affiliate_referral_code'),
-            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -1026,44 +901,10 @@ async def cancel_collaboration(
             notify_vayada_team("Collaboration Cancelled", html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-
-        return CollaborationResponse(
-            id=str(updated['id']),
-            initiator_type=updated['initiator_type'],
-            status=updated['status'],
-            creator_id=str(updated['creator_id']),
+        return CollaborationResponse.from_db_row(
+            updated,
             creator_name=creator_name,
-            creator_profile_picture=updated['creator_profile_picture'],
-            hotel_id=str(updated['hotel_id']),
-            hotel_name=updated['hotel_name'],
-            listing_id=str(updated['listing_id']),
-            listing_name=updated['listing_name'],
-            listing_location=updated['listing_location'],
-            collaboration_type=updated['collaboration_type'],
-            free_stay_min_nights=updated['free_stay_min_nights'],
-            free_stay_max_nights=updated['free_stay_max_nights'],
-            paid_amount=updated['paid_amount'],
-            currency=updated.get('currency'),
-            discount_percentage=updated['discount_percentage'],
-            travel_date_from=updated['travel_date_from'],
-            travel_date_to=updated['travel_date_to'],
-            preferred_date_from=updated['preferred_date_from'],
-            preferred_date_to=updated['preferred_date_to'],
-            preferred_months=updated['preferred_months'],
-            why_great_fit=updated['why_great_fit'],
             platform_deliverables=plat_delivs_resp,
-            consent=updated['consent'],
-            created_at=updated['created_at'],
-            updated_at=updated['updated_at'],
-            responded_at=updated['responded_at'],
-            cancelled_at=updated['cancelled_at'],
-            completed_at=updated['completed_at'],
-            hotel_agreed_at=updated['hotel_agreed_at'],
-            creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at'],
-            creator_fee=updated.get('creator_fee'),
-            affiliate_referral_code=updated.get('affiliate_referral_code'),
-            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise
@@ -1118,44 +959,10 @@ async def toggle_deliverable(
         creator_name = creator_user['name'] if creator_user else 'Unknown'
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-
-        return CollaborationResponse(
-            id=str(updated['id']),
-            initiator_type=updated['initiator_type'],
-            status=updated['status'],
-            creator_id=str(updated['creator_id']),
+        return CollaborationResponse.from_db_row(
+            updated,
             creator_name=creator_name,
-            creator_profile_picture=updated['creator_profile_picture'],
-            hotel_id=str(updated['hotel_id']),
-            hotel_name=updated['hotel_name'],
-            listing_id=str(updated['listing_id']),
-            listing_name=updated['listing_name'],
-            listing_location=updated['listing_location'],
-            collaboration_type=updated['collaboration_type'],
-            free_stay_min_nights=updated['free_stay_min_nights'],
-            free_stay_max_nights=updated['free_stay_max_nights'],
-            paid_amount=updated['paid_amount'],
-            currency=updated.get('currency'),
-            discount_percentage=updated['discount_percentage'],
-            travel_date_from=updated['travel_date_from'],
-            travel_date_to=updated['travel_date_to'],
-            preferred_date_from=updated['preferred_date_from'],
-            preferred_date_to=updated['preferred_date_to'],
-            preferred_months=updated['preferred_months'],
-            why_great_fit=updated['why_great_fit'],
             platform_deliverables=plat_delivs_resp,
-            consent=updated['consent'],
-            created_at=updated['created_at'],
-            updated_at=updated['updated_at'],
-            responded_at=updated['responded_at'],
-            cancelled_at=updated['cancelled_at'],
-            completed_at=updated['completed_at'],
-            hotel_agreed_at=updated['hotel_agreed_at'],
-            creator_agreed_at=updated['creator_agreed_at'],
-            term_last_updated_at=updated['term_last_updated_at'],
-            creator_fee=updated.get('creator_fee'),
-            affiliate_referral_code=updated.get('affiliate_referral_code'),
-            affiliate_link=updated.get('affiliate_link'),
         )
     except HTTPException:
         raise

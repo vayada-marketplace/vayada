@@ -326,3 +326,61 @@ class CollaborationResponse(BaseModel):
     affiliate_link: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+    @classmethod
+    def from_db_row(
+        cls,
+        row,
+        *,
+        creator_name: str = "Unknown",
+        platform_deliverables: Optional[List["PlatformDeliverablesItem"]] = None,
+    ) -> "CollaborationResponse":
+        """Build a response from a joined collaboration row.
+
+        Callers that fetch via `CollaborationRepository.get_full` (or
+        equivalent) get the joined hotel/listing/creator fields directly
+        on the row. Callers that hand-build a row for newly-created
+        collaborations should merge those joined fields onto the dict
+        before calling.
+        """
+        fsmin = row.get('free_stay_min_nights')
+        fsmax = row.get('free_stay_max_nights')
+        return cls(
+            id=str(row['id']),
+            initiator_type=row['initiator_type'],
+            status=row['status'],
+            creator_id=str(row['creator_id']),
+            creator_name=creator_name,
+            creator_profile_picture=row.get('creator_profile_picture'),
+            hotel_id=str(row['hotel_id']),
+            hotel_name=row['hotel_name'],
+            listing_id=str(row['listing_id']),
+            listing_name=row['listing_name'],
+            listing_location=row['listing_location'],
+            collaboration_type=row.get('collaboration_type'),
+            free_stay_min_nights=fsmin,
+            free_stay_max_nights=fsmax,
+            paid_amount=row.get('paid_amount'),
+            currency=row.get('currency'),
+            discount_percentage=row.get('discount_percentage'),
+            stay_nights=fsmin if fsmin is not None and fsmin == fsmax else None,
+            travel_date_from=row.get('travel_date_from'),
+            travel_date_to=row.get('travel_date_to'),
+            preferred_date_from=row.get('preferred_date_from'),
+            preferred_date_to=row.get('preferred_date_to'),
+            preferred_months=row.get('preferred_months'),
+            why_great_fit=row.get('why_great_fit'),
+            platform_deliverables=platform_deliverables or [],
+            consent=row.get('consent'),
+            created_at=row['created_at'],
+            updated_at=row['updated_at'],
+            responded_at=row.get('responded_at'),
+            cancelled_at=row.get('cancelled_at'),
+            completed_at=row.get('completed_at'),
+            hotel_agreed_at=row.get('hotel_agreed_at'),
+            creator_agreed_at=row.get('creator_agreed_at'),
+            term_last_updated_at=row.get('term_last_updated_at'),
+            creator_fee=row.get('creator_fee'),
+            affiliate_referral_code=row.get('affiliate_referral_code'),
+            affiliate_link=row.get('affiliate_link'),
+        )

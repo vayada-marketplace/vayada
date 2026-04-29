@@ -1452,45 +1452,12 @@ async def get_admin_collaborations(
 
         collaborations = []
         for row in rows:
-            # Fetch deliverables for each collaboration
             collab_id = str(row['id'])
             deliverables = await get_collaboration_deliverables(collab_id)
-
-            collaborations.append(CollaborationResponse(
-                id=collab_id,
-                initiator_type=row['initiator_type'],
-                status=row['status'],
-                creator_id=str(row['creator_id']),
+            collaborations.append(CollaborationResponse.from_db_row(
+                row,
                 creator_name=users_map.get(str(row['creator_user_id']), 'Unknown'),
-                creator_profile_picture=row['creator_profile_picture'],
-                hotel_id=str(row['hotel_id']),
-                hotel_name=row['hotel_name'],
-                listing_id=str(row['listing_id']),
-                listing_name=row['listing_name'],
-                listing_location=row['listing_location'],
-                collaboration_type=row['collaboration_type'],
-                free_stay_min_nights=row['free_stay_min_nights'],
-                free_stay_max_nights=row['free_stay_max_nights'],
-                paid_amount=row['paid_amount'],
-                currency=row['currency'],
-                discount_percentage=row['discount_percentage'],
-                stay_nights=row['free_stay_min_nights'] if row['free_stay_min_nights'] == row['free_stay_max_nights'] else None,
-                travel_date_from=row['travel_date_from'],
-                travel_date_to=row['travel_date_to'],
-                preferred_date_from=row['preferred_date_from'],
-                preferred_date_to=row['preferred_date_to'],
-                preferred_months=row['preferred_months'],
-                why_great_fit=row['why_great_fit'],
                 platform_deliverables=deliverables,
-                consent=row['consent'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at'],
-                responded_at=row['responded_at'],
-                cancelled_at=row['cancelled_at'],
-                completed_at=row['completed_at'],
-                hotel_agreed_at=row['hotel_agreed_at'],
-                creator_agreed_at=row['creator_agreed_at'],
-                term_last_updated_at=row['term_last_updated_at']
             ))
 
         return CollaborationListResponse(collaborations=collaborations, total=total)
@@ -1509,45 +1476,10 @@ async def _build_admin_collaboration_response(collaboration_id: str) -> Collabor
     creator_user = await UserRepository.get_by_id(updated['creator_user_id'], columns="name")
     creator_name = creator_user['name'] if creator_user else 'Unknown'
     plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
-
-    return CollaborationResponse(
-        id=str(updated['id']),
-        initiator_type=updated['initiator_type'],
-        status=updated['status'],
-        creator_id=str(updated['creator_id']),
+    return CollaborationResponse.from_db_row(
+        updated,
         creator_name=creator_name,
-        creator_profile_picture=updated['creator_profile_picture'],
-        hotel_id=str(updated['hotel_id']),
-        hotel_name=updated['hotel_name'],
-        listing_id=str(updated['listing_id']),
-        listing_name=updated['listing_name'],
-        listing_location=updated['listing_location'],
-        collaboration_type=updated['collaboration_type'],
-        free_stay_min_nights=updated['free_stay_min_nights'],
-        free_stay_max_nights=updated['free_stay_max_nights'],
-        paid_amount=updated['paid_amount'],
-        currency=updated.get('currency'),
-        discount_percentage=updated['discount_percentage'],
-        stay_nights=updated['free_stay_min_nights'] if updated['free_stay_min_nights'] == updated['free_stay_max_nights'] else None,
-        travel_date_from=updated['travel_date_from'],
-        travel_date_to=updated['travel_date_to'],
-        preferred_date_from=updated['preferred_date_from'],
-        preferred_date_to=updated['preferred_date_to'],
-        preferred_months=updated['preferred_months'],
-        why_great_fit=updated['why_great_fit'],
         platform_deliverables=plat_delivs_resp,
-        consent=updated['consent'],
-        created_at=updated['created_at'],
-        updated_at=updated['updated_at'],
-        responded_at=updated['responded_at'],
-        cancelled_at=updated['cancelled_at'],
-        completed_at=updated['completed_at'],
-        hotel_agreed_at=updated['hotel_agreed_at'],
-        creator_agreed_at=updated['creator_agreed_at'],
-        term_last_updated_at=updated['term_last_updated_at'],
-        creator_fee=updated.get('creator_fee'),
-        affiliate_referral_code=updated.get('affiliate_referral_code'),
-        affiliate_link=updated.get('affiliate_link'),
     )
 
 
