@@ -2,6 +2,7 @@
 Tests for /admin endpoints — hotel registration, setup status, room CRUD, booking management.
 """
 import pytest
+from unittest.mock import AsyncMock, patch
 from tests.conftest import (
     create_test_user,
     create_test_hotel,
@@ -417,6 +418,51 @@ class TestAdminRoomTypes:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 422
+
+    async def test_patch_triggers_channex_cancellation_push(
+        self, client, hotel_with_rooms
+    ):
+        """Changing flexible-cancellation fields fires the Channex sync."""
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        with patch(
+            "app.routers.admin_rooms.push_cancellation_policy_for_room_type",
+            new_callable=AsyncMock,
+        ) as push:
+            resp = await client.patch(
+                f"/admin/room-types/{room['id']}",
+                json={"flexibleCancellationType": "partial_refund"},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+            # asyncio.create_task schedules but may not complete before
+            # the request returns; await any pending task explicitly.
+            import asyncio
+            await asyncio.sleep(0)
+            push.assert_awaited_once()
+            assert push.await_args.args[1] == str(room["id"])
+
+    async def test_patch_unrelated_field_does_not_trigger_channex_push(
+        self, client, hotel_with_rooms
+    ):
+        """A PATCH that doesn't touch cancellation fields skips the sync."""
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        with patch(
+            "app.routers.admin_rooms.push_cancellation_policy_for_room_type",
+            new_callable=AsyncMock,
+        ) as push:
+            resp = await client.patch(
+                f"/admin/room-types/{room['id']}",
+                json={"name": "Renamed"},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+            import asyncio
+            await asyncio.sleep(0)
+            push.assert_not_awaited()
 
 
 # ── Admin Bookings ────────────────────────────────────────────────

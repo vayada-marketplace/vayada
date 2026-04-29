@@ -415,6 +415,110 @@ async def push_restrictions_for_rate_plan(
         )
 
 
+# ── Cancellation policy push ─────────────────────────────────────────
+#
+# Maps a room type's flexible-rate cancellation settings onto each Channex
+# flexible rate plan so OTA guests see the correct refund terms. The
+# non_refundable plan keeps its own (separate) policy and is left alone.
+#
+# Airbnb caveat: Airbnb only accepts a fixed set of preset cancellation
+# policies (Flexible / Moderate / Strict / etc.) which Channex exposes via
+# the channel iframe rather than the rate-plan API. We skip Airbnb mappings
+# here; hosts continue to manage Airbnb's policy through the iframe.
+
+def _build_cancellation_policy(
+    room_type: dict,
+    channel: str,
+) -> Optional[List[dict]]:
+    """Build Channex cancellation_policies entries for a flexible rate plan.
+
+    Returns a list of policy entries, or None if the channel can't accept a
+    custom policy (currently: airbnb).
+    """
+    if channel == "airbnb":
+        return None
+
+    cancel_type = room_type.get("flexible_cancellation_type") or "free"
+
+    if cancel_type == "partial_refund":
+        window = int(room_type.get("partial_refund_cancel_window_days") or 30)
+        refund_pct = int(room_type.get("partial_refund_amount_percent") or 50)
+        # Channex penalty_value is the amount KEPT, not refunded.
+        penalty_pct = max(0, min(100, 100 - refund_pct))
+        return [
+            # Free refund up to `window` days before arrival.
+            {
+                "days_before_arrival": window,
+                "penalty_type": "percent",
+                "penalty_value": 0,
+            },
+            # Inside the window: keep `penalty_pct`, refund the rest.
+            {
+                "days_before_arrival": 0,
+                "penalty_type": "percent",
+                "penalty_value": penalty_pct,
+            },
+        ]
+
+    # "free" — refund anytime up to arrival.
+    return [
+        {
+            "days_before_arrival": 0,
+            "penalty_type": "percent",
+            "penalty_value": 0,
+        },
+    ]
+
+
+async def push_cancellation_policy_for_room_type(
+    hotel_id: str,
+    room_type_id: str,
+) -> None:
+    """Push the room type's flexible-rate cancellation policy to every
+    matching Channex rate plan. Skips non_refundable plans and airbnb."""
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
+        return
+
+    room_type = await RoomTypeRepository.get_by_id(room_type_id)
+    if not room_type:
+        return
+
+    rate_plans = await ChannexRatePlanMappingRepository.list_by_room_type_id(room_type_id)
+    if not rate_plans:
+        return
+
+    api_key = channex_service.get_platform_api_key()
+
+    for rp in rate_plans:
+        if rp.get("plan_name", "standard") != "standard":
+            continue
+        channel = rp.get("channel", "direct")
+        policies = _build_cancellation_policy(room_type, channel)
+        if policies is None:
+            logger.info(
+                "Skipping cancellation policy push for room type %s on %s "
+                "(channel uses preset policies)",
+                room_type_id, channel,
+            )
+            continue
+
+        rate_plan_id = str(rp["channex_rate_plan_id"])
+        try:
+            await channex_service.update_rate_plan_cancellation_policy(
+                api_key, rate_plan_id, policies=policies,
+            )
+            logger.info(
+                "Pushed cancellation policy for room type %s rate plan %s (%s)",
+                room_type_id, rate_plan_id, channel,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to push cancellation policy for room type %s rate plan %s: %s",
+                room_type_id, rate_plan_id, e,
+            )
+
+
 # ── Full ARI sync for a hotel ────────────────────────────────────────
 
 async def push_ari_for_hotel(hotel_id: str) -> None:

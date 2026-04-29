@@ -8,7 +8,10 @@ from app.database import Database
 from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
-from app.services.channex_sync_service import push_availability_for_room_type
+from app.services.channex_sync_service import (
+    push_availability_for_room_type,
+    push_cancellation_policy_for_room_type,
+)
 from app.utils import parse_jsonb, get_hotel_id
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
@@ -220,6 +223,17 @@ async def update_room_type(
             for k, v in updates["monthly_rates"].items()
         }
     room = await RoomTypeRepository.update(room_type_id, updates)
+
+    cancel_fields = {
+        "flexible_cancellation_type",
+        "partial_refund_cancel_window_days",
+        "partial_refund_amount_percent",
+    }
+    if cancel_fields & updates.keys():
+        asyncio.create_task(
+            push_cancellation_policy_for_room_type(hotel_id, room_type_id)
+        )
+
     return _room_to_admin(room)
 
 

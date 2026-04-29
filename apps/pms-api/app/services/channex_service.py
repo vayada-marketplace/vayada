@@ -269,6 +269,30 @@ async def list_rate_plans(api_key: str, property_id: str) -> List[dict]:
     return data.get("data", [])
 
 
+async def update_rate_plan_cancellation_policy(
+    api_key: str,
+    rate_plan_id: str,
+    *,
+    policies: List[dict],
+) -> dict:
+    """Set the cancellation policy on a Channex rate plan.
+
+    Each entry in `policies`: {days_before_arrival, penalty_type, penalty_value}.
+    `penalty_type` is "percent" (Channex also accepts "amount" / "first_night"
+    but we only emit "percent" today). Passing an empty list inherits the
+    property-level default.
+    """
+    payload = {
+        "inherit_cancellation_policy": not policies,
+        "cancellation_policies": policies,
+    }
+    data = await _request(
+        "PUT", f"/api/v1/rate_plans/{rate_plan_id}", api_key,
+        json={"rate_plan": payload},
+    )
+    return data.get("data", data)
+
+
 # ── Channels ─────────────────────────────────────────────────────────
 
 async def list_channels(api_key: str, property_id: str) -> List[dict]:
