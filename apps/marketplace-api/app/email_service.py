@@ -81,31 +81,23 @@ async def _send_email_smtp(
         msg.attach(part1)
         msg.attach(part2)
         
-        # Send email
-        # IONOS supports both port 465 (SSL/TLS) and 587 (STARTTLS)
-        # Port 465 is primary, 587 is alternative if 465 is blocked
+        # Two SMTP styles: implicit TLS on 465, STARTTLS on 587 (the SES path).
         if settings.SMTP_PORT == 465:
-            # Use SSL/TLS for port 465 (IONOS primary method)
             import ssl
             context = ssl.create_default_context()
-            # IONOS requires TLS 1.2 or higher
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, context=context) as server:
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
-                    # IONOS requires full email address as username
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.send_message(msg)
         else:
-            # Use STARTTLS for port 587 (IONOS alternative method)
             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                # IONOS requires STARTTLS on port 587
                 if settings.SMTP_USE_TLS:
                     server.starttls()
-                
+
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
-                    # IONOS requires full email address as username
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                
+
                 server.send_message(msg)
         
         logger.info(f"Email sent successfully to {to_email}")
@@ -115,12 +107,6 @@ async def _send_email_smtp(
         logger.error(f"SMTP authentication failed: {str(e)}")
         logger.error(f"  Host: {settings.SMTP_HOST}, Port: {settings.SMTP_PORT}")
         logger.error(f"  User: {settings.SMTP_USER}")
-        logger.error("  Troubleshooting steps:")
-        logger.error("    1. Verify password is correct in IONOS")
-        logger.error("    2. Check if SMTP is enabled in IONOS control panel")
-        logger.error("    3. Ensure email account exists and is active")
-        logger.error("    4. Try logging into webmail with same credentials")
-        logger.error("    5. Check if 2FA requires app-specific password")
         return False
     except Exception as e:
         logger.error(f"SMTP email sending failed: {str(e)}")
