@@ -2,6 +2,8 @@
  * API client for the affiliate dashboard
  */
 
+import { clearAuthData, getToken } from '@/services/auth/storage'
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002'
 
 export interface ApiError {
@@ -38,47 +40,18 @@ export function extractErrorMessage(err: unknown, fallback: string): string {
 
 export class ApiClient {
   private baseURL: string
-  private TOKEN_KEY = 'access_token'
-  private EXPIRES_AT_KEY = 'token_expires_at'
 
   constructor(baseURL: string = API_BASE_URL) {
     this.baseURL = baseURL
   }
 
-  private getToken(): string | null {
-    if (typeof window === 'undefined') return null
-
-    const token = localStorage.getItem(this.TOKEN_KEY)
-    const expiresAt = localStorage.getItem(this.EXPIRES_AT_KEY)
-
-    if (!token || !expiresAt) return null
-
-    if (Date.now() >= parseInt(expiresAt)) {
-      this.clearToken()
-      return null
-    }
-
-    return token
-  }
-
-  private clearToken(): void {
-    if (typeof window === 'undefined') return
-    localStorage.removeItem(this.TOKEN_KEY)
-    localStorage.removeItem(this.EXPIRES_AT_KEY)
-  }
-
   private handleUnauthorized(error: ApiErrorResponse): void {
-    this.clearToken()
+    clearAuthData()
 
     if (typeof window !== 'undefined') {
-      const errorMessage = error.data.detail as string || ''
+      const errorMessage = (typeof error.data.detail === 'string' ? error.data.detail : '') || ''
       const isExpired = errorMessage.includes('expired') || errorMessage.includes('Expired')
-
-      if (isExpired) {
-        window.location.href = '/login?expired=true'
-      } else {
-        window.location.href = '/login'
-      }
+      window.location.href = isExpired ? '/login?expired=true' : '/login'
     }
   }
 
@@ -88,7 +61,8 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
 
-    const token = !endpoint.startsWith('/auth/') ? this.getToken() : null
+    const isAuthEndpoint = endpoint.startsWith('/auth/')
+    const token = isAuthEndpoint ? null : getToken()
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -99,54 +73,45 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    const config: RequestInit = {
-      ...options,
-      headers,
+    const response = await fetch(url, { ...options, headers })
+
+    if (response.status === 204) {
+      if (!response.ok) {
+        throw new ApiErrorResponse(response.status, { detail: 'No Content' })
+      }
+      return undefined as T
     }
 
-    try {
-      const response = await fetch(url, config)
+    const contentType = response.headers.get('content-type')
+    const isJson = contentType?.includes('application/json') ?? false
+    const text = await response.text()
 
-      if (response.status === 204) {
-        if (!response.ok) {
-          throw new ApiErrorResponse(response.status, { detail: 'No Content' })
-        }
-        return undefined as T
-      }
-
-      const contentType = response.headers.get('content-type')
-      const hasJsonContent = contentType && contentType.includes('application/json')
-
-      let data: any
-      if (hasJsonContent) {
-        const text = await response.text()
+    let data: any
+    if (isJson) {
+      try {
         data = text ? JSON.parse(text) : null
-      } else {
-        const text = await response.text()
-        data = text || null
+      } catch {
+        data = null
+      }
+    } else {
+      data = text || null
+    }
+
+    if (!response.ok) {
+      const errorData: ApiError =
+        data && typeof data === 'object' && 'detail' in data
+          ? (data as ApiError)
+          : { detail: typeof data === 'string' && data ? data : `API Error: ${response.status}` }
+      const error = new ApiErrorResponse(response.status, errorData)
+
+      if (response.status === 401 && !isAuthEndpoint) {
+        this.handleUnauthorized(error)
       }
 
-      if (!response.ok) {
-        const error = new ApiErrorResponse(response.status, data as ApiError)
-
-        if (response.status === 401 && !endpoint.startsWith('/auth/')) {
-          this.handleUnauthorized(error)
-        }
-
-        throw error
-      }
-
-      return data as T
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        throw error
-      }
-      if (error instanceof SyntaxError && error.message.includes('JSON')) {
-        return undefined as T
-      }
-      console.error('API request failed:', error)
       throw error
     }
+
+    return data as T
   }
 
   async get<T>(endpoint: string, options?: RequestInit): Promise<T> {
