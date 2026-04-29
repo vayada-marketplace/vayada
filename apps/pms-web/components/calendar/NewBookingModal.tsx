@@ -13,6 +13,7 @@ interface NewBookingModalProps {
   initialRoomId?: string
   initialCheckIn?: string
   initialCheckOut?: string
+  connectedChannelKeys?: Set<string> | null
 }
 
 const CHANNELS = [
@@ -23,6 +24,9 @@ const CHANNELS = [
   { value: 'other', label: 'Other' },
 ]
 
+// Direct and Other are always offered regardless of channel-manager state.
+const ALWAYS_SHOWN_CHANNELS = new Set(['direct', 'other'])
+
 export default function NewBookingModal({
   roomTypes,
   rooms,
@@ -31,7 +35,13 @@ export default function NewBookingModal({
   initialRoomId,
   initialCheckIn,
   initialCheckOut,
+  connectedChannelKeys,
 }: NewBookingModalProps) {
+  const visibleChannels = connectedChannelKeys
+    ? CHANNELS.filter(
+        (ch) => ALWAYS_SHOWN_CHANNELS.has(ch.value) || connectedChannelKeys.has(ch.value)
+      )
+    : CHANNELS
   const initialRoom =
     (initialRoomId && rooms.find((r) => r.id === initialRoomId)) || rooms[0]
   const initialRoomType =
@@ -278,7 +288,7 @@ export default function NewBookingModal({
                 onChange={(e) => setChannel(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               >
-                {CHANNELS.map((ch) => (
+                {visibleChannels.map((ch) => (
                   <option key={ch.value} value={ch.value}>
                     {ch.label}
                   </option>
