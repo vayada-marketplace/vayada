@@ -179,7 +179,48 @@ class TestAdminRoomTypes:
         assert rooms_resp.status_code == 200
         rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
         assert len(rooms) == 3
-        assert {r["roomNumber"] for r in rooms} == {"1", "2", "3"}
+        assert {r["roomNumber"] for r in rooms} == {
+            "Garden King 1",
+            "Garden King 2",
+            "Garden King 3",
+        }
+
+    async def test_duplicate_room_type_auto_creates_rooms(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 2,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        original_id = create_resp.json()["id"]
+
+        dup_resp = await client.post(
+            f"/admin/room-types/{original_id}/duplicate",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert dup_resp.status_code == 201
+        clone_id = dup_resp.json()["id"]
+        assert dup_resp.json()["name"] == "Garden King (Copy)"
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rooms_resp.status_code == 200
+        clone_rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == clone_id]
+        assert len(clone_rooms) == 2
+        assert {r["roomNumber"] for r in clone_rooms} == {
+            "Garden King (Copy) 1",
+            "Garden King (Copy) 2",
+        }
 
     async def test_get_room_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]

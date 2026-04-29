@@ -104,27 +104,33 @@ def _room_to_response(r: dict) -> RoomResponse:
     )
 
 
-async def _auto_create_rooms(hotel_id: str, room_type_id: str, count: int) -> None:
+async def _auto_create_rooms(
+    hotel_id: str, room_type_id: str, count: int, room_type_name: str
+) -> None:
     """Create `count` Room records for a newly created room type.
 
-    Room numbers start after the highest existing numeric room number in the
-    hotel, so the defaults ("1", "2", "3", …) never collide with the unique
-    (hotel_id, room_number) index. Non-numeric room numbers are ignored.
-    Failures are logged but do not abort the request — the user can still
-    add rooms manually if the defaults clash.
+    Room numbers are named "{room_type_name} N" so the calendar can show e.g.
+    "#Garden King 1" instead of an opaque "#1". The starting suffix is one past
+    the highest existing "{room_type_name} N" suffix in the hotel, keeping the
+    unique (hotel_id, room_number) index satisfied even if the user re-creates
+    a room type with the same name. Failures are logged but do not abort the
+    request — the user can still add rooms manually if a default still clashes.
     """
     if count <= 0:
         return
+    prefix = f"{room_type_name} "
+    like_pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     max_num = await Database.fetchval(
         """
-        SELECT COALESCE(MAX((room_number)::int), 0)
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(room_number, '^.*[^0-9]', ''), '')::int), 0)
         FROM rooms
-        WHERE hotel_id = $1 AND room_number ~ '^[0-9]+$'
+        WHERE hotel_id = $1 AND room_number LIKE $2 ESCAPE '\\'
         """,
         hotel_id,
+        like_pattern,
     ) or 0
     for i in range(count):
-        room_number = str(max_num + i + 1)
+        room_number = f"{prefix}{max_num + i + 1}"
         try:
             await RoomRepository.create(
                 {
@@ -189,7 +195,12 @@ async def create_room_type(
     if not payload.get("daily_rates"):
         payload["daily_rates"] = {}
     room = await RoomTypeRepository.create(hotel_id, payload)
-    await _auto_create_rooms(hotel_id, str(room["id"]), int(payload.get("total_rooms") or 0))
+    await _auto_create_rooms(
+        hotel_id,
+        str(room["id"]),
+        int(payload.get("total_rooms") or 0),
+        room["name"],
+    )
     return _room_to_admin(room)
 
 
@@ -284,6 +295,12 @@ async def duplicate_room_type(
         "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("rate_payment_methods"))),
     }
     room = await RoomTypeRepository.create(hotel_id, clone_data)
+    await _auto_create_rooms(
+        hotel_id,
+        str(room["id"]),
+        int(clone_data.get("total_rooms") or 0),
+        room["name"],
+    )
     return _room_to_admin(room)
 
 
