@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from app.config import settings as app_settings
 from app.dependencies import require_hotel_admin
-from app.database import Database, AuthDatabase, BookingEngineDatabase
+from app.database import AuthDatabase, BookingEngineDatabase
 from app.utils import get_hotel_id, parse_jsonb
+from app.repositories.hotel_repo import HotelRepository
 from app.models.hotel import (
     HotelRegister,
     HotelResponse,
@@ -20,6 +21,42 @@ from app.models.hotel import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _hotel_response(row: dict, slug: str = None, name: str = None, contact_email: str = None) -> HotelResponse:
+    """Build a HotelResponse from a basic-shape row, optionally overriding
+    fields with values the caller is about to write."""
+    return HotelResponse(
+        id=str(row["id"]),
+        slug=slug if slug is not None else row["slug"],
+        name=name if name is not None else row["name"],
+        contact_email=contact_email if contact_email is not None else row["contact_email"],
+        user_id=str(row["user_id"]),
+        created_at=row["created_at"].isoformat(),
+    )
+
+
+def _hotel_to_dict(row: dict) -> dict:
+    """Serialize a full hotel row for the GET/PATCH endpoints."""
+    lm = row.get("last_minute_discount")
+    return {
+        "id": str(row["id"]),
+        "slug": row["slug"],
+        "name": row["name"],
+        "contact_email": row.get("contact_email", ""),
+        "property_type": row.get("property_type", "guest_house"),
+        "timezone": row.get("timezone", ""),
+        "country": row.get("country", ""),
+        "state": row.get("state", ""),
+        "city": row.get("city", ""),
+        "address": row.get("address", ""),
+        "zip_code": row.get("zip_code", ""),
+        "phone": row.get("phone", ""),
+        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
+        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
+        "last_minute_discount": json.loads(lm) if isinstance(lm, str) else lm,
+        "instant_book": bool(row.get("instant_book", False)),
+    }
 
 
 # ── Hotel Registration ─────────────────────────────────────────────
@@ -49,10 +86,7 @@ async def register_hotel(
        already has one, which is the old bug we're trying to kill.
     """
     if data.booking_hotel_id:
-        existing = await Database.fetchrow(
-            "SELECT id, slug, name, contact_email, user_id, created_at FROM hotels WHERE id = $1",
-            data.booking_hotel_id,
-        )
+        existing = await HotelRepository.get_by_id(data.booking_hotel_id)
         if existing:
             if str(existing["user_id"]) != user_id:
                 raise HTTPException(
@@ -64,37 +98,16 @@ async def register_hotel(
                 or existing["name"] != data.name
                 or existing["contact_email"] != data.contact_email
             ):
-                await Database.execute(
-                    "UPDATE hotels SET slug = $1, name = $2, contact_email = $3 WHERE id = $4",
-                    data.slug, data.name, data.contact_email, str(existing["id"]),
+                await HotelRepository.update_basic(
+                    str(existing["id"]), data.slug, data.name, data.contact_email,
                 )
-            return HotelResponse(
-                id=str(existing["id"]),
-                slug=data.slug,
-                name=data.name,
-                contact_email=data.contact_email,
-                user_id=str(existing["user_id"]),
-                created_at=existing["created_at"].isoformat(),
-            )
+            return _hotel_response(existing, data.slug, data.name, data.contact_email)
 
-        row = await Database.fetchrow(
-            """INSERT INTO hotels (id, slug, name, contact_email, user_id)
-               VALUES ($1, $2, $3, $4, $5)
-               RETURNING id, slug, name, contact_email, user_id, created_at""",
-            data.booking_hotel_id,
-            data.slug,
-            data.name,
-            data.contact_email,
-            user_id,
+        row = await HotelRepository.create(
+            data.slug, data.name, data.contact_email, user_id,
+            hotel_id=data.booking_hotel_id,
         )
-        return HotelResponse(
-            id=str(row["id"]),
-            slug=row["slug"],
-            name=row["name"],
-            contact_email=row["contact_email"],
-            user_id=str(row["user_id"]),
-            created_at=row["created_at"].isoformat(),
-        )
+        return _hotel_response(row)
 
     # Legacy path — no booking_hotel_id. Warn and fall back to the
     # single-hotel-per-user behavior.
@@ -104,42 +117,16 @@ async def register_hotel(
         "must be updated to pass booking_hotel_id.",
         user_id, data.slug,
     )
-    existing = await Database.fetchrow(
-        "SELECT id, slug, name, contact_email, user_id, created_at FROM hotels WHERE user_id = $1",
-        user_id,
-    )
+    existing = await HotelRepository.get_oldest_for_user(user_id)
     if existing:
         if existing["slug"] != data.slug or existing["name"] != data.name:
-            await Database.execute(
-                "UPDATE hotels SET slug = $1, name = $2, contact_email = $3 WHERE id = $4",
-                data.slug, data.name, data.contact_email, str(existing["id"]),
+            await HotelRepository.update_basic(
+                str(existing["id"]), data.slug, data.name, data.contact_email,
             )
-        return HotelResponse(
-            id=str(existing["id"]),
-            slug=data.slug,
-            name=data.name,
-            contact_email=data.contact_email,
-            user_id=str(existing["user_id"]),
-            created_at=existing["created_at"].isoformat(),
-        )
+        return _hotel_response(existing, data.slug, data.name, data.contact_email)
 
-    row = await Database.fetchrow(
-        """INSERT INTO hotels (slug, name, contact_email, user_id)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id, slug, name, contact_email, user_id, created_at""",
-        data.slug,
-        data.name,
-        data.contact_email,
-        user_id,
-    )
-    return HotelResponse(
-        id=str(row["id"]),
-        slug=row["slug"],
-        name=row["name"],
-        contact_email=row["contact_email"],
-        user_id=str(row["user_id"]),
-        created_at=row["created_at"].isoformat(),
-    )
+    row = await HotelRepository.create(data.slug, data.name, data.contact_email, user_id)
+    return _hotel_response(row)
 
 
 @router.get("/hotel")
@@ -151,31 +138,10 @@ async def get_hotel(user_id: str = Depends(require_hotel_admin)):
     as every other admin endpoint).
     """
     hotel_id = await get_hotel_id(user_id)
-    row = await Database.fetchrow(
-        "SELECT * FROM hotels WHERE id = $1", hotel_id
-    )
+    row = await HotelRepository.get_by_id(hotel_id)
     if not row:
         raise HTTPException(status_code=404, detail="Hotel not found")
-    import json as _json
-    lm = row.get("last_minute_discount")
-    return {
-        "id": str(row["id"]),
-        "slug": row["slug"],
-        "name": row["name"],
-        "contact_email": row["contact_email"],
-        "property_type": row.get("property_type", "guest_house"),
-        "timezone": row.get("timezone", ""),
-        "country": row.get("country", ""),
-        "state": row.get("state", ""),
-        "city": row.get("city", ""),
-        "address": row.get("address", ""),
-        "zip_code": row.get("zip_code", ""),
-        "phone": row.get("phone", ""),
-        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
-        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
-        "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
-        "instant_book": bool(row.get("instant_book", False)),
-    }
+    return _hotel_to_dict(row)
 
 
 @router.patch("/hotel")
@@ -183,36 +149,11 @@ async def update_hotel(
     data: dict,
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Update hotel details (slug, name, email, last_minute_discount)."""
-    import json as _json
+    """Update hotel details (slug, name, email, last_minute_discount, etc.)."""
     hotel_id = await get_hotel_id(user_id)
-    hotel = {"id": hotel_id}
-
-    set_clauses = []
-    values = []
-    idx = 1
-    for field in ("slug", "name", "contact_email", "last_minute_discount",
-                   "property_type", "timezone", "country", "state", "city",
-                   "address", "zip_code", "phone", "latitude", "longitude",
-                   "instant_book"):
-        if field in data:
-            val = data[field]
-            if field == "last_minute_discount":
-                set_clauses.append(f"{field} = ${idx}::jsonb")
-                values.append(_json.dumps(val) if val is not None else None)
-            else:
-                set_clauses.append(f"{field} = ${idx}")
-                values.append(val)
-            idx += 1
-
-    if not set_clauses:
+    row = await HotelRepository.update_fields(hotel_id, data)
+    if not row:
         raise HTTPException(status_code=400, detail="No fields to update")
-
-    values.append(str(hotel["id"]))
-    row = await Database.fetchrow(
-        f"UPDATE hotels SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *",
-        *values,
-    )
 
     # Sync instant_book to booking_db so the booking-engine frontend (which
     # reads /api/hotels/{slug} from the BE backend) can adjust the checkout
@@ -223,7 +164,7 @@ async def update_hotel(
         try:
             await BookingEngineDatabase.execute(
                 "UPDATE booking_hotels SET instant_book = $2 WHERE id = $1",
-                str(hotel["id"]), bool(data["instant_book"]),
+                hotel_id, bool(data["instant_book"]),
             )
         except Exception as e:
             logger.error("Failed to sync instant_book to booking engine: %s", e)
@@ -232,25 +173,7 @@ async def update_hotel(
                 detail="Failed to sync booking-acceptance setting to booking engine. Please retry.",
             )
 
-    lm = row.get("last_minute_discount")
-    return {
-        "id": str(row["id"]),
-        "slug": row["slug"],
-        "name": row["name"],
-        "contact_email": row.get("contact_email", ""),
-        "property_type": row.get("property_type", "guest_house"),
-        "timezone": row.get("timezone", ""),
-        "country": row.get("country", ""),
-        "state": row.get("state", ""),
-        "city": row.get("city", ""),
-        "address": row.get("address", ""),
-        "zip_code": row.get("zip_code", ""),
-        "phone": row.get("phone", ""),
-        "latitude": float(row["latitude"]) if row.get("latitude") is not None else None,
-        "longitude": float(row["longitude"]) if row.get("longitude") is not None else None,
-        "last_minute_discount": _json.loads(lm) if isinstance(lm, str) else lm,
-        "instant_book": bool(row.get("instant_book", False)),
-    }
+    return _hotel_to_dict(row)
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)
@@ -270,22 +193,17 @@ async def get_setup_status(
     header_id = _current_hotel_id_override.get()
     if header_id:
         # Header mode: find the specific hotel, don't auto-create.
-        hotel = await Database.fetchrow(
-            "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
-            header_id, user_id,
-        )
-        if not hotel:
+        owned_id = await HotelRepository.get_owned_id(header_id, user_id)
+        if not owned_id:
             raise HTTPException(
                 status_code=403,
                 detail="X-Hotel-Id does not match any hotel owned by this user",
             )
+        hotel_id = owned_id
     else:
-        hotel = await Database.fetchrow(
-            "SELECT id FROM hotels WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",
-            user_id,
-        )
+        oldest = await HotelRepository.get_oldest_for_user(user_id)
         # Auto-register: if no PMS hotel exists yet, create one from the auth profile
-        if not hotel:
+        if not oldest:
             try:
                 user = await AuthDatabase.fetchrow(
                     "SELECT name, email FROM users WHERE id = $1", user_id
@@ -297,25 +215,17 @@ async def get_setup_status(
                     slug = base_slug or "hotel"
                     # Append short suffix to avoid slug collisions
                     slug = f"{slug}-{uuid.uuid4().hex[:6]}"
-                    hotel = await Database.fetchrow(
-                        """INSERT INTO hotels (slug, name, contact_email, user_id)
-                           VALUES ($1, $2, $3, $4)
-                           RETURNING id""",
-                        slug,
-                        user["name"],
-                        user["email"],
-                        user_id,
+                    oldest = await HotelRepository.create(
+                        slug, user["name"], user["email"], user_id,
                     )
             except Exception as e:
                 logger.error(f"Auto-register hotel failed for user {user_id}: {e}")
 
-    if not hotel:
-        return SetupStatusResponse(registered=False, setup_complete=False, room_count=0)
+        if not oldest:
+            return SetupStatusResponse(registered=False, setup_complete=False, room_count=0)
+        hotel_id = str(oldest["id"])
 
-    hotel_id = str(hotel["id"])
-    room_count = await Database.fetchval(
-        "SELECT COUNT(*) FROM room_types WHERE hotel_id = $1", hotel_id
-    )
+    room_count = await HotelRepository.count_room_types(hotel_id)
     return SetupStatusResponse(
         registered=True,
         setup_complete=room_count > 0,
@@ -329,10 +239,8 @@ async def get_setup_status(
 @router.get("/benefits", response_model=HotelBenefitsResponse)
 async def get_benefits(user_id: str = Depends(require_hotel_admin)):
     hotel_id = await get_hotel_id(user_id)
-    row = await Database.fetchrow(
-        "SELECT benefits FROM hotels WHERE id = $1", hotel_id
-    )
-    return HotelBenefitsResponse(benefits=parse_jsonb(row["benefits"]) if row else [])
+    raw = await HotelRepository.get_benefits_raw(hotel_id)
+    return HotelBenefitsResponse(benefits=parse_jsonb(raw) if raw is not None else [])
 
 
 @router.put("/benefits", response_model=HotelBenefitsResponse)
@@ -341,11 +249,7 @@ async def update_benefits(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
-    await Database.execute(
-        "UPDATE hotels SET benefits = $1::jsonb WHERE id = $2",
-        json.dumps(data.benefits),
-        hotel_id,
-    )
+    await HotelRepository.update_benefits(hotel_id, data.benefits)
     return HotelBenefitsResponse(benefits=data.benefits)
 
 
@@ -355,11 +259,7 @@ async def update_benefits(
 @router.get("/guest-form-settings", response_model=GuestFormSettingsResponse)
 async def get_guest_form_settings(user_id: str = Depends(require_hotel_admin)):
     hotel_id = await get_hotel_id(user_id)
-    row = await Database.fetchrow(
-        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
-        "FROM hotels WHERE id = $1",
-        hotel_id,
-    )
+    row = await HotelRepository.get_guest_form_settings(hotel_id)
     if not row:
         return GuestFormSettingsResponse()
     return GuestFormSettingsResponse(
@@ -376,19 +276,8 @@ async def update_guest_form_settings(
 ):
     hotel_id = await get_hotel_id(user_id)
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
-    if updates:
-        set_clauses = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(updates))
-        values = list(updates.values())
-        values.append(hotel_id)
-        await Database.execute(
-            f"UPDATE hotels SET {set_clauses} WHERE id = ${len(values)}",
-            *values,
-        )
-    row = await Database.fetchrow(
-        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
-        "FROM hotels WHERE id = $1",
-        hotel_id,
-    )
+    await HotelRepository.update_guest_form_settings(hotel_id, updates)
+    row = await HotelRepository.get_guest_form_settings(hotel_id)
     return GuestFormSettingsResponse(
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
