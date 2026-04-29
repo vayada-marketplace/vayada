@@ -191,8 +191,31 @@ class DashboardRepository:
         ]}
 
     @staticmethod
+    def _sparkline_buckets(range_key: str) -> list[tuple[date, date]]:
+        """7 contiguous, non-overlapping date buckets ending today.
+
+        - "today" / "week": one day per bucket, last 7 days
+        - "month": four days per bucket, last 28 days
+
+        The previous "month" implementation produced gappy/overlapping
+        windows of mixed widths (e.g. bucket 0 was 1 day, others 5–6
+        days, with a single-day overlap at every boundary)."""
+        today = date.today()
+        if range_key == "month":
+            return [
+                (
+                    today - timedelta(days=27 - i * 4),
+                    today - timedelta(days=27 - (i + 1) * 4 + 1) if i < 6 else today,
+                )
+                for i in range(7)
+            ]
+        return [(today - timedelta(days=6 - i),) * 2 for i in range(7)]
+
+    @staticmethod
     async def get_sparklines(hotel: dict, range_key: str = "today") -> dict:
-        """Return 7-point sparkline data for each stat."""
+        """Return 7-point sparkline data for each stat. Two grouped
+        queries (bookings, page-view events) instead of the previous 14
+        per-bucket round-trips."""
         hotel_id = str(hotel["id"]) if hotel else None
         hotel_slug = hotel.get("slug") if hotel else None
         if not hotel_id:
@@ -203,48 +226,42 @@ class DashboardRepository:
                 "page_views": [0] * 7,
             }
 
-        today = date.today()
-        days = []
-        if range_key == "month":
-            for i in range(7):
-                d_start = today - timedelta(days=29 - i * 4)
-                d_end = today - timedelta(days=max(0, 29 - (i + 1) * 4 + 1))
-                days.append((d_start, d_end))
-        elif range_key == "week":
-            for i in range(7):
-                d = today - timedelta(days=6 - i)
-                days.append((d, d))
-        else:
-            for i in range(7):
-                d = today - timedelta(days=6 - i)
-                days.append((d, d))
+        days = DashboardRepository._sparkline_buckets(range_key)
+        window_start = days[0][0]
+        window_end = days[-1][1]
 
-        revenue = []
-        bookings = []
-        avg_rate = []
-        page_views = []
+        # All bookings in the window, fetched once and bucketed in Python.
+        booking_rows = await PmsDatabase.fetch(
+            """
+            SELECT created_at::date AS d, total_amount, nightly_rate
+            FROM bookings
+            WHERE hotel_id = $1
+              AND status = 'confirmed'
+              AND created_at::date >= $2 AND created_at::date <= $3
+            """,
+            hotel_id, window_start, window_end,
+        )
+
+        # Page-view counts in the window — also one query.
+        page_view_by_day: dict[date, int] = {}
+        if hotel_slug:
+            page_view_by_day = await EventRepository.count_by_day(
+                hotel_slug, "page_visit", window_start, window_end,
+            )
+
+        revenue: list[float] = []
+        bookings: list[int] = []
+        avg_rate: list[float] = []
+        page_views: list[int] = []
 
         for d_start, d_end in days:
-            row = await PmsDatabase.fetchrow(
-                """
-                SELECT
-                    COALESCE(SUM(total_amount), 0) as rev,
-                    COUNT(*) as cnt,
-                    COALESCE(AVG(nightly_rate), 0) as rate
-                FROM bookings
-                WHERE hotel_id = $1
-                  AND status = 'confirmed'
-                  AND created_at::date >= $2 AND created_at::date <= $3
-                """,
-                hotel_id, d_start, d_end,
-            )
-            revenue.append(float(row["rev"]))
-            bookings.append(row["cnt"])
-            avg_rate.append(round(float(row["rate"]), 2))
+            bucket = [r for r in booking_rows if d_start <= r["d"] <= d_end]
+            revenue.append(sum(float(r["total_amount"]) for r in bucket))
+            bookings.append(len(bucket))
+            rates = [float(r["nightly_rate"]) for r in bucket]
+            avg_rate.append(round(sum(rates) / len(rates), 2) if rates else 0)
 
-            pv = 0
-            if hotel_slug:
-                pv = await EventRepository.count_by_type(hotel_slug, "page_visit", d_start, d_end)
+            pv = sum(c for d, c in page_view_by_day.items() if d_start <= d <= d_end)
             page_views.append(pv)
 
         return {

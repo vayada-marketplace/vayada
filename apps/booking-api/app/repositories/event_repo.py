@@ -52,3 +52,22 @@ class EventRepository:
             hotel_slug, start, end,
         )
         return {row["event_type"]: row["cnt"] for row in rows}
+
+    @staticmethod
+    async def count_by_day(
+        hotel_slug: str, event_type: str, start: date, end: date,
+    ) -> dict[date, int]:
+        """Return a date → count map for sparkline-style charts. Uses a
+        single query so the dashboard doesn't fan out to one query per
+        bucket."""
+        rows = await Database.fetch(
+            """
+            SELECT created_at::date AS d, COUNT(*) AS cnt
+            FROM booking_events
+            WHERE hotel_slug = $1 AND event_type = $2
+              AND created_at::date >= $3 AND created_at::date <= $4
+            GROUP BY created_at::date
+            """,
+            hotel_slug, event_type, start, end,
+        )
+        return {row["d"]: row["cnt"] for row in rows}
