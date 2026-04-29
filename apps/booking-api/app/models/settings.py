@@ -102,7 +102,9 @@ class PropertySettingsUpdate(BaseModel):
     facebook: Optional[str] = None
     tiktok: Optional[str] = None
     youtube: Optional[str] = None
-    billing_active_plan: Optional[str] = None
+    # billing_active_plan is intentionally not exposed here: the active plan
+    # only flips via the pending-switch flow (see _apply_pending_plan_switch_if_due).
+    # Direct PATCH would bypass the scheduled effective date.
     billing_commission_rate: Optional[float] = None
     billing_fixed_fee: Optional[float] = None
     billing_pending_switch: Optional[str] = None

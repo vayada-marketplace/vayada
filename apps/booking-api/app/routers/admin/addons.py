@@ -11,23 +11,9 @@ from app.models.addon import (
     AddonSettingsResponse,
     AddonSettingsUpdate,
 )
+from app.models.utils import parse_json_list
 
 router = APIRouter()
-
-
-def _parse_json_list(value) -> list[str]:
-    """Parse a JSONB value that may already be a list or a JSON string."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, list) else []
-        except (json.JSONDecodeError, TypeError):
-            return []
-    return []
 
 
 def _addon_to_response(row: dict) -> AddonResponse:
@@ -44,8 +30,8 @@ def _addon_to_response(row: dict) -> AddonResponse:
         per_night=row.get("per_night"),
         location=row.get("location", ""),
         max_guests=row.get("max_guests", ""),
-        highlights=_parse_json_list(row.get("highlights")),
-        included_items=_parse_json_list(row.get("included_items")),
+        highlights=parse_json_list(row.get("highlights")),
+        included_items=parse_json_list(row.get("included_items")),
     )
 
 

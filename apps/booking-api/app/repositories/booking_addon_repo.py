@@ -88,10 +88,3 @@ class BookingAddonRepository:
             addon_id, hotel_id,
         )
         return result == "DELETE 1"
-
-    @staticmethod
-    async def count_by_hotel_id(hotel_id: str) -> int:
-        return await Database.fetchval(
-            "SELECT COUNT(*) FROM booking_addons WHERE hotel_id = $1",
-            hotel_id,
-        )

@@ -3,14 +3,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from app.dependencies import require_current_hotel
 from app.database import Database
+from app.models.utils import parse_json
 
 router = APIRouter()
-
-
-def _parse_jsonb(val):
-    if isinstance(val, str):
-        return json.loads(val)
-    return val if val is not None else []
 
 
 class BenefitsResponse(BaseModel):
@@ -34,7 +29,7 @@ async def get_benefits(hotel: dict = Depends(require_current_hotel)):
         "SELECT benefits FROM booking_hotels WHERE id = $1", str(hotel["id"])
     )
     return BenefitsResponse(
-        benefits=_parse_jsonb(row["benefits"]) if row else []
+        benefits=parse_json(row["benefits"]) if row else []
     )
 
 

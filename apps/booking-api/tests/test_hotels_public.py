@@ -1,5 +1,5 @@
 """
-Tests for /api/hotels public endpoints — hotel details, rooms, addons, exchange rates.
+Tests for /api/hotels public endpoints — hotel details, addons, exchange rates.
 """
 
 
@@ -50,19 +50,6 @@ class TestGetHotel:
         resp = await client.get(f"/api/hotels/{hotel['slug']}")
         assert resp.status_code == 200
         assert resp.json()["instantBook"] is True
-
-
-class TestGetRooms:
-    async def test_get_rooms_empty(self, client, hotel_with_property):
-        hotel = hotel_with_property["hotel"]
-        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-    async def test_get_rooms_nonexistent_slug(self, client):
-        resp = await client.get("/api/hotels/nonexistent-slug/rooms")
-        assert resp.status_code == 200
-        assert resp.json() == []
 
 
 class TestGetAddons:

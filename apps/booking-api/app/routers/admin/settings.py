@@ -169,7 +169,8 @@ _PROPERTY_FIELD_MAP = {
     "facebook": "social_facebook",
     "tiktok": "social_tiktok",
     "youtube": "social_youtube",
-    "billing_active_plan": "billing_active_plan",
+    # billing_active_plan deliberately omitted — it flips via the pending-switch
+    # flow only (see _apply_pending_plan_switch_if_due), never via PATCH.
     "billing_commission_rate": "billing_commission_rate",
     "billing_fixed_fee": "billing_fixed_fee",
     "billing_pending_switch": "billing_pending_switch",

@@ -52,8 +52,3 @@ class EventRepository:
             hotel_slug, start, end,
         )
         return {row["event_type"]: row["cnt"] for row in rows}
-
-    @staticmethod
-    async def count_by_date_range(hotel_slug: str, event_type: str, start: date, end: date) -> int:
-        """Alias for count_by_type, used by sparklines."""
-        return await EventRepository.count_by_type(hotel_slug, event_type, start, end)

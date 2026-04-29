@@ -1,11 +1,10 @@
 import logging
 from typing import List
 from fastapi import APIRouter, HTTPException, Query
-from app.models.hotel import HotelResponse, RoomTypeResponse, AddonResponse
+from app.models.hotel import HotelResponse, AddonResponse
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.services.hotel_service import (
     get_hotel_by_slug,
-    get_rooms_by_hotel_slug,
     get_addons_by_hotel_slug,
 )
 from app.services.exchange_rate_service import get_rates
@@ -23,11 +22,6 @@ async def get_hotel(slug: str, lang: str = "en"):
     if not hotel:
         raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
     return hotel
-
-
-@router.get("/{slug}/rooms", response_model=List[RoomTypeResponse])
-async def get_rooms(slug: str):
-    return await get_rooms_by_hotel_slug(slug)
 
 
 @router.get("/{slug}/addons", response_model=List[AddonResponse])

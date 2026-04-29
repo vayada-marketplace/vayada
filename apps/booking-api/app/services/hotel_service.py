@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Optional, List
 from app.repositories.booking_hotel_repo import BookingHotelRepository
@@ -8,10 +7,9 @@ from app.models.hotel import (
     HotelContact,
     HotelSocialLinks,
     HotelBranding,
-    RoomTypeResponse,
     AddonResponse,
 )
-from app.models.utils import parse_json
+from app.models.utils import parse_json, parse_json_list
 
 logger = logging.getLogger(__name__)
 
@@ -87,28 +85,11 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     )
 
 
-async def get_rooms_by_hotel_slug(slug: str) -> List[RoomTypeResponse]:
-    return []
-
-
 async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
     hotel = await BookingHotelRepository.get_by_slug(slug)
     if not hotel or not hotel.get("show_addons_step", True):
         return []
     rows = await BookingAddonRepository.list_by_hotel_id(str(hotel["id"]))
-    def _parse_json_list(value) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-                return parsed if isinstance(parsed, list) else []
-            except (json.JSONDecodeError, TypeError):
-                return []
-        return []
-
     return [
         AddonResponse(
             id=str(row["id"]),
@@ -123,8 +104,8 @@ async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
             per_night=row.get("per_night"),
             location=row.get("location", ""),
             max_guests=row.get("max_guests", ""),
-            highlights=_parse_json_list(row.get("highlights")),
-            included_items=_parse_json_list(row.get("included_items")),
+            highlights=parse_json_list(row.get("highlights")),
+            included_items=parse_json_list(row.get("included_items")),
         )
         for row in rows
     ]

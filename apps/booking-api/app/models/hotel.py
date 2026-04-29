@@ -61,24 +61,6 @@ class HotelResponse(BaseModel):
     instant_book: bool = False
 
 
-class RoomTypeResponse(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-    id: str
-    name: str
-    description: str
-    short_description: str
-    max_occupancy: int
-    size: int
-    base_rate: float
-    currency: str
-    amenities: List[str]
-    images: List[str]
-    bed_type: str
-    remaining_rooms: int
-    features: List[str]
-
-
 # Re-export addon models for backwards compatibility
 from app.models.addon import (  # noqa: E402, F401
     AddonResponse,
