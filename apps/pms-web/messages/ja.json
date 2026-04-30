@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "最初のチェックアウト: 11:00",
   "dashboard.noDepartures": "本日の出発なし",
   "dashboard.revenueThisMonth": "今月の収益",
-  "dashboard.last30Days": "過去30日間",
+  "dashboard.monthToDate": "月初から本日まで",
   "dashboard.viewAll": "すべて表示",
   "dashboard.confirmed": "確認済み",
   "dashboard.settled": "精算済み",

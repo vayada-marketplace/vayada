@@ -76,18 +76,17 @@ export default function DashboardPage() {
 
   const occupancyPct = totalRooms > 0 ? Math.round((occupiedTonight / totalRooms) * 100) : 0
 
-  const thirtyDaysAgoStr = useMemo(() => {
+  const monthStartStr = useMemo(() => {
     const d = new Date()
-    d.setDate(d.getDate() - 30)
-    return d.toISOString().split('T')[0]
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
   }, [])
 
   const revenueThisMonth = useMemo(
     () =>
       bookings
-        .filter(b => b.checkIn >= thirtyDaysAgoStr)
+        .filter(b => b.checkIn >= monthStartStr)
         .reduce((sum, b) => sum + b.totalAmount, 0),
-    [bookings, thirtyDaysAgoStr]
+    [bookings, monthStartStr]
   )
 
   const forecastDays = useMemo(() => {
@@ -176,7 +175,7 @@ export default function DashboardPage() {
         <StatCard
           label={t('dashboard.revenueThisMonth')}
           value={formatCurrency(revenueThisMonth, hotelCurrency)}
-          sub={t('dashboard.last30Days')}
+          sub={t('dashboard.monthToDate')}
           icon={<DollarIcon />}
         />
       </div>
