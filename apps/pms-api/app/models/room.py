@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import List, Optional
 
 
 def to_camel(string: str) -> str:
@@ -40,3 +40,9 @@ class RoomResponse(BaseModel):
     sort_order: int
     created_at: str
     updated_at: str
+
+
+class RoomReorder(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ordered_room_ids: List[str]

@@ -10,7 +10,7 @@ from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
-from app.models.room import RoomCreate, RoomUpdate, RoomResponse
+from app.models.room import RoomCreate, RoomReorder, RoomUpdate, RoomResponse
 from app.models.calendar import (
     CalendarResponse,
     CalendarRoomType,
@@ -81,6 +81,38 @@ async def create_room(
             detail="A room with this number already exists",
         )
     return _room_to_response(room)
+
+
+@router.patch("/rooms/reorder", status_code=204)
+async def reorder_rooms(
+    data: RoomReorder,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Persist a new vertical room order for the PMS Calendar (VAY-307).
+
+    Rejects partial lists — caller must send all of the hotel's room
+    IDs to keep the per-property order globally consistent. Order is
+    saved per property; nothing is stored per user.
+    """
+    hotel_id = await get_hotel_id(user_id)
+
+    if not data.ordered_room_ids:
+        raise HTTPException(status_code=400, detail="orderedRoomIds is required")
+
+    if len(set(data.ordered_room_ids)) != len(data.ordered_room_ids):
+        raise HTTPException(status_code=400, detail="orderedRoomIds contains duplicates")
+
+    existing_rooms = await RoomRepository.list_by_hotel_id(hotel_id)
+    existing_ids = {str(r["id"]) for r in existing_rooms}
+    submitted_ids = set(data.ordered_room_ids)
+    if submitted_ids != existing_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="orderedRoomIds must contain every room of this hotel exactly once",
+        )
+
+    pairs = [(rid, idx + 1) for idx, rid in enumerate(data.ordered_room_ids)]
+    await RoomRepository.bulk_set_sort_order(hotel_id, pairs)
 
 
 @router.patch("/rooms/{room_id}", response_model=RoomResponse)
