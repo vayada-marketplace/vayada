@@ -293,7 +293,7 @@ async def create_collaboration(
         raise
     except Exception as e:
         logger.error(f"Error creating collaboration: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 @router.post("/{collaboration_id}/respond", response_model=CollaborationResponse)
@@ -458,7 +458,7 @@ async def respond_to_collaboration_request(
         raise
     except Exception as e:
         logger.error(f"Error responding to collaboration: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 
@@ -688,7 +688,7 @@ async def update_collaboration_terms(
         raise
     except Exception as e:
         logger.error(f"Error updating terms: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 @router.post("/{collaboration_id}/approve", response_model=CollaborationResponse)
@@ -819,7 +819,7 @@ async def approve_collaboration_terms(
         raise
     except Exception as e:
         logger.error(f"Error approving: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 @router.post("/{collaboration_id}/cancel", response_model=CollaborationResponse)
@@ -910,7 +910,7 @@ async def cancel_collaboration(
         raise
     except Exception as e:
         logger.error(f"Error cancelling: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 @router.post("/{collaboration_id}/deliverables/{deliverable_id}/toggle", response_model=CollaborationResponse)
@@ -968,7 +968,7 @@ async def toggle_deliverable(
         raise
     except Exception as e:
         logger.error(f"Error toggling: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 
 @router.post("/{collaboration_id}/rate", response_model=RateCollaborationResponse)
@@ -1053,4 +1053,4 @@ async def rate_collaboration(
         raise
     except Exception as e:
         logger.error(f"Error rating collaboration: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise

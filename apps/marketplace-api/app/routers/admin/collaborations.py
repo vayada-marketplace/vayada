@@ -134,7 +134,7 @@ async def get_admin_collaborations(
         logger.error(f"Error fetching admin collaborations: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaborations: {str(e)}"
+            detail="Failed to fetch collaborations"
         )
 
 

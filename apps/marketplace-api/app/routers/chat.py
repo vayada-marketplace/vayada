@@ -124,9 +124,5 @@ async def mark_messages_as_read(
     Mark all messages in a collaboration as read for the current user.
     Logic: Mark all messages where sender is NOT the current user (or is system/NULL).
     """
-    try:
-        await ChatRepository.mark_as_read(collaboration_id, user_id)
-        return {"status": "success", "message": "Messages marked as read"}
-    except Exception as e:
-        logger.error(f"Error marking messages as read: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    await ChatRepository.mark_as_read(collaboration_id, user_id)
+    return {"status": "success", "message": "Messages marked as read"}

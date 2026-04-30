@@ -155,7 +155,7 @@ async def get_hotel_profile_status(user_id: str = Depends(get_current_user_id_al
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get profile status: {str(e)}"
+            detail="Failed to get profile status"
         )
 
 
@@ -273,7 +273,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get profile: {str(e)}"
+            detail="Failed to get profile"
         )
 
 
@@ -449,7 +449,7 @@ async def update_hotel_profile(
                 logger.error(f"Error uploading picture: {e}")
                 raise HTTPException(
                     status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to upload picture: {str(e)}"
+                    detail="Failed to upload picture"
                 )
         
         # Build dynamic UPDATE query for hotel_profiles table
@@ -635,7 +635,7 @@ async def update_hotel_profile(
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update profile: {str(e)}"
+            detail="Failed to update profile"
         )
 
 
@@ -671,7 +671,7 @@ async def create_hotel_listing(
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create listing: {str(e)}"
+            detail="Failed to create listing"
         )
 
 
@@ -725,7 +725,7 @@ async def update_hotel_listing(
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update listing: {str(e)}"
+            detail="Failed to update listing"
         )
 
 
@@ -755,7 +755,7 @@ async def delete_hotel_listing(
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete listing: {str(e)}"
+            detail="Failed to delete listing"
         )
 
 
@@ -865,7 +865,7 @@ async def get_hotel_collaborations(
         logger.exception("Failed to fetch hotel collaborations")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaborations: {str(e)}"
+            detail="Failed to fetch collaborations"
         )
 
 
@@ -1045,6 +1045,6 @@ async def get_hotel_collaboration_detail(
         logger.error(f"Error fetching collaboration detail: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaboration details: {str(e)}"
+            detail="Failed to fetch collaboration details"
         )
 

@@ -116,7 +116,7 @@ async def get_users(
         logger.error(f"Error fetching users: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch users: {str(e)}"
+            detail="Failed to fetch users"
         )
 
 
@@ -313,7 +313,7 @@ async def get_user_details(
         logger.error(f"Error fetching user details: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch user details: {str(e)}"
+            detail="Failed to fetch user details"
         )
 
 
@@ -508,7 +508,7 @@ async def create_user(
         logger.error(f"Error creating user: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}"
+            detail="Failed to create user"
         )
 
 
@@ -700,7 +700,7 @@ async def update_creator_profile(
         logger.error(f"Error updating creator profile: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update creator profile: {str(e)}"
+            detail="Failed to update creator profile"
         )
 
 
@@ -810,7 +810,7 @@ async def update_hotel_profile(
         logger.error(f"Error updating hotel profile: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update hotel profile: {str(e)}"
+            detail="Failed to update hotel profile"
         )
 
 
@@ -940,7 +940,7 @@ async def update_user(
         logger.error(f"Error updating user: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update user: {str(e)}"
+            detail="Failed to update user"
         )
 
 
@@ -1024,5 +1024,5 @@ async def delete_user(
         logger.error(f"Error deleting user: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete user: {str(e)}"
+            detail="Failed to delete user"
         )

@@ -3,8 +3,10 @@ Main FastAPI application
 """
 import asyncio
 import logging
-from fastapi import FastAPI
+import traceback
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.database import Database, AuthDatabase, PmsDatabase, check_database_connection
 from app.config import settings
@@ -86,6 +88,19 @@ app.add_middleware(
     allow_methods=settings.cors_methods_list,
     allow_headers=settings.cors_headers_list,
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all so DB error text and stack traces never leak to clients."""
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: "
+        f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/")

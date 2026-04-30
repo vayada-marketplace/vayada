@@ -122,7 +122,7 @@ async def get_all_listings():
         logger.error(f"Error fetching listings for marketplace: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch listings: {str(e)}"
+            detail="Failed to fetch listings"
         )
 
 
@@ -232,6 +232,6 @@ async def get_all_creators(
         logger.error(f"Error fetching creators for marketplace: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch creators: {str(e)}"
+            detail="Failed to fetch creators"
         )
 

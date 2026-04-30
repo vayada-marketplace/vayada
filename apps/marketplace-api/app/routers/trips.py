@@ -66,7 +66,7 @@ async def create_trip(
         logger.error(f"Error creating trip: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create trip: {str(e)}"
+            detail="Failed to create trip"
         )
 
 
@@ -122,7 +122,7 @@ async def list_trips(
         logger.error(f"Error listing trips: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list trips: {str(e)}"
+            detail="Failed to list trips"
         )
 
 
@@ -181,7 +181,7 @@ async def get_trip(
         logger.error(f"Error getting trip: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get trip: {str(e)}"
+            detail="Failed to get trip"
         )
 
 
@@ -259,7 +259,7 @@ async def update_trip(
         logger.error(f"Error updating trip: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update trip: {str(e)}"
+            detail="Failed to update trip"
         )
 
 
@@ -286,7 +286,7 @@ async def delete_trip(
         logger.error(f"Error deleting trip: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete trip: {str(e)}"
+            detail="Failed to delete trip"
         )
 
 
@@ -351,7 +351,7 @@ async def create_external_collaboration(
         logger.error(f"Error creating external collaboration: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create external collaboration: {str(e)}"
+            detail="Failed to create external collaboration"
         )
 
 
@@ -388,7 +388,7 @@ async def list_external_collaborations(
         logger.error(f"Error listing external collaborations: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list external collaborations: {str(e)}"
+            detail="Failed to list external collaborations"
         )
 
 
@@ -457,7 +457,7 @@ async def update_external_collaboration(
         logger.error(f"Error updating external collaboration: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update external collaboration: {str(e)}"
+            detail="Failed to update external collaboration"
         )
 
 
@@ -484,5 +484,5 @@ async def delete_external_collaboration(
         logger.error(f"Error deleting external collaboration: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete external collaboration: {str(e)}"
+            detail="Failed to delete external collaboration"
         )

@@ -133,7 +133,7 @@ async def upload_image(
         logger.error(f"Error uploading image: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload image: {str(e)}"
+            detail="Failed to upload image"
         )
 
 
@@ -268,7 +268,7 @@ async def upload_multiple_images(
         logger.error(f"Error uploading images: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload images: {str(e)}"
+            detail="Failed to upload images"
         )
 
 

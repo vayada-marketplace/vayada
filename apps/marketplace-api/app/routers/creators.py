@@ -128,7 +128,7 @@ async def get_creator_profile_status(user_id: str = Depends(get_current_user_id_
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get profile status: {str(e)}"
+            detail="Failed to get profile status"
         )
 
 
@@ -231,7 +231,7 @@ async def get_creator_profile(user_id: str = Depends(get_current_user_id_allow_p
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get profile: {str(e)}"
+            detail="Failed to get profile"
         )
 
 
@@ -467,7 +467,7 @@ async def update_creator_profile(
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update profile: {str(e)}"
+            detail="Failed to update profile"
         )
 
 
@@ -568,7 +568,7 @@ async def get_creator_collaborations(
         logger.error(f"Error fetching creator collaborations: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaborations: {str(e)}"
+            detail="Failed to fetch collaborations"
         )
 
 
@@ -708,6 +708,6 @@ async def get_creator_collaboration_detail(
         logger.error(f"Error fetching collaboration detail: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch collaboration details: {str(e)}"
+            detail="Failed to fetch collaboration details"
         )
 

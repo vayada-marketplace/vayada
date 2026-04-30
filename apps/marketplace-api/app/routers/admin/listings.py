@@ -73,7 +73,7 @@ async def create_hotel_listing(
         logger.error(f"Error creating listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create listing: {str(e)}"
+            detail="Failed to create listing"
         )
 
 
@@ -117,7 +117,7 @@ async def update_hotel_listing(
         logger.error(f"Error updating listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update listing: {str(e)}"
+            detail="Failed to update listing"
         )
 
 
@@ -183,5 +183,5 @@ async def delete_hotel_listing(
         logger.error(f"Error deleting listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete listing: {str(e)}"
+            detail="Failed to delete listing"
         )
