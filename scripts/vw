@@ -158,10 +158,6 @@ cmd_done() {
     exit 1
   fi
 
-  echo "→ Moving Linear ticket $ticket to In Review"
-  claude -p "Use the linear MCP server to move ticket $ticket to the In Review state. Reply with one short line: success or the error." \
-    </dev/null 2>&1 | sed 's/^/   /' || echo "   (failed; move it manually in Linear)"
-
   echo "→ Deinitializing submodules in worktree"
   ( cd "$worktree" && git submodule deinit --all -f --quiet ) || true
 
@@ -207,6 +203,7 @@ cmd_sync() {
       echo "→ Pulling main repo (rebase --autostash)"
       if ! git -C "$MAIN_REPO" -c rebase.autostash=true pull --rebase "$remote" main --quiet; then
         echo "   pull --rebase failed — resolve manually in $MAIN_REPO"
+        launch_claude_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate (likely a local commit, dirty state, or submodule pointer conflict) and resolve so the main repo can fast-forward to $remote/main."
       fi
     fi
 
@@ -235,6 +232,7 @@ cmd_sync() {
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main" >/dev/null 2>&1; then
       echo "   rebase failed — leaving clean state"
       echo "   resolve manually in $wt, or run: vw done $wt_branch"
+      launch_claude_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. The worktree was reset to a clean pre-rebase state by rebase --abort. Investigate why the rebase fails (likely submodule pointer divergence) and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
       continue
     fi
 
@@ -382,6 +380,49 @@ rebase_with_submodule_autoresolve() {
   return 1
 }
 
+# Open a new Warp tab cd'd into $worktree running Claude, with a prompt
+# describing the $context of the failure so it can investigate and fix it.
+# Best-effort: silently no-ops if the worktree is gone or osascript fails
+# (e.g. when running headless / not on macOS / Warp not installed).
+launch_claude_to_resolve() {
+  local worktree="$1"
+  local context="$2"
+
+  [ -d "$worktree" ] || return 0
+  [ "${VW_NO_AUTO_CLAUDE:-0}" = "1" ] && return 0
+
+  # Strip apostrophes — the keystroke wraps the prompt in single quotes,
+  # so an apostrophe inside would terminate the shell string.
+  context="${context//\'/}"
+
+  local prompt="You are in a git worktree at $worktree. An automated vw workflow just failed:
+
+$context
+
+Investigate (git status, git log, submodule state, and $MAIN_REPO state) and fix it. Common cases for this kind of failure:
+  - Submodule pointer conflict during rebase: pick the SHA whose history contains both sides (typically the submodule remote main after a just-shipped merge), then continue the rebase.
+  - Real code merge conflict inside a submodule: edit the file, git add, commit inside the submodule, then continue.
+  - Dirty submodule working tree blocking submodule update: commit or reset as appropriate.
+
+After the worktree is clean and the rebase or merge is finished, re-run vw ship-all (or vw sync) from $MAIN_REPO if more work still needs shipping. Otherwise report what you did and stop."
+
+  local as_prompt="${prompt//\\/\\\\}"
+  as_prompt="${as_prompt//\"/\\\"}"
+
+  echo "  → launching Claude in new Warp tab to resolve"
+
+  /usr/bin/osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "Warp" to activate
+delay 0.4
+tell application "System Events"
+    keystroke "t" using command down
+    delay 0.5
+    keystroke "cd $worktree && claude '$as_prompt'"
+    keystroke return
+end tell
+APPLESCRIPT
+}
+
 ship_submodule() {
   local subdir="$1" ticket="$2"
 
@@ -454,6 +495,7 @@ ship_worktree() {
   if ! git -C "$wt" merge-base --is-ancestor "$remote/main" "$ticket" 2>/dev/null; then
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main"; then
       echo "  ✗ parent rebase failed — resolve manually in $wt"
+      launch_claude_to_resolve "$wt" "Parent worktree rebase of $ticket onto $remote/main failed during vw ship-all. Submodule pointer conflicts could not be auto-resolved. Submodule branches for this ticket were already pushed before the parent rebase was attempted, so the underlying submodule work is preserved on its remote main."
       return 1
     fi
   fi
