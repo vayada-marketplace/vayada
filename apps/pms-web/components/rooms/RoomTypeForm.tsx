@@ -177,7 +177,7 @@ function RatePaymentMethodsSection({
   return (
     <div>
       <div className="flex items-start gap-3 mb-2">
-        <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">6</span>
+        <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">7</span>
         <div className="flex-1">
           <h3 className="text-[13px] font-semibold text-gray-900">Allowed payment methods per rate</h3>
           <p className="text-[11px] text-gray-400">
@@ -278,7 +278,9 @@ export default function RoomTypeForm({
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 5)
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
-  const [mealPlans, setMealPlans] = useState<MealPlan[]>(form.mealPlans || [])
+  const [mealPlans, setMealPlans] = useState<MealPlan[]>(
+    (form.mealPlans || []).map(m => ({ ...m, chargePer: m.chargePer ?? 'room' }))
+  )
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
   const [editingDay, setEditingDay] = useState<string | null>(null)
@@ -333,27 +335,36 @@ export default function RoomTypeForm({
     onChange(updated)
   }
 
-  const MEAL_PLAN_OPTIONS: { code: MealPlanCode; label: string; sub: string }[] = [
-    { code: 1, label: 'Breakfast', sub: 'Pushed to OTAs as "Breakfast included"' },
-    { code: 3, label: 'Half board', sub: 'Breakfast + dinner' },
-    { code: 4, label: 'Full board', sub: 'Breakfast + lunch + dinner' },
-    { code: 9, label: 'All inclusive', sub: 'All meals + drinks' },
+  const MEAL_PLAN_OPTIONS: { code: MealPlanCode; label: string }[] = [
+    { code: 1, label: 'Breakfast included' },
+    { code: 3, label: 'Half board' },
+    { code: 4, label: 'Full board' },
+    { code: 9, label: 'All inclusive' },
   ]
-  const isMealEnabled = (code: MealPlanCode) => mealPlans.some(m => m.code === code)
-  const getMealSurcharge = (code: MealPlanCode) =>
-    mealPlans.find(m => m.code === code)?.surcharge ?? 0
-  const toggleMeal = (code: MealPlanCode) => {
-    setMealPlans(prev =>
-      prev.some(m => m.code === code)
-        ? prev.filter(m => m.code !== code)
-        : [...prev, { code, surcharge: 0 }]
-    )
+  const MEAL_PLAN_LABEL: Record<MealPlanCode, string> = {
+    1: 'Breakfast included',
+    3: 'Half board',
+    4: 'Full board',
+    9: 'All inclusive',
   }
-  const setMealSurcharge = (code: MealPlanCode, surcharge: number) => {
-    setMealPlans(prev =>
-      prev.map(m => (m.code === code ? { ...m, surcharge } : m))
-    )
+  // Standard occupancy used when projecting per-person surcharges in the
+  // pricing preview. Keeps the preview footnote ("Calculated for 2 guests")
+  // honest; the server multiplies by max_occupancy when actually pushing rates.
+  const PREVIEW_GUESTS = 2
+  const addMealPlan = () => {
+    const used = new Set(mealPlans.map(m => m.code))
+    const next = MEAL_PLAN_OPTIONS.find(o => !used.has(o.code))?.code
+    if (next === undefined) return
+    setMealPlans(prev => [...prev, { code: next, surcharge: 0, chargePer: 'room' }])
   }
+  const removeMealPlan = (idx: number) => {
+    setMealPlans(prev => prev.filter((_, i) => i !== idx))
+  }
+  const updateMealPlan = (idx: number, patch: Partial<MealPlan>) => {
+    setMealPlans(prev => prev.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
+  }
+  const projectedSurcharge = (mp: MealPlan): number =>
+    mp.chargePer === 'person' ? mp.surcharge * PREVIEW_GUESTS : mp.surcharge
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]
@@ -1334,58 +1345,141 @@ export default function RoomTypeForm({
                   )}
                 </div>
 
-                {/* Meal plans */}
-                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${mealPlans.length > 0 ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                  <div className="flex items-center gap-3">
-                    <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11h18" /><path d="M12 3v18" /><path d="M3 7h18" /></svg>
-                    <span className="text-[12px] font-semibold text-gray-900">Meal plans</span>
-                    <span className="text-[11px] text-gray-400">(extra rate variants pushed to OTAs)</span>
-                  </div>
-                  <div className="mt-3 ml-[28px] space-y-2">
-                    {MEAL_PLAN_OPTIONS.map(({ code, label, sub }) => {
-                      const enabled = isMealEnabled(code)
-                      const surcharge = getMealSurcharge(code)
-                      const symbol = getCurrencySymbol(form.currency || 'EUR')
-                      return (
-                        <div key={code} className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => toggleMeal(code)}
-                            className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}
-                            aria-label={`Toggle ${label}`}
-                          >
-                            <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${enabled ? 'left-[20px]' : 'left-[2px]'}`} />
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[12px] font-medium text-gray-900">{label}</div>
-                            <div className="text-[10px] text-gray-400">{sub}</div>
-                          </div>
-                          {enabled && (
-                            <div className="inline-flex items-center gap-1 border border-gray-200 rounded-lg bg-white px-2 py-1">
-                              <span className="text-[11px] text-gray-500">+{symbol}</span>
-                              <input
-                                type="number"
-                                min={0}
-                                step={1}
-                                value={surcharge}
-                                onChange={(e) => setMealSurcharge(code, Math.max(0, parseFloat(e.target.value) || 0))}
-                                className="w-[80px] px-1 py-0.5 text-[12px] font-semibold text-gray-900 text-right bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <span className="text-[10px] text-gray-400">/night</span>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
               </div>
             </div>
 
-            {/* Section 4: Weekend surcharge */}
+            {/* Section 4: Meal plans */}
             <div>
               <div className="flex items-start gap-3 mb-2">
                 <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-gray-900">Do you offer meal plans?</h3>
+                  <p className="text-[11px] text-gray-400">Each meal plan creates an additional bookable rate on your booking engine and OTA channels</p>
+                </div>
+              </div>
+              <div className="ml-4 md:ml-9 space-y-2.5">
+                {mealPlans.map((mp, idx) => {
+                  const symbol = getCurrencySymbol(form.currency || 'EUR')
+                  const usedCodes = new Set(mealPlans.map((m, i) => i === idx ? null : m.code).filter(c => c !== null))
+                  const availableOptions = MEAL_PLAN_OPTIONS.filter(o => o.code === mp.code || !usedCodes.has(o.code))
+                  const label = MEAL_PLAN_LABEL[mp.code]
+                  const projected = projectedSurcharge(mp)
+                  const baseSeasonRate = parseFloat(seasons[0]?.rate || '') || form.baseRate || 0
+                  return (
+                    <div key={idx} className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                      {/* Header row: toggle, type dropdown, delete */}
+                      <div className="flex items-center gap-3">
+                        <div className="relative w-10 h-[22px] rounded-full bg-primary-500 shrink-0">
+                          <div className="absolute top-[2px] left-[20px] w-[18px] h-[18px] rounded-full bg-white shadow" />
+                        </div>
+                        <select
+                          value={mp.code}
+                          onChange={(e) => updateMealPlan(idx, { code: parseInt(e.target.value, 10) as MealPlanCode })}
+                          className="flex-1 max-w-[260px] px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[12px] font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
+                          style={{ ...SELECT_ARROW_STYLE, backgroundPosition: 'right 10px center' }}
+                        >
+                          {availableOptions.map(o => (
+                            <option key={o.code} value={o.code}>{o.label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => removeMealPlan(idx)}
+                          className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-white transition-colors"
+                          aria-label="Remove meal plan"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                        </button>
+                      </div>
+
+                      {/* Surcharge + Charge per */}
+                      <div className="flex flex-wrap items-end gap-4">
+                        <div className="flex-1 min-w-[200px]">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Surcharge</div>
+                          <div className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                            <span className="text-[11px] text-gray-500">{symbol}</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={mp.surcharge}
+                              onChange={(e) => updateMealPlan(idx, { surcharge: Math.max(0, parseFloat(e.target.value) || 0) })}
+                              className="w-[100px] px-1 text-[12px] font-semibold text-gray-900 bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <span className="text-[10px] text-gray-400">/ {mp.chargePer} / night</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Charge per</div>
+                          <div className="inline-flex bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            {(['person', 'room'] as const).map(unit => (
+                              <button
+                                key={unit}
+                                type="button"
+                                onClick={() => updateMealPlan(idx, { chargePer: unit })}
+                                className={`px-4 py-1.5 text-[11px] font-medium capitalize transition-colors ${mp.chargePer === unit ? 'bg-primary-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                {unit}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pricing preview table */}
+                      {seasons.length > 0 && baseSeasonRate > 0 && mp.surcharge > 0 && (
+                        <div className="rounded-lg bg-white border border-gray-100 overflow-hidden">
+                          <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+                            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">How pricing changes with this meal plan</div>
+                          </div>
+                          <table className="w-full text-[11px]">
+                            <thead>
+                              <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                                <th className="px-3 py-2">Season</th>
+                                <th className="px-3 py-2 text-right">Room only</th>
+                                <th className="px-3 py-2 text-right">{label}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {seasons.map((s, sIdx) => {
+                                const base = parseFloat(s.rate || '') || form.baseRate || 0
+                                const withMeal = base + projected
+                                return (
+                                  <tr key={sIdx} className="border-t border-gray-100">
+                                    <td className="px-3 py-2 text-gray-700">{s.name || `Season ${sIdx + 1}`}</td>
+                                    <td className="px-3 py-2 text-right text-gray-500">{symbol}{base.toLocaleString()}</td>
+                                    <td className="px-3 py-2 text-right font-semibold text-gray-900">{symbol}{withMeal.toLocaleString()}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                          <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100">
+                            * Calculated for {PREVIEW_GUESTS} guests · {label} surcharge: {symbol}{mp.surcharge.toLocaleString()} per {mp.chargePer}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+
+                {mealPlans.length < MEAL_PLAN_OPTIONS.length && (
+                  <button
+                    type="button"
+                    onClick={addMealPlan}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-primary-600 hover:bg-primary-50 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    Add meal plan
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Section 5: Weekend surcharge */}
+            <div>
+              <div className="flex items-start gap-3 mb-2">
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>
                 <div>
                   <h3 className="text-[13px] font-semibold text-gray-900">Do weekends cost more?</h3>
                   <p className="text-[11px] text-gray-400">Weekend pricing applies to Friday & Saturday nights across all seasons</p>
@@ -1432,10 +1526,10 @@ export default function RoomTypeForm({
               </div>
             </div>
 
-            {/* Section 5: Minimum advance booking */}
+            {/* Section 6: Minimum advance booking */}
             <div>
               <div className="flex items-start gap-3 mb-2">
-                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>
+                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">6</span>
                 <div>
                   <h3 className="text-[13px] font-semibold text-gray-900">Minimum advance booking</h3>
                   <p className="text-[11px] text-gray-400">Require guests to book a minimum number of days before check-in</p>
@@ -1455,7 +1549,7 @@ export default function RoomTypeForm({
               </div>
             </div>
 
-            {/* Section 6: Allowed payment methods per rate */}
+            {/* Section 7: Allowed payment methods per rate */}
             <RatePaymentMethodsSection
               value={form.ratePaymentMethods ?? null}
               flexibleRateEnabled={flexibleRateEnabled}
