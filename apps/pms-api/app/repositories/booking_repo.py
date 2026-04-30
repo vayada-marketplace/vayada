@@ -204,20 +204,39 @@ class BookingRepository:
 
     @staticmethod
     async def is_room_available(
-        room_id: str, check_in, check_out
+        room_id: str,
+        check_in,
+        check_out,
+        exclude_booking_id: Optional[str] = None,
     ) -> bool:
-        count = await Database.fetchval(
-            """
-            SELECT COUNT(*) FROM bookings
-            WHERE room_id = $1
-              AND status IN ('pending', 'confirmed')
-              AND check_in < $3
-              AND check_out > $2
-            """,
-            room_id,
-            check_in,
-            check_out,
-        )
+        if exclude_booking_id:
+            count = await Database.fetchval(
+                """
+                SELECT COUNT(*) FROM bookings
+                WHERE room_id = $1
+                  AND status IN ('pending', 'confirmed')
+                  AND check_in < $3
+                  AND check_out > $2
+                  AND id <> $4
+                """,
+                room_id,
+                check_in,
+                check_out,
+                exclude_booking_id,
+            )
+        else:
+            count = await Database.fetchval(
+                """
+                SELECT COUNT(*) FROM bookings
+                WHERE room_id = $1
+                  AND status IN ('pending', 'confirmed')
+                  AND check_in < $3
+                  AND check_out > $2
+                """,
+                room_id,
+                check_in,
+                check_out,
+            )
         return (count or 0) == 0
 
     @staticmethod
