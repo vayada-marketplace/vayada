@@ -25,3 +25,10 @@ export function formatCurrency(amount: number, currency: string): string {
   const symbol = getCurrencySymbol(currency)
   return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
+
+export function formatCompactPrice(amount: number, currency: string): string {
+  const symbol = getCurrencySymbol(currency)
+  if (!Number.isFinite(amount)) return `${symbol}0`
+  const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(amount)
+  return `${symbol}${compact}`
+}

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
-import { getCurrencySymbol, CURRENCY_SYMBOLS } from '@/lib/utils'
+import { getCurrencySymbol, CURRENCY_SYMBOLS, formatCurrency, formatCompactPrice } from '@/lib/utils'
 
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Bed', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
@@ -1596,7 +1596,7 @@ export default function RoomTypeForm({
                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#38bdf8','Mid':'#3b82f6','High':'#1d4ed8','Peak':'#4338ca'}[s.tier] || '#9ca3af') }} />
                       <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
                       {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
-                      {s.rate && <span className="text-gray-500 ml-auto">{getCurrencySymbol(form.currency || 'EUR')}{s.rate}/night</span>}
+                      {s.rate && <span className="text-gray-500 ml-auto">{formatCurrency(parseFloat(s.rate) || 0, form.currency || 'EUR')}/night</span>}
                     </div>
                   ))}
                 </div>
@@ -1646,14 +1646,13 @@ export default function RoomTypeForm({
                       const seasonBgHex: Record<string, string> = { 'Low': '#f0f9ff', 'Mid': '#eff6ff', 'High': '#dbeafe', 'Peak': '#e0e7ff' }
                       const cellBg = !inOp ? '#f9fafb' : hasDailyOverride ? '#fefce8' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
                       const isEditing = editingDay === dateStr
-                      const currencySymbol = getCurrencySymbol(form.currency || 'EUR')
 
                       cells.push(
                         <div
                           key={day}
                           className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border cursor-pointer ${!inOp ? 'opacity-40 border-gray-100' : hasDailyOverride ? 'border-amber-300 ring-1 ring-amber-200' : inGap ? 'border-red-200' : 'border-gray-100 hover:border-primary-300'}`}
                           style={{ backgroundColor: cellBg }}
-                          title={hasDailyOverride ? `Daily override: ${currencySymbol}${dailyRates[dateStr]} (click to edit, right-click to remove)` : inGap ? 'No season — click to set a daily rate' : 'Click to set a daily rate override'}
+                          title={hasDailyOverride ? `Daily override: ${formatCurrency(dailyRates[dateStr], form.currency || 'EUR')} (click to edit, right-click to remove)` : inGap ? 'No season — click to set a daily rate' : 'Click to set a daily rate override'}
                           onClick={() => {
                             if (!inOp) return
                             setEditingDay(dateStr)
@@ -1697,7 +1696,7 @@ export default function RoomTypeForm({
                               <span className={`text-[10px] font-medium ${inGap ? 'text-red-600' : isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
                               {inOp && displayRate > 0 && (
                                 <span className={`text-[8px] font-semibold ${hasDailyOverride ? 'text-amber-600' : isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
-                                  {currencySymbol}{displayRate}
+                                  {formatCompactPrice(displayRate, form.currency || 'EUR')}
                                 </span>
                               )}
                               {inGap && (
