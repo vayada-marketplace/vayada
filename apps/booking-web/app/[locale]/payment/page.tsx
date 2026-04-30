@@ -5,12 +5,13 @@ import { useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
-import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js'
 import { Booking } from '@/lib/types'
 import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import StripeProvider from '@/components/StripeProvider'
+import StripeConfirmStep from '@/components/payment/StripeConfirmStep'
+import PolicyModal from '@/components/payment/PolicyModal'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
@@ -19,41 +20,6 @@ import { getFreeCancellationDays } from '@/lib/constants/booking'
 import { usePricing } from '@/lib/hooks/usePricing'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 import { GuestDetailsDraft, readGuestDetails, saveLastBooking } from '@/lib/storage/bookingDraft'
-
-function CardPaymentForm({
-  onSubmit,
-  submitting,
-  agreedToTerms,
-  buttonLabel,
-}: {
-  onSubmit: () => void
-  submitting: boolean
-  agreedToTerms: boolean
-  buttonLabel: string
-}) {
-  const stripe = useStripe()
-  const elements = useElements()
-
-  return (
-    <div className="space-y-5">
-      <PaymentElement />
-      <div className="flex items-center gap-4 mt-5 pt-5 border-t border-gray-100">
-        <div className="flex items-center gap-1.5 text-sm text-gray-500">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-          </svg>
-          SSL Encrypted
-        </div>
-        <div className="flex items-center gap-1.5 text-sm text-gray-500">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-          </svg>
-          Secure Payment
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function PaymentPageContent() {
   const router = useRouter()
@@ -75,7 +41,12 @@ function PaymentPageContent() {
 
   const adultsParam = parseInt(searchParams.get('adults') || '2')
 
-  // Ensure rooms have date-resolved rates
+  // Ensure rooms have date-resolved rates on mount. URL search params stay
+  // stable for the lifetime of this page (a checkIn/checkOut change comes
+  // from a navigation, which remounts), so reading them from a closure is
+  // safe. refetchRooms is intentionally omitted because it isn't memoized
+  // by HotelContext and would re-fire on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam)
   }, [])
@@ -224,21 +195,19 @@ function PaymentPageContent() {
   if (clientSecret && pendingBooking) {
     return (
       <StripeProvider clientSecret={clientSecret}>
-        <StripePaymentPage
+        <StripeConfirmStep
           hotel={hotel}
           room={room}
           checkIn={checkIn}
           checkOut={checkOut}
           nights={nights}
           adults={adultsParam}
-          children={childrenParam}
           roomTotal={roomTotal}
           addons={addons}
           selectedAddonIds={selectedAddonIds}
           addonQuantities={addonQuantities}
           addonTotal={addonTotal}
           grandTotal={grandTotal}
-          guestDetails={guestDetails}
           booking={pendingBooking}
           slug={slug}
           formatPrice={formatPrice}
@@ -678,197 +647,22 @@ function PaymentPageContent() {
 
       <BookingFooter />
 
-      {policyModal && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={() => setPolicyModal(null)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h3 className="text-lg font-bold text-gray-900">
-                {policyModal === 'terms' ? t('termsAndConditions') : t('cancellationPolicyTitle')}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPolicyModal(null)}
-                className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="px-6 py-5 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-              {policyModal === 'terms'
-                ? (termsText || 'Please contact the property for the full Terms and Conditions.')
-                : (cancellationPolicyText || t('cancellationPolicyDesc', {
-                    date: formatDate(
-                      new Date(new Date(checkIn).getTime() - getFreeCancellationDays(room?.cancellationPolicy) * 86400000).toISOString().slice(0, 10),
-                      locale,
-                    ),
-                  }))}
-            </div>
-          </div>
-        </div>
-      )}
+      <PolicyModal
+        kind={policyModal}
+        onClose={() => setPolicyModal(null)}
+        termsText={termsText}
+        cancellationPolicyText={cancellationPolicyText}
+        cancellationFallback={t('cancellationPolicyDesc', {
+          date: formatDate(
+            new Date(new Date(checkIn).getTime() - getFreeCancellationDays(room?.cancellationPolicy) * 86400000).toISOString().slice(0, 10),
+            locale,
+          ),
+        })}
+      />
     </div>
   )
 }
 
-/** Stripe payment confirmation page — rendered inside Elements provider */
-function StripePaymentPage({
-  hotel,
-  room,
-  checkIn,
-  checkOut,
-  nights,
-  adults,
-  children,
-  roomTotal,
-  addons,
-  selectedAddonIds,
-  addonQuantities,
-  addonTotal,
-  grandTotal,
-  guestDetails,
-  booking,
-  slug,
-  formatPrice,
-  formatDate,
-  locale,
-  roomsParam,
-  selectedCurrency,
-  convertAndRound,
-}: any) {
-  const stripe = useStripe()
-  const elements = useElements()
-  const router = useRouter()
-  const t = useTranslations('payment')
-  const tc = useTranslations('common')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleConfirmPayment = async () => {
-    if (!stripe || !elements) return
-
-    setSubmitting(true)
-    setError('')
-
-    try {
-      const { error: stripeError } = await stripe.confirmPayment({
-        elements,
-        redirect: 'if_required',
-      })
-
-      if (stripeError) {
-        setError(stripeError.message || 'Payment failed')
-        setSubmitting(false)
-        return
-      }
-
-      // Payment authorized — confirm with backend
-      await bookingService.confirmAuthorization(slug, booking.id)
-
-      // Reuse the full Booking returned by the create call so the confirmation
-      // page sees the same shape no matter which payment method ran (the
-      // hand-rolled subset we used to write here was missing nightlyRate,
-      // addonTotal, createdAt, hostResponseDeadline — so Stripe-path users
-      // saw no countdown timer).
-      saveLastBooking({
-        ...booking,
-        paymentMethod: 'card',
-        paymentStatus: 'authorized',
-      })
-
-      router.push(`/booking/${booking.bookingReference}`)
-    } catch (err: any) {
-      setError(err.message || 'Payment confirmation failed')
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <HeroSection heroImage={hotel.heroImage} hotelName={hotel.name} compact />
-
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">{t('confirmPayment') || 'Confirm Payment'}</h2>
-          <p className="text-gray-600 mb-6">
-            {hotel.instantBook
-              ? (t('confirmPaymentDescInstant') || 'Complete your payment to confirm the booking. Your card will be charged now.')
-              : (t('confirmPaymentDesc') || 'Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts.')}
-          </p>
-
-          <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">{roomsParam > 1 ? `${roomsParam}× ` : ''}{room.name}</span>
-              <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
-            </div>
-            {addons.filter((a: any) => selectedAddonIds.includes(a.id)).map((addon: any) => {
-              const qty = addon.perNight ? (addonQuantities?.[addon.id] ?? nights) : (addonQuantities?.[addon.id] ?? 1)
-              const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
-              const annotation = addon.perNight
-                ? (qty < nights ? ` (${qty}/${nights})` : '')
-                : addon.perPerson
-                  ? ` (${qty}/${adults})`
-                  : qty > 1 ? ` ×${qty}` : ''
-              return (
-                <div key={addon.id} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{addon.name}{annotation}</span>
-                  <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
-                </div>
-              )
-            })}
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">{formatDate(checkIn, locale)} — {formatDate(checkOut, locale)}</span>
-              <span className="text-gray-500">{tc('nights', { count: nights })}</span>
-            </div>
-            <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-              <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900">{formatPrice(grandTotal, selectedCurrency)}</span>
-            </div>
-          </div>
-
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <div className="mb-6">
-            <PaymentElement />
-          </div>
-
-          <button
-            onClick={handleConfirmPayment}
-            disabled={!stripe || submitting}
-            className={`w-full py-3 text-center font-semibold rounded-lg transition-colors text-sm ${
-              !stripe || submitting
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-primary-600 text-white hover:bg-primary-700'
-            }`}
-          >
-            {submitting
-              ? (t('processing') || 'Processing...')
-              : (t('authorizePayment') || `Authorize ${formatPrice(grandTotal, selectedCurrency)}`)
-            }
-          </button>
-
-          <p className="text-xs text-gray-500 text-center mt-3">
-            {t('authorizationNote') || 'Your card will only be charged if the host accepts your booking within 24 hours.'}
-          </p>
-        </div>
-      </div>
-
-      <BookingFooter />
-    </div>
-  )
-}
 
 export default function PaymentPage() {
   return (
