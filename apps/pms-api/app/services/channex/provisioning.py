@@ -14,7 +14,10 @@ from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.services.channex._common import (
     _CHANNEL_LABELS,
     _CHANNELS_WITH_NON_REFUNDABLE,
+    _CHANNELS_WITH_MEAL_PLANS,
+    MEAL_PLAN_LABELS,
 )
+from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -104,26 +107,49 @@ async def provision_property(hotel_id: str) -> dict:
                 channex_room_type_id, rt["name"], room_type_id,
             )
 
-        # Create rate plans — one per (channel, plan_name) combination:
-        #   direct        → standard (+ non_refundable if enabled)
-        #   booking_com   → standard (+ non_refundable if enabled)
+        # Create rate plans — one per (channel, plan_name, meal_plan_code) combination:
+        #   direct        → standard (+ non_refundable if enabled), room-only meal_plan_code 0
+        #   booking_com   → standard (+ non_refundable if enabled), per enabled meal plan
         #   airbnb        → standard only (Airbnb API allows one rate plan per listing)
         existing_rates = await ChannexRatePlanMappingRepository.list_by_room_type_id(room_type_id)
         existing_combos = {
-            (r.get("channel", "direct"), r.get("plan_name", "standard"))
+            (
+                r.get("channel", "direct"),
+                r.get("plan_name", "standard"),
+                int(r.get("meal_plan_code") or 0),
+            )
             for r in existing_rates
         }
         default_occ = min(2, rt["max_occupancy"])
 
+        meal_plans = parse_jsonb(rt.get("meal_plans") or [])
+        meal_codes = [0] + [int(m["code"]) for m in meal_plans if m.get("code")]
+
         plans_to_create = []
         for channel, label in _CHANNEL_LABELS.items():
-            prefix = f"{label} " if label else ""
-            plans_to_create.append((channel, "standard", f"{rt['name']} - {prefix}Standard"))
-            if rt.get("non_refundable_enabled") and channel in _CHANNELS_WITH_NON_REFUNDABLE:
-                plans_to_create.append((channel, "non_refundable", f"{rt['name']} - {prefix}Non-Refundable"))
+            channel_prefix = f"{label} " if label else ""
+            channel_meal_codes = (
+                meal_codes if channel in _CHANNELS_WITH_MEAL_PLANS else [0]
+            )
+            for meal_code in channel_meal_codes:
+                meal_label = MEAL_PLAN_LABELS.get(meal_code, "")
+                meal_suffix = f" ({meal_label})" if meal_label else ""
+                plans_to_create.append((
+                    channel,
+                    "standard",
+                    meal_code,
+                    f"{rt['name']} - {channel_prefix}Standard{meal_suffix}",
+                ))
+                if rt.get("non_refundable_enabled") and channel in _CHANNELS_WITH_NON_REFUNDABLE:
+                    plans_to_create.append((
+                        channel,
+                        "non_refundable",
+                        meal_code,
+                        f"{rt['name']} - {channel_prefix}Non-Refundable{meal_suffix}",
+                    ))
 
-        for channel, plan_name, plan_title in plans_to_create:
-            if (channel, plan_name) in existing_combos:
+        for channel, plan_name, meal_code, plan_title in plans_to_create:
+            if (channel, plan_name, meal_code) in existing_combos:
                 continue
             channex_rp = await channex_service.create_rate_plan(
                 api_key,
@@ -133,6 +159,7 @@ async def provision_property(hotel_id: str) -> dict:
                 sell_mode="per_room",
                 currency=rt["currency"],
                 options=[{"occupancy": default_occ, "is_primary": True}],
+                meal_plan_code=meal_code,
             )
             await ChannexRatePlanMappingRepository.create(
                 hotel_id=hotel_id,
@@ -142,11 +169,12 @@ async def provision_property(hotel_id: str) -> dict:
                 sell_mode="per_room",
                 plan_name=plan_name,
                 channel=channel,
+                meal_plan_code=meal_code,
             )
             rates_created += 1
             logger.info(
-                "Created Channex rate plan %s (%s/%s) for %s",
-                channex_rp["id"], channel, plan_name, rt["name"],
+                "Created Channex rate plan %s (%s/%s/meal=%d) for %s",
+                channex_rp["id"], channel, plan_name, meal_code, rt["name"],
             )
 
     return {

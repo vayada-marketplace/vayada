@@ -37,6 +37,7 @@ async def push_ari_for_hotel(hotel_id: str) -> None:
                 plan_name=rp.get("plan_name", "standard"),
                 channel=channel,
                 markup_pct=markup_map.get(channel, Decimal(0)),
+                meal_plan_code=int(rp.get("meal_plan_code") or 0),
             )
 
     await ChannexConnectionRepository.update_last_ari_sync(

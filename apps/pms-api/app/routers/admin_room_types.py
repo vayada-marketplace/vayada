@@ -77,6 +77,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         last_minute_discount=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("last_minute_discount"))),
         minimum_advance_days=room.get("minimum_advance_days") or 0,
         rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
+        meal_plans=parse_jsonb(room.get("meal_plans", [])),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
     )
@@ -256,6 +257,7 @@ async def duplicate_room_type(
         "non_refundable_cancellation_policy": existing.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
         "last_minute_discount": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("last_minute_discount"))),
         "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("rate_payment_methods"))),
+        "meal_plans": parse_jsonb(existing.get("meal_plans", [])),
     }
     room = await RoomTypeRepository.create(hotel_id, clone_data)
     await _auto_create_rooms(

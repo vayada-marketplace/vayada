@@ -3,6 +3,29 @@ from typing import Optional, List, Dict
 
 MAX_ROOM_SIZE = 15000
 
+# Booking.com meal_plan_code values that Channex maps for us. 0 = room only
+# is the implicit default and never persisted in room_types.meal_plans.
+VALID_MEAL_PLAN_CODES = {1, 3, 4, 9}
+
+
+def _validate_meal_plans(plans: list) -> list:
+    seen: set[int] = set()
+    for p in plans:
+        code = p.get("code")
+        surcharge = p.get("surcharge")
+        if code not in VALID_MEAL_PLAN_CODES:
+            raise ValueError(
+                f"meal_plans[].code must be one of {sorted(VALID_MEAL_PLAN_CODES)}, got {code}"
+            )
+        if code in seen:
+            raise ValueError(f"meal_plans contains duplicate code {code}")
+        seen.add(code)
+        if surcharge is None or float(surcharge) < 0:
+            raise ValueError(
+                f"meal_plans[].surcharge must be >= 0 (code {code})"
+            )
+    return plans
+
 
 def _validate_operating_periods(periods: list) -> list:
     """Raise ValueError if any operating period has end date before start date."""
@@ -142,6 +165,7 @@ class RoomTypeCreate(BaseModel):
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
+    meal_plans: List[dict] = []
 
     @field_validator("size")
     @classmethod
@@ -149,6 +173,11 @@ class RoomTypeCreate(BaseModel):
         if v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
         return v
+
+    @field_validator("meal_plans")
+    @classmethod
+    def validate_meal_plans(cls, v: List[dict]) -> List[dict]:
+        return _validate_meal_plans(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -223,6 +252,7 @@ class RoomTypeUpdate(BaseModel):
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: Optional[int] = None
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
+    meal_plans: Optional[List[dict]] = None
 
     @field_validator("size")
     @classmethod
@@ -267,6 +297,13 @@ class RoomTypeUpdate(BaseModel):
             _validate_season_rates(v)
             _validate_no_season_overlap(v)
             _validate_no_season_gaps(v)
+        return v
+
+    @field_validator("meal_plans")
+    @classmethod
+    def validate_meal_plans(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+        if v is not None:
+            _validate_meal_plans(v)
         return v
 
 
@@ -343,6 +380,7 @@ class RoomTypeAdminResponse(BaseModel):
     last_minute_discount: Optional[dict] = None
     minimum_advance_days: int = 0
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
+    meal_plans: List[dict] = []
     created_at: str
     updated_at: str
 

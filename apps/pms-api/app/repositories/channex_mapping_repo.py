@@ -187,17 +187,20 @@ class ChannexRatePlanMappingRepository:
         sell_mode: str = "per_room",
         plan_name: str = "standard",
         channel: str = "direct",
+        meal_plan_code: int = 0,
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO channex_rate_plan_mappings
                 (hotel_id, room_type_id, channex_rate_plan_id,
-                 channex_room_type_id, sell_mode, plan_name, channel)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 channex_room_type_id, sell_mode, plan_name, channel,
+                 meal_plan_code)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
             hotel_id, room_type_id, channex_rate_plan_id,
             channex_room_type_id, sell_mode, plan_name, channel,
+            meal_plan_code,
         )
         return dict(row)
 

@@ -188,6 +188,9 @@ async def channex_list_rate_plan_mappings(
         channex_rate_plan_id=str(m["channex_rate_plan_id"]),
         channex_room_type_id=str(m["channex_room_type_id"]),
         sell_mode=m["sell_mode"],
+        plan_name=m.get("plan_name") or "standard",
+        channel=m.get("channel") or "direct",
+        meal_plan_code=int(m.get("meal_plan_code") or 0),
         created_at=m["created_at"].isoformat(),
     ) for m in mappings]
 
