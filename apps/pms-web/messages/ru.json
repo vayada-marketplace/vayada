@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "Первый выезд: 11:00",
   "dashboard.noDepartures": "Сегодня нет выездов",
   "dashboard.revenueThisMonth": "Доход за этот месяц",
-  "dashboard.last30Days": "За 30 дней",
+  "dashboard.monthToDate": "С начала месяца",
   "dashboard.viewAll": "Показать все",
   "dashboard.confirmed": "Подтверждено",
   "dashboard.settled": "Оплачено",

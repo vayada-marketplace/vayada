@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "Check-out pertama: 11:00",
   "dashboard.noDepartures": "Tidak ada keberangkatan hari ini",
   "dashboard.revenueThisMonth": "Pendapatan Bulan Ini",
-  "dashboard.last30Days": "30 hari terakhir",
+  "dashboard.monthToDate": "Bulan berjalan",
   "dashboard.viewAll": "Lihat semua",
   "dashboard.confirmed": "Dikonfirmasi",
   "dashboard.settled": "Diselesaikan",

@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "Premier depart : 11h00",
   "dashboard.noDepartures": "Aucun depart aujourd'hui",
   "dashboard.revenueThisMonth": "Revenus ce mois-ci",
-  "dashboard.last30Days": "30 derniers jours",
+  "dashboard.monthToDate": "Depuis le 1er du mois",
   "dashboard.viewAll": "Voir tout",
   "dashboard.confirmed": "Confirme",
   "dashboard.settled": "Regle",

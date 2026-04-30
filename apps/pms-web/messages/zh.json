@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "首位退房：11:00",
   "dashboard.noDepartures": "今日无离店",
   "dashboard.revenueThisMonth": "本月收入",
-  "dashboard.last30Days": "近30天",
+  "dashboard.monthToDate": "本月至今",
   "dashboard.viewAll": "查看全部",
   "dashboard.confirmed": "已确认",
   "dashboard.settled": "已结算",

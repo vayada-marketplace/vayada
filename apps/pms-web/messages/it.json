@@ -122,7 +122,7 @@
   "dashboard.firstCheckout": "Primo check-out: 11:00",
   "dashboard.noDepartures": "Nessuna partenza oggi",
   "dashboard.revenueThisMonth": "Ricavi di questo mese",
-  "dashboard.last30Days": "Ultimi 30 giorni",
+  "dashboard.monthToDate": "Mese in corso",
   "dashboard.viewAll": "Vedi tutto",
   "dashboard.confirmed": "Confermata",
   "dashboard.settled": "Saldata",
