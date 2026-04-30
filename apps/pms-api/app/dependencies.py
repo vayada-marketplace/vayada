@@ -1,12 +1,21 @@
 """
 JWT auth dependencies — validates tokens issued by the booking engine.
 """
+from typing import Optional
+
 import jwt
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import settings
 from app.database import AuthDatabase
 from app.utils import set_current_hotel_id_override
+
+
+# Must match AUTH_COOKIE_NAME in booking-engine-backend/app/auth.py.
+# When the frontend logs in via /auth/login on the auth backend, that
+# backend sets this cookie; the browser sends it back to us on every
+# cross-origin XHR/fetch. We accept either Bearer or this cookie.
+AUTH_COOKIE_NAME = "access_token"
 
 
 async def capture_hotel_header(request: Request) -> None:
@@ -26,13 +35,25 @@ async def capture_hotel_header(request: Request) -> None:
     """
     set_current_hotel_id_override(request.headers.get("X-Hotel-Id"))
 
-security = HTTPBearer()
+# auto_error=False so we can fall back to the access_token cookie when
+# the Authorization header is absent.
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
-    token = credentials.credentials
+    if credentials is not None:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = jwt.decode(
             token,

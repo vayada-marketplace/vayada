@@ -198,7 +198,7 @@ class TestCreateRoomBlock:
                 "endDate": "2026-08-05",
             },
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_create_room_block_other_users_room(self, client, hotel_with_rooms):
         """Cannot create block on another user's room type."""

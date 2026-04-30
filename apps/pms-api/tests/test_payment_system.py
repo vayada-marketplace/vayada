@@ -427,7 +427,7 @@ class TestHostAcceptReject:
         )
 
         resp = await client.post(f"/admin/bookings/{booking['id']}/reject")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ── Guest Withdraw ───────────────────────────────────────────────
@@ -833,7 +833,7 @@ class TestPaymentSettingsAdmin:
 
     async def test_payment_settings_requires_auth(self, client):
         resp = await client.get("/admin/payment-settings")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ── Cancellation Policy (Admin) ──────────────────────────────────
@@ -888,7 +888,7 @@ class TestPayoutsAdmin:
 
     async def test_payouts_requires_auth(self, client):
         resp = await client.get("/admin/payouts")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ── Payout Service Unit Tests ────────────────────────────────────

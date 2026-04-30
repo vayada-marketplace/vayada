@@ -423,7 +423,7 @@ class TestAdminAffiliateXendit:
                 "accountHolderName": "No Auth",
             },
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ── Admin: Payment Settings with Xendit Fields ───────────────────

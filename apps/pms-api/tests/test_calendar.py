@@ -92,7 +92,7 @@ class TestCalendar:
 
     async def test_calendar_requires_auth(self, client):
         resp = await client.get("/admin/calendar?start=2026-06-01&end=2026-06-30")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_calendar_requires_dates(self, client, hotel_with_rooms):
         """Missing start/end params → 422."""

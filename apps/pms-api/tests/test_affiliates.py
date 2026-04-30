@@ -199,7 +199,7 @@ class TestAdminAffiliateList:
 
     async def test_list_affiliates_requires_auth(self, client):
         resp = await client.get("/admin/affiliates")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ── Admin affiliate detail ───────────────────────────────────────

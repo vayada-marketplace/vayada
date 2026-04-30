@@ -77,7 +77,7 @@ class TestImageUpload:
             "/upload/images",
             files=[("files", ("room.jpg", image_data, "image/jpeg"))],
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_upload_non_hotel_user_forbidden(self, client, cleanup_database):
         user = await create_test_user(user_type="creator")
