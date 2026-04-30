@@ -10,10 +10,11 @@ import BookingFooter from '@/components/layout/BookingFooter'
 import DatePickerCalendar from '@/components/booking/DatePickerCalendar'
 import GuestSelector from '@/components/booking/GuestSelector'
 import RoomDetailModal from '@/components/booking/RoomDetailModal'
+import RoomCard from '@/components/booking/RoomCard'
+import RoomFiltersBar from '@/components/booking/RoomFiltersBar'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { getNonRefundableRate, getFreeCancellationDays } from '@/lib/constants/booking'
 import { trackEvent } from '@/services/api/tracking'
 import { hotelService } from '@/services/api/hotel'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
@@ -494,53 +495,13 @@ function HomePageContent() {
           </div>
         </div>
 
-        {/* Filters & Sort */}
-        <div className="mb-6">
-          {FILTERS.length > 0 && (
-            <>
-              <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-3">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                {t('popularFilters')}
-              </div>
-              <div className="h-px bg-gray-200 mb-4" />
-              <div className="flex items-center gap-2.5 flex-wrap mb-4">
-                {FILTERS.map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => toggleFilter(filter)}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                      activeFilters.includes(filter)
-                        ? 'border-gray-900 text-gray-900'
-                        : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                    }`}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          <div className="flex justify-end">
-            {/* Sort */}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              <select
-                value={sortOption}
-                onChange={(e) => setSortOption(e.target.value)}
-                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="recommended">{t('recommended')}</option>
-                <option value="roomSize">{t('roomSize')}</option>
-                <option value="priceLow">{t('priceLowHigh')}</option>
-                <option value="priceHigh">{t('priceHighLow')}</option>
-              </select>
-            </div>
-          </div>
-        </div>
+        <RoomFiltersBar
+          filters={FILTERS}
+          activeFilters={activeFilters}
+          onToggleFilter={toggleFilter}
+          sortOption={sortOption}
+          onSortChange={setSortOption}
+        />
 
         {/* Room Cards */}
         <div className="space-y-6">
@@ -564,301 +525,23 @@ function HomePageContent() {
                 </div>
               </div>
             ))
-          ) : filteredRooms.map((room, roomIndex) => {
-            const imgIdx = imageIndices[room.id] ?? 0
-            const expandedRate = expandedRates[room.id] ?? null
-            const totalGuests = committedAdults + committedChildren
-            const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy)
-            // Per-night rates rounded in the displayed currency so that nightly × nights
-            // matches the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-            const flexibleNightly = convertAndRound(room.baseRate, room.currency)
-            const flexibleTotal = flexibleNightly * nights * requiredRooms
-            const nonRefundableNightlyBase = getNonRefundableRate(room.baseRate, room.nonRefundableRate)
-            const nonRefundableNightly = convertAndRound(nonRefundableNightlyBase, room.currency)
-            const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms
-            const discount = Math.round((1 - nonRefundableNightlyBase / room.baseRate) * 100)
-            const soldOut = room.remainingRooms < requiredRooms
-            const hasLastMinuteDeal = room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
-            const originalFlexibleTotal = hasLastMinuteDeal && room.originalRate
-              ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
-              : null
-
-            return (
-              <div
-                key={room.id}
-                className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-shadow ${soldOut ? 'opacity-60' : 'hover:shadow-lg'}`}
-              >
-                <div className="flex flex-col md:flex-row">
-                  {/* Image Carousel — fills full card height */}
-                  <div className="relative w-full h-64 md:w-[420px] md:min-h-[320px] md:h-auto flex-shrink-0 cursor-pointer overflow-hidden" onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}>
-                    <Image
-                      src={room.images[imgIdx]}
-                      alt={room.name}
-                      fill
-                      className="object-cover"
-                    />
-                    {soldOut && (
-                      <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
-                        <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">{t('soldOut')}</span>
-                      </div>
-                    )}
-                    {/* Prev/Next Arrows */}
-                    {room.images.length > 1 && (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setImageIndices((prev) => ({
-                              ...prev,
-                              [room.id]: imgIdx === 0 ? room.images.length - 1 : imgIdx - 1,
-                            }))
-                          }}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors z-10"
-                        >
-                          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setImageIndices((prev) => ({
-                              ...prev,
-                              [room.id]: imgIdx === room.images.length - 1 ? 0 : imgIdx + 1,
-                            }))
-                          }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center hover:bg-gray-50 transition-colors z-10"
-                        >
-                          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                        </button>
-                      </>
-                    )}
-                    {/* Thumbnail strip */}
-                    {room.images.length > 1 && (
-                      <div className="absolute bottom-3 left-3 right-3 flex gap-1.5 z-10 overflow-x-auto">
-                        {room.images.map((img, i) => (
-                          <button
-                            key={i}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setImageIndices((prev) => ({ ...prev, [room.id]: i }))
-                            }}
-                            className={`relative h-12 w-16 rounded-md overflow-hidden border-2 transition-colors flex-shrink-0 ${i === imgIdx ? 'border-white' : 'border-transparent opacity-70 hover:opacity-100'}`}
-                          >
-                            <Image src={img} alt="" fill className="object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Room Details + Rates */}
-                  <div className="flex-1 p-5 flex flex-col">
-                    {/* Header row */}
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-2">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-xl font-bold text-gray-900">
-                            {requiredRooms > 1 && <span className="text-primary-600">{requiredRooms}× </span>}
-                            {room.name}
-                          </h3>
-                          {room.category && (
-                            <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200">
-                              {room.category}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                          <span className="flex items-center gap-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-                            {room.size} m&sup2;
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                            {t('upToGuests', { count: room.maxOccupancy })}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}
-                        className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-full px-4 py-1.5 hover:bg-gray-50 transition-colors flex-shrink-0"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        {t('viewDetails')}
-                      </button>
-                    </div>
-
-                    {/* Feature pills */}
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {room.features.slice(0, 4).map((feature) => (
-                        <span
-                          key={feature}
-                          className="inline-flex items-center gap-1.5 text-sm text-gray-700 border border-gray-200 px-3 py-1 rounded-full"
-                        >
-                          <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          {feature}
-                        </span>
-                      ))}
-                      {room.features.length > 4 && (
-                        <span className="inline-flex items-center text-sm text-gray-500 border border-gray-200 px-3 py-1 rounded-full">
-                          {tc('more', { count: room.features.length - 4 })}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Last-minute deal badge */}
-                    {hasLastMinuteDeal && (
-                      <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-                        <span className="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded">-{room.lastMinuteDiscountPercent}%</span>
-                        <span className="text-sm font-medium text-amber-800">Last-minute deal</span>
-                        {originalFlexibleTotal && (
-                          <span className="ml-auto text-sm text-gray-400 line-through">{formatPrice(originalFlexibleTotal, selectedCurrency)}</span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Rate Options */}
-                    <div className="border-t border-gray-100 pt-4">
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t('rateOptions')}</p>
-                      <div className="space-y-3">
-                        {/* Non-Refundable Rate */}
-                        {room.nonRefundableRate != null && (
-                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${soldOut ? 'opacity-50 pointer-events-none' : ''} ${expandedRate === 'nonrefundable' ? 'border-primary-500' : 'border-gray-200'}`}>
-                          <button
-                            onClick={() =>
-                              !soldOut && setExpandedRates((prev) => ({
-                                ...prev,
-                                [room.id]: prev[room.id] === 'nonrefundable' ? null : 'nonrefundable',
-                              }))
-                            }
-                            disabled={soldOut}
-                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors disabled:cursor-not-allowed"
-                          >
-                            <div className="flex items-center gap-3">
-                              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                              <div className="text-left">
-                                <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                                  {t('nonRefundableRate')}
-                                  {discount > 0 && <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded">-{discount}% OFF</span>}
-                                </p>
-                                <p className="text-xs text-gray-500">{t('nonRefundableDesc')}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatPrice(nonRefundableTotal, selectedCurrency)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(nonRefundableNightly, selectedCurrency) })}</p>
-                              </div>
-                              <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'nonrefundable' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </div>
-                          </button>
-                          {expandedRate === 'nonrefundable' && (
-                            <div className="px-4 pb-4">
-                              {room.benefits && room.benefits.length > 0 && (
-                                <>
-                                  <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
-                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
-                                    {room.benefits.map((benefit) => (
-                                      <p key={benefit} className="flex items-center gap-2 text-sm text-gray-600">
-                                        <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                        {benefit}
-                                      </p>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
-                              <button
-                                onClick={() => {
-                                  if (soldOut) return
-                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=nonrefundable${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
-                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
-                                }}
-                                disabled={soldOut}
-                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {soldOut ? t('soldOut') : t('selectThisRate')}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        )}
-
-                        {/* Flexible Rate */}
-                        {room.flexibleRateEnabled !== false && (
-                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${soldOut ? 'opacity-50 pointer-events-none' : ''} ${expandedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200'}`}>
-                          <button
-                            onClick={() =>
-                              !soldOut && setExpandedRates((prev) => ({
-                                ...prev,
-                                [room.id]: prev[room.id] === 'flexible' ? null : 'flexible',
-                              }))
-                            }
-                            disabled={soldOut}
-                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50/50 transition-colors disabled:cursor-not-allowed"
-                          >
-                            <div className="flex items-center gap-3">
-                              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                              <div className="text-left">
-                                <p className="text-sm font-bold text-gray-900">{t('flexibleRate')}</p>
-                                <p className="text-xs text-gray-500">
-                                  {room.flexibleCancellationType === 'partial_refund'
-                                    ? t('partialRefundDesc', {
-                                        percent: room.partialRefundAmountPercent ?? 50,
-                                        days: room.partialRefundCancelWindowDays ?? 30,
-                                      })
-                                    : t('flexibleDesc', { days: getFreeCancellationDays(room.cancellationPolicy) })}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <p className="text-lg font-bold text-gray-900">{formatPrice(flexibleTotal, selectedCurrency)}</p>
-                                <p className="text-xs text-gray-500">{t('perNightly', { price: formatPrice(flexibleNightly, selectedCurrency) })}</p>
-                              </div>
-                              <svg className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${expandedRate === 'flexible' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </div>
-                          </button>
-                          {expandedRate === 'flexible' && (
-                            <div className="px-4 pb-4">
-                              {room.benefits && room.benefits.length > 0 && (
-                                <>
-                                  <p className="text-xs font-medium text-gray-500 mb-2">{t('includes')}</p>
-                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4">
-                                    {room.benefits.map((benefit) => (
-                                      <p key={benefit} className="flex items-center gap-2 text-sm text-gray-600">
-                                        <svg className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                        {benefit}
-                                      </p>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
-                              <button
-                                onClick={() => {
-                                  if (soldOut) return
-                                  const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=flexible${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
-                                  router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
-                                }}
-                                disabled={soldOut}
-                                className="w-full py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {soldOut ? t('soldOut') : t('selectThisRate')}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          ) : filteredRooms.map((room, roomIndex) => (
+            <RoomCard
+              key={room.id}
+              room={room}
+              nights={nights}
+              totalGuests={committedAdults + committedChildren}
+              imageIndex={imageIndices[room.id] ?? 0}
+              onChangeImageIndex={(i) => setImageIndices((prev) => ({ ...prev, [room.id]: i }))}
+              expandedRate={(expandedRates[room.id] as 'flexible' | 'nonrefundable' | null) ?? null}
+              onToggleRate={(next) => setExpandedRates((prev) => ({ ...prev, [room.id]: next }))}
+              onView={() => { trackEvent(slug, 'viewed_room', { roomId: room.id }); setDetailModalIndex(roomIndex) }}
+              onSelectRate={(rateType, requiredRooms) => {
+                const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
+                router.push(hasAddons ? `/addons?${params}` : `/book?${params}`)
+              }}
+            />
+          ))}
         </div>
       </div>
 
