@@ -96,12 +96,17 @@ export default function DashboardPage() {
       const date = new Date()
       date.setDate(date.getDate() + i)
       const dateStr = date.toISOString().split('T')[0]
-      const occupied = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr).length
+      const activeBookings = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr)
+      const occupied = activeBookings.length
       const pct = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0
+      const avgPrice = activeBookings.length
+        ? activeBookings.reduce((sum, b) => sum + b.nightlyRate, 0) / activeBookings.length
+        : 0
       days.push({
         date,
         dateStr,
         pct,
+        avgPrice,
         label: i === 0 ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: date.getDate(),
       })
@@ -265,7 +270,7 @@ export default function DashboardPage() {
             </p>
           )}
         </div>
-        <ForecastChart days={forecastDays} today={today} />
+        <ForecastChart days={forecastDays} today={today} currency={hotelCurrency} t={t} />
       </div>
     </div>
   )
@@ -310,54 +315,193 @@ function Avatar({ first, last }: { first: string; last: string }) {
   )
 }
 
+type ForecastDay = {
+  date: Date
+  dateStr: string
+  pct: number
+  avgPrice: number
+  label: string
+  dayNum: number
+}
+
+function niceCeil(value: number): number {
+  if (value <= 0) return 100
+  const exponent = Math.floor(Math.log10(value))
+  const fraction = value / Math.pow(10, exponent)
+  let nice: number
+  if (fraction <= 1) nice = 1
+  else if (fraction <= 2) nice = 2
+  else if (fraction <= 5) nice = 5
+  else nice = 10
+  return nice * Math.pow(10, exponent)
+}
+
+function occupancyBarClass(pct: number): string {
+  if (pct >= 80) return 'bg-blue-700'
+  if (pct >= 60) return 'bg-blue-500'
+  if (pct >= 40) return 'bg-blue-400'
+  if (pct >= 20) return 'bg-blue-300'
+  return 'bg-blue-200'
+}
+
 function ForecastChart({
   days,
   today,
+  currency,
+  t,
 }: {
-  days: { date: Date; dateStr: string; pct: number; label: string; dayNum: number }[]
+  days: ForecastDay[]
   today: string
+  currency: string
+  t: (key: string, params?: Record<string, string | number>) => string
 }) {
-  const maxPct = Math.max(...days.map(d => d.pct), 1)
+  const chartHeight = 140
+  const maxAvgPrice = Math.max(...days.map(d => d.avgPrice), 0)
+  const priceAxisMax = niceCeil(maxAvgPrice)
+  const currencySymbol = getCurrencySymbol(currency)
+
+  const occupancyTicks = [100, 75, 50, 25, 0]
+  const priceTicks = [1, 0.75, 0.5, 0.25, 0].map(f => Math.round(priceAxisMax * f))
+
+  const formatPrice = (value: number) => {
+    if (value >= 1000) return `${currencySymbol}${Math.round(value / 1000)}k`
+    return `${currencySymbol}${Math.round(value)}`
+  }
+
+  const linePoints = days.map((day, i) => {
+    const x = ((i + 0.5) / days.length) * 100
+    const y = priceAxisMax > 0
+      ? chartHeight - (day.avgPrice / priceAxisMax) * chartHeight
+      : chartHeight
+    return { x, y, day }
+  })
+
+  const polylinePoints = linePoints.map(p => `${p.x},${p.y}`).join(' ')
 
   return (
-    <div className="flex items-end gap-1">
-      {days.map(day => {
-        const isToday = day.dateStr === today
-        const heightPx = Math.max(Math.round((day.pct / maxPct) * 70), 2)
-        const isHighOccupancy = day.pct >= 90
+    <div>
+      <div className="flex">
+        {/* Left axis (occupancy %) */}
+        <div className="flex flex-col justify-between pr-2 text-[9px] text-gray-400 select-none" style={{ height: chartHeight }}>
+          {occupancyTicks.map(tick => (
+            <span key={tick} className="leading-none">{tick}%</span>
+          ))}
+        </div>
 
-        return (
-          <div key={day.dateStr} className="flex-1 flex flex-col items-center">
-            <span
-              className={`text-[10px] font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-500'}`}
-            >
-              {day.pct}%
-            </span>
-            <div className="w-full flex items-end" style={{ height: 70 }}>
+        {/* Plot area */}
+        <div className="relative flex-1" style={{ height: chartHeight }}>
+          {/* Gridlines */}
+          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+            {occupancyTicks.map((tick, idx) => (
               <div
-                className={`w-full rounded-t-sm ${
-                  isHighOccupancy
-                    ? 'bg-emerald-500'
-                    : isToday
-                    ? 'bg-blue-600'
-                    : day.pct < 30
-                    ? 'bg-blue-200'
-                    : 'bg-blue-500'
-                }`}
-                style={{ height: heightPx }}
+                key={tick}
+                className={`border-t ${idx === occupancyTicks.length - 1 ? 'border-gray-300' : 'border-gray-100'}`}
               />
-            </div>
-            <div className="text-center mt-1">
-              <p
-                className={`text-[10px] font-medium ${isToday ? 'text-blue-600' : 'text-gray-500'}`}
-              >
-                {day.label}
-              </p>
-              <p className="text-[9px] text-gray-400">{day.dayNum}</p>
-            </div>
+            ))}
           </div>
-        )
-      })}
+
+          {/* Bars */}
+          <div className="absolute inset-0 flex items-end gap-1">
+            {days.map(day => {
+              const isToday = day.dateStr === today
+              const heightPx = Math.max(Math.round((day.pct / 100) * chartHeight), 2)
+              return (
+                <div
+                  key={day.dateStr}
+                  className="flex-1 flex justify-center group relative"
+                  style={{ height: chartHeight }}
+                >
+                  <div className="w-full flex items-end">
+                    <div
+                      className={`w-full rounded-t-sm transition-opacity ${occupancyBarClass(day.pct)} ${
+                        isToday ? 'ring-2 ring-blue-900 ring-offset-0' : ''
+                      }`}
+                      style={{ height: heightPx }}
+                    />
+                  </div>
+                  {/* Tooltip */}
+                  <div className="pointer-events-none absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap z-10 shadow">
+                    <div className="font-semibold">
+                      {day.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </div>
+                    <div>{t('dashboard.occupancyAxis')}: {day.pct}%</div>
+                    <div>{t('dashboard.avgPriceAxis')}: {day.avgPrice > 0 ? formatPrice(day.avgPrice) : '—'}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Overlay line for avg price */}
+          {priceAxisMax > 0 && (
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              viewBox={`0 0 100 ${chartHeight}`}
+              preserveAspectRatio="none"
+            >
+              <polyline
+                points={polylinePoints}
+                fill="none"
+                stroke="#f59e0b"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+              {linePoints.map(p => (
+                <circle
+                  key={p.day.dateStr}
+                  cx={p.x}
+                  cy={p.y}
+                  r="2"
+                  fill="#f59e0b"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </svg>
+          )}
+        </div>
+
+        {/* Right axis (avg price) */}
+        <div className="flex flex-col justify-between pl-2 text-[9px] text-amber-600 select-none" style={{ height: chartHeight }}>
+          {priceTicks.map((tick, idx) => (
+            <span key={idx} className="leading-none">{formatPrice(tick)}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Day labels (mirror axis layout to stay aligned with bars) */}
+      <div className="flex mt-2">
+        <div className="invisible pr-2 text-[9px] select-none">
+          <span>100%</span>
+        </div>
+        <div className="flex-1 flex gap-1">
+          {days.map(day => {
+            const isToday = day.dateStr === today
+            return (
+              <div key={day.dateStr} className="flex-1 text-center">
+                <p className={`text-[10px] font-medium ${isToday ? 'text-blue-700' : 'text-gray-500'}`}>
+                  {day.label}
+                </p>
+                <p className="text-[9px] text-gray-400">{day.dayNum}</p>
+              </div>
+            )
+          })}
+        </div>
+        <div className="invisible pl-2 text-[9px] select-none">
+          <span>{formatPrice(priceAxisMax)}</span>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm bg-blue-500" />
+          <span>{t('dashboard.occupancyAxis')}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-0.5 bg-amber-500" />
+          <span>{t('dashboard.avgPriceAxis')}</span>
+        </div>
+      </div>
     </div>
   )
 }

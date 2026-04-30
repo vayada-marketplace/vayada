@@ -128,6 +128,8 @@
   "dashboard.settled": "Diselesaikan",
   "dashboard.occupancyForecast": "Perkiraan Hunian",
   "dashboard.next14Days": "14 hari ke depan",
+  "dashboard.occupancyAxis": "Hunian",
+  "dashboard.avgPriceAxis": "Harga rata-rata",
   "bookings.title": "Reservasi",
   "bookings.subtitle": "Buku besar semua pemesanan",
   "bookings.searchPlaceholder": "Cari berdasarkan tamu, ID reservasi, atau kamar...",

@@ -128,6 +128,8 @@
   "dashboard.settled": "Regle",
   "dashboard.occupancyForecast": "Prevision d'occupation",
   "dashboard.next14Days": "14 prochains jours",
+  "dashboard.occupancyAxis": "Occupation",
+  "dashboard.avgPriceAxis": "Prix moyen",
   "bookings.title": "Reservations",
   "bookings.subtitle": "Registre principal de toutes les reservations",
   "bookings.searchPlaceholder": "Rechercher par voyageur, ID de reservation ou chambre...",

@@ -128,6 +128,8 @@
   "dashboard.settled": "Оплачено",
   "dashboard.occupancyForecast": "Прогноз заполняемости",
   "dashboard.next14Days": "Ближайшие 14 дней",
+  "dashboard.occupancyAxis": "Заполняемость",
+  "dashboard.avgPriceAxis": "Ср. цена",
   "bookings.title": "Бронирования",
   "bookings.subtitle": "Главная книга всех бронирований",
   "bookings.searchPlaceholder": "Поиск по гостю, ID бронирования или номеру...",

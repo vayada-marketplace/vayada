@@ -128,6 +128,8 @@
   "dashboard.settled": "已结算",
   "dashboard.occupancyForecast": "入住率预测",
   "dashboard.next14Days": "未来14天",
+  "dashboard.occupancyAxis": "入住率",
+  "dashboard.avgPriceAxis": "平均价格",
   "bookings.title": "预订",
   "bookings.subtitle": "所有预订总账",
   "bookings.searchPlaceholder": "按客人、预订号或房间搜索...",

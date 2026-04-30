@@ -128,6 +128,8 @@
   "dashboard.settled": "精算済み",
   "dashboard.occupancyForecast": "稼働率予測",
   "dashboard.next14Days": "今後14日間",
+  "dashboard.occupancyAxis": "稼働率",
+  "dashboard.avgPriceAxis": "平均料金",
   "bookings.title": "予約",
   "bookings.subtitle": "全予約の元帳",
   "bookings.searchPlaceholder": "ゲスト、予約ID、部屋で検索...",
