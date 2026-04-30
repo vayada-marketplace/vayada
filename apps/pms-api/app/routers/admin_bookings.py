@@ -9,6 +9,7 @@ from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign
@@ -293,6 +294,76 @@ async def assign_room_to_booking(
         )
 
     await BookingRepository.assign_room(booking_id, data.room_id)
+    updated = await BookingRepository.get_by_id(booking_id)
+    return _booking_to_admin(updated)
+
+
+@router.patch("/bookings/{booking_id}/move-room", response_model=BookingAdminResponse)
+async def move_booking_to_room(
+    booking_id: str,
+    data: BookingRoomAssign,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking["status"] == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Cancelled bookings cannot be moved",
+        )
+
+    current_room_id = str(booking["room_id"]) if booking.get("room_id") else None
+    if current_room_id == data.room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Booking is already assigned to this room",
+        )
+
+    room = await RoomRepository.get_by_id(data.room_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if str(room["room_type_id"]) != str(booking["room_type_id"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Room does not belong to the same room type as the booking",
+        )
+
+    available = await BookingRepository.is_room_available(
+        data.room_id,
+        booking["check_in"],
+        booking["check_out"],
+        exclude_booking_id=booking_id,
+    )
+    if not available:
+        raise HTTPException(
+            status_code=409,
+            detail="Room is not available for the booking dates",
+        )
+
+    await BookingRepository.assign_room(booking_id, data.room_id)
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="room_moved",
+        payload={
+            "from_room_id": current_room_id,
+            "to_room_id": data.room_id,
+        },
+        actor_user_id=user_id,
+    )
+
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id,
+            str(booking["room_type_id"]),
+            start_date=booking["check_in"],
+            end_date=booking["check_out"],
+        )
+    )
+
     updated = await BookingRepository.get_by_id(booking_id)
     return _booking_to_admin(updated)
 
