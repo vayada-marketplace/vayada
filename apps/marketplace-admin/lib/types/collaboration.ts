@@ -33,6 +33,7 @@ export interface Collaboration {
     // Participants
     initiator_type: 'creator' | 'hotel'; // Who started it?
     creator_id: string;
+    creator_user_id?: string;
     creator_name: string;
     creator_profile_picture?: string;
     hotel_id: string;

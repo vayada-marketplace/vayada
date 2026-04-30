@@ -103,24 +103,40 @@ export function CollaborationDetailModal({
                 {/* Header: Parties & Status */}
                 <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100">
                     {/* Creator */}
-                    <Link
-                        href={`/dashboard/users/${collaboration.creator_id}`}
-                        onClick={handleClose}
-                        className="flex items-center space-x-3 rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
-                        title={`View ${collaboration.creator_name}'s profile`}
-                    >
-                        <Avatar
-                            src={collaboration.creator_profile_picture}
-                            alt={collaboration.creator_name}
-                            name={collaboration.creator_name}
-                            size="lg"
-                            className="border border-gray-200"
-                        />
-                        <div>
-                            <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.creator_name}</p>
-                            <p className="text-xs text-gray-500">Creator</p>
+                    {collaboration.creator_user_id ? (
+                        <Link
+                            href={`/dashboard/users/${collaboration.creator_user_id}`}
+                            onClick={handleClose}
+                            className="flex items-center space-x-3 rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
+                            title={`View ${collaboration.creator_name}'s profile`}
+                        >
+                            <Avatar
+                                src={collaboration.creator_profile_picture}
+                                alt={collaboration.creator_name}
+                                name={collaboration.creator_name}
+                                size="lg"
+                                className="border border-gray-200"
+                            />
+                            <div>
+                                <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.creator_name}</p>
+                                <p className="text-xs text-gray-500">Creator</p>
+                            </div>
+                        </Link>
+                    ) : (
+                        <div className="flex items-center space-x-3 p-1 -m-1">
+                            <Avatar
+                                src={collaboration.creator_profile_picture}
+                                alt={collaboration.creator_name}
+                                name={collaboration.creator_name}
+                                size="lg"
+                                className="border border-gray-200"
+                            />
+                            <div>
+                                <p className="text-sm font-bold text-gray-900">{collaboration.creator_name}</p>
+                                <p className="text-xs text-gray-500">Creator</p>
+                            </div>
                         </div>
-                    </Link>
+                    )}
                     {/* Status */}
                     <div className="my-4 md:my-0 flex flex-col items-center">
                         <Badge variant={statusVariantMap[collaboration.status]}>
