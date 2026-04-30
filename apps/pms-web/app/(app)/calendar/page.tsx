@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { format, addDays, startOfDay, differenceInDays, parseISO } from 'date-fns'
 import {
   calendarService,
   CalendarData,
+  CalendarRoom,
   CalendarBooking,
   CalendarBlock,
   CreateAdminBookingPayload,
@@ -55,6 +56,16 @@ export default function CalendarPage() {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
   const [connectedChannelKeys, setConnectedChannelKeys] = useState<Set<string> | null>(null)
+
+  // Reorder mode state. When `reorderMode` is true, the Calendar header is
+  // replaced with Cancel / Save order, the grid is rendered but not
+  // interactive, and `localRooms` holds the in-progress order. `localRooms`
+  // is null when not reordering — the grid then reads order from `data.rooms`.
+  const [showRoomViewMenu, setShowRoomViewMenu] = useState(false)
+  const [reorderMode, setReorderMode] = useState(false)
+  const [localRooms, setLocalRooms] = useState<CalendarRoom[] | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const roomViewMenuRef = useRef<HTMLDivElement | null>(null)
 
   // Drag-to-select state for creating bookings/blocks by dragging across day cells
   const [drag, setDrag] = useState<{
@@ -217,6 +228,73 @@ export default function CalendarPage() {
     fetchData()
   }
 
+  // Reorder helpers (VAY-307).
+  const enterReorderMode = () => {
+    if (!data || data.rooms.length <= 1) return
+    setShowRoomViewMenu(false)
+    setLocalRooms(data.rooms.slice())
+    setReorderMode(true)
+  }
+
+  const cancelReorder = () => {
+    setLocalRooms(null)
+    setReorderMode(false)
+  }
+
+  const moveRoom = (idx: number, dir: -1 | 1) => {
+    setLocalRooms((rooms) => {
+      if (!rooms) return rooms
+      const next = idx + dir
+      if (next < 0 || next >= rooms.length) return rooms
+      const copy = rooms.slice()
+      ;[copy[idx], copy[next]] = [copy[next], copy[idx]]
+      return copy
+    })
+  }
+
+  const saveReorder = async () => {
+    if (!localRooms) return
+    setSavingOrder(true)
+    try {
+      await calendarService.reorderRooms(localRooms.map((r) => r.id))
+      setReorderMode(false)
+      setLocalRooms(null)
+      fetchData()
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  // Whether the user has unsaved changes during reorder mode.
+  const hasUnsavedOrder = useMemo(() => {
+    if (!reorderMode || !localRooms || !data) return false
+    if (localRooms.length !== data.rooms.length) return true
+    return localRooms.some((r, i) => r.id !== data.rooms[i].id)
+  }, [reorderMode, localRooms, data])
+
+  // Warn on tab close / refresh when there are unsaved order changes.
+  useEffect(() => {
+    if (!hasUnsavedOrder) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasUnsavedOrder])
+
+  // Close the Room View dropdown when clicking outside.
+  useEffect(() => {
+    if (!showRoomViewMenu) return
+    const onDown = (e: MouseEvent) => {
+      if (!roomViewMenuRef.current?.contains(e.target as Node)) {
+        setShowRoomViewMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [showRoomViewMenu])
+
   // Calculate bar position and width relative to the visible date range
   // Bars start at the midpoint of the check-in column and end at the midpoint
   // of the check-out column, matching the standard hotel calendar convention.
@@ -326,6 +404,27 @@ export default function CalendarPage() {
             {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
           </p>
         </div>
+        {reorderMode ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-gray-700">
+              {t('calendar.reorderingRooms')}
+            </span>
+            <button
+              onClick={cancelReorder}
+              disabled={savingOrder}
+              className="px-4 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {t('calendar.cancel')}
+            </button>
+            <button
+              onClick={saveReorder}
+              disabled={savingOrder || !hasUnsavedOrder}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {t('calendar.saveOrder')}
+            </button>
+          </div>
+        ) : (
         <div className="flex items-center gap-2">
           <button
             onClick={goToday}
@@ -363,8 +462,44 @@ export default function CalendarPage() {
           >
             {t('calendar.newBooking')}
           </button>
+          {data && data.rooms.length > 1 && (
+            <div className="relative" ref={roomViewMenuRef}>
+              <button
+                onClick={() => setShowRoomViewMenu((v) => !v)}
+                aria-label={t('calendar.roomViewMenu')}
+                className="p-2 text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              {showRoomViewMenu && (
+                <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden">
+                  <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
+                    {t('calendar.roomView')}
+                  </div>
+                  <button
+                    onClick={enterReorderMode}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    </svg>
+                    {t('calendar.reorderRooms')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+        )}
       </div>
+
+      {reorderMode && (
+        <div className="mb-4 px-4 py-2.5 bg-primary-50 border border-primary-200 rounded-lg text-xs text-primary-800">
+          {t('calendar.reorderHint')}
+        </div>
+      )}
 
       {/* Channel Legend */}
       <div className="flex items-center gap-4 mb-4">
@@ -414,24 +549,56 @@ export default function CalendarPage() {
               </tr>
             </thead>
             <tbody>
-              {data.rooms.map((room) => {
+              {(reorderMode && localRooms ? localRooms : data.rooms).map((room, roomIdx, roomsArr) => {
                 const roomBookings = bookingsByRoom[room.id] || []
                 const rt = roomTypeMap[room.roomTypeId]
+                const isFirst = roomIdx === 0
+                const isLast = roomIdx === roomsArr.length - 1
                 return (
-                  <tr key={room.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                  <tr key={room.id} className={`border-b border-gray-100 ${reorderMode ? '' : 'hover:bg-gray-50/50'}`}>
                     <td className="px-1.5 md:px-3 py-1.5 md:py-2 sticky left-0 bg-white z-10 border-r border-gray-200">
-                      <div className="text-[11px] md:text-sm font-semibold text-gray-900 truncate">#{room.roomNumber}</div>
-                      <div className="hidden md:block text-[10px] text-gray-500 leading-tight truncate">
-                        {room.roomTypeName}
-                        {rt?.category && (
-                          <span className="text-gray-400"> &middot; {rt.category}</span>
+                      <div className="flex items-center gap-2">
+                        {reorderMode && (
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={() => moveRoom(roomIdx, -1)}
+                              disabled={isFirst}
+                              aria-label={t('calendar.moveUp')}
+                              title={t('calendar.moveUp')}
+                              className="w-5 h-5 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => moveRoom(roomIdx, 1)}
+                              disabled={isLast}
+                              aria-label={t('calendar.moveDown')}
+                              title={t('calendar.moveDown')}
+                              className="w-5 h-5 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                          </div>
                         )}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] md:text-sm font-semibold text-gray-900 truncate">#{room.roomNumber}</div>
+                          <div className="hidden md:block text-[10px] text-gray-500 leading-tight truncate">
+                            {room.roomTypeName}
+                            {rt?.category && (
+                              <span className="text-gray-400"> &middot; {rt.category}</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td
                       colSpan={VIEW_DAYS}
-                      className="relative h-12 p-0 select-none touch-none cursor-cell"
-                      onPointerDown={(e) => handleCellPointerDown(e, room.id)}
+                      className={`relative h-12 p-0 select-none touch-none ${reorderMode ? 'pointer-events-none opacity-60' : 'cursor-cell'}`}
+                      onPointerDown={(e) => !reorderMode && handleCellPointerDown(e, room.id)}
                     >
                       {/* Day grid lines */}
                       <div className="absolute inset-0 flex">

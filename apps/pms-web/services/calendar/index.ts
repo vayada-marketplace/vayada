@@ -97,4 +97,7 @@ export const calendarService = {
 
   createAdminBooking: (data: CreateAdminBookingPayload) =>
     pmsClient.post('/admin/bookings', data),
+
+  reorderRooms: (orderedRoomIds: string[]) =>
+    pmsClient.patch('/admin/rooms/reorder', { orderedRoomIds }),
 }
