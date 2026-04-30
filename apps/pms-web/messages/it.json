@@ -128,6 +128,8 @@
   "dashboard.settled": "Saldata",
   "dashboard.occupancyForecast": "Previsione occupazione",
   "dashboard.next14Days": "Prossimi 14 giorni",
+  "dashboard.occupancyAxis": "Occupazione",
+  "dashboard.avgPriceAxis": "Prezzo medio",
   "bookings.title": "Prenotazioni",
   "bookings.subtitle": "Registro principale di tutte le prenotazioni",
   "bookings.searchPlaceholder": "Cerca per ospite, ID prenotazione o camera...",

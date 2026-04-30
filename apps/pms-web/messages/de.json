@@ -128,6 +128,8 @@
   "dashboard.settled": "Abgerechnet",
   "dashboard.occupancyForecast": "Belegungsprognose",
   "dashboard.next14Days": "Naechste 14 Tage",
+  "dashboard.occupancyAxis": "Belegung",
+  "dashboard.avgPriceAxis": "Ø Preis",
   "bookings.title": "Reservierungen",
   "bookings.subtitle": "Hauptbuch aller Buchungen",
   "bookings.searchPlaceholder": "Nach Gast, Reservierungs-ID oder Zimmer suchen...",
