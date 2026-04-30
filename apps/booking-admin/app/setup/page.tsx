@@ -386,6 +386,7 @@ export default function SetupPage() {
               seasons: r.seasons,
               weekendSurcharge: r.weekendSurcharge,
               minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
+              mealPlans: r.mealPlans ?? [],
               cancellationPolicy: r.cancellationPolicy,
               flexibleRateEnabled: r.flexibleRateEnabled,
             })
