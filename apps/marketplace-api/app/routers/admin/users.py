@@ -18,6 +18,7 @@ from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
 from app.services.creator_profile import CreatorProfileService
 from app.services.hotel_profile import HotelProfileService
+from app.services.listings import ListingService
 
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
@@ -417,62 +418,8 @@ async def create_user(
                 hotel_profile_id = hotel_profile['id']
 
                 if profile_data.listings:
-                    pool = await Database.get_pool()
-                    async with pool.acquire() as conn:
-                        async with conn.transaction():
-                            for listing_request in profile_data.listings:
-                                listing = await conn.fetchrow(
-                                    """
-                                    INSERT INTO hotel_listings
-                                    (hotel_profile_id, name, location, description, accommodation_type, images)
-                                    VALUES ($1, $2, $3, $4, $5, $6)
-                                    RETURNING id
-                                    """,
-                                    hotel_profile_id,
-                                    listing_request.name,
-                                    listing_request.location,
-                                    listing_request.description,
-                                    listing_request.accommodationType,
-                                    listing_request.images
-                                )
-
-                                listing_id = listing['id']
-
-                                for offering in listing_request.collaborationOfferings:
-                                    await conn.execute(
-                                        """
-                                        INSERT INTO listing_collaboration_offerings
-                                        (listing_id, collaboration_type, availability_months, platforms,
-                                         free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-                                         commission_percentage)
-                                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
-                                        """,
-                                        listing_id,
-                                        offering.collaborationType,
-                                        offering.availabilityMonths,
-                                        offering.platforms,
-                                        offering.freeStayMinNights,
-                                        offering.freeStayMaxNights,
-                                        offering.paidMaxAmount,
-                                        offering.discountPercentage,
-                                        offering.currency,
-                                        offering.commissionPercentage
-                                    )
-
-                                await conn.execute(
-                                    """
-                                    INSERT INTO listing_creator_requirements
-                                    (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups)
-                                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                                    """,
-                                    listing_id,
-                                    listing_request.creatorRequirements.platforms,
-                                    listing_request.creatorRequirements.minFollowers,
-                                    listing_request.creatorRequirements.topCountries,
-                                    listing_request.creatorRequirements.targetAgeMin,
-                                    listing_request.creatorRequirements.targetAgeMax,
-                                    listing_request.creatorRequirements.targetAgeGroups or []
-                                )
+                    for listing_request in profile_data.listings:
+                        await ListingService.create(str(hotel_profile_id), listing_request)
         except Exception:
             # Compensating action: delete user from auth DB if profile creation fails
             await UserRepository.delete(user_id)
