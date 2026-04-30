@@ -27,7 +27,7 @@ class TestListAddons:
 
     async def test_list_no_auth(self, client):
         resp = await client.get("/admin/addons")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 class TestCreateAddon:

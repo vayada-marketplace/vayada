@@ -1,12 +1,46 @@
 """
-Authentication utilities — password hashing and reset tokens.
+Authentication utilities — password hashing, reset tokens, and the
+shared httpOnly auth cookie used by the *.vayada.com frontends.
 """
 import bcrypt
 import secrets
 from typing import Optional
 from datetime import datetime, timezone
 
+from fastapi import Response
+
+from app.config import settings
 from app.repositories.password_reset_repo import PasswordResetRepository
+
+
+# Cookie name is shared across backends (booking-engine, pms-backend) and
+# frontends. Don't rename without coordinating.
+AUTH_COOKIE_NAME = "access_token"
+
+
+def set_auth_cookie(response: Response, token: str, max_age_seconds: int) -> None:
+    """Set the httpOnly auth cookie on the response. SameSite=None is
+    required so the cookie is sent on cross-origin XHR/fetch from
+    affiliate.vayada.com → pms-api.vayada.com (same site, different
+    origin)."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=max_age_seconds,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite="none",
+        domain=settings.AUTH_COOKIE_DOMAIN or None,
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        domain=settings.AUTH_COOKIE_DOMAIN or None,
+        path="/",
+    )
 
 
 def hash_password(password: str) -> str:

@@ -4,6 +4,7 @@ Dependencies for FastAPI routes
 from typing import Optional
 from fastapi import HTTPException, status, Depends, Header, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.auth import AUTH_COOKIE_NAME
 from app.config import settings
 from app.jwt_utils import decode_access_token, is_token_expired
 from app.repositories.user_repo import UserRepository
@@ -26,14 +27,36 @@ async def require_internal_key(
             detail="Invalid or missing internal API key",
         )
 
-security = HTTPBearer()
+# auto_error=False so we can fall back to the cookie when the
+# Authorization header is absent.
+security = HTTPBearer(auto_error=False)
+
+
+def _extract_token(
+    credentials: Optional[HTTPAuthorizationCredentials], request: Request
+) -> str:
+    """Pull the access token from the Authorization header if present,
+    else from the AUTH_COOKIE_NAME cookie. Raises 401 when neither is
+    available."""
+    if credentials is not None:
+        return credentials.credentials
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def _authenticate(
-    credentials: HTTPAuthorizationCredentials, columns: str = "id, type, status"
+    credentials: Optional[HTTPAuthorizationCredentials],
+    request: Request,
+    columns: str = "id, type, status",
 ) -> dict:
     """Shared auth logic: validate token, fetch user, check status."""
-    token = credentials.credentials
+    token = _extract_token(credentials, request)
 
     if is_token_expired(token):
         raise HTTPException(
@@ -80,16 +103,18 @@ async def _authenticate(
 
 
 async def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
-    user = await _authenticate(credentials)
+    user = await _authenticate(credentials, request)
     return str(user['id'])
 
 
 async def get_current_user_with_admin_flag(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> dict:
-    user = await _authenticate(credentials, columns="id, type, status, is_superadmin")
+    user = await _authenticate(credentials, request, columns="id, type, status, is_superadmin")
     return {
         "user_id": str(user['id']),
         "type": user['type'],

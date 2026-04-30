@@ -49,7 +49,7 @@ class TestGetBenefits:
 
     async def test_no_auth(self, client):
         resp = await client.get("/admin/benefits")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 class TestUpdateBenefits:

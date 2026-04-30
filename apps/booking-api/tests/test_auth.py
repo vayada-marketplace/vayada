@@ -362,7 +362,7 @@ class TestChangePassword:
                 "new_password": "NewPass123!",
             },
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 class TestChangeEmail:
@@ -437,4 +437,4 @@ class TestChangeEmail:
             "/auth/change-email",
             json={"new_email": "new@example.com", "password": "Pass123!"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401

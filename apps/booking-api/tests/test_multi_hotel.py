@@ -57,7 +57,7 @@ class TestListHotels:
 
     async def test_list_hotels_requires_auth(self, client):
         resp = await client.get("/admin/hotels")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_list_hotels_non_hotel_user(self, client, cleanup_database):
         user = await create_test_user(user_type="admin")

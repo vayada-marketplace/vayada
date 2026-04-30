@@ -1,7 +1,7 @@
 """
 Authentication routes for the booking engine
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from datetime import datetime, timezone
@@ -9,7 +9,15 @@ import secrets
 import logging
 
 from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
-from app.auth import hash_password, verify_password, create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used
+from app.auth import (
+    hash_password,
+    verify_password,
+    create_password_reset_token,
+    validate_password_reset_token,
+    mark_password_reset_token_as_used,
+    set_auth_cookie,
+    clear_auth_cookie,
+)
 from app.config import settings
 from app.dependencies import get_current_user_id
 from app.repositories.user_repo import UserRepository
@@ -43,7 +51,7 @@ _INVALID_TOKEN = TokenValidationResponse(valid=False, expired=False, user_id=Non
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest):
+async def register(request: RegisterRequest, response: Response):
     if not request.terms_accepted:
         raise HTTPException(status_code=400, detail="You must accept the Terms of Service to register")
     if not request.privacy_accepted:
@@ -76,6 +84,7 @@ async def register(request: RegisterRequest):
     access_token = create_access_token(
         data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
     )
+    set_auth_cookie(response, access_token, get_token_expiration_seconds())
 
     # Send welcome/registration confirmation email
     login_link = f"{settings.FRONTEND_URL}/login"
@@ -95,7 +104,7 @@ async def register(request: RegisterRequest):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, response: Response):
     user = await UserRepository.get_by_email(request.email)
     if not user or not verify_password(request.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -105,6 +114,7 @@ async def login(request: LoginRequest):
     access_token = create_access_token(
         data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
     )
+    set_auth_cookie(response, access_token, get_token_expiration_seconds())
 
     return LoginResponse(
         id=str(user['id']),
@@ -117,6 +127,15 @@ async def login(request: LoginRequest):
         message="Login successful",
         is_superadmin=bool(user.get('is_superadmin', False)),
     )
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Clear the httpOnly auth cookie. Idempotent — safe to call when
+    not logged in. Bearer-using clients can ignore the response and
+    continue dropping their token client-side."""
+    clear_auth_cookie(response)
+    return {"message": "Logged out"}
 
 
 @router.post("/validate-token", response_model=TokenValidationResponse)

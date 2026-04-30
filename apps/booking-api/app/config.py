@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
 
+    # Auth Cookie (shared with all *.vayada.com frontends)
+    # Set AUTH_COOKIE_DOMAIN to ".vayada.com" in prod so subdomains
+    # (affiliate.vayada.com, pms.vayada.com, etc.) all see the cookie.
+    # Leave empty in dev so it defaults to the response host.
+    AUTH_COOKIE_DOMAIN: str = Field(default="", description="Cookie domain — '.vayada.com' in prod, empty in dev")
+    AUTH_COOKIE_SECURE: bool = Field(default=True, description="Set the Secure flag on auth cookies (browsers permit on localhost)")
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

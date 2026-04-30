@@ -25,7 +25,7 @@ class TestAdminMe:
 
     async def test_me_no_auth(self, client):
         resp = await client.get("/admin/me")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_me_non_hotel_user(self, client, cleanup_database):
         user = await create_test_user(user_type="admin")

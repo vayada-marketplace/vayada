@@ -20,7 +20,7 @@ class TestUploadImages:
                 "data": base64.b64encode(b"fake-image-data").decode(),
             },
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     async def test_upload_success(self, client, cleanup_database):
         user = await create_test_user()

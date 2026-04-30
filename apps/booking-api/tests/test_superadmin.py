@@ -33,7 +33,7 @@ class TestSuperadminCheck:
 
     async def test_superadmin_check_no_auth(self, client):
         resp = await client.get("/admin/superadmin/check")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 async def _make_superadmin(user):
