@@ -184,7 +184,7 @@ export default function RoomCard({
                   title={t('nonRefundableRate')}
                   description={t('nonRefundableDesc')}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(nonRefundableNightly, selectedCurrency)}
+                  nightlyLabel={formatPrice(nonRefundableNightly * requiredRooms, selectedCurrency)}
                   discountPercent={discount}
                   benefits={room.benefits}
                   soldOut={soldOut}
@@ -200,7 +200,7 @@ export default function RoomCard({
                   title={t('flexibleRate')}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(flexibleNightly, selectedCurrency)}
+                  nightlyLabel={formatPrice(flexibleNightly * requiredRooms, selectedCurrency)}
                   benefits={room.benefits}
                   soldOut={soldOut}
                   onSelect={() => onSelectRate('flexible', requiredRooms)}

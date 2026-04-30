@@ -209,7 +209,7 @@ function BookPageContent() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-bold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</p>
-                  <p className="text-xs text-gray-500">{formatPrice(nightlyRate, selectedCurrency)} &times; {nights}</p>
+                  <p className="text-xs text-gray-500">{formatPrice(nightlyRate * roomsParam, selectedCurrency)} &times; {nights}</p>
                 </div>
               </div>
 
