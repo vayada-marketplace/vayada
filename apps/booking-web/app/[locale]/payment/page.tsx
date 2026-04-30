@@ -18,21 +18,7 @@ import { bookingService } from '@/services/api/booking'
 import { getFreeCancellationDays } from '@/lib/constants/booking'
 import { usePricing } from '@/lib/hooks/usePricing'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
-
-interface GuestDetails {
-  roomTypeId: string
-  guestFirstName: string
-  guestLastName: string
-  guestEmail: string
-  guestPhone: string
-  guestCountry?: string
-  specialRequests: string
-  estimatedArrivalTime?: string
-  numberOfGuests?: number
-  referralCode?: string
-  addonIds?: string[]
-  addonQuantities?: Record<string, number>
-}
+import { GuestDetailsDraft, readGuestDetails, saveLastBooking } from '@/lib/storage/bookingDraft'
 
 function CardPaymentForm({
   onSubmit,
@@ -100,7 +86,7 @@ function PaymentPageContent() {
   const rateType = searchParams.get('rateType') || 'flexible'
   const isNonRefundable = rateType === 'nonrefundable'
 
-  const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null)
+  const [guestDetails, setGuestDetails] = useState<GuestDetailsDraft | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
   const promoCodeParam = searchParams.get('promoCode') || ''
@@ -139,18 +125,11 @@ function PaymentPageContent() {
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [pendingBooking, setPendingBooking] = useState<Booking | null>(null)
 
-  // Load guest details from sessionStorage
+  // Load guest details from the booking draft (set by /book on submit)
   useEffect(() => {
-    const stored = sessionStorage.getItem('guestDetails')
-    if (stored) {
-      try {
-        setGuestDetails(JSON.parse(stored))
-      } catch {
-        router.push('/book')
-      }
-    } else {
-      router.push('/book')
-    }
+    const draft = readGuestDetails()
+    if (draft) setGuestDetails(draft)
+    else router.push('/book')
   }, [router])
 
   // Per-rate allow-list from the room. When null, every hotel-enabled method is
@@ -224,11 +203,11 @@ function PaymentPageContent() {
         // The Stripe form will be rendered, user confirms payment there
       } else if (paymentMethod === 'xendit' && result.xenditInvoiceUrl) {
         // Redirect to Xendit payment page (QRIS, e-wallets, VA)
-        sessionStorage.setItem('lastBooking', JSON.stringify(booking))
+        saveLastBooking(booking)
         window.location.href = result.xenditInvoiceUrl
       } else {
         // Pay at property — redirect to confirmation
-        sessionStorage.setItem('lastBooking', JSON.stringify(booking))
+        saveLastBooking(booking)
         router.push(`/booking/${booking.bookingReference}`)
       }
     } catch (err: any) {
@@ -799,11 +778,11 @@ function StripePaymentPage({
       // hand-rolled subset we used to write here was missing nightlyRate,
       // addonTotal, createdAt, hostResponseDeadline — so Stripe-path users
       // saw no countdown timer).
-      sessionStorage.setItem('lastBooking', JSON.stringify({
+      saveLastBooking({
         ...booking,
         paymentMethod: 'card',
         paymentStatus: 'authorized',
-      }))
+      })
 
       router.push(`/booking/${booking.bookingReference}`)
     } catch (err: any) {

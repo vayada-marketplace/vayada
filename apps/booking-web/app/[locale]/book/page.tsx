@@ -16,6 +16,7 @@ import { COUNTRIES } from '@/lib/constants/countries'
 import { trackEvent } from '@/services/api/tracking'
 import { usePricing } from '@/lib/hooks/usePricing'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
+import { saveGuestDetails } from '@/lib/storage/bookingDraft'
 
 const ARRIVAL_TIMES = Array.from({ length: 24 }, (_, i) => {
   const h = i.toString().padStart(2, '0')
@@ -128,8 +129,7 @@ function BookPageContent() {
       const refCookie = document.cookie.match(/(^| )ref=([^;]+)/)
       const referralCode = refCookie ? decodeURIComponent(refCookie[2]) : undefined
 
-      // Store guest details in sessionStorage for the payment page
-      sessionStorage.setItem('guestDetails', JSON.stringify({
+      saveGuestDetails({
         roomTypeId: room.id,
         guestFirstName: firstName,
         guestLastName: lastName,
@@ -142,7 +142,7 @@ function BookPageContent() {
         referralCode,
         addonIds: selectedAddonIds,
         addonQuantities,
-      }))
+      })
 
       // Redirect to payment page with booking params
       const params = new URLSearchParams({

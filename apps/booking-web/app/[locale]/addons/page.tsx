@@ -341,10 +341,6 @@ export default function AddonsPage() {
                   const qty = selections[id]
                   return qty > 1 ? `${id}:${qty}` : id
                 }).join(','))
-                // Store selected dates for perNight addons
-                if (Object.keys(selectedDates).length > 0) {
-                  sessionStorage.setItem('addonDates', JSON.stringify(selectedDates))
-                }
               }
               router.push(`/book?${params.toString()}`)
             }}

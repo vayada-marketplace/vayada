@@ -11,6 +11,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 import { Booking } from '@/lib/types'
 import { bookingService } from '@/services/api/booking'
 import { trackEvent } from '@/services/api/tracking'
+import { readLastBooking, saveLastBooking } from '@/lib/storage/bookingDraft'
 
 function CountdownTimer({ deadline }: { deadline: string }) {
   const [timeLeft, setTimeLeft] = useState('')
@@ -57,17 +58,10 @@ export default function BookingConfirmationPage({
 
   useEffect(() => {
     trackEvent(slug, 'completed_booking')
-    const stored = sessionStorage.getItem('lastBooking')
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored)
-        if (parsed.bookingReference === params.reference) {
-          setBooking(parsed)
-          setStatus(parsed.status || 'pending')
-        }
-      } catch {
-        // ignore
-      }
+    const stored = readLastBooking()
+    if (stored && stored.bookingReference === params.reference) {
+      setBooking(stored)
+      setStatus(stored.status || 'pending')
     }
   }, [params.reference, slug])
 
@@ -84,7 +78,7 @@ export default function BookingConfirmationPage({
           if (booking) {
             const updated = { ...booking, status: result.status as Booking['status'] }
             setBooking(updated)
-            sessionStorage.setItem('lastBooking', JSON.stringify(updated))
+            saveLastBooking(updated)
           }
         }
       } catch {
@@ -106,7 +100,7 @@ export default function BookingConfirmationPage({
       setStatus('cancelled')
       const updated = { ...booking, status: 'cancelled' as const }
       setBooking(updated)
-      sessionStorage.setItem('lastBooking', JSON.stringify(updated))
+      saveLastBooking(updated)
     } catch (err: any) {
       setWithdrawError(err.message || 'Failed to withdraw booking')
     } finally {
