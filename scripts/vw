@@ -380,6 +380,12 @@ rebase_with_submodule_autoresolve() {
   return 1
 }
 
+# When set by cmd_ship_all, launch_claude_to_resolve appends to this queue
+# instead of opening a Warp tab per failure, so flush_claude_queue can dispatch
+# all failures into a single Claude session at the end of the run.
+CLAUDE_QUEUE_WORKTREES=()
+CLAUDE_QUEUE_CONTEXTS=()
+
 # Open a new Warp tab cd'd into $worktree running Claude, with a prompt
 # describing the $context of the failure so it can investigate and fix it.
 # Best-effort: silently no-ops if the worktree is gone or osascript fails
@@ -390,6 +396,12 @@ launch_claude_to_resolve() {
 
   [ -d "$worktree" ] || return 0
   [ "${VW_NO_AUTO_CLAUDE:-0}" = "1" ] && return 0
+
+  if [ "${VW_BATCH_CLAUDE:-0}" = "1" ]; then
+    CLAUDE_QUEUE_WORKTREES+=("$worktree")
+    CLAUDE_QUEUE_CONTEXTS+=("$context")
+    return 0
+  fi
 
   # Strip apostrophes — the keystroke wraps the prompt in single quotes,
   # so an apostrophe inside would terminate the shell string.
@@ -421,6 +433,57 @@ tell application "System Events"
     keystroke return
 end tell
 APPLESCRIPT
+}
+
+# Dispatch all queued failures into a single Claude session in $MAIN_REPO.
+# No-op if the queue is empty or VW_NO_AUTO_CLAUDE is set.
+flush_claude_queue() {
+  local count=${#CLAUDE_QUEUE_WORKTREES[@]}
+  [ "$count" -eq 0 ] && return 0
+  [ "${VW_NO_AUTO_CLAUDE:-0}" = "1" ] && return 0
+
+  local prompt="You are at $MAIN_REPO. An automated vw ship-all run produced $count failure(s) that need manual resolution. Each failure below is independent — work through them one by one, cd-ing into the worktree listed for that entry.
+
+"
+  local i n wt ctx
+  for ((i=0; i<count; i++)); do
+    n=$((i+1))
+    wt="${CLAUDE_QUEUE_WORKTREES[i]}"
+    ctx="${CLAUDE_QUEUE_CONTEXTS[i]}"
+    prompt+="── Failure $n of $count ──
+Worktree: $wt
+$ctx
+
+"
+  done
+
+  prompt+="For each failure, common cases:
+  - Submodule pointer conflict during rebase: pick the SHA whose history contains both sides (typically the submodule remote main after a just-shipped merge), then continue the rebase.
+  - Real code merge conflict inside a submodule: edit the file, git add, commit inside the submodule, then continue.
+  - Dirty submodule working tree blocking submodule update: commit or reset as appropriate.
+
+After every worktree is clean and its rebase or merge is finished, run vw ship-all again from $MAIN_REPO to ship anything that still needs shipping. Otherwise report what you did and stop."
+
+  # Strip apostrophes — keystroke wraps the prompt in single quotes.
+  prompt="${prompt//\'/}"
+  local as_prompt="${prompt//\\/\\\\}"
+  as_prompt="${as_prompt//\"/\\\"}"
+
+  echo "  → launching Claude in new Warp tab to resolve $count failure(s)"
+
+  /usr/bin/osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "Warp" to activate
+delay 0.4
+tell application "System Events"
+    keystroke "t" using command down
+    delay 0.5
+    keystroke "cd $MAIN_REPO && claude '$as_prompt'"
+    keystroke return
+end tell
+APPLESCRIPT
+
+  CLAUDE_QUEUE_WORKTREES=()
+  CLAUDE_QUEUE_CONTEXTS=()
 }
 
 ship_submodule() {
@@ -517,6 +580,9 @@ cmd_ship_all() {
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
   [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
 
+  # Queue conflict prompts; flush_claude_queue dispatches them as one session.
+  export VW_BATCH_CLAUDE=1
+
   echo "→ Fetching $remote/main"
   git fetch "$remote" main --quiet
 
@@ -548,6 +614,8 @@ cmd_ship_all() {
 
   echo
   echo "→ Shipped: $shipped, failed: $failed"
+
+  flush_claude_queue
 
   if [ "$shipped" -gt 0 ]; then
     echo
