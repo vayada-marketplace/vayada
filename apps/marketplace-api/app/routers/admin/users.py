@@ -16,6 +16,7 @@ from app.s3_service import delete_all_objects_in_prefix
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
+from app.services.creator_profile import CreatorProfileService
 
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
@@ -549,94 +550,7 @@ async def update_creator_profile(
         if request.name is not None:
             await UserRepository.update_name(user_id, request.name)
 
-        pool = await Database.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                update_fields = []
-                update_values = []
-                param_counter = 1
-
-                if request.location is not None:
-                    update_fields.append(f"location = ${param_counter}")
-                    update_values.append(request.location)
-                    param_counter += 1
-
-                if request.shortDescription is not None:
-                    update_fields.append(f"short_description = ${param_counter}")
-                    update_values.append(request.shortDescription)
-                    param_counter += 1
-
-                if request.portfolioLink is not None:
-                    update_fields.append(f"portfolio_link = ${param_counter}")
-                    update_values.append(str(request.portfolioLink))
-                    param_counter += 1
-
-                if request.phone is not None:
-                    update_fields.append(f"phone = ${param_counter}")
-                    update_values.append(request.phone)
-                    param_counter += 1
-
-                if request.profilePicture is not None:
-                    update_fields.append(f"profile_picture = ${param_counter}")
-                    update_values.append(request.profilePicture)
-                    param_counter += 1
-
-                if request.creatorType is not None:
-                    update_fields.append(f"creator_type = ${param_counter}")
-                    update_values.append(request.creatorType)
-                    param_counter += 1
-
-                if update_fields:
-                    update_fields.append("updated_at = now()")
-                    update_values.append(creator_id)
-
-                    update_query = f"""
-                        UPDATE creators
-                        SET {', '.join(update_fields)}
-                        WHERE id = ${param_counter}
-                    """
-                    await conn.execute(update_query, *update_values)
-
-                if request.platforms is not None:
-                    await conn.execute(
-                        "DELETE FROM creator_platforms WHERE creator_id = $1",
-                        creator_id
-                    )
-
-                    for platform in request.platforms:
-                        top_countries_data = None
-                        if platform.topCountries:
-                            top_countries_data = json.dumps(
-                                [tc if isinstance(tc, dict) else tc.model_dump() for tc in platform.topCountries]
-                            )
-
-                        top_age_groups_data = None
-                        if platform.topAgeGroups:
-                            top_age_groups_data = json.dumps(
-                                [tag if isinstance(tag, dict) else tag.model_dump() for tag in platform.topAgeGroups]
-                            )
-
-                        gender_split_data = None
-                        if platform.genderSplit:
-                            gender_split_data = json.dumps(
-                                platform.genderSplit if isinstance(platform.genderSplit, dict) else platform.genderSplit.model_dump()
-                            )
-
-                        await conn.execute(
-                            """
-                            INSERT INTO creator_platforms
-                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                            """,
-                            creator_id,
-                            platform.name,
-                            platform.handle,
-                            platform.followers,
-                            Decimal(str(platform.engagementRate)),
-                            top_countries_data,
-                            top_age_groups_data,
-                            gender_split_data
-                        )
+        await CreatorProfileService.update(creator_id, request)
 
         creator_data = await CreatorRepository.get_by_id(
             creator_id,

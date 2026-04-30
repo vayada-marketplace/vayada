@@ -4,7 +4,6 @@ Creator profile routes
 from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from typing import List, Literal, Optional
 from datetime import datetime
-from decimal import Decimal
 import json
 import logging
 
@@ -18,6 +17,7 @@ from app.email_service import send_email, create_profile_completion_email_html
 from app.auth import create_email_verification_token
 from app.config import settings
 from app.s3_service import delete_file_from_s3, extract_key_from_url
+from app.services.creator_profile import CreatorProfileService
 from app.models.common import PlatformResponse, CreatorRequirementsResponse
 from app.models.creators import (
     CreatorProfileStatusResponse,
@@ -286,87 +286,7 @@ async def update_creator_profile(
         if request.name is not None:
             await UserRepository.update_name(user_id, request.name)
 
-        # Start transaction - update creator profile and platforms
-        pool = await Database.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                # Build dynamic UPDATE query for creator profile
-                update_fields = []
-                update_values = []
-                param_counter = 1
-                
-                if request.location is not None:
-                    update_fields.append(f"location = ${param_counter}")
-                    update_values.append(request.location)
-                    param_counter += 1
-                
-                if request.shortDescription is not None:
-                    update_fields.append(f"short_description = ${param_counter}")
-                    update_values.append(request.shortDescription)
-                    param_counter += 1
-                
-                if request.portfolioLink is not None:
-                    update_fields.append(f"portfolio_link = ${param_counter}")
-                    update_values.append(str(request.portfolioLink))
-                    param_counter += 1
-                
-                if request.phone is not None:
-                    update_fields.append(f"phone = ${param_counter}")
-                    update_values.append(request.phone)
-                    param_counter += 1
-                
-                if request.profilePicture is not None:
-                    update_fields.append(f"profile_picture = ${param_counter}")
-                    update_values.append(request.profilePicture)
-                    param_counter += 1
-
-                if request.creatorType is not None:
-                    update_fields.append(f"creator_type = ${param_counter}")
-                    update_values.append(request.creatorType)
-                    param_counter += 1
-
-                # Update creator profile if there are fields to update
-                if update_fields:
-                    update_fields.append("updated_at = now()")
-                    update_values.append(creator_id)  # WHERE clause parameter
-                    
-                    update_query = f"""
-                        UPDATE creators 
-                        SET {', '.join(update_fields)}
-                        WHERE id = ${param_counter}
-                    """
-                    await conn.execute(update_query, *update_values)
-                
-                # Update platforms only if provided (replace strategy)
-                if request.platforms is not None:
-                    # Delete existing platforms
-                    await conn.execute(
-                        "DELETE FROM creator_platforms WHERE creator_id = $1",
-                        creator_id
-                    )
-                    
-                    # Insert new platforms
-                    for platform in request.platforms:
-                        # Prepare analytics data as JSONB (serialize to string for DB)
-                        top_countries_data = json.dumps([tc.model_dump() for tc in platform.topCountries]) if platform.topCountries else None
-                        top_age_groups_data = json.dumps([tag.model_dump() for tag in platform.topAgeGroups]) if platform.topAgeGroups else None
-                        gender_split_data = json.dumps(platform.genderSplit.model_dump()) if platform.genderSplit else None
-                        
-                        await conn.execute(
-                            """
-                            INSERT INTO creator_platforms
-                            (creator_id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                            """,
-                            creator_id,
-                            platform.name,
-                            platform.handle,
-                            platform.followers,
-                            Decimal(str(platform.engagementRate)),
-                            top_countries_data,
-                            top_age_groups_data,
-                            gender_split_data
-                        )
+        await CreatorProfileService.update(creator_id, request)
 
         # Delete old profile picture from S3 if replaced with a new one
         if request.profilePicture is not None and old_profile_picture and old_profile_picture != request.profilePicture:
