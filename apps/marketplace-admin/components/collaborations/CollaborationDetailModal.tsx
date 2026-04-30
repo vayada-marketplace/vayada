@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -102,7 +103,12 @@ export function CollaborationDetailModal({
                 {/* Header: Parties & Status */}
                 <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100">
                     {/* Creator */}
-                    <div className="flex items-center space-x-3">
+                    <Link
+                        href={`/dashboard/users/${collaboration.creator_id}`}
+                        onClick={handleClose}
+                        className="flex items-center space-x-3 rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
+                        title={`View ${collaboration.creator_name}'s profile`}
+                    >
                         <Avatar
                             src={collaboration.creator_profile_picture}
                             alt={collaboration.creator_name}
@@ -111,10 +117,10 @@ export function CollaborationDetailModal({
                             className="border border-gray-200"
                         />
                         <div>
-                            <p className="text-sm font-bold text-gray-900">{collaboration.creator_name}</p>
+                            <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.creator_name}</p>
                             <p className="text-xs text-gray-500">Creator</p>
                         </div>
-                    </div>
+                    </Link>
                     {/* Status */}
                     <div className="my-4 md:my-0 flex flex-col items-center">
                         <Badge variant={statusVariantMap[collaboration.status]}>
@@ -126,15 +132,20 @@ export function CollaborationDetailModal({
                     </div>
 
                     {/* Hotel */}
-                    <div className="flex items-center space-x-3 text-right">
+                    <Link
+                        href={`/dashboard/hotels/${collaboration.hotel_id}`}
+                        onClick={handleClose}
+                        className="flex items-center space-x-3 text-right rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
+                        title={`View ${collaboration.hotel_name}'s profile`}
+                    >
                         <div>
-                            <p className="text-sm font-bold text-gray-900">{collaboration.hotel_name}</p>
+                            <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.hotel_name}</p>
                             <p className="text-xs text-gray-500">{collaboration.listing_name}</p>
                         </div>
                         <div className="w-12 h-12 rounded-lg bg-gray-200 flex items-center justify-center text-gray-500 font-bold border border-gray-200">
                             {collaboration.hotel_name.charAt(0)}
                         </div>
-                    </div>
+                    </Link>
                 </div>
 
                 {/* Terms & Dates */}
