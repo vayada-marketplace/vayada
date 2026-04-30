@@ -6,10 +6,9 @@
 import { ApiClient } from '@/services/api/client'
 import {
   clearAuthData,
-  getToken,
   getUserName,
   getUserType,
-  storeToken,
+  isLoggedInHint,
   storeUser,
 } from './storage'
 
@@ -41,13 +40,15 @@ export interface ResetPasswordRequest {
 
 export const authService = {
   login: async (data: LoginRequest): Promise<LoginResponse> => {
+    // Server sets the httpOnly access_token cookie on this response —
+    // we don't read or store the token here. Body is just used for
+    // user display data.
     const response = await authClient.post<LoginResponse>('/auth/login', data)
 
     if (response.type !== 'affiliate') {
       throw new Error('Access denied. Affiliate account required.')
     }
 
-    storeToken(response.access_token, response.expires_in)
     storeUser({
       id: response.id,
       email: response.email,
@@ -63,18 +64,24 @@ export const authService = {
     await authClient.post('/auth/reset-password', data)
   },
 
-  logout: (): void => {
+  logout: async (): Promise<void> => {
+    // Best-effort: clear the server-side cookie. Even if this fails
+    // (network blip, server down), local state still gets wiped and
+    // the user is bounced to /login.
+    try {
+      await authClient.post('/auth/logout')
+    } catch {
+      // ignore
+    }
     clearAuthData()
     if (typeof window !== 'undefined') {
       window.location.href = '/login'
     }
   },
 
-  isLoggedIn: (): boolean => getToken() !== null,
+  isLoggedIn: isLoggedInHint,
 
   isAffiliate: (): boolean => getUserType() === 'affiliate',
-
-  getToken,
 
   getUserName,
 

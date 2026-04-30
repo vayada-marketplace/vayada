@@ -1,8 +1,13 @@
 /**
- * API client for the affiliate dashboard
+ * API client for the affiliate dashboard.
+ *
+ * Auth: every request goes out with `credentials: 'include'` so the
+ * httpOnly access_token cookie set by /auth/login flows back to the
+ * backend automatically. No Bearer header, no localStorage token —
+ * the frontend never sees the token.
  */
 
-import { clearAuthData, getToken } from '@/services/auth/storage'
+import { clearAuthData } from '@/services/auth/storage'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8002'
 
@@ -61,19 +66,16 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
 
-    const isAuthEndpoint = endpoint.startsWith('/auth/')
-    const token = isAuthEndpoint ? null : getToken()
-
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
     }
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
-
-    const response = await fetch(url, { ...options, headers })
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    })
 
     if (response.status === 204) {
       if (!response.ok) {
@@ -104,7 +106,7 @@ export class ApiClient {
           : { detail: typeof data === 'string' && data ? data : `API Error: ${response.status}` }
       const error = new ApiErrorResponse(response.status, errorData)
 
-      if (response.status === 401 && !isAuthEndpoint) {
+      if (response.status === 401 && !endpoint.startsWith('/auth/')) {
         this.handleUnauthorized(error)
       }
 

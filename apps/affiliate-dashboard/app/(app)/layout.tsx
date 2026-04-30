@@ -1,29 +1,15 @@
-'use client'
-
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
 import SWRProvider from '@/components/SWRProvider'
 
+/**
+ * Authentication is gated server-side by middleware.ts (cookie
+ * presence check) plus the API client (401 handling on data fetches).
+ * This layout no longer needs a client-side check or the loading flash
+ * that came with it.
+ */
 export default function AppLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const router = useRouter()
-  const [isAuthorized, setIsAuthorized] = useState(false)
-
-  useEffect(() => {
-    if (!authService.isLoggedIn() || !authService.isAffiliate()) {
-      router.replace('/login')
-    } else {
-      setIsAuthorized(true)
-    }
-  }, [router])
-
-  if (!isAuthorized) {
-    return null
-  }
-
   return <SWRProvider>{children}</SWRProvider>
 }

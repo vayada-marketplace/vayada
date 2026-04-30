@@ -1,13 +1,12 @@
 /**
- * Shared localStorage layer for auth tokens + user data.
+ * Local user-display data for the affiliate dashboard.
  *
- * All access to the auth-related localStorage keys goes through this module
- * so the storage shape stays consistent across the API client and the
- * authService.
+ * Auth tokens themselves now live in an httpOnly cookie set by the
+ * auth backend on /auth/login — they are intentionally not in
+ * localStorage and not readable from JS. This module only persists
+ * non-sensitive UI state (display name, type) for the navbar and the
+ * client-side "is logged in" hint.
  */
-
-const TOKEN_KEY = 'access_token'
-const EXPIRES_AT_KEY = 'token_expires_at'
 
 const USER_KEYS = ['userId', 'userEmail', 'userName', 'userType', 'userStatus', 'user'] as const
 
@@ -17,24 +16,6 @@ export interface StoredUser {
   name: string
   type: string
   status: string
-}
-
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null
-  const token = localStorage.getItem(TOKEN_KEY)
-  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY)
-  if (!token || !expiresAt) return null
-  if (Date.now() >= parseInt(expiresAt)) {
-    clearAuthData()
-    return null
-  }
-  return token
-}
-
-export function storeToken(token: string, expiresIn: number): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(EXPIRES_AT_KEY, (Date.now() + expiresIn * 1000).toString())
 }
 
 export function storeUser(data: StoredUser): void {
@@ -50,8 +31,6 @@ export function storeUser(data: StoredUser): void {
 
 export function clearAuthData(): void {
   if (typeof window === 'undefined') return
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(EXPIRES_AT_KEY)
   for (const key of USER_KEYS) localStorage.removeItem(key)
   localStorage.setItem('isLoggedIn', 'false')
 }
@@ -64,4 +43,14 @@ export function getUserType(): string | null {
 export function getUserName(): string {
   if (typeof window === 'undefined') return ''
   return localStorage.getItem('userName') || ''
+}
+
+/** Client-side hint based on the last successful login. The cookie is
+ * httpOnly so we cannot inspect it directly; if the cookie has expired
+ * server-side, the next API call will 401 and the API client redirects
+ * to /login. The Next middleware does the authoritative gate at
+ * navigation time. */
+export function isLoggedInHint(): boolean {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem('isLoggedIn') === 'true'
 }
