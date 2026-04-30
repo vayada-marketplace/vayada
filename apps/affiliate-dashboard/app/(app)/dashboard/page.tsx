@@ -119,15 +119,10 @@ export default function DashboardPage() {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 bg-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-sm text-muted">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-sm text-muted text-center sm:text-left">
             &copy; 2026 vayada. All rights reserved.
           </p>
-          <div className="flex gap-6 text-sm text-muted">
-            <a href="#" className="hover:text-gray-700 transition-colors">Help Center</a>
-            <a href="#" className="hover:text-gray-700 transition-colors">Terms</a>
-            <a href="#" className="hover:text-gray-700 transition-colors">Privacy</a>
-          </div>
         </div>
       </footer>
     </div>

@@ -44,12 +44,7 @@ export default function RecentActivity() {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-gray-900">Recent Activity</h3>
-        <a href="#" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-          View all
-        </a>
-      </div>
+      <h3 className="font-semibold text-gray-900 mb-4">Recent Activity</h3>
 
       <DataState
         data={data ? data.activities : null}
