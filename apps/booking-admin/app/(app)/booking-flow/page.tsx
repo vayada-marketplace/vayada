@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { settingsService, type AddonItem, type AddonSettings, type PromoCodeItem, type DesignSettings, type PropertySettings } from '@/services/settings'
 import { pmsClient } from '@/services/api/pmsClient'
-import { ToggleSwitch, FeedbackAlert, SaveButton } from '@/components/ui'
+import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from '@/components/ui'
 import { uploadSingleImage } from '@/lib/utils/uploadImage'
 import { CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LANGUAGE_CODES } from '@/lib/constants/options'
 import type { CurrencyOption, LanguageOption } from '@/lib/constants/options'
@@ -75,6 +75,9 @@ export default function BookingFlowPage() {
   const [highlightInput, setHighlightInput] = useState('')
   const [includedItemInput, setIncludedItemInput] = useState('')
   const addonFileInputRef = useRef<HTMLInputElement>(null)
+
+  // Pending delete confirmation
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'addon' | 'promo'; id: string } | null>(null)
 
   // Promo codes state
   const [promoCodes, setPromoCodes] = useState<PromoCodeItem[]>([])
@@ -250,8 +253,11 @@ export default function BookingFlowPage() {
     }
   }
 
-  const handleDeleteAddon = async (id: string) => {
-    if (!confirm(t('bookingFlow.addons.confirm.delete'))) return
+  const handleDeleteAddon = (id: string) => {
+    setPendingDelete({ kind: 'addon', id })
+  }
+
+  const confirmDeleteAddon = async (id: string) => {
     try {
       setDeletingId(id)
       await settingsService.deleteAddon(id)
@@ -261,6 +267,7 @@ export default function BookingFlowPage() {
       showFeedback('error', t('bookingFlow.addons.feedback.deleteError'))
     } finally {
       setDeletingId(null)
+      setPendingDelete(null)
     }
   }
 
@@ -328,8 +335,11 @@ export default function BookingFlowPage() {
     }
   }
 
-  const handleDeletePromoCode = async (id: string) => {
-    if (!confirm(t('bookingFlow.promoCodes.confirm.delete'))) return
+  const handleDeletePromoCode = (id: string) => {
+    setPendingDelete({ kind: 'promo', id })
+  }
+
+  const confirmDeletePromoCode = async (id: string) => {
     try {
       setDeletingPromoId(id)
       await settingsService.deletePromoCode(id)
@@ -339,6 +349,7 @@ export default function BookingFlowPage() {
       showFeedback('error', t('bookingFlow.promoCodes.feedback.deleteError'))
     } finally {
       setDeletingPromoId(null)
+      setPendingDelete(null)
     }
   }
 
@@ -1151,6 +1162,27 @@ export default function BookingFlowPage() {
           </div>
         </div>
       )}
+
+      {/* DELETE CONFIRMATION DIALOG */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t('common.delete')}
+        message={
+          pendingDelete?.kind === 'promo'
+            ? t('bookingFlow.promoCodes.confirm.delete')
+            : t('bookingFlow.addons.confirm.delete')
+        }
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        tone="danger"
+        loading={deletingId !== null || deletingPromoId !== null}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          if (pendingDelete.kind === 'addon') confirmDeleteAddon(pendingDelete.id)
+          else confirmDeletePromoCode(pendingDelete.id)
+        }}
+      />
     </div>
   )
 }
