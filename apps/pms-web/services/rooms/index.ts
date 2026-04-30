@@ -5,6 +5,15 @@ export interface MonthlyRate {
   nonRefundableRate?: number | null
 }
 
+// Booking.com meal_plan_code values that Channex maps for us. 0 (room only)
+// is the implicit default and never appears in the meal_plans array.
+export type MealPlanCode = 1 | 3 | 4 | 9
+
+export interface MealPlan {
+  code: MealPlanCode
+  surcharge: number
+}
+
 export interface RoomType {
   id: string
   hotelId: string
@@ -42,6 +51,7 @@ export interface RoomType {
   nonRefundableCancellationPolicy: string
   minimumAdvanceDays: number
   ratePaymentMethods: Record<string, string[]> | null
+  mealPlans: MealPlan[]
   createdAt: string
   updatedAt: string
 }
@@ -81,6 +91,7 @@ export interface RoomTypeCreate {
   nonRefundableCancellationPolicy?: string
   minimumAdvanceDays?: number
   ratePaymentMethods?: Record<string, string[]> | null
+  mealPlans?: MealPlan[]
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>

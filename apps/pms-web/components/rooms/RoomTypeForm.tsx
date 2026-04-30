@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
-import { RoomTypeCreate, RoomTypeUpdate } from '@/services/rooms'
+import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import { getCurrencySymbol, CURRENCY_SYMBOLS } from '@/lib/utils'
 
@@ -278,6 +278,7 @@ export default function RoomTypeForm({
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 5)
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
+  const [mealPlans, setMealPlans] = useState<MealPlan[]>(form.mealPlans || [])
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
   const [editingDay, setEditingDay] = useState<string | null>(null)
@@ -321,14 +322,37 @@ export default function RoomTypeForm({
       nonRefundableEnabled,
       nonRefundableDiscount,
       nonRefundableCancellationPolicy,
+      mealPlans,
       dailyRates,
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, flexibleCancellationType, partialRefundCancelWindowDays, partialRefundAmountPercent, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, dailyRates])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, flexibleCancellationType, partialRefundCancelWindowDays, partialRefundAmountPercent, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, mealPlans, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     const updated = { ...form, ...updates }
     onChange(updated)
+  }
+
+  const MEAL_PLAN_OPTIONS: { code: MealPlanCode; label: string; sub: string }[] = [
+    { code: 1, label: 'Breakfast', sub: 'Pushed to OTAs as "Breakfast included"' },
+    { code: 3, label: 'Half board', sub: 'Breakfast + dinner' },
+    { code: 4, label: 'Full board', sub: 'Breakfast + lunch + dinner' },
+    { code: 9, label: 'All inclusive', sub: 'All meals + drinks' },
+  ]
+  const isMealEnabled = (code: MealPlanCode) => mealPlans.some(m => m.code === code)
+  const getMealSurcharge = (code: MealPlanCode) =>
+    mealPlans.find(m => m.code === code)?.surcharge ?? 0
+  const toggleMeal = (code: MealPlanCode) => {
+    setMealPlans(prev =>
+      prev.some(m => m.code === code)
+        ? prev.filter(m => m.code !== code)
+        : [...prev, { code, surcharge: 0 }]
+    )
+  }
+  const setMealSurcharge = (code: MealPlanCode, surcharge: number) => {
+    setMealPlans(prev =>
+      prev.map(m => (m.code === code ? { ...m, surcharge } : m))
+    )
   }
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1308,6 +1332,52 @@ export default function RoomTypeForm({
                       <span className="text-[11px] text-gray-500">off flexible rate</span>
                     </div>
                   )}
+                </div>
+
+                {/* Meal plans */}
+                <div className={`rounded-xl border px-4 py-3.5 transition-colors ${mealPlans.length > 0 ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <svg className="w-4 h-4 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11h18" /><path d="M12 3v18" /><path d="M3 7h18" /></svg>
+                    <span className="text-[12px] font-semibold text-gray-900">Meal plans</span>
+                    <span className="text-[11px] text-gray-400">(extra rate variants pushed to OTAs)</span>
+                  </div>
+                  <div className="mt-3 ml-[28px] space-y-2">
+                    {MEAL_PLAN_OPTIONS.map(({ code, label, sub }) => {
+                      const enabled = isMealEnabled(code)
+                      const surcharge = getMealSurcharge(code)
+                      const symbol = getCurrencySymbol(form.currency || 'EUR')
+                      return (
+                        <div key={code} className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleMeal(code)}
+                            className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${enabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+                            aria-label={`Toggle ${label}`}
+                          >
+                            <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${enabled ? 'left-[20px]' : 'left-[2px]'}`} />
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[12px] font-medium text-gray-900">{label}</div>
+                            <div className="text-[10px] text-gray-400">{sub}</div>
+                          </div>
+                          {enabled && (
+                            <div className="inline-flex items-center gap-1 border border-gray-200 rounded-lg bg-white px-2 py-1">
+                              <span className="text-[11px] text-gray-500">+{symbol}</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={surcharge}
+                                onChange={(e) => setMealSurcharge(code, Math.max(0, parseFloat(e.target.value) || 0))}
+                                className="w-[80px] px-1 py-0.5 text-[12px] font-semibold text-gray-900 text-right bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <span className="text-[10px] text-gray-400">/night</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
