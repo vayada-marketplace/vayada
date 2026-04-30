@@ -20,6 +20,7 @@ from app.image_processing import validate_image, process_image, generate_thumbna
 from app.config import settings
 from app.auth import create_email_verification_token
 from app.services.listings import ListingService, build_listing_response
+from app.services.hotel_profile import HotelProfileService
 from app.models.common import CollaborationOfferingResponse, CreatorRequirementsResponse
 from app.models.hotels import (
     HotelProfileStatusHasDefaults,
@@ -452,46 +453,18 @@ async def update_hotel_profile(
                     detail="Failed to upload picture"
                 )
         
-        # Build dynamic UPDATE query for hotel_profiles table
-        update_fields = []
-        update_values = []
-        param_counter = 1
-        
-        if name is not None:
-            update_fields.append(f"name = ${param_counter}")
-            update_values.append(name)
-            param_counter += 1
-        
-        if location is not None:
-            update_fields.append(f"location = ${param_counter}")
-            update_values.append(location)
-            param_counter += 1
-        
-        if about is not None:
-            update_fields.append(f"about = ${param_counter}")
-            update_values.append(about)
-            param_counter += 1
-        
-        if website is not None:
-            update_fields.append(f"website = ${param_counter}")
-            update_values.append(website)
-            param_counter += 1
-        
-        if phone is not None:
-            update_fields.append(f"phone = ${param_counter}")
-            update_values.append(phone)
-            param_counter += 1
-        
         # Use picture URL from JSON if provided, otherwise use uploaded file URL
         final_picture_url = picture_url_from_json if picture_url_from_json is not None else picture_url
-        if final_picture_url is not None:
-            update_fields.append(f"picture = ${param_counter}")
-            update_values.append(final_picture_url)
-            param_counter += 1
-        
-        # Only update if there are fields to update
-        if update_fields:
-            await HotelRepository.update_profile(hotel['id'], update_fields, update_values)
+
+        await HotelProfileService.apply_partial(
+            hotel['id'],
+            name=name,
+            location=location,
+            about=about,
+            website=website,
+            phone=phone,
+            picture=final_picture_url,
+        )
         
         # Update email in users table if provided
         if email is not None:

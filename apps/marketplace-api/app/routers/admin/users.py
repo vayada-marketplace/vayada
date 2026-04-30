@@ -17,6 +17,7 @@ from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
 from app.services.creator_profile import CreatorProfileService
+from app.services.hotel_profile import HotelProfileService
 
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
@@ -652,42 +653,15 @@ async def update_hotel_profile(
 
         hotel_id = hotel['id']
 
-        update_fields = []
-        update_values = []
-        param_counter = 1
-
-        if request.name is not None:
-            update_fields.append(f"name = ${param_counter}")
-            update_values.append(request.name)
-            param_counter += 1
-
-        if request.location is not None:
-            update_fields.append(f"location = ${param_counter}")
-            update_values.append(request.location)
-            param_counter += 1
-
-        if request.about is not None:
-            update_fields.append(f"about = ${param_counter}")
-            update_values.append(request.about)
-            param_counter += 1
-
-        if request.website is not None:
-            update_fields.append(f"website = ${param_counter}")
-            update_values.append(str(request.website))
-            param_counter += 1
-
-        if request.phone is not None:
-            update_fields.append(f"phone = ${param_counter}")
-            update_values.append(request.phone)
-            param_counter += 1
-
-        if request.picture is not None:
-            update_fields.append(f"picture = ${param_counter}")
-            update_values.append(str(request.picture))
-            param_counter += 1
-
-        if update_fields:
-            await HotelRepository.update_profile(hotel_id, update_fields, update_values)
+        await HotelProfileService.apply_partial(
+            hotel_id,
+            name=request.name,
+            location=request.location,
+            about=request.about,
+            website=str(request.website) if request.website is not None else None,
+            phone=request.phone,
+            picture=str(request.picture) if request.picture is not None else None,
+        )
 
         if request.email is not None:
             await UserRepository.update_email(user_id, request.email)
