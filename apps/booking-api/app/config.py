@@ -63,7 +63,11 @@ class Settings(BaseSettings):
     # (affiliate.vayada.com, pms.vayada.com, etc.) all see the cookie.
     # Leave empty in dev so it defaults to the response host.
     AUTH_COOKIE_DOMAIN: str = Field(default="", description="Cookie domain — '.vayada.com' in prod, empty in dev")
-    AUTH_COOKIE_SECURE: bool = Field(default=True, description="Set the Secure flag on auth cookies (browsers permit on localhost)")
+    # Prod (cross-subdomain): samesite=none + secure=true.
+    # Dev (http://localhost): samesite=lax + secure=false — same-site
+    # requests get the cookie regardless of method, no Secure needed.
+    AUTH_COOKIE_SECURE: bool = Field(default=True, description="Secure flag on auth cookies; False for http://localhost dev")
+    AUTH_COOKIE_SAMESITE: str = Field(default="none", description="lax | none | strict — must be 'none' for cross-subdomain prod")
 
     # Environment
     ENVIRONMENT: str = "development"
