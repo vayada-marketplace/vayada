@@ -5,12 +5,17 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: eu-west-1
   ECR_REPOSITORY: vayada-booking-frontend
   AWS_ACCOUNT_ID: 269416271598
   ECS_CLUSTER: vayada-backend-cluster
   ECS_SERVICE: vayada-booking-frontend-service
+  ECS_TASK_FAMILY: vayada-booking-frontend
 
 jobs:
   build-and-deploy:
@@ -51,11 +56,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy to ECS
+      - name: Download current task definition
         run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
-          echo "Deployment triggered for ${{ env.ECS_SERVICE }}"
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_FAMILY }} \
+            --region ${{ env.AWS_REGION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Render task definition with SHA-pinned image
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.ECS_TASK_FAMILY }}
+          image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
