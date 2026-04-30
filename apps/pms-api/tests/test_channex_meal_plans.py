@@ -57,6 +57,40 @@ def test_meal_surcharge_handles_jsonb_string():
     assert _meal_surcharge_for_code(room_type, 1) == Decimal("250")
 
 
+def test_meal_surcharge_per_room_not_multiplied():
+    room_type = {
+        "max_occupancy": 4,
+        "meal_plans": [{"code": 1, "surcharge": 300000, "charge_per": "room"}],
+    }
+    assert _meal_surcharge_for_code(room_type, 1) == Decimal("300000")
+
+
+def test_meal_surcharge_per_person_multiplied_by_occupancy():
+    room_type = {
+        "max_occupancy": 3,
+        "meal_plans": [{"code": 1, "surcharge": 100000, "charge_per": "person"}],
+    }
+    assert _meal_surcharge_for_code(room_type, 1) == Decimal("300000")
+
+
+def test_meal_surcharge_accepts_camel_case_charge_per():
+    # Frontend may send chargePer; the row hasn't been re-validated since.
+    room_type = {
+        "max_occupancy": 2,
+        "meal_plans": [{"code": 1, "surcharge": 150, "chargePer": "person"}],
+    }
+    assert _meal_surcharge_for_code(room_type, 1) == Decimal("300")
+
+
+def test_meal_surcharge_legacy_rows_default_to_per_room():
+    # Older rows without charge_per must keep the existing flat-per-room behavior.
+    room_type = {
+        "max_occupancy": 4,
+        "meal_plans": [{"code": 1, "surcharge": 250}],
+    }
+    assert _meal_surcharge_for_code(room_type, 1) == Decimal("250")
+
+
 # ── _build_restriction_entry with meal surcharge ──────────────────────
 
 

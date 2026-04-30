@@ -6,6 +6,7 @@ MAX_ROOM_SIZE = 15000
 # Booking.com meal_plan_code values that Channex maps for us. 0 = room only
 # is the implicit default and never persisted in room_types.meal_plans.
 VALID_MEAL_PLAN_CODES = {1, 3, 4, 9}
+VALID_MEAL_PLAN_CHARGE_UNITS = {"room", "person"}
 
 
 def _validate_meal_plans(plans: list) -> list:
@@ -24,6 +25,15 @@ def _validate_meal_plans(plans: list) -> list:
             raise ValueError(
                 f"meal_plans[].surcharge must be >= 0 (code {code})"
             )
+        charge_per = p.get("chargePer") or p.get("charge_per") or "room"
+        if charge_per not in VALID_MEAL_PLAN_CHARGE_UNITS:
+            raise ValueError(
+                f"meal_plans[].chargePer must be one of {sorted(VALID_MEAL_PLAN_CHARGE_UNITS)}, "
+                f"got {charge_per} (code {code})"
+            )
+        # Persist canonical snake_case form alongside the original to keep both
+        # the camelCase API surface and the snake_case DB consumers happy.
+        p["charge_per"] = charge_per
     return plans
 
 

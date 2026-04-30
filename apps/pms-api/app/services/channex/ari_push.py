@@ -110,13 +110,25 @@ async def push_availability_for_room_type(
 
 
 def _meal_surcharge_for_code(room_type: dict, meal_plan_code: int) -> Decimal:
-    """Look up the per-night meal surcharge for a meal_plan_code."""
+    """Look up the per-night meal surcharge for a meal_plan_code.
+
+    When charge_per == 'person' the per-guest amount is multiplied by the
+    room type's max_occupancy so the rate Channex pushes to OTAs reflects
+    the full board cost for a fully-occupied room.
+    """
     if not meal_plan_code:
         return Decimal(0)
     meal_plans = parse_jsonb(room_type.get("meal_plans") or [])
     for entry in meal_plans:
-        if int(entry.get("code") or 0) == meal_plan_code:
-            return Decimal(str(entry.get("surcharge") or 0))
+        if int(entry.get("code") or 0) != meal_plan_code:
+            continue
+        amount = Decimal(str(entry.get("surcharge") or 0))
+        # Accept both camelCase (FE-fresh) and snake_case (validator-normalized).
+        charge_per = entry.get("charge_per") or entry.get("chargePer") or "room"
+        if charge_per == "person":
+            occupancy = int(room_type.get("max_occupancy") or 2)
+            amount = amount * occupancy
+        return amount
     return Decimal(0)
 
 
