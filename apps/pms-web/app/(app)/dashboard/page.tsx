@@ -335,12 +335,10 @@ function niceCeil(value: number): number {
   return nice * Math.pow(10, exponent)
 }
 
+const HIGH_OCCUPANCY_THRESHOLD = 70
+
 function occupancyBarClass(pct: number): string {
-  if (pct >= 80) return 'bg-blue-700'
-  if (pct >= 60) return 'bg-blue-500'
-  if (pct >= 40) return 'bg-blue-400'
-  if (pct >= 20) return 'bg-blue-300'
-  return 'bg-blue-200'
+  return pct >= HIGH_OCCUPANCY_THRESHOLD ? 'bg-blue-600' : 'bg-blue-300'
 }
 
 function ForecastChart({
@@ -441,7 +439,7 @@ function ForecastChart({
               <polyline
                 points={polylinePoints}
                 fill="none"
-                stroke="#f59e0b"
+                stroke="#60a5fa"
                 strokeWidth="1.5"
                 vectorEffect="non-scaling-stroke"
               />
@@ -450,8 +448,10 @@ function ForecastChart({
                   key={p.day.dateStr}
                   cx={p.x}
                   cy={p.y}
-                  r="2"
-                  fill="#f59e0b"
+                  r="2.5"
+                  fill="#ffffff"
+                  stroke="#60a5fa"
+                  strokeWidth="1.5"
                   vectorEffect="non-scaling-stroke"
                 />
               ))}
@@ -460,7 +460,7 @@ function ForecastChart({
         </div>
 
         {/* Right axis (avg price) */}
-        <div className="flex flex-col justify-between pl-2 text-[9px] text-amber-600 select-none" style={{ height: chartHeight }}>
+        <div className="flex flex-col justify-between pl-2 text-[9px] text-blue-500 select-none" style={{ height: chartHeight }}>
           {priceTicks.map((tick, idx) => (
             <span key={idx} className="leading-none">{formatPrice(tick)}</span>
           ))}
@@ -491,14 +491,21 @@ function ForecastChart({
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[10px] text-gray-500">
         <div className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-blue-500" />
-          <span>{t('dashboard.occupancyAxis')}</span>
+          <span className="inline-block w-3 h-3 rounded-sm bg-blue-600" />
+          <span>{t('dashboard.legendHigh')}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-0.5 bg-amber-500" />
-          <span>{t('dashboard.avgPriceAxis')}</span>
+          <span className="inline-block w-3 h-3 rounded-sm bg-blue-300" />
+          <span>{t('dashboard.legendLow')}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="relative inline-flex w-4 items-center justify-center">
+            <span className="absolute inset-x-0 h-0.5 bg-blue-400" />
+            <span className="relative inline-block w-1.5 h-1.5 rounded-full bg-white border border-blue-400" />
+          </span>
+          <span>{t('dashboard.legendAdr', { currency: currency })}</span>
         </div>
       </div>
     </div>
