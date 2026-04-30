@@ -9,9 +9,12 @@ export interface MonthlyRate {
 // is the implicit default and never appears in the meal_plans array.
 export type MealPlanCode = 1 | 3 | 4 | 9
 
+export type MealPlanChargeUnit = 'room' | 'person'
+
 export interface MealPlan {
   code: MealPlanCode
   surcharge: number
+  chargePer: MealPlanChargeUnit
 }
 
 export interface RoomType {
