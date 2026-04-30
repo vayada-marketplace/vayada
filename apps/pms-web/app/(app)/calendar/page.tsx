@@ -1,7 +1,17 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { format, addDays, startOfDay, differenceInDays, parseISO } from 'date-fns'
+import {
+  format,
+  addDays,
+  startOfDay,
+  differenceInDays,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  addMonths,
+  subMonths,
+} from 'date-fns'
 import {
   calendarService,
   CalendarData,
@@ -15,10 +25,13 @@ import BlockDetailModal from '@/components/calendar/BlockDetailModal'
 import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
 import MobileCalendar from '@/components/calendar/MobileCalendar'
+import MonthView from '@/components/calendar/MonthView'
 import { useTranslation } from '@/lib/i18n'
 import { channexService } from '@/services/channex'
 
 const VIEW_DAYS = 21
+const VIEW_MODE_STORAGE_KEY = 'pms.calendar.viewMode'
+type ViewMode = 'timeline' | 'month'
 
 const CHANNEL_COLORS: Record<string, string> = {
   direct: 'bg-blue-500',
@@ -48,6 +61,7 @@ const ALWAYS_SHOWN_LEGEND_KEYS = new Set(['direct', 'other'])
 
 export default function CalendarPage() {
   const { t } = useTranslation()
+  const [viewMode, setViewMode] = useState<ViewMode>('timeline')
   const [startDate, setStartDate] = useState(() => startOfDay(new Date()))
   const [data, setData] = useState<CalendarData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -90,18 +104,48 @@ export default function CalendarPage() {
     [startDate]
   )
 
+  // Fetch range depends on view mode. Month view needs the entire month; the
+  // existing endpoint handles arbitrary ranges so no backend change is needed.
+  const fetchRange = useMemo(() => {
+    if (viewMode === 'month') {
+      const mStart = startOfMonth(startDate)
+      const mEnd = addDays(endOfMonth(startDate), 1)
+      return { start: mStart, end: mEnd }
+    }
+    return { start: startDate, end: endDate }
+  }, [viewMode, startDate, endDate])
+
   const fetchData = () => {
     setLoading(true)
     calendarService
-      .getCalendarData(format(startDate, 'yyyy-MM-dd'), format(endDate, 'yyyy-MM-dd'))
+      .getCalendarData(
+        format(fetchRange.start, 'yyyy-MM-dd'),
+        format(fetchRange.end, 'yyyy-MM-dd')
+      )
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false))
   }
 
+  // Restore view mode from session on mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const saved = window.sessionStorage.getItem(VIEW_MODE_STORAGE_KEY)
+      if (saved === 'month' || saved === 'timeline') {
+        setViewMode(saved)
+        if (saved === 'month') {
+          setStartDate((d) => startOfMonth(d))
+        }
+      }
+    } catch {
+      // sessionStorage may be unavailable (private mode, SSR) — ignore
+    }
+  }, [])
+
   useEffect(() => {
     fetchData()
-  }, [startDate])
+  }, [startDate, viewMode])
 
   useEffect(() => {
     channexService
@@ -186,9 +230,34 @@ export default function CalendarPage() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [prefill])
 
-  const goToday = () => setStartDate(startOfDay(new Date()))
-  const goPrev = () => setStartDate((d) => addDays(d, -7))
-  const goNext = () => setStartDate((d) => addDays(d, 7))
+  const goToday = () =>
+    setStartDate(viewMode === 'month' ? startOfMonth(new Date()) : startOfDay(new Date()))
+  const goPrev = () =>
+    setStartDate((d) => (viewMode === 'month' ? subMonths(d, 1) : addDays(d, -7)))
+  const goNext = () =>
+    setStartDate((d) => (viewMode === 'month' ? addMonths(d, 1) : addDays(d, 7)))
+
+  const switchView = (next: ViewMode) => {
+    if (next === viewMode) {
+      setShowRoomViewMenu(false)
+      return
+    }
+    // Snap startDate to the 1st of its month when entering month mode, so prev/
+    // next month nav lines up. Leaving month mode keeps that same date — per
+    // spec, Timeline starts on the first day of the month the user was viewing.
+    if (next === 'month') {
+      setStartDate((d) => startOfMonth(d))
+    }
+    setViewMode(next)
+    setShowRoomViewMenu(false)
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, next)
+      } catch {
+        // ignore
+      }
+    }
+  }
 
   const handleCreateBlock = async (blockData: {
     roomTypeId: string
@@ -401,7 +470,9 @@ export default function CalendarPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">{t('calendar.title')}</h1>
           <p className="text-sm text-gray-500">
-            {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
+            {viewMode === 'month'
+              ? format(startDate, 'MMMM yyyy')
+              : `${format(startDate, 'MMM d')} – ${format(addDays(endDate, -1), 'MMM d, yyyy')}`}
           </p>
         </div>
         {reorderMode ? (
@@ -462,7 +533,7 @@ export default function CalendarPage() {
           >
             {t('calendar.newBooking')}
           </button>
-          {data && data.rooms.length > 1 && (
+          {data && (
             <div className="relative" ref={roomViewMenuRef}>
               <button
                 onClick={() => setShowRoomViewMenu((v) => !v)}
@@ -476,17 +547,50 @@ export default function CalendarPage() {
               {showRoomViewMenu && (
                 <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden">
                   <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
-                    {t('calendar.roomView')}
+                    {t('calendar.view')}
                   </div>
                   <button
-                    onClick={enterReorderMode}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                    onClick={() => switchView('timeline')}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                      viewMode === 'timeline'
+                        ? 'bg-primary-50 text-primary-700 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
                   >
-                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h16" />
                     </svg>
-                    {t('calendar.reorderRooms')}
+                    {t('calendar.viewTimeline')}
                   </button>
+                  <button
+                    onClick={() => switchView('month')}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                      viewMode === 'month'
+                        ? 'bg-primary-50 text-primary-700 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    {t('calendar.viewMonth')}
+                  </button>
+                  {viewMode === 'timeline' && data.rooms.length > 1 && (
+                    <>
+                      <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-y border-gray-200">
+                        {t('calendar.roomView')}
+                      </div>
+                      <button
+                        onClick={enterReorderMode}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                        </svg>
+                        {t('calendar.reorderRooms')}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -523,6 +627,18 @@ export default function CalendarPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
           <p className="text-gray-500">{t('calendar.noRooms')}</p>
         </div>
+      ) : viewMode === 'month' ? (
+        <MonthView
+          monthStart={startDate}
+          rooms={data.rooms}
+          roomTypeMap={roomTypeMap}
+          bookingsByRoom={bookingsByRoom}
+          blocksByRoom={blocksByRoom}
+          legacyBlocksByRoomType={legacyBlocksByRoomType}
+          roomIndexInType={roomIndexInType}
+          onSelectBooking={(id) => setSelectedBookingId(id)}
+          onSelectBlock={(bl) => setSelectedBlock(bl)}
+        />
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-x-auto">
           <table className="w-full min-w-[600px] md:min-w-[900px] table-fixed">
