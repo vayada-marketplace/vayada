@@ -32,6 +32,9 @@ class ChannexRatePlanMappingResponse(BaseModel):
     channex_rate_plan_id: str
     channex_room_type_id: str
     sell_mode: str
+    plan_name: str = "standard"
+    channel: str = "direct"
+    meal_plan_code: int = 0
     created_at: str
 
 

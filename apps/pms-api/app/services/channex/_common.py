@@ -15,6 +15,19 @@ _CHANNEL_LABELS = {
 }
 _CHANNELS_WITH_NON_REFUNDABLE = {"direct", "booking_com"}
 
+# Meal-plan rate variants only push to OTAs. Direct keeps a single room-only
+# rate; meal options on direct stays remain a separate concern.
+_CHANNELS_WITH_MEAL_PLANS = {"booking_com"}
+
+# Display labels for meal_plan_code values used in rate-plan titles.
+MEAL_PLAN_LABELS = {
+    0: "",
+    1: "Breakfast",
+    3: "Half Board",
+    4: "Full Board",
+    9: "All Inclusive",
+}
+
 CHANNEX_SYNC_REASON = "channex_sync"
 
 

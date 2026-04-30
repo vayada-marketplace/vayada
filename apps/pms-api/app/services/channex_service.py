@@ -223,6 +223,22 @@ async def delete_room_type(
 
 # ── Rate Plans ───────────────────────────────────────────────────────
 
+# Map Booking.com meal_plan_code values to Channex's `meal_type` string
+# enum. Channex relays meal_type to the OTA as the appropriate channel
+# field (e.g. Booking.com's meal_plan_code).
+_MEAL_PLAN_CODE_TO_CHANNEX = {
+    0: "nomeal",
+    1: "breakfast",
+    3: "halfboard",
+    4: "fullboard",
+    9: "allinclusive",
+}
+
+
+def meal_plan_code_to_channex_meal_type(code: int) -> str:
+    return _MEAL_PLAN_CODE_TO_CHANNEX.get(code, "nomeal")
+
+
 async def create_rate_plan(
     api_key: str,
     *,
@@ -233,6 +249,7 @@ async def create_rate_plan(
     rate_mode: str = "manual",
     currency: str = None,
     options: List[dict] = None,
+    meal_plan_code: int = 0,
 ) -> dict:
     """Create a rate plan in Channex linked to a room type."""
     if options is None:
@@ -246,6 +263,7 @@ async def create_rate_plan(
         "sell_mode": sell_mode,
         "rate_mode": rate_mode,
         "options": options,
+        "meal_type": meal_plan_code_to_channex_meal_type(meal_plan_code),
     }
     if currency:
         payload["currency"] = currency

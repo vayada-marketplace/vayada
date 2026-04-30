@@ -17,6 +17,7 @@ from app.repositories.channex_mapping_repo import (
 from app.services import channex_service
 
 from app.services.channex._common import SYNC_HORIZON_DAYS, _count_local_blocks
+from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +109,23 @@ async def push_availability_for_room_type(
 # ── Restrictions (rates + rules) ─────────────────────────────────────
 
 
+def _meal_surcharge_for_code(room_type: dict, meal_plan_code: int) -> Decimal:
+    """Look up the per-night meal surcharge for a meal_plan_code."""
+    if not meal_plan_code:
+        return Decimal(0)
+    meal_plans = parse_jsonb(room_type.get("meal_plans") or [])
+    for entry in meal_plans:
+        if int(entry.get("code") or 0) == meal_plan_code:
+            return Decimal(str(entry.get("surcharge") or 0))
+    return Decimal(0)
+
+
 def _build_restriction_entry(
     room_type: dict,
     check_date: date,
     plan_name: str = "standard",
     markup_pct: Decimal = Decimal(0),
+    meal_plan_code: int = 0,
 ) -> dict:
     """Build a restriction snapshot for a single date.
     Returns dict with rate, min_stay_arrival, max_stay, stop_sell, CTA, CTD."""
@@ -127,6 +140,13 @@ def _build_restriction_entry(
             rate = round(base_rate * (1 - discount / 100), 2)
     else:
         rate = base_rate
+
+    # Add the per-night meal surcharge before channel markup so the markup
+    # also applies to the meal cost (mirrors how OTAs compute commission on
+    # the full guest-paid amount).
+    surcharge = _meal_surcharge_for_code(room_type, meal_plan_code)
+    if surcharge:
+        rate = round(float(rate) + float(surcharge), 2)
 
     # Apply channel markup (direct is always 0%)
     if markup_pct:
@@ -194,6 +214,7 @@ async def push_restrictions_for_rate_plan(
     markup_pct: Optional[Decimal] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    meal_plan_code: int = 0,
 ) -> None:
     """Calculate and push rates + restrictions for a single rate plan to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -223,7 +244,9 @@ async def push_restrictions_for_rate_plan(
     prev_restr = None
 
     while current <= end_date:
-        restr = _build_restriction_entry(room_type, current, plan_name, markup_pct)
+        restr = _build_restriction_entry(
+            room_type, current, plan_name, markup_pct, meal_plan_code
+        )
 
         if prev_restr is not None and not _restrictions_equal(prev_restr, restr):
             values.append(_restriction_to_value(
