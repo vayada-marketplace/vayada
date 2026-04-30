@@ -6,6 +6,7 @@ from typing import Optional, List
 import asyncpg
 
 from app.database import Database
+from app.repositories._sql import safe_columns
 
 
 class CollaborationRepository:
@@ -19,7 +20,7 @@ class CollaborationRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM collaborations WHERE id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM collaborations WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, collaboration_id)
         else:

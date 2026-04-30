@@ -6,6 +6,7 @@ from typing import Optional, List
 import asyncpg
 
 from app.database import AuthDatabase
+from app.repositories._sql import safe_columns
 
 
 class UserRepository:
@@ -28,7 +29,7 @@ class UserRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM users WHERE id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM users WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
         else:
@@ -150,7 +151,7 @@ class UserRepository:
         conn: Optional[asyncpg.Connection] = None,
     ) -> list:
         """Return all users with status = 'verified'."""
-        query = f"SELECT {columns} FROM users WHERE status = 'verified'"
+        query = f"SELECT {safe_columns(columns)} FROM users WHERE status = 'verified'"
         if conn:
             rows = await conn.fetch(query)
         else:
@@ -167,7 +168,7 @@ class UserRepository:
         """Return {user_id_str: dict} mapping for a list of user IDs."""
         if not user_ids:
             return {}
-        query = f"SELECT {columns} FROM users WHERE id = ANY($1::uuid[])"
+        query = f"SELECT {safe_columns(columns)} FROM users WHERE id = ANY($1::uuid[])"
         if conn:
             rows = await conn.fetch(query, user_ids)
         else:

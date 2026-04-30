@@ -7,6 +7,7 @@ from typing import Optional, List
 import asyncpg
 
 from app.database import Database
+from app.repositories._sql import safe_columns
 
 
 class HotelRepository:
@@ -20,7 +21,7 @@ class HotelRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM hotel_profiles WHERE user_id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM hotel_profiles WHERE user_id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
         else:
@@ -34,7 +35,7 @@ class HotelRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM hotel_profiles WHERE id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM hotel_profiles WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, profile_id)
         else:
@@ -95,7 +96,7 @@ class HotelRepository:
         columns: str = "id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at",
         conn: Optional[asyncpg.Connection] = None,
     ) -> list:
-        query = f"SELECT {columns} FROM hotel_listings WHERE hotel_profile_id = $1 ORDER BY created_at DESC"
+        query = f"SELECT {safe_columns(columns)} FROM hotel_listings WHERE hotel_profile_id = $1 ORDER BY created_at DESC"
         if conn:
             rows = await conn.fetch(query, profile_id)
         else:
@@ -110,7 +111,7 @@ class HotelRepository:
         columns: str = "id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM hotel_listings WHERE id = $1 AND hotel_profile_id = $2"
+        query = f"SELECT {safe_columns(columns)} FROM hotel_listings WHERE id = $1 AND hotel_profile_id = $2"
         if conn:
             row = await conn.fetchrow(query, listing_id, hotel_profile_id)
         else:

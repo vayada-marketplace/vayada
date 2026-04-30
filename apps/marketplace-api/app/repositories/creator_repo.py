@@ -6,6 +6,7 @@ from typing import Optional, List
 import asyncpg
 
 from app.database import Database
+from app.repositories._sql import safe_columns
 
 
 class CreatorRepository:
@@ -17,7 +18,7 @@ class CreatorRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM creators WHERE user_id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM creators WHERE user_id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
         else:
@@ -31,7 +32,7 @@ class CreatorRepository:
         columns: str = "*",
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
-        query = f"SELECT {columns} FROM creators WHERE id = $1"
+        query = f"SELECT {safe_columns(columns)} FROM creators WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, creator_id)
         else:
@@ -88,7 +89,7 @@ class CreatorRepository:
         columns: str = "id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split",
         conn: Optional[asyncpg.Connection] = None,
     ) -> list:
-        query = f"SELECT {columns} FROM creator_platforms WHERE creator_id = $1 ORDER BY name"
+        query = f"SELECT {safe_columns(columns)} FROM creator_platforms WHERE creator_id = $1 ORDER BY name"
         if conn:
             rows = await conn.fetch(query, creator_id)
         else:

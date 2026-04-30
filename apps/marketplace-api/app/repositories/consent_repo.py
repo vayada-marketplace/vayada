@@ -6,6 +6,7 @@ from typing import Optional
 import asyncpg
 
 from app.database import AuthDatabase
+from app.repositories._sql import safe_columns
 
 
 class ConsentRepository:
@@ -95,7 +96,7 @@ class ConsentRepository:
         conn: Optional[asyncpg.Connection] = None,
     ) -> list:
         """Return all consent history records (no pagination) for GDPR export."""
-        query = f"SELECT {columns} FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC"
+        query = f"SELECT {safe_columns(columns)} FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC"
         if conn:
             rows = await conn.fetch(query, user_id)
         else:
