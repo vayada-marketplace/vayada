@@ -556,15 +556,23 @@ export default function CalendarPage() {
                 </th>
                 {dates.map((d) => {
                   const isToday = format(d, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+                  const dow = d.getDay()
+                  const isWeekend = dow === 0 || dow === 6
+                  const headerStyle = isToday
+                    ? { backgroundColor: '#eff6ff', color: '#2563eb' }
+                    : isWeekend
+                    ? { backgroundColor: '#fafafa' }
+                    : undefined
                   return (
                     <th
                       key={d.toISOString()}
-                      className={`px-0.5 py-2 text-center text-[10px] font-medium border-r border-gray-100 ${
-                        isToday ? 'bg-primary-50 text-primary-700' : 'text-gray-500'
+                      style={headerStyle}
+                      className={`px-0.5 py-2 text-center text-[10px] border-r border-gray-100 ${
+                        isToday ? 'font-bold' : 'font-medium text-gray-500'
                       }`}
                     >
                       <div>{format(d, 'EEE')}</div>
-                      <div className="font-semibold text-xs">{format(d, 'd')}</div>
+                      <div className={`text-xs ${isToday ? 'font-bold' : 'font-semibold'}`}>{format(d, 'd')}</div>
                     </th>
                   )
                 })}
@@ -624,9 +632,23 @@ export default function CalendarPage() {
                     >
                       {/* Day grid lines */}
                       <div className="absolute inset-0 flex">
-                        {dates.map((d) => (
-                          <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
-                        ))}
+                        {dates.map((d) => {
+                          const isToday = format(d, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+                          const dow = d.getDay()
+                          const isWeekend = dow === 0 || dow === 6
+                          const cellStyle = isToday
+                            ? { backgroundColor: '#f8fbff' }
+                            : isWeekend
+                            ? { backgroundColor: '#fafafa' }
+                            : undefined
+                          return (
+                            <div
+                              key={d.toISOString()}
+                              style={cellStyle}
+                              className="flex-1 border-r border-gray-100"
+                            />
+                          )
+                        })}
                       </div>
                       {/* Drag-selection overlay — persists while popover is open */}
                       {(() => {
@@ -718,9 +740,23 @@ export default function CalendarPage() {
                   </td>
                   <td colSpan={VIEW_DAYS} className="relative h-12 p-0">
                     <div className="absolute inset-0 flex">
-                      {dates.map((d) => (
-                        <div key={d.toISOString()} className="flex-1 border-r border-gray-100" />
-                      ))}
+                      {dates.map((d) => {
+                        const isToday = format(d, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+                        const dow = d.getDay()
+                        const isWeekend = dow === 0 || dow === 6
+                        const cellStyle = isToday
+                          ? { backgroundColor: '#f8fbff' }
+                          : isWeekend
+                          ? { backgroundColor: '#fafafa' }
+                          : undefined
+                        return (
+                          <div
+                            key={d.toISOString()}
+                            style={cellStyle}
+                            className="flex-1 border-r border-gray-100"
+                          />
+                        )
+                      })}
                     </div>
                     {unassignedBookings.map((b) => {
                       const style = getBarStyle(b.checkIn, b.checkOut)

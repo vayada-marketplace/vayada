@@ -106,9 +106,18 @@ export default function MobileCalendar({ bookings, onSelectBooking, onNewBooking
       <div className="bg-white px-3 py-2">
         {/* Weekday headers */}
         <div className="grid grid-cols-7 mb-1">
-          {WEEKDAYS.map(d => (
-            <div key={d} className="text-center text-[10px] font-medium text-gray-400 py-1">{d}</div>
-          ))}
+          {WEEKDAYS.map((d, i) => {
+            const isWeekendCol = i >= 5
+            return (
+              <div
+                key={d}
+                style={isWeekendCol ? { backgroundColor: '#fafafa' } : undefined}
+                className="text-center text-[10px] font-medium text-gray-400 py-1 rounded"
+              >
+                {d}
+              </div>
+            )
+          })}
         </div>
 
         {/* Day cells */}
@@ -119,28 +128,42 @@ export default function MobileCalendar({ bookings, onSelectBooking, onNewBooking
             const isCurrentMonth = isSameMonth(day, currentMonth)
             const isToday = isSameDay(day, today)
             const isSelected = selectedDate && isSameDay(day, selectedDate)
+            const dow = day.getDay()
+            const isWeekend = dow === 0 || dow === 6
             const hasBookings = dayBookings.length > 0
 
             // Get unique channel colors for dots
             const channels = Array.from(new Set(dayBookings.map(b => b.channel)))
 
+            const cellBgStyle = !isSelected && !isToday && isWeekend
+              ? { backgroundColor: '#fafafa' }
+              : undefined
+
             return (
               <button
                 key={key}
                 onClick={() => setSelectedDate(day)}
+                style={cellBgStyle}
                 className={`relative flex flex-col items-center py-1.5 rounded-xl transition-colors ${
                   isSelected
                     ? 'bg-primary-500 text-white'
-                    : isToday
-                      ? 'bg-gray-100 text-gray-900'
-                      : isCurrentMonth
-                        ? 'text-gray-900'
-                        : 'text-gray-300'
+                    : isCurrentMonth
+                      ? 'text-gray-900'
+                      : 'text-gray-300'
                 }`}
               >
-                <span className={`text-[13px] font-medium ${isSelected ? 'font-bold' : ''}`}>
-                  {format(day, 'd')}
-                </span>
+                {isToday && !isSelected ? (
+                  <span
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[13px] font-bold text-white"
+                  >
+                    {format(day, 'd')}
+                  </span>
+                ) : (
+                  <span className={`text-[13px] font-medium ${isSelected ? 'font-bold' : ''}`}>
+                    {format(day, 'd')}
+                  </span>
+                )}
                 {/* Booking dots */}
                 {hasBookings && !isSelected && (
                   <div className="flex gap-0.5 mt-0.5">
