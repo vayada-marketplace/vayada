@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { usersService } from '@/services/api'
 import { ApiErrorResponse } from '@/services/api/client'
@@ -17,20 +17,52 @@ import {
 } from '@heroicons/react/24/outline'
 import { Modal } from '@/components/ui/Modal'
 
+type FilterType = 'all' | 'hotel' | 'creator' | 'admin'
+type FilterStatus = 'all' | 'pending' | 'verified' | 'rejected' | 'suspended'
+
+const VALID_TYPES: FilterType[] = ['all', 'hotel', 'creator', 'admin']
+const VALID_STATUSES: FilterStatus[] = ['all', 'pending', 'verified', 'rejected', 'suspended']
+
 export default function DashboardPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filterType, setFilterType] = useState<'all' | 'hotel' | 'creator' | 'admin'>('all')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'verified' | 'rejected' | 'suspended'>('all')
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get('q') ?? '')
+  const [filterType, setFilterType] = useState<FilterType>(() => {
+    const value = searchParams.get('type') as FilterType | null
+    return value && VALID_TYPES.includes(value) ? value : 'all'
+  })
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>(() => {
+    const value = searchParams.get('status') as FilterStatus | null
+    return value && VALID_STATUSES.includes(value) ? value : 'all'
+  })
 
   // Pagination
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(() => {
+    const parsed = Number(searchParams.get('page'))
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1
+  })
   const [pageSize] = useState(100)
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
+
+  // Mirror filter state into the URL so navigating away and back restores
+  // the user's view. Debounced to avoid churning history while typing.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (filterType !== 'all') params.set('type', filterType)
+    if (filterStatus !== 'all') params.set('status', filterStatus)
+    if (searchTerm) params.set('q', searchTerm)
+    if (page > 1) params.set('page', String(page))
+    const query = params.toString()
+    const next = query ? `/dashboard?${query}` : '/dashboard'
+    const timer = setTimeout(() => {
+      router.replace(next, { scroll: false })
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [filterType, filterStatus, searchTerm, page, router])
 
   // Modal state
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null)
