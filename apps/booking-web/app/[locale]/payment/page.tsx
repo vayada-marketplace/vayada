@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import Image from 'next/image'
 import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js'
+import { Booking } from '@/lib/types'
 import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
@@ -136,8 +137,7 @@ function PaymentPageContent() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [clientSecret, setClientSecret] = useState<string | null>(null)
-  const [bookingId, setBookingId] = useState<string | null>(null)
-  const [bookingReference, setBookingReference] = useState<string | null>(null)
+  const [pendingBooking, setPendingBooking] = useState<Booking | null>(null)
 
   // Load guest details from sessionStorage
   useEffect(() => {
@@ -217,10 +217,9 @@ function PaymentPageContent() {
       })
 
       const booking = result.booking
-      setBookingId(booking.id)
-      setBookingReference(booking.bookingReference)
 
       if (paymentMethod === 'card' && result.clientSecret) {
+        setPendingBooking(booking)
         setClientSecret(result.clientSecret)
         // The Stripe form will be rendered, user confirms payment there
       } else if (paymentMethod === 'xendit' && result.xenditInvoiceUrl) {
@@ -243,7 +242,7 @@ function PaymentPageContent() {
   }
 
   // If we have a client secret, render the Stripe payment form
-  if (clientSecret && bookingId) {
+  if (clientSecret && pendingBooking) {
     return (
       <StripeProvider clientSecret={clientSecret}>
         <StripePaymentPage
@@ -261,8 +260,7 @@ function PaymentPageContent() {
           addonTotal={addonTotal}
           grandTotal={grandTotal}
           guestDetails={guestDetails}
-          bookingId={bookingId}
-          bookingReference={bookingReference!}
+          booking={pendingBooking}
           slug={slug}
           formatPrice={formatPrice}
           formatDate={formatDate}
@@ -758,8 +756,7 @@ function StripePaymentPage({
   addonTotal,
   grandTotal,
   guestDetails,
-  bookingId,
-  bookingReference,
+  booking,
   slug,
   formatPrice,
   formatDate,
@@ -795,30 +792,20 @@ function StripePaymentPage({
       }
 
       // Payment authorized — confirm with backend
-      await bookingService.confirmAuthorization(slug, bookingId)
+      await bookingService.confirmAuthorization(slug, booking.id)
 
-      // Store booking for confirmation page
+      // Reuse the full Booking returned by the create call so the confirmation
+      // page sees the same shape no matter which payment method ran (the
+      // hand-rolled subset we used to write here was missing nightlyRate,
+      // addonTotal, createdAt, hostResponseDeadline — so Stripe-path users
+      // saw no countdown timer).
       sessionStorage.setItem('lastBooking', JSON.stringify({
-        id: bookingId,
-        bookingReference,
-        hotelName: hotel.name,
-        roomName: room.name,
-        guestFirstName: guestDetails.guestFirstName,
-        guestLastName: guestDetails.guestLastName,
-        guestEmail: guestDetails.guestEmail,
-        checkIn,
-        checkOut,
-        nights,
-        adults,
-        children,
-        totalAmount: grandTotal,
-        currency: room.currency,
-        status: 'pending',
+        ...booking,
         paymentMethod: 'card',
         paymentStatus: 'authorized',
       }))
 
-      router.push(`/booking/${bookingReference}`)
+      router.push(`/booking/${booking.bookingReference}`)
     } catch (err: any) {
       setError(err.message || 'Payment confirmation failed')
       setSubmitting(false)
