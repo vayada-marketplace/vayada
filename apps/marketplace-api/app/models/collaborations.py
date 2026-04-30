@@ -275,6 +275,7 @@ class CollaborationResponse(BaseModel):
     initiator_type: str
     status: str
     creator_id: str
+    creator_user_id: Optional[str] = None
     creator_name: str
     creator_profile_picture: Optional[str] = None
     hotel_id: str
@@ -350,6 +351,7 @@ class CollaborationResponse(BaseModel):
             initiator_type=row['initiator_type'],
             status=row['status'],
             creator_id=str(row['creator_id']),
+            creator_user_id=str(row['creator_user_id']) if row.get('creator_user_id') else None,
             creator_name=creator_name,
             creator_profile_picture=row.get('creator_profile_picture'),
             hotel_id=str(row['hotel_id']),

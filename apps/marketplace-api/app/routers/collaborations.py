@@ -282,6 +282,7 @@ async def create_collaboration(
             'listing_name': listing['name'],
             'listing_location': listing['location'],
             'creator_profile_picture': creator_record['profile_picture'],
+            'creator_user_id': creator_record['user_id'],
         }
         return CollaborationResponse.from_db_row(
             joined_row,
