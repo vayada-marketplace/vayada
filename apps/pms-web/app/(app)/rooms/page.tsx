@@ -33,6 +33,57 @@ function getCategoryLabel(name: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)
 }
 
+interface RateOverview {
+  flexMin: number
+  flexMax: number
+  nrMin: number | null
+  nrMax: number | null
+  seasonCount: number
+  discountPct: number
+}
+
+function getRateOverview(room: RoomType): RateOverview | null {
+  if (!room.baseRate || room.baseRate <= 0) return null
+
+  const seasonRates = (room.seasons || [])
+    .map((s) => parseFloat(s.rate))
+    .filter((n) => Number.isFinite(n) && n > 0)
+  const flexValues = [room.baseRate, ...seasonRates]
+  const flexMin = Math.min(...flexValues)
+  const flexMax = Math.max(...flexValues)
+
+  let nrMin: number | null = null
+  let nrMax: number | null = null
+  let discountPct = 0
+
+  if (room.nonRefundableEnabled !== false && room.nonRefundableRate && room.nonRefundableRate > 0) {
+    discountPct = Math.round((1 - room.nonRefundableRate / room.baseRate) * 100)
+    if (room.nonRefundableDiscount && room.nonRefundableDiscount > 0) {
+      const factor = 1 - room.nonRefundableDiscount / 100
+      nrMin = Math.round(flexMin * factor)
+      nrMax = Math.round(flexMax * factor)
+    } else {
+      const factor = room.nonRefundableRate / room.baseRate
+      nrMin = Math.round(flexMin * factor)
+      nrMax = Math.round(flexMax * factor)
+    }
+  }
+
+  return {
+    flexMin,
+    flexMax,
+    nrMin,
+    nrMax,
+    seasonCount: seasonRates.length,
+    discountPct,
+  }
+}
+
+function formatRateRange(min: number, max: number, currency: string): string {
+  if (min === max) return formatCurrency(min, currency)
+  return `${formatCurrency(min, currency)}–${formatCurrency(max, currency).replace(/^[^0-9]+/, '')}`
+}
+
 function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomType; rooms: Room[]; onRoomsChange: () => void; onDuplicate: (id: string) => void }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
@@ -45,6 +96,7 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
 
   const typeRooms = rooms.filter(r => r.roomTypeId === room.id)
   const available = typeRooms.filter(r => r.status === 'available').length
+  const rateOverview = getRateOverview(room)
 
   const handleAddRoom = async () => {
     if (!newRoomNumber.trim()) return
@@ -127,6 +179,36 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
           </p>
         </div>
 
+        {/* Rate overview (md+) */}
+        {rateOverview && (
+          <div className="hidden md:flex flex-col gap-1 shrink-0 mr-2 text-[12px]">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">{t('rooms.flexRate')}</span>
+              <span className="font-medium text-gray-800 tabular-nums">
+                {formatRateRange(rateOverview.flexMin, rateOverview.flexMax, room.currency)}
+              </span>
+              {rateOverview.seasonCount > 0 && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600">
+                  {rateOverview.seasonCount} {rateOverview.seasonCount === 1 ? t('rooms.season') : t('rooms.seasons')}
+                </span>
+              )}
+            </div>
+            {rateOverview.nrMin != null && rateOverview.nrMax != null && (
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">{t('rooms.nonRefundableShort')}</span>
+                <span className="font-medium text-gray-800 tabular-nums">
+                  {formatRateRange(rateOverview.nrMin, rateOverview.nrMax, room.currency)}
+                </span>
+                {rateOverview.discountPct > 0 && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700">
+                    -{rateOverview.discountPct}%
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Count badge */}
         <span className={`shrink-0 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`} title={`${available} available`}>
           {typeRooms.length}
@@ -154,18 +236,33 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
       {/* Expanded: Derived Rates + Individual Rooms */}
       {expanded && (
         <div className="pl-5 md:pl-16 pr-3 md:pr-5 pb-4">
-          {/* Derived Rates */}
-          {room.nonRefundableRate != null && room.nonRefundableRate > 0 && (
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-[11px] text-gray-400 font-medium">{t('rooms.derivedRates')}</span>
-              <span className="text-[11px] px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-gray-600">
-                {t('rooms.nonRefundable')} {formatCurrency(room.nonRefundableRate, room.currency)}
-                {room.baseRate > 0 && (
-                  <span className="text-gray-400 ml-1">
-                    (-{Math.round((1 - room.nonRefundableRate / room.baseRate) * 100)}%)
+          {/* Mobile rate overview (header version is hidden < md) */}
+          {rateOverview && (
+            <div className="md:hidden flex flex-col gap-1 mb-3 text-[12px]">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-gray-500">{t('rooms.flexRate')}</span>
+                <span className="font-medium text-gray-800 tabular-nums">
+                  {formatRateRange(rateOverview.flexMin, rateOverview.flexMax, room.currency)}
+                </span>
+                {rateOverview.seasonCount > 0 && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600">
+                    {rateOverview.seasonCount} {rateOverview.seasonCount === 1 ? t('rooms.season') : t('rooms.seasons')}
                   </span>
                 )}
-              </span>
+              </div>
+              {rateOverview.nrMin != null && rateOverview.nrMax != null && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-gray-500">{t('rooms.nonRefundableShort')}</span>
+                  <span className="font-medium text-gray-800 tabular-nums">
+                    {formatRateRange(rateOverview.nrMin, rateOverview.nrMax, room.currency)}
+                  </span>
+                  {rateOverview.discountPct > 0 && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700">
+                      -{rateOverview.discountPct}%
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
