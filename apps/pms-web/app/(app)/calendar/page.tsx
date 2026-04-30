@@ -898,6 +898,7 @@ export default function CalendarPage() {
           onClose={() => setSelectedBookingId(null)}
           onStatusChange={fetchData}
           rooms={data?.rooms}
+          bookings={data?.bookings}
         />
       )}
     </div>

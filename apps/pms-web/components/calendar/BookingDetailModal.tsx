@@ -15,18 +15,37 @@ interface CalendarRoom {
   status: string
 }
 
+interface CalendarBookingLite {
+  id: string
+  roomId: string | null
+  checkIn: string
+  checkOut: string
+  status: string
+}
+
 interface BookingDetailModalProps {
   bookingId: string
   onClose: () => void
   onStatusChange: () => void
   rooms?: CalendarRoom[]
+  bookings?: CalendarBookingLite[]
 }
+
+type View = 'detail' | 'roomPicker' | 'moveSuccess'
+
+const datesOverlap = (
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string,
+): boolean => aStart < bEnd && aEnd > bStart
 
 export default function BookingDetailModal({
   bookingId,
   onClose,
   onStatusChange,
   rooms = [],
+  bookings = [],
 }: BookingDetailModalProps) {
   const [booking, setBooking] = useState<Booking | null>(null)
   const [loading, setLoading] = useState(true)
@@ -36,6 +55,11 @@ export default function BookingDetailModal({
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [view, setView] = useState<View>('detail')
+  const [pickerSelectedRoomId, setPickerSelectedRoomId] = useState<string>('')
+  const [movingRoom, setMovingRoom] = useState(false)
+  const [moveError, setMoveError] = useState<string | null>(null)
+  const [movedToRoomNumber, setMovedToRoomNumber] = useState<string>('')
   const [editForm, setEditForm] = useState({
     checkIn: '',
     checkOut: '',
@@ -116,6 +140,63 @@ export default function BookingDetailModal({
     ? rooms.filter((r) => r.roomTypeId === booking.roomTypeId && r.status === 'available')
     : []
 
+  // Candidate rooms for the "Move to another room" picker: same room type,
+  // not the current room. Each is annotated with availability for the
+  // booking's exact dates, computed from already-loaded calendar bookings
+  // (excluding the booking being moved). The backend re-validates on submit.
+  const moveCandidates = booking
+    ? rooms
+        .filter((r) => r.roomTypeId === booking.roomTypeId && r.id !== booking.roomId)
+        .map((r) => {
+          const isAvailable = !bookings.some(
+            (b) =>
+              b.id !== booking.id &&
+              b.roomId === r.id &&
+              b.status !== 'cancelled' &&
+              datesOverlap(booking.checkIn, booking.checkOut, b.checkIn, b.checkOut),
+          )
+          return { room: r, isAvailable }
+        })
+    : []
+
+  const currentRoom = booking?.roomId
+    ? rooms.find((r) => r.id === booking.roomId) || null
+    : null
+
+  const enterRoomPicker = () => {
+    setMoveError(null)
+    setPickerSelectedRoomId('')
+    setView('roomPicker')
+  }
+
+  const handleConfirmMove = async () => {
+    if (!booking || !pickerSelectedRoomId) return
+    setMoveError(null)
+    setMovingRoom(true)
+    try {
+      const updated = await bookingsService.moveRoom(bookingId, pickerSelectedRoomId)
+      const target = rooms.find((r) => r.id === pickerSelectedRoomId)
+      setMovedToRoomNumber(target?.roomNumber || updated.roomNumber || '')
+      setBooking(updated)
+      setView('moveSuccess')
+      onStatusChange()
+      window.setTimeout(() => {
+        // Use the functional setter so we don't bounce out if the user
+        // already navigated away.
+        setView((v) => (v === 'moveSuccess' ? 'detail' : v))
+      }, 1000)
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.detail ||
+        err?.data?.detail ||
+        err?.message ||
+        'Failed to move booking'
+      setMoveError(typeof detail === 'string' ? detail : 'Failed to move booking')
+    } finally {
+      setMovingRoom(false)
+    }
+  }
+
   const channelStyle = CHANNEL_COLORS[booking?.channel?.toLowerCase() || 'direct'] || CHANNEL_COLORS.other
 
   return (
@@ -139,6 +220,139 @@ export default function BookingDetailModal({
           </div>
         ) : !booking ? (
           <div className="p-8 text-center text-gray-500">Booking not found</div>
+        ) : view === 'roomPicker' ? (
+          /* ── ROOM PICKER ── */
+          <div className="p-6">
+            <div className="flex items-center gap-3 mb-1">
+              <button
+                onClick={() => setView('detail')}
+                aria-label="Back"
+                className="text-gray-500 hover:text-gray-800 -ml-1 p-1 rounded hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <h2 className="text-lg font-bold text-gray-900">Move to another room</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-4 ml-8">
+              {booking.guestFirstName} {booking.guestLastName} &middot;{' '}
+              {booking.checkIn} &rarr; {booking.checkOut}
+            </p>
+
+            {currentRoom && (
+              <div className="mb-3">
+                <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                  Current room
+                </p>
+                <div className="flex items-center justify-between px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg opacity-70">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-gray-300" />
+                    <span className="text-sm font-medium text-gray-700">
+                      #{currentRoom.roomNumber}
+                      {currentRoom.floor ? ` (Floor ${currentRoom.floor})` : ''}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      &middot; {currentRoom.roomTypeName}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {moveCandidates.length === 0 ? (
+              <div className="py-8 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-lg">
+                No other rooms of this type available.
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {moveCandidates.map(({ room, isAvailable }) => {
+                  const isSelected = pickerSelectedRoomId === room.id
+                  return (
+                    <button
+                      key={room.id}
+                      type="button"
+                      disabled={!isAvailable}
+                      onClick={() => isAvailable && setPickerSelectedRoomId(room.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 border rounded-lg transition-colors text-left ${
+                        isSelected
+                          ? 'bg-primary-50 border-primary-400'
+                          : isAvailable
+                          ? 'bg-white border-gray-200 hover:bg-gray-50'
+                          : 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            isAvailable ? 'bg-green-500' : 'bg-gray-300'
+                          }`}
+                        />
+                        <span className={`text-sm font-medium truncate ${isAvailable ? 'text-gray-900' : 'text-gray-500'}`}>
+                          #{room.roomNumber}
+                          {room.floor ? ` (Floor ${room.floor})` : ''}
+                        </span>
+                        <span className="text-xs text-gray-400 truncate">
+                          &middot; {room.roomTypeName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          className={`text-xs ${
+                            isAvailable ? 'text-green-700' : 'text-gray-400'
+                          }`}
+                        >
+                          {isAvailable ? 'Available' : 'Unavailable'}
+                        </span>
+                        {isSelected && (
+                          <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {moveError && (
+              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {moveError}
+              </div>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-gray-200">
+              <button
+                onClick={handleConfirmMove}
+                disabled={!pickerSelectedRoomId || movingRoom}
+                className="w-full px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {movingRoom
+                  ? 'Moving...'
+                  : pickerSelectedRoomId
+                  ? `Move to #${
+                      rooms.find((r) => r.id === pickerSelectedRoomId)?.roomNumber || ''
+                    }`
+                  : 'Select a room to continue'}
+              </button>
+              <p className="mt-2 text-xs text-gray-500 text-center">
+                The original confirmation number and payment record are preserved.
+              </p>
+            </div>
+          </div>
+        ) : view === 'moveSuccess' ? (
+          /* ── MOVE SUCCESS ── */
+          <div className="p-8 text-center">
+            <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-3">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-gray-900">
+              Reservation moved &mdash; {booking.guestFirstName} {booking.guestLastName} is now in #{movedToRoomNumber}
+            </p>
+          </div>
         ) : editing ? (
           /* ── EDIT MODE ── */
           <div className="p-6">
@@ -440,6 +654,18 @@ export default function BookingDetailModal({
               </div>
             ) : (
               <div className="pt-2 border-t border-gray-200 space-y-2">
+                {/* Move-to-another-room — visible for assigned, non-cancelled bookings */}
+                {booking.status !== 'cancelled' && booking.roomId && (
+                  <button
+                    onClick={enterRoomPicker}
+                    className="w-full px-4 py-2 text-sm font-medium text-primary-700 border border-primary-300 hover:bg-primary-50 rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                    Move to another room
+                  </button>
+                )}
                 {/* Edit button — always shown for non-cancelled bookings */}
                 {booking.status !== 'cancelled' && (
                   <button

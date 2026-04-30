@@ -104,6 +104,9 @@ export const bookingsService = {
   assignRoom: (id: string, roomId: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/assign-room`, { roomId }),
 
+  moveRoom: (id: string, roomId: string) =>
+    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, { roomId }),
+
   getPaymentSettings: () =>
     pmsClient.get<PaymentSettingsResponse>('/admin/payment-settings'),
 
