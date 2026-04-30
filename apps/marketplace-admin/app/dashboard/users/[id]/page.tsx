@@ -1272,7 +1272,13 @@ export default function UserDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => router.push('/dashboard')}
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && window.history.length > 1) {
+                      router.back()
+                    } else {
+                      router.push('/dashboard')
+                    }
+                  }}
                 >
                   <ArrowLeftIcon className="w-4 h-4 mr-2" />
                   Back to Users
