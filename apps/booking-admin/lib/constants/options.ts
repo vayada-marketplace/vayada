@@ -82,7 +82,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '\u{1F1F3}\u{1F1F1}' },
 ]
 
-export const POPULAR_LANGUAGE_CODES = ['de', 'fr', 'es', 'ja', 'zh', 'ru']
+export const POPULAR_LANGUAGE_CODES = ['id', 'de', 'fr', 'es', 'ja', 'zh', 'ru']
 
 export interface CountryOption {
   code: string
