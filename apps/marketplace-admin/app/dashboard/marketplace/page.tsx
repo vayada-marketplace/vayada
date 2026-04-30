@@ -516,8 +516,12 @@ export default function MarketplacePreviewPage() {
                       </span>
                     </div>
                     <div className="text-sm text-gray-600 space-y-1">
-                      {offering.collaboration_type === 'Free Stay' && (
-                        <p>Stay duration: {offering.free_stay_min_nights} - {offering.free_stay_max_nights} nights</p>
+                      {offering.collaboration_type === 'Free Stay' && (offering.free_stay_min_nights || offering.free_stay_max_nights) && (
+                        <p>Stay duration: {
+                          offering.free_stay_min_nights && offering.free_stay_max_nights && offering.free_stay_min_nights !== offering.free_stay_max_nights
+                            ? `${offering.free_stay_min_nights} - ${offering.free_stay_max_nights} nights`
+                            : `${offering.free_stay_max_nights || offering.free_stay_min_nights} night${(offering.free_stay_max_nights || offering.free_stay_min_nights) === 1 ? '' : 's'}`
+                        }</p>
                       )}
                       {offering.collaboration_type === 'Paid' && offering.paid_max_amount && (
                         <p>Budget: up to {getCurrencySymbol(offering.currency || 'USD')}{Number(offering.paid_max_amount).toLocaleString()}</p>
