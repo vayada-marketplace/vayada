@@ -448,12 +448,8 @@ def _build_payout_updates(data: ProfileUpdate) -> dict:
 
 
 async def _save_payout_settings(user_id: str, data: ProfileUpdate) -> dict:
-    """Write payout settings for a user: canonical row in
-    affiliate_payout_settings, plus a mirror update on every
-    `affiliates` row for the same user so the existing payout service
-    (which reads payment_method etc. from the affiliate row at payout
-    time) keeps working unchanged.
-    """
+    """Write payout settings for a user to the canonical
+    affiliate_payout_settings row."""
     affiliates = await AffiliateRepository.list_by_user_id(user_id)
     if not affiliates:
         raise HTTPException(status_code=404, detail="No affiliate records found")
@@ -472,21 +468,7 @@ async def _save_payout_settings(user_id: str, data: ProfileUpdate) -> dict:
         if not final_code or not final_number or not final_name:
             raise HTTPException(status_code=400, detail="All Xendit bank details are required")
 
-    saved = await AffiliatePayoutSettingsRepository.upsert(user_id, updates)
-
-    # Mirror to each affiliates row so the payout service keeps reading
-    # the right fields. This loop will go away once payouts read from
-    # the canonical table directly.
-    set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates.keys()))
-    values = list(updates.values())
-    for a in affiliates:
-        await Database.execute(
-            f"UPDATE affiliates SET {set_clauses}, updated_at = now() WHERE id = $1",
-            str(a["id"]),
-            *values,
-        )
-
-    return saved
+    return await AffiliatePayoutSettingsRepository.upsert(user_id, updates)
 
 
 def _payout_response(row: dict) -> PayoutSettings:

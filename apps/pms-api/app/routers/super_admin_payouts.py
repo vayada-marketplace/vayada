@@ -104,13 +104,13 @@ async def list_affiliate_payouts(
             a.hotel_id,
             h.name AS hotel_name,
             h.slug AS hotel_slug,
-            a.payment_method,
-            a.paypal_email,
-            a.bank_account_holder,
-            a.bank_iban,
-            a.bank_swift_bic,
-            a.bank_name,
-            a.bank_country,
+            COALESCE(apsf.payment_method, 'stripe') AS payment_method,
+            COALESCE(apsf.paypal_email, '')         AS paypal_email,
+            COALESCE(apsf.bank_account_holder, '')  AS bank_account_holder,
+            COALESCE(apsf.bank_iban, '')            AS bank_iban,
+            COALESCE(apsf.bank_swift_bic, '')       AS bank_swift_bic,
+            COALESCE(apsf.bank_name, '')            AS bank_name,
+            COALESCE(apsf.bank_country, '')         AS bank_country,
             a.stripe_connect_account_id,
             a.stripe_connect_onboarded,
             COALESCE(unpaid.amount, 0)        AS outstanding_amount,
@@ -122,6 +122,7 @@ async def list_affiliate_payouts(
                      'EUR')                   AS currency
         FROM affiliates a
         JOIN hotels h ON h.id = a.hotel_id
+        LEFT JOIN affiliate_payout_settings apsf ON apsf.user_id = a.user_id
         LEFT JOIN (
             SELECT recipient_id,
                    SUM(amount)::numeric AS amount,
@@ -182,8 +183,19 @@ async def get_affiliate_payout_detail(
     """Per-booking breakdown for one affiliate plus the prior payout history."""
     affiliate = await Database.fetchrow(
         """
-        SELECT a.*, h.name AS hotel_name, h.slug AS hotel_slug
-        FROM affiliates a JOIN hotels h ON h.id = a.hotel_id
+        SELECT a.*,
+               h.name AS hotel_name,
+               h.slug AS hotel_slug,
+               COALESCE(apsf.payment_method, 'stripe') AS payment_method,
+               COALESCE(apsf.paypal_email, '')         AS paypal_email,
+               COALESCE(apsf.bank_iban, '')            AS bank_iban,
+               COALESCE(apsf.bank_account_holder, '')  AS bank_account_holder,
+               COALESCE(apsf.bank_swift_bic, '')       AS bank_swift_bic,
+               COALESCE(apsf.bank_name, '')            AS bank_name,
+               COALESCE(apsf.bank_country, '')         AS bank_country
+        FROM affiliates a
+        JOIN hotels h ON h.id = a.hotel_id
+        LEFT JOIN affiliate_payout_settings apsf ON apsf.user_id = a.user_id
         WHERE a.id = $1
         """,
         affiliate_id,

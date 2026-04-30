@@ -370,8 +370,9 @@ async def create_test_affiliate(
     hotel_id: str,
     full_name: str = "Test Affiliate",
     email: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> Dict:
-    """Create an affiliate in the PMS database."""
+    """Create an affiliate in the PMS database. Optionally link to a user."""
     import secrets, string
     email = email or generate_test_email("pmstest-aff")
     code = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
@@ -379,16 +380,36 @@ async def create_test_affiliate(
         """
         INSERT INTO affiliates (
             hotel_id, referral_code, full_name, email,
-            social_media, user_type, payment_method,
-            paypal_email, bank_iban
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            social_media, user_type, user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
         hotel_id, code, full_name, email,
-        "https://instagram.com/test", "guest", "paypal",
-        email, "",
+        "https://instagram.com/test", "guest", user_id,
     )
     return dict(row)
+
+
+async def set_test_payout_settings(user_id: str, **fields) -> None:
+    """Insert/update an affiliate_payout_settings row for a user.
+
+    Pass any subset of payment_method / paypal_email / bank_* / xendit_*
+    columns; missing ones keep DB defaults.
+    """
+    if not fields:
+        return
+    cols = list(fields.keys())
+    placeholders = ", ".join(f"${i+2}" for i in range(len(cols)))
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
+    await Database.execute(
+        f"""
+        INSERT INTO affiliate_payout_settings (user_id, {', '.join(cols)})
+        VALUES ($1, {placeholders})
+        ON CONFLICT (user_id) DO UPDATE SET {set_clause}, updated_at = now()
+        """,
+        user_id,
+        *(fields[c] for c in cols),
+    )
 
 
 async def create_test_room_block(

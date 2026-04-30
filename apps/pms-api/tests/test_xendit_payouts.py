@@ -16,6 +16,7 @@ from tests.conftest import (
     create_test_booking_with_payment,
     create_test_payment_settings,
     create_test_affiliate,
+    set_test_payout_settings,
     get_auth_headers,
 )
 from app.database import Database
@@ -210,7 +211,8 @@ class TestAffiliateRepoXendit:
     async def test_update_xendit_details(self, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
-        aff = await create_test_affiliate(str(hotel["id"]))
+        # Affiliate must be linked to a user — payout settings are per-user
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
 
         from app.repositories.affiliate_repo import AffiliateRepository
 
@@ -334,7 +336,8 @@ class TestAdminAffiliateXendit:
     async def test_save_xendit_bank_details(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
-        aff = await create_test_affiliate(str(hotel["id"]))
+        # Affiliate must be linked to a user so payout settings can be stored
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         # Approve first
         await Database.execute(
             "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
@@ -526,7 +529,7 @@ class TestAdminAffiliateDetailXendit:
     async def test_affiliate_detail_after_xendit_setup(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
-        aff = await create_test_affiliate(str(hotel["id"]))
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         await Database.execute(
             "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
         )
@@ -847,19 +850,19 @@ class TestSchedulerAffiliatePayoutsXendit:
             status="confirmed",
             check_in="2025-12-01", check_out="2025-12-05",
         )
-        aff = await create_test_affiliate(str(hotel["id"]))
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
 
-        # Set up Xendit details on affiliate
+        # Approve and configure Xendit payout settings
         await Database.execute(
-            """
-            UPDATE affiliates
-            SET status = 'approved', payment_method = 'xendit',
-                xendit_channel_code = 'ID_MANDIRI',
-                xendit_account_number = '9876543210',
-                xendit_account_holder_name = 'Aff Mandiri'
-            WHERE id = $1
-            """,
+            "UPDATE affiliates SET status = 'approved' WHERE id = $1",
             aff["id"],
+        )
+        await set_test_payout_settings(
+            str(user["id"]),
+            payment_method="xendit",
+            xendit_channel_code="ID_MANDIRI",
+            xendit_account_number="9876543210",
+            xendit_account_holder_name="Aff Mandiri",
         )
 
         # Create affiliate payout for Jan 2026 (previous month of Feb 2026 run)
@@ -908,17 +911,18 @@ class TestSchedulerAffiliatePayoutsXendit:
             status="confirmed",
             check_in="2025-12-01", check_out="2025-12-05",
         )
-        aff = await create_test_affiliate(str(hotel["id"]))
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         await Database.execute(
             """
             UPDATE affiliates
-            SET status = 'approved', payment_method = 'stripe',
+            SET status = 'approved',
                 stripe_connect_account_id = 'acct_aff_stripe',
                 stripe_connect_onboarded = true
             WHERE id = $1
             """,
             aff["id"],
         )
+        await set_test_payout_settings(str(user["id"]), payment_method="stripe")
 
         payout = await Database.fetchrow(
             """
@@ -999,15 +1003,13 @@ class TestSchedulerAffiliatePayoutsXendit:
             status="confirmed",
             check_in="2025-12-01", check_out="2025-12-05",
         )
-        aff = await create_test_affiliate(str(hotel["id"]))
+        aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         await Database.execute(
-            """
-            UPDATE affiliates
-            SET status = 'approved', payment_method = 'xendit'
-            WHERE id = $1
-            """,
+            "UPDATE affiliates SET status = 'approved' WHERE id = $1",
             aff["id"],
         )
+        # payment_method=xendit but no account number → should skip
+        await set_test_payout_settings(str(user["id"]), payment_method="xendit")
 
         payout = await Database.fetchrow(
             """
