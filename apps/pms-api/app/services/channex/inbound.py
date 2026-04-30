@@ -33,7 +33,9 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     ota_name = (attrs.get("ota_name", "") or "channex").lower()
 
     # Check if we already have this booking
-    existing = await ChannexBookingMappingRepository.get_by_channex_id(channex_booking_id)
+    existing = await ChannexBookingMappingRepository.get_by_channex_id(
+        hotel_id, channex_booking_id
+    )
 
     if existing:
         existing_booking_id = str(existing["booking_id"])
@@ -80,7 +82,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     first_room = rooms[0]
     channex_room_type_id = first_room.get("room_type_id", "")
     room_mapping = await ChannexRoomTypeMappingRepository.get_by_channex_room_type_id(
-        str(channex_room_type_id)
+        hotel_id, str(channex_room_type_id)
     )
     if not room_mapping:
         logger.warning(
@@ -93,6 +95,15 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
         logger.warning("Room type %s not found, skipping", room_type_id)
+        return
+
+    if str(room_type["hotel_id"]) != hotel_id:
+        logger.error(
+            "Channex room mapping %s resolves to room_type %s owned by hotel "
+            "%s, but polling hotel is %s — refusing to import booking %s",
+            channex_room_type_id, room_type_id,
+            room_type["hotel_id"], hotel_id, channex_booking_id,
+        )
         return
 
     # Parse dates
@@ -262,8 +273,18 @@ async def poll_bookings_for_hotel(hotel_id: str) -> None:
     if not conn or not conn["is_active"]:
         return
 
+    # Refuse to poll without a property_id — otherwise the Channex feed returns
+    # revisions for every property in the shared account and we would steal
+    # other hotels' bookings.
+    if not conn.get("channex_property_id"):
+        logger.warning(
+            "Skipping Channex poll for hotel %s: no channex_property_id set",
+            hotel_id,
+        )
+        return
+
     api_key = channex_service.get_platform_api_key()
-    property_id = str(conn["channex_property_id"]) if conn.get("channex_property_id") else None
+    property_id = str(conn["channex_property_id"])
 
     try:
         revisions = await channex_service.get_booking_revisions_feed(

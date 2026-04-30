@@ -53,8 +53,13 @@ class ChannexConnectionRepository:
 
     @staticmethod
     async def list_active() -> List[dict]:
+        # NULL channex_property_id means the property hasn't been mapped yet.
+        # Such connections must not be polled — without a property_id filter
+        # the Channex feed returns revisions for every property in the shared
+        # account.
         rows = await Database.fetch(
-            "SELECT * FROM channex_connections WHERE is_active = true"
+            "SELECT * FROM channex_connections "
+            "WHERE is_active = true AND channex_property_id IS NOT NULL"
         )
         return [dict(r) for r in rows]
 
@@ -131,10 +136,13 @@ class ChannexRoomTypeMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_channex_room_type_id(channex_room_type_id: str) -> Optional[dict]:
+    async def get_by_channex_room_type_id(
+        hotel_id: str, channex_room_type_id: str
+    ) -> Optional[dict]:
         row = await Database.fetchrow(
-            "SELECT * FROM channex_room_type_mappings WHERE channex_room_type_id = $1",
-            channex_room_type_id,
+            "SELECT * FROM channex_room_type_mappings "
+            "WHERE hotel_id = $1 AND channex_room_type_id = $2",
+            hotel_id, channex_room_type_id,
         )
         return dict(row) if row else None
 
@@ -281,10 +289,13 @@ class ChannexBookingMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_channex_id(channex_booking_id: str) -> Optional[dict]:
+    async def get_by_channex_id(
+        hotel_id: str, channex_booking_id: str
+    ) -> Optional[dict]:
         row = await Database.fetchrow(
-            "SELECT * FROM channex_booking_mappings WHERE channex_booking_id = $1",
-            channex_booking_id,
+            "SELECT * FROM channex_booking_mappings "
+            "WHERE hotel_id = $1 AND channex_booking_id = $2",
+            hotel_id, channex_booking_id,
         )
         return dict(row) if row else None
 
