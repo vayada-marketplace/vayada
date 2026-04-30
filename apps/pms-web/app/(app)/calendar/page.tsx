@@ -14,6 +14,7 @@ import BlockModal from '@/components/calendar/BlockModal'
 import BlockDetailModal from '@/components/calendar/BlockDetailModal'
 import NewBookingModal from '@/components/calendar/NewBookingModal'
 import BookingDetailModal from '@/components/calendar/BookingDetailModal'
+import MiniDatePicker from '@/components/calendar/MiniDatePicker'
 import MobileCalendar from '@/components/calendar/MobileCalendar'
 import { useTranslation } from '@/lib/i18n'
 import { channexService } from '@/services/channex'
@@ -56,6 +57,7 @@ export default function CalendarPage() {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
   const [connectedChannelKeys, setConnectedChannelKeys] = useState<Set<string> | null>(null)
+  const [showDatePicker, setShowDatePicker] = useState(false)
 
   // Reorder mode state. When `reorderMode` is true, the Calendar header is
   // replaced with Cancel / Save order, the grid is rendered but not
@@ -400,9 +402,29 @@ export default function CalendarPage() {
       <div className="flex items-center justify-between gap-2 mb-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">{t('calendar.title')}</h1>
-          <p className="text-sm text-gray-500">
-            {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
-          </p>
+          <div className="relative inline-block">
+            <button
+              type="button"
+              onClick={() => setShowDatePicker((v) => !v)}
+              aria-label={t('calendar.openDatePicker')}
+              aria-expanded={showDatePicker}
+              className="inline-flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700 underline decoration-dotted underline-offset-4"
+            >
+              <span>
+                {format(startDate, 'MMM d')} &ndash; {format(addDays(endDate, -1), 'MMM d, yyyy')}
+              </span>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showDatePicker && (
+              <MiniDatePicker
+                value={startDate}
+                onChange={(d) => setStartDate(startOfDay(d))}
+                onClose={() => setShowDatePicker(false)}
+              />
+            )}
+          </div>
         </div>
         {reorderMode ? (
           <div className="flex items-center gap-3">
