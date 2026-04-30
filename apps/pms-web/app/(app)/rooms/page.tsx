@@ -43,27 +43,43 @@ interface RateOverview {
 }
 
 function getRateOverview(room: RoomType): RateOverview | null {
-  if (!room.baseRate || room.baseRate <= 0) return null
-
   const seasonRates = (room.seasons || [])
     .map((s) => parseFloat(s.rate))
     .filter((n) => Number.isFinite(n) && n > 0)
-  const flexValues = [room.baseRate, ...seasonRates]
+  const monthlyBaseRates = Object.values(room.monthlyRates || {})
+    .map((m) => (typeof m?.baseRate === 'number' ? m.baseRate : null))
+    .filter((n): n is number => n != null && n > 0)
+  const dailyRateValues = Object.values(room.dailyRates || {})
+    .filter((n): n is number => typeof n === 'number' && n > 0)
+
+  const hasBaseRate = typeof room.baseRate === 'number' && room.baseRate > 0
+  const flexValues = [
+    ...(hasBaseRate ? [room.baseRate] : []),
+    ...seasonRates,
+    ...monthlyBaseRates,
+    ...dailyRateValues,
+  ]
+  if (flexValues.length === 0) return null
+
   const flexMin = Math.min(...flexValues)
   const flexMax = Math.max(...flexValues)
+  const referenceRate = hasBaseRate
+    ? room.baseRate
+    : (seasonRates[0] ?? monthlyBaseRates[0] ?? dailyRateValues[0])
 
   let nrMin: number | null = null
   let nrMax: number | null = null
   let discountPct = 0
 
-  if (room.nonRefundableEnabled !== false && room.nonRefundableRate && room.nonRefundableRate > 0) {
-    discountPct = Math.round((1 - room.nonRefundableRate / room.baseRate) * 100)
+  if (room.nonRefundableEnabled !== false) {
     if (room.nonRefundableDiscount && room.nonRefundableDiscount > 0) {
       const factor = 1 - room.nonRefundableDiscount / 100
+      discountPct = Math.round(room.nonRefundableDiscount)
       nrMin = Math.round(flexMin * factor)
       nrMax = Math.round(flexMax * factor)
-    } else {
-      const factor = room.nonRefundableRate / room.baseRate
+    } else if (room.nonRefundableRate && room.nonRefundableRate > 0 && referenceRate > 0) {
+      const factor = room.nonRefundableRate / referenceRate
+      discountPct = Math.round((1 - factor) * 100)
       nrMin = Math.round(flexMin * factor)
       nrMax = Math.round(flexMax * factor)
     }
