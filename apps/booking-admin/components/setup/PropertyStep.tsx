@@ -1,37 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LANGUAGE_CODES } from '@/lib/constants/options'
-import type { CurrencyOption, LanguageOption } from '@/lib/constants/options'
-
-export const COUNTRY_OPTIONS = [
-  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia',
-  'Austria', 'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium',
-  'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei',
-  'Bulgaria', 'Burkina Faso', 'Burundi', 'Cambodia', 'Cameroon', 'Canada', 'Cape Verde',
-  'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Congo',
-  'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic', 'Denmark', 'Djibouti', 'Dominica',
-  'Dominican Republic', 'East Timor', 'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea',
-  'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'France', 'Gabon', 'Gambia',
-  'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau',
-  'Guyana', 'Haiti', 'Honduras', 'Hong Kong', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran', 'Iraq',
-  'Ireland', 'Israel', 'Italy', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati',
-  'Kosovo', 'Kuwait', 'Kyrgyzstan', 'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya',
-  'Liechtenstein', 'Lithuania', 'Luxembourg', 'Madagascar', 'Malawi', 'Malaysia', 'Maldives',
-  'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia',
-  'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia',
-  'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea',
-  'North Macedonia', 'Norway', 'Oman', 'Pakistan', 'Palau', 'Palestine', 'Panama',
-  'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar', 'Romania',
-  'Russia', 'Rwanda', 'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines',
-  'Samoa', 'San Marino', 'Saudi Arabia', 'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone',
-  'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea',
-  'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria',
-  'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Togo', 'Tonga', 'Trinidad and Tobago',
-  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates',
-  'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City',
-  'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
-]
+import { COUNTRY_OPTIONS, CURRENCY_OPTIONS, LANGUAGE_OPTIONS, POPULAR_CURRENCY_CODES, POPULAR_LANGUAGE_CODES } from '@/lib/constants/options'
+import type { CountryOption, CurrencyOption, LanguageOption } from '@/lib/constants/options'
 
 interface PropertyStepProps {
   propertyName: string; setPropertyName: (v: string) => void
@@ -62,12 +33,17 @@ function FlagSelect<T extends { code: string; flag: string }>({
   onChange,
   options,
   getLabel,
+  getValue,
+  placeholder = 'Select...',
 }: {
   value: string
-  onChange: (code: string) => void
+  onChange: (value: string) => void
   options: T[]
   getLabel: (opt: T) => string
+  getValue?: (opt: T) => string
+  placeholder?: string
 }) {
+  const resolveValue = getValue ?? ((o: T) => o.code)
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -80,7 +56,7 @@ function FlagSelect<T extends { code: string; flag: string }>({
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const selected = options.find((o) => o.code === value)
+  const selected = options.find((o) => resolveValue(o) === value)
   const filtered = options.filter(o =>
     getLabel(o).toLowerCase().includes(search.toLowerCase()) || o.code.toLowerCase().includes(search.toLowerCase())
   )
@@ -92,7 +68,7 @@ function FlagSelect<T extends { code: string; flag: string }>({
         onClick={() => { setOpen(!open); setSearch('') }}
         className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
       >
-        <span>{selected ? `${selected.flag} ${getLabel(selected)}` : 'Select...'}</span>
+        <span>{selected ? `${selected.flag} ${getLabel(selected)}` : placeholder}</span>
         <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
@@ -112,22 +88,27 @@ function FlagSelect<T extends { code: string; flag: string }>({
           <div className="max-h-52 overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-[12px] text-gray-400">No results</div>
-          ) : filtered.map((opt) => (
-            <button
-              key={opt.code}
-              type="button"
-              onClick={() => { onChange(opt.code); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left hover:bg-gray-50 ${opt.code === value ? 'bg-gray-50 font-medium' : ''}`}
-            >
-              {opt.code === value && (
-                <svg className="w-3.5 h-3.5 text-gray-700 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-              {opt.code !== value && <span className="w-3.5 flex-shrink-0" />}
-              <span>{opt.flag} {getLabel(opt)}</span>
-            </button>
-          ))}
+          ) : filtered.map((opt) => {
+            const optValue = resolveValue(opt)
+            const isSelected = optValue === value
+            return (
+              <button
+                key={opt.code}
+                type="button"
+                onClick={() => { onChange(optValue); setOpen(false) }}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left hover:bg-gray-50 ${isSelected ? 'bg-gray-50 font-medium' : ''}`}
+              >
+                {isSelected ? (
+                  <svg className="w-3.5 h-3.5 text-gray-700 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <span className="w-3.5 flex-shrink-0" />
+                )}
+                <span>{opt.flag} {getLabel(opt)}</span>
+              </button>
+            )
+          })}
           </div>
         </div>
       )}
@@ -352,16 +333,14 @@ export default function PropertyStep({
               <label className="block text-[12px] font-semibold text-gray-800 mb-1">
                 Country <span className="text-gray-800">*</span>
               </label>
-              <select
+              <FlagSelect<CountryOption>
                 value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-              >
-                <option value="">Select country</option>
-                {COUNTRY_OPTIONS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                onChange={setCountry}
+                options={COUNTRY_OPTIONS}
+                getLabel={(o) => o.name}
+                getValue={(o) => o.name}
+                placeholder="Select country"
+              />
             </div>
           </div>
 
