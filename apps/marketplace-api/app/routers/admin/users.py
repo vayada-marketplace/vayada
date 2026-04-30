@@ -12,13 +12,13 @@ import bcrypt
 
 from app.database import Database, AuthDatabase
 from app.dependencies import get_admin_user
-from app.s3_service import delete_all_objects_in_prefix
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
 from app.services.creator_profile import CreatorProfileService
 from app.services.hotel_profile import HotelProfileService
 from app.services.listings import ListingService
+from app.services.user_deletion import UserDeletionService
 
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
@@ -779,25 +779,6 @@ async def update_user(
         )
 
 
-async def delete_user_images(user_id: str, user_type: str) -> dict:
-    """Delete all images associated with a user from S3 by deleting their folder."""
-    if user_type == 'creator':
-        prefix = f"creators/{user_id}/"
-    elif user_type == 'hotel':
-        prefix = f"listings/{user_id}/"
-    else:
-        logger.warning(f"Unknown user type {user_type}, skipping image deletion")
-        return {"deleted_count": 0, "failed_count": 0, "total_objects": 0}
-
-    stats = await delete_all_objects_in_prefix(prefix)
-    logger.info(
-        f"Deleted images from S3 folder {prefix} for user {user_id}: "
-        f"{stats['deleted_count']} deleted, {stats['failed_count']} failed, "
-        f"{stats['total_objects']} total"
-    )
-    return stats
-
-
 @router.delete("/users/{user_id}", status_code=http_status.HTTP_200_OK)
 async def delete_user(
     user_id: str,
@@ -821,25 +802,7 @@ async def delete_user(
                 detail="User not found"
             )
 
-        await delete_user_images(user_id, user['type'])
-
-        # Cross-DB cascade: marketplace business data, then auth.
-        if user['type'] == 'creator':
-            creator = await CreatorRepository.get_by_user_id(user_id, columns="id")
-            if creator:
-                await CreatorRepository.delete_platforms(creator['id'])
-                await Database.execute("DELETE FROM creators WHERE id = $1", creator['id'])
-        elif user['type'] == 'hotel':
-            hotel = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
-            if hotel:
-                listings = await HotelRepository.get_listings_by_profile_id(hotel['id'], columns="id")
-                for listing in listings:
-                    await HotelRepository.delete_offerings(listing['id'])
-                    await HotelRepository.delete_requirements(listing['id'])
-                await Database.execute("DELETE FROM hotel_listings WHERE hotel_profile_id = $1", hotel['id'])
-                await Database.execute("DELETE FROM hotel_profiles WHERE id = $1", hotel['id'])
-
-        await UserRepository.delete(user_id)
+        await UserDeletionService.delete(user_id, user['type'])
 
         logger.info(f"Admin {admin_id} deleted user {user_id} (type: {user['type']}, email: {user['email']})")
 
