@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, MagnifyingGlassIcon, ChevronDownIcon, Cog6ToothIcon, DocumentDuplicateIcon, PencilIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { roomsService, individualRoomsService, RoomType, Room } from '@/services/rooms'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ListingImportModal from '@/components/rooms/ListingImportModal'
@@ -107,6 +107,8 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
   const [newRoomNumber, setNewRoomNumber] = useState('')
   const [newRoomFloor, setNewRoomFloor] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null)
+  const [editingRoomNumber, setEditingRoomNumber] = useState('')
   const category = room.category ? room.category.toLowerCase() : getCategoryFromName(room.name)
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES['standard']
 
@@ -143,6 +145,31 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
       onRoomsChange()
     } catch (err: any) {
       alert(err.message || t('rooms.cannotDeleteRoom'))
+    }
+  }
+
+  const startRenameRoom = (roomId: string, currentNumber: string) => {
+    setEditingRoomId(roomId)
+    setEditingRoomNumber(currentNumber)
+  }
+
+  const cancelRenameRoom = () => {
+    setEditingRoomId(null)
+    setEditingRoomNumber('')
+  }
+
+  const saveRenameRoom = async (roomId: string, currentNumber: string) => {
+    const trimmed = editingRoomNumber.trim()
+    if (!trimmed || trimmed === currentNumber) {
+      cancelRenameRoom()
+      return
+    }
+    try {
+      await individualRoomsService.update(roomId, { roomNumber: trimmed })
+      cancelRenameRoom()
+      onRoomsChange()
+    } catch (err: any) {
+      alert(err.message || t('rooms.failedToRenameRoom'))
     }
   }
 
@@ -298,33 +325,80 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
                 maintenance: 'bg-amber-50 text-amber-600 border-amber-200',
                 out_of_order: 'bg-red-50 text-red-600 border-red-200',
               }
+              const isEditing = editingRoomId === r.id
               return (
                 <div
                   key={r.id}
                   className="flex items-center py-2.5 border-l-2 border-gray-200 pl-4 ml-1 hover:border-primary-400 transition-colors"
                 >
-                  <div className="flex-1">
-                    <p className="text-[13px] font-medium text-gray-800">
-                      #{r.roomNumber}
-                      {r.floor && <span className="text-gray-400 ml-1.5 text-[11px]">Floor {r.floor}</span>}
-                    </p>
+                  <div className="flex-1 min-w-0">
+                    {isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] text-gray-400">#</span>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editingRoomNumber}
+                          onChange={(e) => setEditingRoomNumber(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveRenameRoom(r.id, r.roomNumber)
+                            else if (e.key === 'Escape') cancelRenameRoom()
+                          }}
+                          className="text-[13px] font-medium text-gray-800 px-2 py-1 border border-primary-300 rounded-md focus:outline-none focus:border-primary-500 min-w-0 w-40"
+                        />
+                        {r.floor && <span className="text-gray-400 text-[11px]">Floor {r.floor}</span>}
+                      </div>
+                    ) : (
+                      <p className="text-[13px] font-medium text-gray-800">
+                        #{r.roomNumber}
+                        {r.floor && <span className="text-gray-400 ml-1.5 text-[11px]">Floor {r.floor}</span>}
+                      </p>
+                    )}
                   </div>
-                  <select
-                    value={r.status}
-                    onChange={(e) => handleStatusChange(r.id, e.target.value)}
-                    className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 ${statusStyles[r.status] || statusStyles.available}`}
-                  >
-                    <option value="available">{t('rooms.statusAvailable')}</option>
-                    <option value="maintenance">{t('rooms.statusMaintenance')}</option>
-                    <option value="out_of_order">{t('rooms.statusOutOfOrder')}</option>
-                  </select>
-                  <button
-                    onClick={() => handleDeleteRoom(r.id)}
-                    className="p-1 text-gray-300 hover:text-red-500 transition-colors"
-                    title={t('rooms.deleteRoom')}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
+                  {isEditing ? (
+                    <>
+                      <button
+                        onClick={() => saveRenameRoom(r.id, r.roomNumber)}
+                        className="p-1 text-green-500 hover:text-green-600 transition-colors"
+                        title={t('rooms.saveRename')}
+                      >
+                        <CheckIcon className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={cancelRenameRoom}
+                        className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                        title={t('rooms.cancelRename')}
+                      >
+                        <XMarkIcon className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <select
+                        value={r.status}
+                        onChange={(e) => handleStatusChange(r.id, e.target.value)}
+                        className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 ${statusStyles[r.status] || statusStyles.available}`}
+                      >
+                        <option value="available">{t('rooms.statusAvailable')}</option>
+                        <option value="maintenance">{t('rooms.statusMaintenance')}</option>
+                        <option value="out_of_order">{t('rooms.statusOutOfOrder')}</option>
+                      </select>
+                      <button
+                        onClick={() => startRenameRoom(r.id, r.roomNumber)}
+                        className="p-1 text-gray-300 hover:text-primary-500 transition-colors"
+                        title={t('rooms.renameRoom')}
+                      >
+                        <PencilIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRoom(r.id)}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                        title={t('rooms.deleteRoom')}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </>
+                  )}
                 </div>
               )
             })
