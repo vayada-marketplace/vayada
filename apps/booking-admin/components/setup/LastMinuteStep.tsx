@@ -246,13 +246,13 @@ export default function LastMinuteStep({
       <div className="mt-6 flex items-center justify-between">
         <button
           onClick={onBack}
-          className="px-4 py-2 text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          className="px-5 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
         >
           Back
         </button>
         <button
           onClick={onContinue}
-          className="px-5 py-2 text-[12px] font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          className="px-5 py-2 text-[13px] font-semibold bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
         >
           Continue
         </button>
