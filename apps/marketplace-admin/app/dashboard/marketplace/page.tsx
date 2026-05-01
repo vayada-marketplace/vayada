@@ -538,6 +538,9 @@ export default function MarketplacePreviewPage() {
                           return order.indexOf(a) - order.indexOf(b)
                         }).join(', ')}</p>
                       )}
+                      {offering.min_followers != null && (
+                        <p>Min followers for this offering: {formatNumber(offering.min_followers)}</p>
+                      )}
                     </div>
                   </div>
                 ))}
