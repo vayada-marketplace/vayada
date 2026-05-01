@@ -167,18 +167,26 @@ function RoomTypeCard({ room, rooms, onRoomsChange, onDuplicate }: { room: RoomT
           className={`w-4 h-4 text-gray-400 transition-transform shrink-0 ${expanded ? '' : '-rotate-90'}`}
         />
 
-        {/* Room type icon */}
-        <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
-          <svg className="w-4 h-4 md:w-5 md:h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 21V7a2 2 0 0 1 2-2h6v16" />
-            <path d="M13 21V3h6a2 2 0 0 1 2 2v16" />
-            <path d="M3 21h18" />
-            <path d="M7 9h2" />
-            <path d="M7 13h2" />
-            <path d="M15 9h2" />
-            <path d="M15 13h2" />
-          </svg>
-        </div>
+        {/* Room type thumbnail or fallback icon */}
+        {room.images?.[0] ? (
+          <img
+            src={room.images[0]}
+            alt={room.name}
+            className="w-9 h-9 md:w-10 md:h-10 rounded-xl object-cover shrink-0"
+          />
+        ) : (
+          <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
+            <svg className="w-4 h-4 md:w-5 md:h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 21V7a2 2 0 0 1 2-2h6v16" />
+              <path d="M13 21V3h6a2 2 0 0 1 2 2v16" />
+              <path d="M3 21h18" />
+              <path d="M7 9h2" />
+              <path d="M7 13h2" />
+              <path d="M15 9h2" />
+              <path d="M15 13h2" />
+            </svg>
+          </div>
+        )}
 
         {/* Name + info */}
         <div className="flex-1 min-w-0">
