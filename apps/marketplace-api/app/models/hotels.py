@@ -92,6 +92,7 @@ class CollaborationOfferingRequest(BaseModel):
     currency: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$', description="ISO 4217 currency code for paid offerings (defaults to USD server-side)")
     discountPercentage: Optional[int] = Field(None, ge=1, le=100, alias="discount_percentage")
     commissionPercentage: Optional[int] = Field(None, ge=1, le=100, alias="commission_percentage")
+    minFollowers: Optional[int] = Field(None, gt=0, alias="min_followers")
 
     @model_validator(mode='after')
     def validate_type_specific_fields(self):

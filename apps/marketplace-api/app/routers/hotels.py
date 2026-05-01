@@ -209,6 +209,7 @@ async def get_hotel_profile(user_id: str = Depends(get_current_user_id_allow_pen
                         "currency": o.get("currency"),
                         "discount_percentage": o["discount_percentage"],
                         "commission_percentage": o.get("commission_percentage"),
+                        "min_followers": o.get("min_followers"),
                         "created_at": o["created_at"],
                         "updated_at": o["updated_at"],
                     }
@@ -540,6 +541,7 @@ async def update_hotel_profile(
                     "currency": o.get('currency'),
                     "discount_percentage": o['discount_percentage'],
                     "commission_percentage": o.get('commission_percentage'),
+                    "min_followers": o.get('min_followers'),
                     "created_at": o['created_at'],
                     "updated_at": o['updated_at'],
                 }).model_dump(by_alias=True)

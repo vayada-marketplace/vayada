@@ -50,6 +50,7 @@ class CollaborationOfferingResponse(BaseModel):
     currency: Optional[str] = Field(None, description="ISO 4217 currency code for paid offerings")
     discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
     commissionPercentage: Optional[int] = Field(None, alias="commission_percentage")
+    minFollowers: Optional[int] = Field(None, alias="min_followers")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
 

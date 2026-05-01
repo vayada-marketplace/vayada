@@ -68,6 +68,7 @@ async def get_all_listings():
                 currency=o['currency'],
                 discount_percentage=o['discount_percentage'],
                 commission_percentage=o.get('commission_percentage'),
+                min_followers=o.get('min_followers'),
                 created_at=o['created_at'],
                 updated_at=o['updated_at']
             ))

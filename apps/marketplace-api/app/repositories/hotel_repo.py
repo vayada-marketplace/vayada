@@ -165,7 +165,7 @@ class HotelRepository:
         query = """
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
                    free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
-                   discount_percentage, commission_percentage, created_at, updated_at
+                   discount_percentage, commission_percentage, min_followers, created_at, updated_at
             FROM listing_collaboration_offerings
             WHERE listing_id = $1
             ORDER BY created_at DESC
@@ -188,6 +188,7 @@ class HotelRepository:
         discount_percentage: Optional[float],
         currency: Optional[str] = None,
         commission_percentage: Optional[int] = None,
+        min_followers: Optional[int] = None,
         *,
         conn: Optional[asyncpg.Connection] = None,
     ) -> dict:
@@ -195,15 +196,15 @@ class HotelRepository:
             INSERT INTO listing_collaboration_offerings
             (listing_id, collaboration_type, availability_months, platforms,
              free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-             commission_percentage)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10)
+             commission_percentage, min_followers)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 'USD'), $10, $11)
             RETURNING id, collaboration_type, availability_months, platforms,
                       free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
-                      discount_percentage, commission_percentage, created_at, updated_at
+                      discount_percentage, commission_percentage, min_followers, created_at, updated_at
         """
         args = (listing_id, collaboration_type, availability_months, platforms,
                 free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-                commission_percentage)
+                commission_percentage, min_followers)
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -345,7 +346,7 @@ class HotelRepository:
         query = f"""
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
                    free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
-                   discount_percentage, commission_percentage, created_at, updated_at
+                   discount_percentage, commission_percentage, min_followers, created_at, updated_at
             FROM listing_collaboration_offerings
             WHERE listing_id IN ({placeholders})
             ORDER BY listing_id, created_at DESC

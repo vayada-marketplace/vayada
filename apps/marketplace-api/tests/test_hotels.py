@@ -683,6 +683,67 @@ class TestListingCollaborationOfferings:
         offering = data["collaboration_offerings"][0]
         assert offering["availability_months"] == ["December", "January", "February"]
 
+    async def test_create_listing_per_offering_min_followers_and_months(
+        self, client: AsyncClient, test_hotel
+    ):
+        """Each offering carries its own months + min_followers (VAY-266)."""
+        response = await client.post(
+            "/hotels/me/listings",
+            json={
+                "name": "Flexible Resort",
+                "location": "Bali",
+                "description": "Beach resort with seasonal collab tiers",
+                "accommodationType": "Hotel",
+                "collaborationOfferings": [
+                    {
+                        "collaborationType": "Free Stay",
+                        "availabilityMonths": ["January", "February", "March", "April", "May"],
+                        "platforms": ["Instagram"],
+                        "freeStayMinNights": 1,
+                        "freeStayMaxNights": 5,
+                        "minFollowers": 100000,
+                    },
+                    {
+                        "collaborationType": "Discount",
+                        "availabilityMonths": ["January", "February", "March", "April", "May"],
+                        "platforms": ["Instagram"],
+                        "discountPercentage": 20,
+                        "minFollowers": 10000,
+                    },
+                    {
+                        "collaborationType": "Discount",
+                        "availabilityMonths": ["July", "August"],
+                        "platforms": ["Instagram"],
+                        "discountPercentage": 10,
+                        "minFollowers": 50000,
+                    },
+                ],
+                "creatorRequirements": {
+                    "platforms": ["Instagram"],
+                    "minFollowers": 10000,
+                },
+            },
+            headers=get_auth_headers(test_hotel["token"]),
+        )
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        offerings = data["collaboration_offerings"]
+        assert len(offerings) == 3
+
+        by_signature = {
+            (o["collaboration_type"], tuple(o["availability_months"])): o for o in offerings
+        }
+        free = by_signature[("Free Stay", ("January", "February", "March", "April", "May"))]
+        disc_low = by_signature[("Discount", ("January", "February", "March", "April", "May"))]
+        disc_high = by_signature[("Discount", ("July", "August"))]
+
+        assert free["min_followers"] == 100000
+        assert disc_low["min_followers"] == 10000
+        assert disc_low["discount_percentage"] == 20
+        assert disc_high["min_followers"] == 50000
+        assert disc_high["discount_percentage"] == 10
+
 
 class TestCreatorRequirements:
     """Tests for listing creator requirements"""
