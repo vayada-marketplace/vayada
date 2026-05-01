@@ -238,6 +238,7 @@ export interface CollaborationOffering {
   currency: string | null               // ISO 4217 code, only meaningful for 'Paid'
   discountPercentage: number | null     // Only for 'Discount'
   commissionPercentage: number | null   // Only for 'Affiliate'
+  minFollowers?: number | null          // Optional per-offering follower threshold
   createdAt: string
   updatedAt: string
 }
