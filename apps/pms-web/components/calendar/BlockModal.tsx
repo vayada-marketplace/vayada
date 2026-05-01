@@ -4,6 +4,18 @@ import { useMemo, useState } from 'react'
 import { CalendarRoom, CalendarRoomType } from '@/services/calendar'
 import Modal from '@/components/Modal'
 
+// Returns the YYYY-MM-DD string one day after the given YYYY-MM-DD string.
+// Parsed as local date so DST / timezone doesn't shift the result.
+function addOneDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const next = new Date(y, m - 1, d + 1)
+  const yyyy = next.getFullYear()
+  const mm = String(next.getMonth() + 1).padStart(2, '0')
+  const dd = String(next.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 interface BlockModalProps {
   roomTypes: CalendarRoomType[]
   rooms: CalendarRoom[]
@@ -62,6 +74,13 @@ export default function BlockModal({
   const handleRoomTypeChange = (newId: string) => {
     setRoomTypeId(newId)
     setSelectedRoomIds([])
+  }
+
+  const handleStartDateChange = (newStart: string) => {
+    setStartDate(newStart)
+    if (newStart && (!endDate || endDate <= newStart)) {
+      setEndDate(addOneDay(newStart))
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -123,7 +142,7 @@ export default function BlockModal({
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => handleStartDateChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               required
             />

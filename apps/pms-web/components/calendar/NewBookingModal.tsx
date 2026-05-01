@@ -27,6 +27,18 @@ const CHANNELS = [
 // Direct and Other are always offered regardless of channel-manager state.
 const ALWAYS_SHOWN_CHANNELS = new Set(['direct', 'other'])
 
+// Returns the YYYY-MM-DD string one day after the given YYYY-MM-DD string.
+// Parsed as local date so DST / timezone doesn't shift the result.
+function addOneDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const next = new Date(y, m - 1, d + 1)
+  const yyyy = next.getFullYear()
+  const mm = String(next.getMonth() + 1).padStart(2, '0')
+  const dd = String(next.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 export default function NewBookingModal({
   roomTypes,
   rooms,
@@ -72,6 +84,13 @@ export default function NewBookingModal({
     const room = rooms.find((r) => r.id === newRoomId)
     const rt = roomTypes.find((t) => t.id === room?.roomTypeId)
     if (rt) setNightlyRate(String(rt.baseRate))
+  }
+
+  const handleCheckInChange = (newCheckIn: string) => {
+    setCheckIn(newCheckIn)
+    if (newCheckIn && (!checkOut || checkOut <= newCheckIn)) {
+      setCheckOut(addOneDay(newCheckIn))
+    }
   }
 
   // Group rooms by room type for the dropdown
@@ -166,7 +185,7 @@ export default function NewBookingModal({
               <input
                 type="date"
                 value={checkIn}
-                onChange={(e) => setCheckIn(e.target.value)}
+                onChange={(e) => handleCheckInChange(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 required
               />
