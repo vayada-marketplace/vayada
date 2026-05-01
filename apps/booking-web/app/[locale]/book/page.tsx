@@ -13,6 +13,7 @@ import { bookingService } from '@/services/api/booking'
 import { formatDate, ensureMinOneNight } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { COUNTRIES } from '@/lib/constants/countries'
+import { COUNTRY_DIAL_CODES, findDialCodeByCountryName } from '@/lib/constants/countryDialCodes'
 import { trackEvent } from '@/services/api/tracking'
 import { usePricing } from '@/lib/hooks/usePricing'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
@@ -91,6 +92,9 @@ function BookPageContent() {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [phoneCountryIso, setPhoneCountryIso] = useState(
+    () => findDialCodeByCountryName(hotel?.country)?.iso2 ?? '',
+  )
   const [country, setCountry] = useState('')
   const [specialRequests, setSpecialRequests] = useState('')
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState('')
@@ -115,7 +119,7 @@ function BookPageContent() {
   }, [slug])
 
   const handleSubmit = async () => {
-    if (!firstName || !lastName || !email || !phone) {
+    if (!firstName || !lastName || !email || !phone || !phoneCountryIso) {
       setError(t('fillRequired'))
       return
     }
@@ -132,12 +136,17 @@ function BookPageContent() {
       const refCookie = document.cookie.match(/(^| )ref=([^;]+)/)
       const referralCode = refCookie ? decodeURIComponent(refCookie[2]) : undefined
 
+      // Strip national trunk prefix (leading 0) before prepending the dial code.
+      const dialEntry = COUNTRY_DIAL_CODES.find((c) => c.iso2 === phoneCountryIso)
+      const localPart = phone.replace(/[^0-9]/g, '').replace(/^0+/, '')
+      const composedPhone = dialEntry ? `+${dialEntry.dial} ${localPart}` : phone
+
       saveGuestDetails({
         roomTypeId: room.id,
         guestFirstName: firstName,
         guestLastName: lastName,
         guestEmail: email,
-        guestPhone: phone,
+        guestPhone: composedPhone,
         guestCountry: country,
         specialRequests: guestFormSettings.specialRequestsEnabled ? specialRequests : undefined,
         estimatedArrivalTime: guestFormSettings.arrivalTimeEnabled && estimatedArrivalTime ? estimatedArrivalTime : undefined,
@@ -311,13 +320,28 @@ function BookPageContent() {
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t('phoneNumber')} <span className="text-red-500">*</span>
                     </label>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+1 234 567 8900"
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-                    />
+                    <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500 overflow-hidden">
+                      <select
+                        value={phoneCountryIso}
+                        onChange={(e) => setPhoneCountryIso(e.target.value)}
+                        aria-label={t('phoneCountryCode')}
+                        className="px-3 py-3 bg-gray-50 border-r border-gray-300 text-gray-900 focus:outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                      >
+                        <option value="">{t('selectCountryCode')}</option>
+                        {COUNTRY_DIAL_CODES.map((c) => (
+                          <option key={c.iso2} value={c.iso2}>
+                            {c.flag} +{c.dial} {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder={t('phoneLocalPlaceholder')}
+                        className="flex-1 min-w-0 px-4 py-3 text-gray-900 focus:outline-none placeholder:text-gray-400"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
