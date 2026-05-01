@@ -684,11 +684,11 @@ export default function CalendarPage() {
         />
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-x-auto">
-          <table className="w-full min-w-[600px] md:min-w-[900px] table-fixed">
+          <table className="w-full min-w-[600px] md:min-w-[960px] table-fixed">
             {/* Date header */}
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="w-20 md:w-48 px-1.5 md:px-3 py-2 text-left text-[10px] md:text-xs font-medium text-gray-600 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
+                <th className="w-20 md:w-56 px-1.5 md:px-3 py-2 text-left text-[10px] md:text-xs font-medium text-gray-600 sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
                   {t('calendar.roomColumn')}
                 </th>
                 {dates.map((d) => {
@@ -752,8 +752,16 @@ export default function CalendarPage() {
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="text-[11px] md:text-sm font-semibold text-gray-900 truncate">#{room.roomNumber}</div>
-                          <div className="hidden md:block text-[10px] text-gray-500 leading-tight truncate">
+                          <div
+                            className="text-[11px] md:text-sm font-semibold text-gray-900 break-words line-clamp-2 leading-tight"
+                            title={room.roomNumber}
+                          >
+                            #{room.roomNumber}
+                          </div>
+                          <div
+                            className="hidden md:block text-[10px] text-gray-500 leading-tight truncate"
+                            title={rt?.category ? `${room.roomTypeName} · ${rt.category}` : room.roomTypeName}
+                          >
                             {room.roomTypeName}
                             {rt?.category && (
                               <span className="text-gray-400"> &middot; {rt.category}</span>
