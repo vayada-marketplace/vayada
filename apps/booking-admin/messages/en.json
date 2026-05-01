@@ -115,7 +115,7 @@
   "manageProperties.toast.deleted": "{name} has been permanently deleted.",
   "manageProperties.toast.error": "Failed to delete the property. Please try again.",
   "layout.sidebar.bookingEngine": "Booking Engine",
-  "layout.sidebar.bookingEngineDescription": "Direct bookings & revenue",
+  "layout.sidebar.bookingEngineDescription": "Direct Bookings & Revenue",
   "layout.sidebar.switchApp": "Switch App",
   "layout.sidebar.propertyManager": "Property Manager",
   "layout.sidebar.propertyManagerDescription": "Operations & Inventory",
