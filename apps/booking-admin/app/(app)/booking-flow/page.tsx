@@ -59,7 +59,7 @@ const emptyAddon = {
 }
 
 export default function BookingFlowPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('addons')
+  const [activeTab, setActiveTab] = useState<Tab>('rooms')
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
