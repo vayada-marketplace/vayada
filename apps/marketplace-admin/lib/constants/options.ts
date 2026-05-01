@@ -80,6 +80,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'ru', name: 'Russian', nativeName: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', flag: '\u{1F1F7}\u{1F1FA}' },
   { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '\u{1F1EE}\u{1F1F9}' },
   { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '\u{1F1F3}\u{1F1F1}' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '\u{1F1F0}\u{1F1F7}' },
 ]
 
 export const POPULAR_LANGUAGE_CODES = ['id', 'de', 'fr', 'es', 'ja', 'zh', 'ru']

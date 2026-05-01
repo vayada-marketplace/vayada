@@ -29,6 +29,7 @@ const LANGUAGE_OPTIONS = [
   { code: 'ru', label: 'Russian' },
   { code: 'ja', label: 'Japanese' },
   { code: 'zh', label: 'Chinese' },
+  { code: 'ko', label: 'Korean' },
   { code: 'ar', label: 'Arabic' },
 ]
 
