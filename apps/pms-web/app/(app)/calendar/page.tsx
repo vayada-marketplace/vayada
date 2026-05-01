@@ -60,6 +60,21 @@ const CHANNEL_LEGEND_KEYS: Array<{
 // Legend entries that are always shown regardless of channel manager state.
 const ALWAYS_SHOWN_LEGEND_KEYS = new Set(['direct', 'other'])
 
+// Map a booking's `channel` value onto a legend key. Bookings can carry
+// historical channel values (e.g. "booking" instead of "booking.com") or
+// channels that are no longer connected; we still want them represented in
+// the legend so users can decode the colored bars on the grid.
+const LEGEND_KEY_BY_CHANNEL: Record<string, string> = {
+  direct: 'direct',
+  airbnb: 'airbnb',
+  booking: 'booking.com',
+  'booking.com': 'booking.com',
+  expedia: 'expedia',
+  other: 'other',
+}
+const normalizeBookingChannel = (channel?: string | null): string =>
+  LEGEND_KEY_BY_CHANNEL[(channel || '').toLowerCase().trim()] || 'other'
+
 export default function CalendarPage() {
   const { t } = useTranslation()
   const [viewMode, setViewMode] = useState<ViewMode>('timeline')
@@ -159,11 +174,17 @@ export default function CalendarPage() {
   }, [])
 
   const visibleLegendKeys = useMemo(() => {
-    if (!connectedChannelKeys) return CHANNEL_LEGEND_KEYS
+    const fromBookings = new Set<string>()
+    if (data) {
+      for (const b of data.bookings) fromBookings.add(normalizeBookingChannel(b.channel))
+    }
     return CHANNEL_LEGEND_KEYS.filter(
-      (ch) => ALWAYS_SHOWN_LEGEND_KEYS.has(ch.key) || connectedChannelKeys.has(ch.key)
+      (ch) =>
+        ALWAYS_SHOWN_LEGEND_KEYS.has(ch.key) ||
+        fromBookings.has(ch.key) ||
+        (connectedChannelKeys?.has(ch.key) ?? false)
     )
-  }, [connectedChannelKeys])
+  }, [connectedChannelKeys, data])
 
   const handleCellPointerDown = (
     e: React.PointerEvent<HTMLTableCellElement>,
