@@ -223,7 +223,7 @@ export default function BrandMediaStep({
               disabled={!canProceed}
               className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Next
+              Continue
             </button>
           </div>
 
