@@ -91,6 +91,16 @@ const AMENITY_CATEGORIES = [
 ]
 
 
+// Clamp a raw string from a number input to [min, max], treating empty/NaN as min.
+// Used by inputs that allow a transient empty display string while typing.
+const clampNumberInput = (raw: string, min: number, max?: number): number => {
+  let n = Number(raw)
+  if (!Number.isFinite(n) || raw === '') n = min
+  if (n < min) n = min
+  if (max !== undefined && n > max) n = max
+  return n
+}
+
 type RoomTab = 'details' | 'pricing' | 'media'
 const ROOM_TABS: { key: RoomTab; label: string }[] = [
   { key: 'details', label: 'Room Details' },
@@ -297,6 +307,14 @@ export default function RoomTypeForm({
   const [category, setCategory] = useState(form.category || '')
   const [bedrooms, setBedrooms] = useState(form.bedrooms ?? 1)
   const [bathrooms, setBathrooms] = useState(form.bathrooms ?? 1)
+  // Display strings for the number inputs in the room-details grid. Held separately from
+  // the committed numeric values so the user can fully clear a field before typing a new
+  // number — onChange writes the raw string, onBlur clamps to [min, max] and rewrites it.
+  const [maxOccupancyInput, setMaxOccupancyInput] = useState(String(form.maxOccupancy ?? 2))
+  const [bedroomsInput, setBedroomsInput] = useState(String(form.bedrooms ?? 1))
+  const [bathroomsInput, setBathroomsInput] = useState(String(form.bathrooms ?? 1))
+  const [sizeInput, setSizeInput] = useState(String(form.size ?? 1))
+  const [totalRoomsInput, setTotalRoomsInput] = useState(String(form.totalRooms ?? 2))
 
   // Sync beds -> form.bedType
   useEffect(() => {
@@ -589,8 +607,20 @@ export default function RoomTypeForm({
             <input
               type="number"
               min={1}
-              value={form.maxOccupancy ?? 2}
-              onChange={(e) => updateForm({ maxOccupancy: Math.max(1, Number(e.target.value)) })}
+              value={maxOccupancyInput}
+              onChange={(e) => {
+                const v = e.target.value
+                setMaxOccupancyInput(v)
+                if (v !== '') {
+                  const n = Number(v)
+                  if (Number.isFinite(n) && n >= 1) updateForm({ maxOccupancy: n })
+                }
+              }}
+              onBlur={() => {
+                const n = clampNumberInput(maxOccupancyInput, 1)
+                setMaxOccupancyInput(String(n))
+                updateForm({ maxOccupancy: n })
+              }}
               className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
             />
             <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;Up to X guests&quot; on room card</p>
@@ -605,8 +635,20 @@ export default function RoomTypeForm({
               <input
                 type="number"
                 min={0}
-                value={bedrooms}
-                onChange={(e) => setBedrooms(Math.max(0, Number(e.target.value)))}
+                value={bedroomsInput}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setBedroomsInput(v)
+                  if (v !== '') {
+                    const n = Number(v)
+                    if (Number.isFinite(n) && n >= 0) setBedrooms(n)
+                  }
+                }}
+                onBlur={() => {
+                  const n = clampNumberInput(bedroomsInput, 0)
+                  setBedroomsInput(String(n))
+                  setBedrooms(n)
+                }}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
               />
             </div>
@@ -617,8 +659,20 @@ export default function RoomTypeForm({
               <input
                 type="number"
                 min={0}
-                value={bathrooms}
-                onChange={(e) => setBathrooms(Math.max(0, Number(e.target.value)))}
+                value={bathroomsInput}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setBathroomsInput(v)
+                  if (v !== '') {
+                    const n = Number(v)
+                    if (Number.isFinite(n) && n >= 0) setBathrooms(n)
+                  }
+                }}
+                onBlur={() => {
+                  const n = clampNumberInput(bathroomsInput, 0)
+                  setBathroomsInput(String(n))
+                  setBathrooms(n)
+                }}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
               />
             </div>
@@ -630,8 +684,20 @@ export default function RoomTypeForm({
                 type="number"
                 min={1}
                 max={15000}
-                value={form.size ?? 1}
-                onChange={(e) => updateForm({ size: Math.max(1, Math.min(parseInt(e.target.value) || 1, 15000)) })}
+                value={sizeInput}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSizeInput(v)
+                  if (v !== '') {
+                    const n = parseInt(v, 10)
+                    if (Number.isFinite(n) && n >= 1 && n <= 15000) updateForm({ size: n })
+                  }
+                }}
+                onBlur={() => {
+                  const n = clampNumberInput(sizeInput, 1, 15000)
+                  setSizeInput(String(n))
+                  updateForm({ size: n })
+                }}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
                 placeholder="50"
               />
@@ -643,8 +709,20 @@ export default function RoomTypeForm({
               <input
                 type="number"
                 min={1}
-                value={form.totalRooms ?? 2}
-                onChange={(e) => updateForm({ totalRooms: Math.max(1, Number(e.target.value)) })}
+                value={totalRoomsInput}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setTotalRoomsInput(v)
+                  if (v !== '') {
+                    const n = Number(v)
+                    if (Number.isFinite(n) && n >= 1) updateForm({ totalRooms: n })
+                  }
+                }}
+                onBlur={() => {
+                  const n = clampNumberInput(totalRoomsInput, 1)
+                  setTotalRoomsInput(String(n))
+                  updateForm({ totalRooms: n })
+                }}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
               />
               <p className="text-[10px] text-gray-400 mt-1 pl-3">Number of units available for this room type</p>
