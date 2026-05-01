@@ -143,9 +143,11 @@ export default function DashboardPage() {
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-5">
       {/* Title */}
-      <div>
-        <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('dashboard.title')}</h1>
-        <p className="text-xs text-gray-400 mt-1 md:mt-0.5">{dateLabel}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('dashboard.title')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{dateLabel}</p>
+        </div>
       </div>
 
       {/* Stat cards */}
