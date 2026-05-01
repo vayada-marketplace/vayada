@@ -180,6 +180,11 @@ export const customDomainService = {
     apiClient.get<CustomDomainStatus>('/admin/settings/custom-domain/status'),
 }
 
+export interface HotelDeletionImpact {
+  upcomingBookingsCount: number
+  connectedChannelsCount: number
+}
+
 export const settingsService = {
   listHotels: () =>
     apiClient.get<HotelSummary[]>('/admin/hotels'),
@@ -189,6 +194,12 @@ export const settingsService = {
 
   updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) =>
     apiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
+
+  getHotelDeletionImpact: (hotelId: string) =>
+    apiClient.get<HotelDeletionImpact>(`/admin/hotels/${hotelId}/deletion-impact`),
+
+  deleteHotel: (hotelId: string) =>
+    apiClient.delete<void>(`/admin/hotels/${hotelId}`),
 
 
   getPropertySettings: () =>
