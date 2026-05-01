@@ -12,7 +12,7 @@ import AddonDetailModal from '@/components/booking/AddonDetailModal'
 import { ADDON_CATEGORIES } from '@/lib/constants/addons'
 import { useHotel, useAddons } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { calculateNights } from '@/lib/utils'
+import { calculateNights, ensureMinOneNight } from '@/lib/utils'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
 
 export default function AddonsPage() {
@@ -29,8 +29,12 @@ export default function AddonsPage() {
   const [detailIndex, setDetailIndex] = useState<number | null>(null)
   const { steps: STEPS, currentStep } = useBookingSteps('addons')
 
-  const checkIn = searchParams.get('checkIn') || ''
-  const checkOut = searchParams.get('checkOut') || ''
+  // Defensively coerce a same-day or invalid URL range so the page never
+  // shows / forwards a 0-night stay.
+  const { checkIn, checkOut } = ensureMinOneNight(
+    searchParams.get('checkIn') || '',
+    searchParams.get('checkOut') || '',
+  )
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const nights = calculateNights(checkIn, checkOut)
 

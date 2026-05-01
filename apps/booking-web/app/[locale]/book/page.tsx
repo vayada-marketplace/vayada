@@ -10,7 +10,7 @@ import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { bookingService } from '@/services/api/booking'
-import { formatDate } from '@/lib/utils'
+import { formatDate, ensureMinOneNight } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { COUNTRIES } from '@/lib/constants/countries'
 import { trackEvent } from '@/services/api/tracking'
@@ -38,15 +38,18 @@ function BookPageContent() {
 
   useEffect(() => { trackEvent(slug, 'started_booking') }, [slug])
 
+  // Defensively coerce a same-day or invalid URL range to a valid one-night
+  // window before anything downstream computes nights / pricing.
+  const { checkIn, checkOut } = ensureMinOneNight(
+    searchParams.get('checkIn') || '2026-02-13',
+    searchParams.get('checkOut') || '2026-02-18',
+  )
+
   // Ensure rooms have date-resolved rates (in case of direct navigation)
   useEffect(() => {
-    const ci = searchParams.get('checkIn')
-    const co = searchParams.get('checkOut')
     const a = parseInt(searchParams.get('adults') || '2')
-    if (ci && co) refetchRooms(ci, co, a)
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, a)
   }, [])
-  const checkIn = searchParams.get('checkIn') || '2026-02-13'
-  const checkOut = searchParams.get('checkOut') || '2026-02-18'
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')
   const roomsParam = parseInt(searchParams.get('rooms') || '1')

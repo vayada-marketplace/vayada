@@ -13,7 +13,7 @@ import RoomDetailModal from '@/components/booking/RoomDetailModal'
 import RoomCard from '@/components/booking/RoomCard'
 import RoomFiltersBar from '@/components/booking/RoomFiltersBar'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
-import { calculateNights, formatDateShort, formatDate } from '@/lib/utils'
+import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { trackEvent } from '@/services/api/tracking'
 import { hotelService } from '@/services/api/hotel'
@@ -100,21 +100,26 @@ function HomePageContent() {
   useEffect(() => { trackEvent(slug, 'page_visit') }, [slug])
 
   // Initialize from URL params so back-navigation from /book or /addons
-  // preserves the user's selected dates and guests.
-  const [checkIn, setCheckIn] = useState(() => {
-    const q = searchParams.get('checkIn')
-    if (q) return q
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d.toISOString().split('T')[0]
-  })
-  const [checkOut, setCheckOut] = useState(() => {
-    const q = searchParams.get('checkOut')
-    if (q) return q
-    const d = new Date()
-    d.setDate(d.getDate() + 2)
-    return d.toISOString().split('T')[0]
-  })
+  // preserves the user's selected dates and guests. Sanitize so a same-day
+  // or invalid range from the URL never lands the page on "0 nights".
+  const initialDates = (() => {
+    const ciQ = searchParams.get('checkIn')
+    const coQ = searchParams.get('checkOut')
+    const today = new Date()
+    const defaultCheckIn = (() => {
+      const d = new Date(today)
+      d.setDate(d.getDate() + 1)
+      return d.toISOString().split('T')[0]
+    })()
+    const defaultCheckOut = (() => {
+      const d = new Date(today)
+      d.setDate(d.getDate() + 2)
+      return d.toISOString().split('T')[0]
+    })()
+    return ensureMinOneNight(ciQ || defaultCheckIn, coQ || defaultCheckOut)
+  })()
+  const [checkIn, setCheckIn] = useState(initialDates.checkIn)
+  const [checkOut, setCheckOut] = useState(initialDates.checkOut)
   const [adults, setAdults] = useState(() => parseInt(searchParams.get('adults') || '2'))
   const [children, setChildren] = useState(() => parseInt(searchParams.get('children') || '0'))
 
