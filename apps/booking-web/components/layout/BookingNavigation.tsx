@@ -132,7 +132,7 @@ function Dropdown({
   if (!open) return null
 
   return (
-    <div ref={ref} className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50">
+    <div ref={ref} className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50 overflow-hidden">
       {items.map((item) => (
         <button
           key={item.value}
