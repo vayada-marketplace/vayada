@@ -172,6 +172,28 @@ export default function RoomCard({
             </div>
           )}
 
+          {!soldOut && room.remainingRooms <= 3 && (
+            <div
+              className={`inline-flex items-center gap-2 self-start mb-3 px-3 py-1.5 rounded-full border text-sm font-medium ${
+                room.remainingRooms === 1
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}
+            >
+              <span
+                className={`relative flex w-2 h-2 ${
+                  room.remainingRooms === 1 ? 'text-red-500' : 'text-amber-500'
+                }`}
+              >
+                <span className="absolute inset-0 rounded-full bg-current opacity-75 animate-ping" />
+                <span className="relative w-2 h-2 rounded-full bg-current" />
+              </span>
+              {room.remainingRooms === 1
+                ? tc('lastRoomLeft')
+                : tc('onlyLeft', { count: room.remainingRooms })}
+            </div>
+          )}
+
           <div className="border-t border-gray-100 pt-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t('rateOptions')}</p>
             <div className="space-y-3">

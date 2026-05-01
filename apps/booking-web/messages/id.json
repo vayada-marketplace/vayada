@@ -21,6 +21,7 @@
     "more": "+{count} lagi",
     "left": "{count} tersisa",
     "onlyLeft": "Hanya {count} tersisa",
+    "lastRoomLeft": "Kamar terakhir tersedia!",
     "allRightsReserved": "{name}. Hak cipta dilindungi.",
     "poweredBy": "Didukung oleh",
     "contact": "Kontak",
