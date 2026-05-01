@@ -21,6 +21,7 @@
     "more": "+{count} more",
     "left": "{count} left",
     "onlyLeft": "Only {count} left",
+    "lastRoomLeft": "Last room available!",
     "allRightsReserved": "{name}. All rights reserved.",
     "poweredBy": "Powered by",
     "contact": "Contact",

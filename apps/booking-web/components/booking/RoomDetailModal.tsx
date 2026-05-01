@@ -319,9 +319,19 @@ export default function RoomDetailModal({
             </button>
 
             {!soldOut && room.remainingRooms <= 3 && (
-              <p className="text-sm text-gray-500 mt-3 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-gray-900" />
-                Only {room.remainingRooms} left at this rate
+              <p
+                className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${
+                  room.remainingRooms === 1 ? 'text-red-700' : 'text-amber-800'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    room.remainingRooms === 1 ? 'bg-red-500' : 'bg-amber-500'
+                  }`}
+                />
+                {room.remainingRooms === 1
+                  ? tc('lastRoomLeft')
+                  : tc('onlyLeft', { count: room.remainingRooms })}
               </p>
             )}
           </div>

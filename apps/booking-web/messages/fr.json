@@ -21,6 +21,7 @@
     "more": "+{count} de plus",
     "left": "{count} restant(s)",
     "onlyLeft": "Plus que {count} restant(s)",
+    "lastRoomLeft": "Dernière chambre disponible !",
     "allRightsReserved": "{name}. Tous droits réservés.",
     "poweredBy": "Propulsé par",
     "contact": "Contact",
