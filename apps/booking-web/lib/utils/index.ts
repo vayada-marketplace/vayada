@@ -50,6 +50,31 @@ export function calculateNights(checkIn: string, checkOut: string): number {
   return Math.ceil(diff / (1000 * 60 * 60 * 24))
 }
 
+// Parsed as local date so DST / timezone doesn't shift the result.
+function addOneLocalDay(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const next = new Date(y, m - 1, d + 1)
+  const yyyy = next.getFullYear()
+  const mm = String(next.getMonth() + 1).padStart(2, '0')
+  const dd = String(next.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+// Guarantees at least one night between check-in and check-out. If checkOut is
+// missing, malformed, or not strictly after checkIn (e.g. a same-day URL like
+// ?checkIn=2026-07-13&checkOut=2026-07-13), it is forced to checkIn + 1 day.
+export function ensureMinOneNight(
+  checkIn: string,
+  checkOut: string,
+): { checkIn: string; checkOut: string } {
+  if (!checkIn) return { checkIn, checkOut }
+  const advanced = addOneLocalDay(checkIn)
+  if (!advanced) return { checkIn, checkOut }
+  if (!checkOut || checkOut <= checkIn) return { checkIn, checkOut: advanced }
+  return { checkIn, checkOut }
+}
+
 export function generateBookingReference(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let result = 'VBK-'
