@@ -744,9 +744,9 @@ export default function RoomsStep({
                       return room.seasons.map((season, idx) => {
                       const tierColors: Record<string, string> = {
                         'Low': 'text-emerald-600 bg-emerald-50 border-emerald-200',
-                        'Mid': 'text-blue-600 bg-blue-50 border-blue-200',
-                        'High': 'text-blue-800 bg-blue-100 border-blue-200',
-                        'Peak': 'text-indigo-700 bg-indigo-100 border-indigo-200',
+                        'Mid': 'text-yellow-700 bg-yellow-50 border-yellow-200',
+                        'High': 'text-red-600 bg-red-50 border-red-200',
+                        'Peak': 'text-red-900 bg-red-100 border-red-300',
                       }
                       const dayCount = season.from && season.to ? (() => { const [fm, fd] = season.from.split('-').map(Number); const [tm, td] = season.to.split('-').map(Number); const fromDoy = DAYS_IN_MONTH.slice(0, fm - 1).reduce((a, b) => a + b, 0) + fd; const toDoy = DAYS_IN_MONTH.slice(0, tm - 1).reduce((a, b) => a + b, 0) + td; return Math.max(0, toDoy - fromDoy); })() : 0
                       return (
@@ -862,9 +862,9 @@ export default function RoomsStep({
                         {room.seasons.map((season, idx) => {
                           const tierColors: Record<string, string> = {
                             'Low': 'text-emerald-600 bg-emerald-50',
-                            'Mid': 'text-blue-600 bg-blue-50',
-                            'High': 'text-blue-800 bg-blue-100',
-                            'Peak': 'text-indigo-700 bg-indigo-100',
+                            'Mid': 'text-yellow-700 bg-yellow-50',
+                            'High': 'text-red-600 bg-red-50',
+                            'Peak': 'text-red-900 bg-red-100',
                           }
                           const maxOcc = room.maxOccupancy ?? 2
                           const hasOccRates = Object.values(season.occupancyRates || {}).some(v => v !== '' && v !== undefined)
@@ -1415,7 +1415,7 @@ export default function RoomsStep({
                     {room.seasons.map((s, i) => {
                       const flexRate = parseFloat(s.rate) || 0
                       const nrRate = Math.round(flexRate * (1 - room.nonRefundableDiscount / 100))
-                      const dotColorHex: Record<string, string> = { 'Low': '#38bdf8', 'Mid': '#3b82f6', 'High': '#1d4ed8', 'Peak': '#4338ca' }
+                      const dotColorHex: Record<string, string> = { 'Low': '#10b981', 'Mid': '#eab308', 'High': '#ef4444', 'Peak': '#7f1d1d' }
                       const fromDate = s.from ? new Date(s.from) : null
                       const toDate = s.to ? new Date(s.to) : null
                       return (
@@ -1475,10 +1475,10 @@ export default function RoomsStep({
                   const surchargePercent = parseFloat(room.weekendSurcharge.replace(/[^0-9.]/g, '')) || 0
 
                   const seasonBgColors: Record<string, string> = {
-                    'Low': '#f0f9ff',
-                    'Mid': '#eff6ff',
-                    'High': '#dbeafe',
-                    'Peak': '#e0e7ff',
+                    'Low': '#ecfdf5',
+                    'Mid': '#fefce8',
+                    'High': '#fef2f2',
+                    'Peak': '#fee2e2',
                   }
                   const weekendBgColor = '#fffbeb'
                   const closedBgColor = '#f3f4f6'
@@ -1524,10 +1524,10 @@ export default function RoomsStep({
                       ))}
                       {/* Legend */}
                       <div className="flex flex-wrap gap-3 mt-3 text-[9px] text-gray-500">
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#38bdf8' }} /> Low</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3b82f6' }} /> Mid</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#1d4ed8' }} /> High</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /> Peak</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10b981' }} /> Low</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#eab308' }} /> Mid</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#ef4444' }} /> High</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#7f1d1d' }} /> Peak</span>
                         {surchargePercent > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /> Weekend+</span>}
                         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#d1d5db' }} /> Closed</span>
                         {room.nonRefundableEnabled && room.flexibleRateEnabled && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} /> NR rate</span>}
