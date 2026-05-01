@@ -243,6 +243,62 @@ class TestAdminRoomTypes:
         )
         assert resp.status_code == 404
 
+    async def test_resolved_rate_uses_season_when_base_rate_zero(
+        self, client, cleanup_database
+    ):
+        """When base_rate=0 and a season covers the check-in date, the
+        resolved-rate endpoint must return the season rate — same logic the
+        booking engine uses — so the calendar's New Booking modal pre-fills
+        the actual price the guest would pay."""
+        import json
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), base_rate=0.0)
+        seasons = [
+            {
+                "name": "High Season",
+                "start_date": "2026-06-01",
+                "end_date": "2026-08-31",
+                "rate": 250.0,
+            }
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
+            json.dumps(seasons),
+            room["id"],
+        )
+
+        resp = await client.get(
+            f"/admin/room-types/{room['id']}/resolved-rate?check_in=2026-07-15",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["nightlyRate"] == 250.0
+        assert body["currency"] == "EUR"
+
+    async def test_resolved_rate_invalid_check_in(self, client, hotel_with_rooms):
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        resp = await client.get(
+            f"/admin/room-types/{room['id']}/resolved-rate?check_in=not-a-date",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 400
+
+    async def test_resolved_rate_not_found(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.get(
+            "/admin/room-types/00000000-0000-0000-0000-000000000000/resolved-rate?check_in=2026-07-15",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 404
+
     async def test_update_room_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
