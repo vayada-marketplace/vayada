@@ -7,7 +7,7 @@ import { bookingsService, Booking } from '@/services/bookings'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import { formatCurrency } from '@/lib/formatCurrency'
-import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES } from '@/lib/constants/statusStyles'
+import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES, getPaymentStatusLabel } from '@/lib/constants/statusStyles'
 
 function CountdownTimer({ deadline }: { deadline: string }) {
   const [timeLeft, setTimeLeft] = useState('')
@@ -282,7 +282,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <p className="text-gray-500">Payment Status</p>
               {booking.paymentStatus && (
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>
-                  {booking.paymentStatus.replace('_', ' ')}
+                  {getPaymentStatusLabel(booking.paymentStatus)}
                 </span>
               )}
             </div>
