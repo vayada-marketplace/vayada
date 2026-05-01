@@ -98,6 +98,16 @@ export const calendarService = {
   createAdminBooking: (data: CreateAdminBookingPayload) =>
     pmsClient.post('/admin/bookings', data),
 
+  // Booking-engine-equivalent nightly rate for the given room type and check-in
+  // date — used by the New Booking modal so the pre-filled rate matches what
+  // the guest would have been quoted (seasons / daily overrides / weekend
+  // surcharge), instead of just the raw base_rate which can be 0 when the
+  // property prices entirely via seasons.
+  getResolvedRate: (roomTypeId: string, checkIn: string) =>
+    pmsClient.get<{ nightlyRate: number; currency: string }>(
+      `/admin/room-types/${roomTypeId}/resolved-rate?check_in=${checkIn}`
+    ),
+
   reorderRooms: (orderedRoomIds: string[]) =>
     pmsClient.patch('/admin/rooms/reorder', { orderedRoomIds }),
 }

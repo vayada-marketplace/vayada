@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { CalendarRoomType, CalendarRoom, CreateAdminBookingPayload } from '@/services/calendar'
+import { useEffect, useRef, useState } from 'react'
+import { CalendarRoomType, CalendarRoom, CreateAdminBookingPayload, calendarService } from '@/services/calendar'
 import { formatCurrency } from '@/lib/formatCurrency'
 import Modal from '@/components/Modal'
 
@@ -56,8 +56,6 @@ export default function NewBookingModal({
     : CHANNELS
   const initialRoom =
     (initialRoomId && rooms.find((r) => r.id === initialRoomId)) || rooms[0]
-  const initialRoomType =
-    initialRoom && roomTypes.find((t) => t.id === initialRoom.roomTypeId)
   const [roomId, setRoomId] = useState(initialRoom?.id || '')
   const [checkIn, setCheckIn] = useState(initialCheckIn || '')
   const [checkOut, setCheckOut] = useState(initialCheckOut || '')
@@ -67,23 +65,52 @@ export default function NewBookingModal({
   const [guestPhone, setGuestPhone] = useState('')
   const [adults, setAdults] = useState(1)
   const [children, setChildren] = useState(0)
-  const [nightlyRate, setNightlyRate] = useState<string>(
-    initialRoomType ? String(initialRoomType.baseRate) : ''
-  )
+  const [nightlyRate, setNightlyRate] = useState<string>('')
+  // Booking-engine-resolved rate for the current room + check-in. Drives the
+  // pre-fill and the placeholder so the user sees the same price the guest
+  // would have been quoted (seasons / daily overrides / weekend surcharge).
+  const [resolvedRate, setResolvedRate] = useState<number | null>(null)
+  // Once the user types in the rate field we stop overwriting it from the
+  // backend so date/room changes don't clobber a deliberate edit.
+  const userEditedRate = useRef(false)
   const [channel, setChannel] = useState('direct')
   const [specialRequests, setSpecialRequests] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  // Pre-fill nightly rate when room changes
   const selectedRoom = rooms.find((r) => r.id === roomId)
   const selectedRoomType = roomTypes.find((rt) => rt.id === selectedRoom?.roomTypeId)
 
+  // Fetch the booking-engine resolved rate whenever the room type or check-in
+  // date changes. Falls back silently to the room type's baseRate on failure.
+  useEffect(() => {
+    if (!selectedRoomType?.id || !checkIn) return
+    let cancelled = false
+    calendarService
+      .getResolvedRate(selectedRoomType.id, checkIn)
+      .then((res) => {
+        if (cancelled) return
+        setResolvedRate(res.nightlyRate)
+        if (!userEditedRate.current) {
+          setNightlyRate(String(res.nightlyRate))
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Fall back to baseRate so the field is still useful if the API fails.
+        const fallback = selectedRoomType.baseRate
+        setResolvedRate(fallback)
+        if (!userEditedRate.current) {
+          setNightlyRate(String(fallback))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedRoomType?.id, checkIn])
+
   const handleRoomChange = (newRoomId: string) => {
     setRoomId(newRoomId)
-    const room = rooms.find((r) => r.id === newRoomId)
-    const rt = roomTypes.find((t) => t.id === room?.roomTypeId)
-    if (rt) setNightlyRate(String(rt.baseRate))
   }
 
   const handleCheckInChange = (newCheckIn: string) => {
@@ -294,8 +321,17 @@ export default function NewBookingModal({
                 min={0}
                 step="0.01"
                 value={nightlyRate}
-                onChange={(e) => setNightlyRate(e.target.value)}
-                placeholder={selectedRoomType ? String(selectedRoomType.baseRate) : ''}
+                onChange={(e) => {
+                  userEditedRate.current = true
+                  setNightlyRate(e.target.value)
+                }}
+                placeholder={
+                  resolvedRate !== null
+                    ? String(resolvedRate)
+                    : selectedRoomType
+                      ? String(selectedRoomType.baseRate)
+                      : ''
+                }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               />
               <p className="text-xs text-gray-500 mt-1">Leave blank for room type default</p>
