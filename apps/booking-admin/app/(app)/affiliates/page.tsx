@@ -59,7 +59,7 @@ export default function AffiliatesPage() {
   const [typeFilter, setTypeFilter] = useState<(typeof TYPE_FILTERS)[number]>('All')
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
-  const [currencySymbol, setCurrencySymbol] = useState('US$')
+  const [currencySymbol, setCurrencySymbol] = useState('$')
   const [payoutModalAffiliate, setPayoutModalAffiliate] = useState<Affiliate | null>(null)
   const [rateModalAffiliate, setRateModalAffiliate] = useState<Affiliate | null>(null)
   const limit = 20
