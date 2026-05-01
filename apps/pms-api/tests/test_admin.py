@@ -505,6 +505,86 @@ class TestAdminRoomTypes:
             await asyncio.sleep(0)
             push.assert_not_awaited()
 
+    async def test_patch_meal_plans_triggers_channex_reprovision(
+        self, client, hotel_with_rooms
+    ):
+        """Adding a meal plan re-provisions Channex (so breakfast variants
+        like 'BDC Standard (Breakfast)' get created) and pushes ARI."""
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        with (
+            patch(
+                "app.routers.admin_room_types.provision_property",
+                new_callable=AsyncMock,
+            ) as provision,
+            patch(
+                "app.routers.admin_room_types.push_ari_for_hotel",
+                new_callable=AsyncMock,
+            ) as ari,
+        ):
+            resp = await client.patch(
+                f"/admin/room-types/{room['id']}",
+                json={"mealPlans": [{"code": 1, "surcharge": 100000, "chargePer": "person"}]},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+            import asyncio
+            await asyncio.sleep(0)
+            provision.assert_awaited_once()
+            ari.assert_awaited_once()
+            assert provision.await_args.args[0] == str(room["hotel_id"])
+
+    async def test_patch_meal_plans_swallows_no_connection_error(
+        self, client, hotel_with_rooms
+    ):
+        """ValueError from provision_property (no Channex connection) is
+        swallowed silently — meal plans on hotels without a CM still save."""
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        with (
+            patch(
+                "app.routers.admin_room_types.provision_property",
+                new_callable=AsyncMock,
+                side_effect=ValueError("No active Channex connection"),
+            ),
+            patch(
+                "app.routers.admin_room_types.push_ari_for_hotel",
+                new_callable=AsyncMock,
+            ) as ari,
+        ):
+            resp = await client.patch(
+                f"/admin/room-types/{room['id']}",
+                json={"mealPlans": [{"code": 1, "surcharge": 100000}]},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+            import asyncio
+            await asyncio.sleep(0)
+            ari.assert_not_awaited()
+
+    async def test_patch_unrelated_field_does_not_trigger_meal_plan_resync(
+        self, client, hotel_with_rooms
+    ):
+        """PATCH without mealPlans should NOT re-provision."""
+        user = hotel_with_rooms["user"]
+        room = hotel_with_rooms["room"]
+
+        with patch(
+            "app.routers.admin_room_types.provision_property",
+            new_callable=AsyncMock,
+        ) as provision:
+            resp = await client.patch(
+                f"/admin/room-types/{room['id']}",
+                json={"name": "Renamed"},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+            import asyncio
+            await asyncio.sleep(0)
+            provision.assert_not_awaited()
+
 
 # ── Admin Bookings ────────────────────────────────────────────────
 

@@ -6,6 +6,8 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.dependencies import require_hotel_admin
+from app.services.channex.orchestrator import push_ari_for_hotel
+from app.services.channex.provisioning import provision_property
 from app.services.channex_sync_service import push_cancellation_policy_for_room_type
 from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.utils import parse_jsonb, get_hotel_id
@@ -209,7 +211,34 @@ async def update_room_type(
             push_cancellation_policy_for_room_type(hotel_id, room_type_id)
         )
 
+    # Meal plans drive which rate-plan variants exist on Channex
+    # (e.g. "BDC Standard (Breakfast)"). Re-provision so newly added meal
+    # codes spawn their rate plans, then push ARI so updated surcharges
+    # propagate to OTAs.
+    if "meal_plans" in updates:
+        asyncio.create_task(_resync_channex_after_meal_plan_change(hotel_id))
+
     return _room_to_admin(room)
+
+
+async def _resync_channex_after_meal_plan_change(hotel_id: str) -> None:
+    try:
+        await provision_property(hotel_id)
+    except ValueError:
+        return
+    except Exception:
+        logger.exception(
+            "Channex re-provision after meal_plan change failed for hotel %s",
+            hotel_id,
+        )
+        return
+    try:
+        await push_ari_for_hotel(hotel_id)
+    except Exception:
+        logger.exception(
+            "Channex ARI push after meal_plan change failed for hotel %s",
+            hotel_id,
+        )
 
 
 @router.post("/room-types/{room_type_id}/duplicate", response_model=RoomTypeAdminResponse, status_code=201)
