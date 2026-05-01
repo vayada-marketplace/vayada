@@ -98,6 +98,8 @@
   "layout.header.manageProperties": "Manage Properties",
   "manageProperties.title": "Manage Properties",
   "manageProperties.subtitle": "View and remove the properties on your account.",
+  "manageProperties.countSubtitle": "{count} properties on your account",
+  "manageProperties.activeBadge": "Active",
   "manageProperties.empty": "You don't have any properties yet.",
   "manageProperties.delete": "Delete",
   "manageProperties.confirm.title": "Delete property?",

@@ -11,6 +11,7 @@ import {
 import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
+import ManagePropertiesModal from './ManagePropertiesModal'
 
 const BOOKING_URL_TEMPLATE = process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || 'https://{slug}.booking.vayada.com'
 
@@ -23,6 +24,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
@@ -240,7 +242,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                   {t('layout.sidebar.settings')}
                 </button>
                 <button
-                  onClick={() => { setProfileOpen(false); router.push('/manage-properties') }}
+                  onClick={() => { setProfileOpen(false); setManageOpen(true) }}
                   className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   {t('layout.header.manageProperties')}
@@ -286,6 +288,25 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           )}
         </div>
       </div>
+
+      <ManagePropertiesModal
+        open={manageOpen}
+        onClose={() => setManageOpen(false)}
+        selectedHotelId={selectedHotel?.id ?? null}
+        onDeleted={(deletedId, remaining) => {
+          // Sync header state so the property switcher reflects the deletion.
+          setHotels((prev) => prev.filter((h) => h.id !== deletedId))
+          if (selectedHotel?.id === deletedId) {
+            if (remaining.length > 0) {
+              localStorage.setItem('selectedHotelId', remaining[0].id)
+            } else {
+              localStorage.removeItem('selectedHotelId')
+            }
+            // Reload so all per-hotel data downstream picks up the new selection.
+            window.location.reload()
+          }
+        }}
+      />
     </header>
   )
 }

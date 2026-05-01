@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { TrashIcon, XMarkIcon, PlusIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline'
 import {
   settingsService,
   type HotelSummary,
@@ -13,7 +13,16 @@ import { useTranslation } from '@/lib/i18n'
 
 type Toast = { type: 'success' | 'error'; message: string } | null
 
-export default function ManagePropertiesPage() {
+interface Props {
+  open: boolean
+  onClose: () => void
+  /** Currently selected hotel id — gets the "Active" badge. */
+  selectedHotelId?: string | null
+  /** Fired after a successful delete so the parent (Header) can sync its state. */
+  onDeleted?: (deletedId: string, remaining: HotelSummary[]) => void
+}
+
+export default function ManagePropertiesModal({ open, onClose, selectedHotelId, onDeleted }: Props) {
   const router = useRouter()
   const { t } = useTranslation()
   const [hotels, setHotels] = useState<HotelSummary[]>([])
@@ -26,11 +35,16 @@ export default function ManagePropertiesPage() {
   const [toast, setToast] = useState<Toast>(null)
 
   useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    setToast(null)
     settingsService.listHotels()
       .then(setHotels)
       .catch(() => setToast({ type: 'error', message: t('manageProperties.toast.error') }))
       .finally(() => setLoading(false))
-  }, [t])
+  }, [open, t])
+
+  if (!open) return null
 
   const openConfirm = async (hotel: HotelSummary) => {
     setTarget(hotel)
@@ -41,13 +55,11 @@ export default function ManagePropertiesPage() {
       const data = await settingsService.getHotelDeletionImpact(hotel.id)
       setImpact(data)
     } catch {
-      // Impact lookup is informational; fall back to zeros so the
-      // dialog still opens.
       setImpact({ upcomingBookingsCount: 0, connectedChannelsCount: 0 })
     }
   }
 
-  const closeDialog = () => {
+  const closeConfirmDialog = () => {
     if (submitting) return
     setTarget(null)
     setImpact(null)
@@ -55,7 +67,11 @@ export default function ManagePropertiesPage() {
     setTyped('')
   }
 
-  const onProceedToStep2 = () => setStep(2)
+  const handleClose = () => {
+    if (submitting) return
+    closeConfirmDialog()
+    onClose()
+  }
 
   const onConfirmDelete = async () => {
     if (!target || typed !== target.name) return
@@ -64,23 +80,16 @@ export default function ManagePropertiesPage() {
       await settingsService.deleteHotel(target.id)
       const remaining = hotels.filter((h) => h.id !== target.id)
       setHotels(remaining)
-
-      const wasSelected = localStorage.getItem('selectedHotelId') === target.id
-      if (wasSelected) {
-        if (remaining.length > 0) {
-          localStorage.setItem('selectedHotelId', remaining[0].id)
-        } else {
-          localStorage.removeItem('selectedHotelId')
-        }
-      }
+      onDeleted?.(target.id, remaining)
 
       setToast({
         type: 'success',
         message: t('manageProperties.toast.deleted', { name: target.name }),
       })
-      closeDialog()
+      closeConfirmDialog()
 
       if (remaining.length === 0) {
+        onClose()
         router.push('/setup?mode=add')
       }
     } catch {
@@ -92,42 +101,97 @@ export default function ManagePropertiesPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">{t('manageProperties.title')}</h1>
-        <p className="text-[13px] text-gray-500 mt-1">{t('manageProperties.subtitle')}</p>
-      </div>
-
-      {toast && (
-        <FeedbackAlert type={toast.type} message={toast.message} />
-      )}
-
-      <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-        {loading ? (
-          <div className="p-6 text-center text-[13px] text-gray-400">…</div>
-        ) : hotels.length === 0 ? (
-          <div className="p-6 text-center text-[13px] text-gray-500">
-            {t('manageProperties.empty')}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={handleClose}
+      />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-start justify-between px-5 pt-5 pb-3">
+          <div>
+            <h2 className="text-[17px] font-semibold text-gray-900">{t('manageProperties.title')}</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              {hotels.length === 0
+                ? t('manageProperties.empty')
+                : t('manageProperties.countSubtitle', { count: hotels.length })}
+            </p>
           </div>
-        ) : (
-          hotels.map((hotel) => (
-            <div key={hotel.id} className="flex items-center justify-between p-4">
-              <div className="min-w-0">
-                <p className="text-[14px] font-semibold text-gray-900 truncate">{hotel.name}</p>
-                <p className="text-[12px] text-gray-500 truncate">{hotel.location}</p>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => openConfirm(hotel)}
-                className="flex items-center gap-1.5"
-              >
-                <TrashIcon className="w-3.5 h-3.5" />
-                {t('manageProperties.delete')}
-              </Button>
-            </div>
-          ))
+          <button
+            onClick={handleClose}
+            disabled={submitting}
+            className="p-1 -mr-1 text-gray-400 hover:text-gray-600 rounded-md disabled:opacity-50"
+          >
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        {toast && (
+          <div className="px-5 pb-2">
+            <FeedbackAlert type={toast.type} message={toast.message} />
+          </div>
         )}
+
+        {/* List */}
+        <div className="px-5 pb-3 overflow-y-auto flex-1 space-y-2">
+          {loading ? (
+            <div className="p-6 text-center text-[13px] text-gray-400">…</div>
+          ) : hotels.length === 0 ? (
+            <div className="p-6 text-center text-[13px] text-gray-500">
+              {t('manageProperties.empty')}
+            </div>
+          ) : (
+            hotels.map((hotel) => {
+              const isActive = hotel.id === selectedHotelId
+              return (
+                <div
+                  key={hotel.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${
+                    isActive ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                    <BuildingOfficeIcon className="w-5 h-5 text-gray-500" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[14px] font-semibold text-gray-900 truncate">{hotel.name}</p>
+                      {isActive && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold bg-primary-100 text-primary-700 rounded">
+                          {t('manageProperties.activeBadge')}
+                        </span>
+                      )}
+                    </div>
+                    {hotel.location && (
+                      <p className="text-[12px] text-gray-500 truncate">{hotel.location}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => openConfirm(hotel)}
+                    aria-label={t('manageProperties.delete')}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-100 px-5 py-3 flex justify-end">
+          <button
+            onClick={() => {
+              onClose()
+              router.push('/setup?mode=add')
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-primary-600 border border-dashed border-primary-300 rounded-lg hover:bg-primary-50 transition-colors"
+          >
+            <PlusIcon className="w-4 h-4" />
+            {t('layout.header.addProperty')}
+          </button>
+        </div>
       </div>
 
       {target && step === 1 && (
@@ -135,8 +199,8 @@ export default function ManagePropertiesPage() {
           name={target.name}
           impact={impact}
           loading={submitting}
-          onCancel={closeDialog}
-          onConfirm={onProceedToStep2}
+          onCancel={closeConfirmDialog}
+          onConfirm={() => setStep(2)}
           t={t}
         />
       )}
@@ -147,7 +211,7 @@ export default function ManagePropertiesPage() {
           typed={typed}
           onTyped={setTyped}
           loading={submitting}
-          onCancel={closeDialog}
+          onCancel={closeConfirmDialog}
           onConfirm={onConfirmDelete}
           t={t}
         />
@@ -215,7 +279,6 @@ function DeleteNameMatchDialog({
   onConfirm: () => void
   t: (k: string, p?: Record<string, string | number>) => string
 }) {
-  // Case-sensitive exact match — the destructive-action gate the ticket calls for.
   const matches = typed === name
   return (
     <DialogShell title={t('manageProperties.confirmName.title')} onClose={onCancel} loading={loading}>
@@ -255,7 +318,7 @@ function DialogShell({
   children: React.ReactNode
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div
         className="absolute inset-0 bg-black/40"
         onClick={loading ? undefined : onClose}
