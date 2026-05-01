@@ -44,7 +44,7 @@ const ALIASES: Record<string, string> = {
   'hair dryer': 'Hairdryer',
   'free toiletries': 'Free toiletries',
   'toiletries': 'Free toiletries',
-  'bathtub': 'Bath',
+  'bathtub': 'Bathtub',
   'spa tub': 'Hot Tub',
   'hot tub': 'Hot Tub',
 
