@@ -247,6 +247,7 @@ export default function RoomTypeForm({
   cancelHref = '/rooms',
 }: RoomTypeFormProps) {
   const [activeTab, setActiveTab] = useState<RoomTab>('details')
+  const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0))
   const [amenityInput, setAmenityInput] = useState('')
   const [featureInput, setFeatureInput] = useState('')
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
@@ -304,6 +305,17 @@ export default function RoomTypeForm({
     onChange((prev: any) => prev.bedType === summary ? prev : { ...prev, bedType: summary })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beds])
+
+  // Resync sortOrder input when form.sortOrder changes externally (e.g., room loaded from API),
+  // but not while the user is mid-edit (input parses to the same value).
+  useEffect(() => {
+    const parsed = parseInt(sortOrderInput, 10)
+    const current = Number.isNaN(parsed) ? 0 : parsed
+    if (current !== (form.sortOrder ?? 0)) {
+      setSortOrderInput(String(form.sortOrder ?? 0))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.sortOrder])
 
   // Sync bedrooms/bathrooms -> form
   useEffect(() => {
@@ -693,11 +705,20 @@ export default function RoomTypeForm({
               </div>
               <input
                 type="number"
-                value={form.sortOrder ?? 0}
-                onChange={(e) => updateForm({ sortOrder: parseInt(e.target.value) || 0 })}
+                value={sortOrderInput}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  setSortOrderInput(raw)
+                  const parsed = parseInt(raw, 10)
+                  updateForm({ sortOrder: Number.isNaN(parsed) ? 0 : Math.max(0, parsed) })
+                }}
+                onBlur={() => {
+                  if (sortOrderInput.trim() === '') setSortOrderInput('0')
+                }}
                 min={0}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
               />
+              <p className="text-[10px] text-gray-400 mt-1">Lower numbers appear first in your room list</p>
             </div>
             <div className="flex items-end md:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">
