@@ -367,15 +367,21 @@ function ForecastChart({
     return `${currencySymbol}${Math.round(value)}`
   }
 
-  const linePoints = days.map((day, i) => {
+  type LinePoint = { x: number; y: number; day: ForecastDay; i: number }
+  const linePoints: LinePoint[] = days.flatMap((day, i) => {
+    if (day.avgPrice <= 0 || priceAxisMax <= 0) return []
     const x = ((i + 0.5) / days.length) * 100
-    const y = priceAxisMax > 0
-      ? chartHeight - (day.avgPrice / priceAxisMax) * chartHeight
-      : chartHeight
-    return { x, y, day }
+    const y = chartHeight - (day.avgPrice / priceAxisMax) * chartHeight
+    return [{ x, y, day, i }]
   })
 
-  const polylinePoints = linePoints.map(p => `${p.x},${p.y}`).join(' ')
+  const lineSegments: LinePoint[][] = []
+  linePoints.forEach(p => {
+    const segment = lineSegments[lineSegments.length - 1]
+    const last = segment?.[segment.length - 1]
+    if (last && p.i === last.i + 1) segment.push(p)
+    else lineSegments.push([p])
+  })
 
   return (
     <div>
@@ -431,20 +437,25 @@ function ForecastChart({
             })}
           </div>
 
-          {/* Overlay line for avg price */}
-          {priceAxisMax > 0 && (
+          {/* Overlay line for avg price (drawn only between consecutive priced nights) */}
+          {linePoints.length > 0 && (
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none"
               viewBox={`0 0 100 ${chartHeight}`}
               preserveAspectRatio="none"
             >
-              <polyline
-                points={polylinePoints}
-                fill="none"
-                stroke="#60a5fa"
-                strokeWidth="1.5"
-                vectorEffect="non-scaling-stroke"
-              />
+              {lineSegments.map((segment, idx) =>
+                segment.length >= 2 ? (
+                  <polyline
+                    key={`seg-${idx}`}
+                    points={segment.map(p => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke="#60a5fa"
+                    strokeWidth="1.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null
+              )}
               {linePoints.map(p => (
                 <circle
                   key={p.day.dateStr}
