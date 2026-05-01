@@ -87,6 +87,7 @@ class ListingService:
                         offering.discountPercentage,
                         offering.currency,
                         offering.commissionPercentage,
+                        offering.minFollowers,
                         conn=conn,
                     )
                     o.setdefault('listing_id', listing_id)
@@ -165,6 +166,7 @@ class ListingService:
                             offering.discountPercentage,
                             offering.currency,
                             offering.commissionPercentage,
+                            offering.minFollowers,
                             conn=conn,
                         )
 
@@ -214,6 +216,7 @@ def build_listing_response(
             "currency": o.get('currency'),
             "discount_percentage": o['discount_percentage'],
             "commission_percentage": o.get('commission_percentage'),
+            "min_followers": o.get('min_followers'),
             "created_at": o['created_at'],
             "updated_at": o['updated_at'],
         })
