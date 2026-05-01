@@ -1,9 +1,10 @@
 import asyncio
 import json
 import logging
+from datetime import date
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
 from app.services.channex.orchestrator import push_ari_for_hotel
@@ -180,6 +181,28 @@ async def get_room_type(
     if not room or str(room["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Room type not found")
     return _room_to_admin(room)
+
+
+@router.get("/room-types/{room_type_id}/resolved-rate")
+async def get_room_type_resolved_rate(
+    room_type_id: str,
+    check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Return the nightly rate the booking engine would charge for the given
+    room type and check-in date. Mirrors the resolution used by booking
+    creation and the public booking engine so the PMS calendar's New Booking
+    modal can pre-fill the same value the guest would have seen."""
+    hotel_id = await get_hotel_id(user_id)
+    room = await RoomTypeRepository.get_by_id(room_type_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room type not found")
+    try:
+        check_in_date = date.fromisoformat(check_in)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="check_in must be YYYY-MM-DD")
+    nightly_rate, _ = RoomTypeRepository.resolve_rate(room, check_in_date)
+    return {"nightlyRate": float(nightly_rate), "currency": room["currency"]}
 
 
 @router.patch("/room-types/{room_type_id}", response_model=RoomTypeAdminResponse)
