@@ -11,6 +11,7 @@ from app.services import hotel_identity_service
 from app.models.hotel import (
     HotelRegister,
     HotelResponse,
+    HotelDeletionImpactResponse,
     HotelDetailsResponse,
     HotelBenefitsUpdate,
     HotelBenefitsResponse,
@@ -18,6 +19,8 @@ from app.models.hotel import (
     GuestFormSettingsUpdate,
     SetupStatusResponse,
 )
+from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+from app.services import channex_service
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +174,51 @@ async def update_hotel(
             )
 
     return _hotel_to_details(row)
+
+
+@router.get("/hotel/deletion-impact", response_model=HotelDeletionImpactResponse)
+async def get_hotel_deletion_impact(user_id: str = Depends(require_hotel_admin)):
+    """Counts shown to the user before they confirm a property delete:
+    upcoming bookings (so they know what guests still need handling) and
+    active OTA channel connections (so they know what to clean up on the
+    OTA side after the delete)."""
+    hotel_id = await get_hotel_id(user_id)
+    return HotelDeletionImpactResponse(
+        upcoming_bookings_count=await HotelRepository.count_upcoming_bookings(hotel_id),
+        connected_channels_count=await HotelRepository.count_active_channel_connections(hotel_id),
+    )
+
+
+@router.delete("/hotel", status_code=204)
+async def delete_hotel(user_id: str = Depends(require_hotel_admin)):
+    """Permanently delete the hotel scoped by X-Hotel-Id.
+
+    Best-effort Channex deprovision first — failures are logged but do
+    not block the local delete, since the user has already been warned
+    that they may need to clean up the OTA side manually. The DB delete
+    cascades to bookings, room types, rooms, room blocks, payments,
+    channex/beds24 connections, etc.
+    """
+    hotel_id = await get_hotel_id(user_id)
+
+    connection = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if connection and connection.get("channex_property_id"):
+        try:
+            api_key = channex_service.get_platform_api_key()
+            await channex_service.delete_property(
+                api_key, connection["channex_property_id"], force=True,
+            )
+        except Exception as e:
+            logger.warning(
+                "Channex deprovision failed for hotel %s during delete (continuing): %s",
+                hotel_id, e,
+            )
+
+    deleted = await HotelRepository.delete(hotel_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    logger.info("User %s deleted PMS hotel %s", user_id, hotel_id)
+    return None
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)

@@ -87,6 +87,15 @@ class SetupStatusResponse(BaseModel):
     room_count: int
 
 
+class HotelDeletionImpactResponse(BaseModel):
+    """Counts shown in the Manage Properties delete-warning dialog so the
+    user knows what they're about to wipe out."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    upcoming_bookings_count: int = 0
+    connected_channels_count: int = 0
+
+
 class HotelDetailsResponse(BaseModel):
     """Full hotel detail surface returned by GET/PATCH /admin/hotel."""
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)

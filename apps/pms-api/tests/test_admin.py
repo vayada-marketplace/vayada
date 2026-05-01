@@ -722,3 +722,159 @@ class TestAdminBookings:
         )
         body2 = resp2.json()
         assert len(body2["bookings"]) == 1
+
+
+# ── Hotel Deletion ────────────────────────────────────────────────
+
+
+class TestHotelDeletionImpact:
+    async def test_no_bookings_no_channels(self, client, cleanup_database):
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        resp = await client.get(
+            "/admin/hotel/deletion-impact",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["upcomingBookingsCount"] == 0
+        assert body["connectedChannelsCount"] == 0
+
+    async def test_counts_upcoming_bookings(self, client, cleanup_database):
+        from datetime import date, timedelta
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+
+        future_in = (date.today() + timedelta(days=10)).isoformat()
+        future_out = (date.today() + timedelta(days=12)).isoformat()
+        past_in = (date.today() - timedelta(days=20)).isoformat()
+        past_out = (date.today() - timedelta(days=18)).isoformat()
+
+        await create_test_booking(str(hotel["id"]), str(room["id"]),
+                                  check_in=future_in, check_out=future_out,
+                                  guest_email="future@example.com")
+        await create_test_booking(str(hotel["id"]), str(room["id"]),
+                                  check_in=future_in, check_out=future_out,
+                                  guest_email="cancelled@example.com",
+                                  status="cancelled")
+        await create_test_booking(str(hotel["id"]), str(room["id"]),
+                                  check_in=past_in, check_out=past_out,
+                                  guest_email="past@example.com")
+
+        resp = await client.get(
+            "/admin/hotel/deletion-impact",
+            headers=get_auth_headers(user["token"]),
+        )
+        # Cancelled and past bookings excluded; only the one upcoming counts.
+        assert resp.json()["upcomingBookingsCount"] == 1
+
+
+class TestDeleteHotel:
+    async def test_delete_owned_hotel(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        resp = await client.delete(
+            "/admin/hotel",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 204
+
+        # Subsequent GET is a 404 because no hotel exists for the user
+        # (setup-status would auto-create one — use a direct repo lookup
+        # via the admin endpoint instead).
+        from app.repositories.hotel_repo import HotelRepository
+        assert await HotelRepository.get_by_id(str(hotel["id"])) is None
+
+    async def test_delete_cascades_bookings(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_booking(str(hotel["id"]), str(room["id"]))
+
+        resp = await client.delete(
+            "/admin/hotel",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 204
+
+        from app.database import Database
+        remaining = await Database.fetchval(
+            "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1", str(hotel["id"])
+        )
+        assert remaining == 0
+
+    async def test_delete_other_users_hotel_forbidden(self, client, cleanup_database):
+        owner = await create_test_user()
+        owned = await create_test_hotel(str(owner["id"]))
+        attacker = await create_test_user()
+
+        resp = await client.delete(
+            "/admin/hotel",
+            headers={
+                **get_auth_headers(attacker["token"]),
+                "X-Hotel-Id": str(owned["id"]),
+            },
+        )
+        # X-Hotel-Id mismatch — 403 from get_hotel_id ownership check
+        assert resp.status_code == 403
+
+    async def test_delete_calls_channex_when_connected(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+        await ChannexConnectionRepository.upsert(str(hotel["id"]))
+        await ChannexConnectionRepository.set_property_id(
+            str(hotel["id"]), "11111111-1111-1111-1111-111111111111"
+        )
+
+        with patch(
+            "app.services.channex_service.delete_property",
+            new=AsyncMock(return_value=None),
+        ) as mock_delete, patch(
+            "app.services.channex_service.get_platform_api_key",
+            return_value="test-key",
+        ):
+            resp = await client.delete(
+                "/admin/hotel",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        assert resp.status_code == 204
+        mock_delete.assert_awaited_once()
+        # Called with the configured property id and force=True
+        args, kwargs = mock_delete.call_args
+        assert str(args[1]) == "11111111-1111-1111-1111-111111111111"
+        assert kwargs.get("force") is True
+
+    async def test_delete_succeeds_even_if_channex_fails(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+
+        from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+        await ChannexConnectionRepository.upsert(str(hotel["id"]))
+        await ChannexConnectionRepository.set_property_id(
+            str(hotel["id"]), "11111111-1111-1111-1111-111111111111"
+        )
+
+        with patch(
+            "app.services.channex_service.delete_property",
+            new=AsyncMock(side_effect=Exception("Channex 500")),
+        ), patch(
+            "app.services.channex_service.get_platform_api_key",
+            return_value="test-key",
+        ):
+            resp = await client.delete(
+                "/admin/hotel",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        # The user has been warned manual OTA cleanup may be needed —
+        # don't block the local delete on a Channex hiccup.
+        assert resp.status_code == 204
+        from app.repositories.hotel_repo import HotelRepository
+        assert await HotelRepository.get_by_id(str(hotel["id"])) is None

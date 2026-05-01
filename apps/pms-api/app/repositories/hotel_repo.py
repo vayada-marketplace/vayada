@@ -123,6 +123,43 @@ class HotelRepository:
         ) or 0
 
     @staticmethod
+    async def count_upcoming_bookings(hotel_id: str) -> int:
+        """Count non-cancelled bookings whose check-in is today or later.
+        Used by the Manage Properties delete-warning dialog."""
+        return await Database.fetchval(
+            """
+            SELECT COUNT(*) FROM bookings
+            WHERE hotel_id = $1
+              AND check_in >= CURRENT_DATE
+              AND status NOT IN ('cancelled', 'rejected')
+            """,
+            hotel_id,
+        ) or 0
+
+    @staticmethod
+    async def count_active_channel_connections(hotel_id: str) -> int:
+        """Count active channel-manager connections — one row max per
+        provider, so the result is the number of distinct providers
+        wired up. Currently only Channex; Beds24 was dropped in
+        migration 029."""
+        channex = await Database.fetchval(
+            "SELECT COUNT(*) FROM channex_connections "
+            "WHERE hotel_id = $1 AND is_active = true",
+            hotel_id,
+        ) or 0
+        return int(channex)
+
+    @staticmethod
+    async def delete(hotel_id: str) -> bool:
+        """Delete the PMS row. FKs cascade to room_types, rooms, bookings,
+        room_blocks, channex_connections, beds24_connections, payment
+        settings, etc. Returns True if a row was deleted."""
+        result = await Database.execute(
+            "DELETE FROM hotels WHERE id = $1", hotel_id,
+        )
+        return isinstance(result, str) and result.endswith(" 1")
+
+    @staticmethod
     async def get_benefits_raw(hotel_id: str):
         """Raw JSONB (string or list depending on driver). Caller should
         parse with ``app.utils.parse_jsonb``."""
