@@ -172,7 +172,7 @@ export default function AddonsPage() {
                   <div className="flex items-center justify-between">
                     <p className="text-lg font-bold text-gray-900">
                       {formatPrice(addon.price, addon.currency)}
-                      {addon.perNight && <span className="text-xs font-normal text-gray-500"> /night</span>}
+                      {addon.perNight && <span className="text-xs font-normal text-gray-500"> {tc('perDay')}</span>}
                       {addon.perPerson && <span className="text-xs font-normal text-gray-500"> /person</span>}
                     </p>
                     {isAdded ? (
@@ -275,7 +275,7 @@ export default function AddonsPage() {
                       <p className="text-sm font-semibold text-gray-900">{addon.name}</p>
                       <p className="text-xs text-gray-500">
                         {addon.perNight
-                          ? `${qty} / ${tc('nights', { count: nights })}`
+                          ? `${qty} / ${tc('days', { count: nights })}`
                           : addon.perPerson
                             ? `${qty} / ${adultsParam} ${tc('guests').toLowerCase()}`
                             : qty > 1 ? `${tc('qty')}: ${qty}` : addon.description}

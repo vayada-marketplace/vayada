@@ -223,7 +223,7 @@ function BookPageContent() {
                     const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
                     const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
                     const annotation = addon.perNight
-                      ? (qty < nights ? ` (${qty}/${nights} ${tc('nights', { count: nights })})` : '')
+                      ? (qty < nights ? ` (${qty}/${nights} ${tc('days', { count: nights })})` : '')
                       : addon.perPerson
                         ? ` (${qty}/${adultsParam} ${tc('guests').toLowerCase()})`
                         : qty > 1 ? ` ×${qty}` : ''

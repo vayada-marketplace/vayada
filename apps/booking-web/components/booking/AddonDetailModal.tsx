@@ -149,7 +149,7 @@ export default function AddonDetailModal({
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-t border-gray-200 flex-shrink-0 bg-white">
           <div>
             <p className="text-xs text-gray-500">
-              {addon.perPerson ? t('pricePerPerson') : addon.perNight ? t('pricePerNight') : t('priceLabel')}
+              {addon.perPerson ? t('pricePerPerson') : addon.perNight ? t('pricePerDay') : t('priceLabel')}
             </p>
             <p className="text-2xl font-bold text-gray-900">
               {formatPrice(addon.price, addon.currency)}
