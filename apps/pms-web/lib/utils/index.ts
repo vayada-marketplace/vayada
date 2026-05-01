@@ -6,7 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: 'US$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥',
+  USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥',
   KRW: '₩', INR: '₹', THB: '฿', IDR: 'Rp', MYR: 'RM',
   PHP: '₱', VND: '₫', SGD: 'S$', AUD: 'A$', NZD: 'NZ$',
   CAD: 'C$', CHF: 'CHF', SEK: 'kr', NOK: 'kr', DKK: 'kr',
