@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { roomsService, RoomType } from '@/services/rooms'
 import { bookingsService, Booking } from '@/services/bookings'
 import { formatCurrency } from '@/lib/formatCurrency'
-import { getCurrencySymbol } from '@/lib/utils'
 import { useTranslation } from '@/lib/i18n'
 
 function getToday() {
@@ -95,17 +94,12 @@ export default function DashboardPage() {
       const date = new Date()
       date.setDate(date.getDate() + i)
       const dateStr = date.toISOString().split('T')[0]
-      const activeBookings = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr)
-      const occupied = activeBookings.length
+      const occupied = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr).length
       const pct = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0
-      const avgPrice = activeBookings.length
-        ? activeBookings.reduce((sum, b) => sum + b.nightlyRate, 0) / activeBookings.length
-        : 0
       days.push({
         date,
         dateStr,
         pct,
-        avgPrice,
         label: i === 0 ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: date.getDate(),
       })
@@ -130,8 +124,6 @@ export default function DashboardPage() {
       </div>
     )
   }
-
-  const currencySymbol = getCurrencySymbol(bookings[0]?.currency || 'USD')
 
   const dateLabel = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -271,7 +263,7 @@ export default function DashboardPage() {
             </p>
           )}
         </div>
-        <ForecastChart days={forecastDays} today={today} currency={hotelCurrency} t={t} />
+        <ForecastChart days={forecastDays} today={today} t={t} />
       </div>
     </div>
   )
@@ -320,21 +312,8 @@ type ForecastDay = {
   date: Date
   dateStr: string
   pct: number
-  avgPrice: number
   label: string
   dayNum: number
-}
-
-function niceCeil(value: number): number {
-  if (value <= 0) return 100
-  const exponent = Math.floor(Math.log10(value))
-  const fraction = value / Math.pow(10, exponent)
-  let nice: number
-  if (fraction <= 1) nice = 1
-  else if (fraction <= 2) nice = 2
-  else if (fraction <= 5) nice = 5
-  else nice = 10
-  return nice * Math.pow(10, exponent)
 }
 
 const HIGH_OCCUPANCY_THRESHOLD = 70
@@ -346,42 +325,14 @@ function occupancyBarClass(pct: number): string {
 function ForecastChart({
   days,
   today,
-  currency,
   t,
 }: {
   days: ForecastDay[]
   today: string
-  currency: string
   t: (key: string, params?: Record<string, string | number>) => string
 }) {
   const chartHeight = 140
-  const maxAvgPrice = Math.max(...days.map(d => d.avgPrice), 0)
-  const priceAxisMax = niceCeil(maxAvgPrice)
-  const currencySymbol = getCurrencySymbol(currency)
-
   const occupancyTicks = [100, 75, 50, 25, 0]
-  const priceTicks = [1, 0.75, 0.5, 0.25, 0].map(f => Math.round(priceAxisMax * f))
-
-  const formatPrice = (value: number) => {
-    if (value >= 1000) return `${currencySymbol}${Math.round(value / 1000)}k`
-    return `${currencySymbol}${Math.round(value)}`
-  }
-
-  type LinePoint = { x: number; y: number; day: ForecastDay; i: number }
-  const linePoints: LinePoint[] = days.flatMap((day, i) => {
-    if (day.avgPrice <= 0 || priceAxisMax <= 0) return []
-    const x = ((i + 0.5) / days.length) * 100
-    const y = chartHeight - (day.avgPrice / priceAxisMax) * chartHeight
-    return [{ x, y, day, i }]
-  })
-
-  const lineSegments: LinePoint[][] = []
-  linePoints.forEach(p => {
-    const segment = lineSegments[lineSegments.length - 1]
-    const last = segment?.[segment.length - 1]
-    if (last && p.i === last.i + 1) segment.push(p)
-    else lineSegments.push([p])
-  })
 
   return (
     <div>
@@ -430,53 +381,11 @@ function ForecastChart({
                       {day.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                     </div>
                     <div>{t('dashboard.occupancyAxis')}: {day.pct}%</div>
-                    <div>{t('dashboard.avgPriceAxis')}: {day.avgPrice > 0 ? formatPrice(day.avgPrice) : '—'}</div>
                   </div>
                 </div>
               )
             })}
           </div>
-
-          {/* Overlay line for avg price (drawn only between consecutive priced nights) */}
-          {linePoints.length > 0 && (
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              viewBox={`0 0 100 ${chartHeight}`}
-              preserveAspectRatio="none"
-            >
-              {lineSegments.map((segment, idx) =>
-                segment.length >= 2 ? (
-                  <polyline
-                    key={`seg-${idx}`}
-                    points={segment.map(p => `${p.x},${p.y}`).join(' ')}
-                    fill="none"
-                    stroke="#60a5fa"
-                    strokeWidth="1.5"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                ) : null
-              )}
-              {linePoints.map(p => (
-                <circle
-                  key={p.day.dateStr}
-                  cx={p.x}
-                  cy={p.y}
-                  r="2.5"
-                  fill="#ffffff"
-                  stroke="#60a5fa"
-                  strokeWidth="1.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-            </svg>
-          )}
-        </div>
-
-        {/* Right axis (avg price) */}
-        <div className="flex flex-col justify-between pl-2 text-[9px] text-blue-500 select-none" style={{ height: chartHeight }}>
-          {priceTicks.map((tick, idx) => (
-            <span key={idx} className="leading-none">{formatPrice(tick)}</span>
-          ))}
         </div>
       </div>
 
@@ -498,9 +407,6 @@ function ForecastChart({
             )
           })}
         </div>
-        <div className="invisible pl-2 text-[9px] select-none">
-          <span>{formatPrice(priceAxisMax)}</span>
-        </div>
       </div>
 
       {/* Legend */}
@@ -512,13 +418,6 @@ function ForecastChart({
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-3 rounded-sm bg-blue-300" />
           <span>{t('dashboard.legendLow')}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="relative inline-flex w-4 items-center justify-center">
-            <span className="absolute inset-x-0 h-0.5 bg-blue-400" />
-            <span className="relative inline-block w-1.5 h-1.5 rounded-full bg-white border border-blue-400" />
-          </span>
-          <span>{t('dashboard.legendAdr', { currency: currency })}</span>
         </div>
       </div>
     </div>
