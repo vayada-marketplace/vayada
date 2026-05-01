@@ -239,6 +239,12 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 >
                   {t('layout.sidebar.settings')}
                 </button>
+                <button
+                  onClick={() => { setProfileOpen(false); router.push('/manage-properties') }}
+                  className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  {t('layout.header.manageProperties')}
+                </button>
                 {/* Language selector */}
                 <div className="relative">
                   <button
