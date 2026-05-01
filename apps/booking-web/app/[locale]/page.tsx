@@ -327,7 +327,7 @@ function HomePageContent() {
               </div>
               <div className="text-left">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{tc('guests')}</p>
-                <p className="text-base font-semibold text-gray-900">
+                <p className="text-base font-semibold text-gray-900 whitespace-nowrap">
                   {tc('adults', { count: adults })}
                   {children > 0 && `, ${tc('children', { count: children })}`}
                 </p>
