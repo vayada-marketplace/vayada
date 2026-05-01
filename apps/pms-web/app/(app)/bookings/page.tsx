@@ -124,8 +124,6 @@ export default function ReservationsPage() {
     { label: t('bookings.statusExpired'), value: 'expired', count: statusCounts['expired'] || 0 },
   ]
 
-  const visibleTabs = STATUS_TABS.filter((t) => t.value === '' || t.count > 0 || t.value === statusFilter)
-
   return (
     <div className="p-4 md:p-6 pb-0">
       {/* Header */}
@@ -172,7 +170,7 @@ export default function ReservationsPage() {
       {/* Status Tabs */}
       <div className="relative border-b border-gray-200 mb-4 md:mb-6">
       <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-        {visibleTabs.map((tab) => {
+        {STATUS_TABS.map((tab) => {
           const isActive = statusFilter === tab.value
           return (
             <button
