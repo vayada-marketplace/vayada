@@ -16,6 +16,23 @@ export const PAYMENT_STATUS_STYLES: Record<string, string> = {
   pay_at_property: 'bg-amber-100 text-amber-700',
 }
 
+export function getPaymentStatusLabel(status: string | null | undefined): string {
+  if (!status) return ''
+  const labels: Record<string, string> = {
+    unpaid: 'Unpaid',
+    authorized: 'Authorized',
+    captured: 'Paid',
+    cancelled: 'Cancelled',
+    refunded: 'Refunded',
+    partially_refunded: 'Partially refunded',
+    failed: 'Failed',
+    pay_at_property: 'Will pay at property',
+  }
+  if (labels[status]) return labels[status]
+  const spaced = status.replace(/_/g, ' ')
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
 export const CHANNEL_COLORS: Record<string, { bg: string; text: string }> = {
   direct: { bg: 'bg-blue-100', text: 'text-blue-700' },
   airbnb: { bg: 'bg-pink-100', text: 'text-pink-700' },
