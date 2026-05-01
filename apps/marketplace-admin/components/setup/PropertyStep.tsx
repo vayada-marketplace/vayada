@@ -43,7 +43,7 @@ interface PropertyStepProps {
   whatsapp: string; setWhatsapp: (v: string) => void
   instagram: string; setInstagram: (v: string) => void
   facebook: string; setFacebook: (v: string) => void
-  twitter: string; setTwitter: (v: string) => void
+  tiktok: string; setTiktok: (v: string) => void
   youtube: string; setYoutube: (v: string) => void
   currency: string; setCurrency: (v: string) => void
   defaultLanguage: string; setDefaultLanguage: (v: string) => void
@@ -265,7 +265,7 @@ export default function PropertyStep({
   whatsapp, setWhatsapp,
   instagram, setInstagram,
   facebook, setFacebook,
-  twitter, setTwitter,
+  tiktok, setTiktok,
   youtube, setYoutube,
   currency, setCurrency,
   defaultLanguage, setDefaultLanguage,
@@ -452,14 +452,14 @@ export default function PropertyStep({
             </div>
             <div>
               <label className="block text-[12px] text-gray-800 mb-1">
-                <span className="font-semibold">Twitter / X</span>
+                <span className="font-semibold">TikTok</span>
               </label>
               <input
                 type="text"
-                value={twitter}
-                onChange={(e) => setTwitter(e.target.value)}
+                value={tiktok}
+                onChange={(e) => setTiktok(e.target.value)}
                 className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 placeholder:text-gray-400"
-                placeholder="https://x.com/yourhotel"
+                placeholder="https://www.tiktok.com/@yourhotel"
               />
             </div>
             <div>
