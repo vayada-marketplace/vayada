@@ -1,6 +1,8 @@
 """
 Tests for /admin endpoints — profile, setup status, property settings, design settings.
 """
+from unittest.mock import AsyncMock, patch
+
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
@@ -308,3 +310,122 @@ class TestDesignSettings:
         )
         assert resp.status_code == 404
         assert "No hotel found" in resp.json()["detail"]
+
+
+class TestDeleteHotel:
+    async def test_delete_owned_hotel(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        hotel = hotel_with_property["hotel"]
+
+        with patch(
+            "app.routers.admin.settings.pms_client.delete_hotel",
+            new=AsyncMock(return_value=None),
+        ) as mock_pms:
+            resp = await client.delete(
+                f"/admin/hotels/{hotel['id']}",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        assert resp.status_code == 204
+        mock_pms.assert_awaited_once()
+
+        # booking_hotels row is gone — listing returns no hotels
+        list_resp = await client.get(
+            "/admin/hotels",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert list_resp.json() == []
+
+    async def test_delete_other_users_hotel_forbidden(self, client, cleanup_database):
+        owner = await create_test_user()
+        owned = await create_test_booking_hotel(str(owner["id"]))
+        attacker = await create_test_user()
+
+        with patch(
+            "app.routers.admin.settings.pms_client.delete_hotel",
+            new=AsyncMock(return_value=None),
+        ) as mock_pms:
+            resp = await client.delete(
+                f"/admin/hotels/{owned['id']}",
+                headers=get_auth_headers(attacker["token"]),
+            )
+
+        assert resp.status_code == 404
+        # Ownership check fires before we ever touch PMS
+        mock_pms.assert_not_called()
+
+    async def test_delete_pms_failure_does_not_delete_booking(
+        self, client, hotel_with_property
+    ):
+        user = hotel_with_property["user"]
+        hotel = hotel_with_property["hotel"]
+
+        from app.services.pms_client import PmsClientError
+
+        with patch(
+            "app.routers.admin.settings.pms_client.delete_hotel",
+            new=AsyncMock(side_effect=PmsClientError(500, "boom")),
+        ):
+            resp = await client.delete(
+                f"/admin/hotels/{hotel['id']}",
+                headers=get_auth_headers(user["token"]),
+            )
+
+        assert resp.status_code == 502
+        # booking_hotels row should still exist — listing still includes it
+        list_resp = await client.get(
+            "/admin/hotels",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert any(h["id"] == str(hotel["id"]) for h in list_resp.json())
+
+
+class TestDeletionImpact:
+    async def test_proxies_pms_response(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        hotel = hotel_with_property["hotel"]
+
+        pms_payload = {"upcomingBookingsCount": 3, "connectedChannelsCount": 1}
+        with patch(
+            "app.routers.admin.settings.pms_client.get_deletion_impact",
+            new=AsyncMock(return_value=pms_payload),
+        ):
+            resp = await client.get(
+                f"/admin/hotels/{hotel['id']}/deletion-impact",
+                headers=get_auth_headers(user["token"]),
+            )
+        assert resp.status_code == 200
+        assert resp.json() == pms_payload
+
+    async def test_pms_404_returns_zero_impact(self, client, hotel_with_property):
+        """A booking_hotels row can exist before its PMS counterpart
+        (incomplete setup) — the dialog should still open with zero
+        impact rather than erroring."""
+        user = hotel_with_property["user"]
+        hotel = hotel_with_property["hotel"]
+
+        from app.services.pms_client import PmsClientError
+
+        with patch(
+            "app.routers.admin.settings.pms_client.get_deletion_impact",
+            new=AsyncMock(side_effect=PmsClientError(404, "not found")),
+        ):
+            resp = await client.get(
+                f"/admin/hotels/{hotel['id']}/deletion-impact",
+                headers=get_auth_headers(user["token"]),
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["upcomingBookingsCount"] == 0
+        assert body["connectedChannelsCount"] == 0
+
+    async def test_other_users_hotel_forbidden(self, client, cleanup_database):
+        owner = await create_test_user()
+        owned = await create_test_booking_hotel(str(owner["id"]))
+        attacker = await create_test_user()
+
+        resp = await client.get(
+            f"/admin/hotels/{owned['id']}/deletion-impact",
+            headers=get_auth_headers(attacker["token"]),
+        )
+        assert resp.status_code == 404

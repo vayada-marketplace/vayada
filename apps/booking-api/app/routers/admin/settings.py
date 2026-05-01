@@ -3,7 +3,7 @@ from datetime import date
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Request, status
 from app.dependencies import require_hotel_admin, get_current_hotel
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.settings import (
@@ -12,12 +12,14 @@ from app.models.settings import (
     hotel_default,
 )
 from app.models.utils import parse_json, slugify
+from app.services import pms_client
 from app.services.billing_service import (
     apply_pending_plan_switch_if_due,
     compute_fixed_plan_projected_fee,
     count_active_rooms,
     schedule_pending_plan_switch,
 )
+from app.services.pms_client import PmsClientError
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +249,69 @@ async def _create_hotel_from_settings(
             status_code=status.HTTP_409_CONFLICT,
             detail="A property with this name already exists. Please choose a different name.",
         )
+
+
+async def _require_owned_hotel(hotel_id: str, user_id: str) -> dict:
+    hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
+    if not hotel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hotel not found or access denied",
+        )
+    return hotel
+
+
+@router.get("/hotels/{hotel_id}/deletion-impact")
+async def get_hotel_deletion_impact(
+    hotel_id: str,
+    request: Request,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Counts the Manage Properties dialog shows before the user
+    confirms a delete. Proxies to PMS, which owns bookings + channel
+    connections."""
+    await _require_owned_hotel(hotel_id, user_id)
+    auth_header = request.headers.get("authorization", "")
+    try:
+        return await pms_client.get_deletion_impact(auth_header, hotel_id)
+    except PmsClientError as e:
+        # PMS row may not exist for a hotel whose setup never completed —
+        # treat that as "no impact" rather than failing the dialog.
+        if e.status_code in (403, 404):
+            return {"upcomingBookingsCount": 0, "connectedChannelsCount": 0}
+        logger.error("Failed to fetch deletion impact for hotel %s: %s", hotel_id, e)
+        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact")
+
+
+@router.delete("/hotels/{hotel_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_hotel(
+    hotel_id: str,
+    request: Request,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Permanently delete a property. Calls PMS first (so Channex
+    deprovision + PMS cascade run while the booking_hotels row still
+    exists for ownership checks), then deletes booking_hotels — which
+    cascades to translations, addons, promo codes, etc."""
+    await _require_owned_hotel(hotel_id, user_id)
+    auth_header = request.headers.get("authorization", "")
+
+    try:
+        await pms_client.delete_hotel(auth_header, hotel_id)
+    except PmsClientError as e:
+        logger.error("PMS delete failed for hotel %s: %s", hotel_id, e)
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to delete the property's PMS data. Please retry.",
+        )
+
+    deleted = await BookingHotelRepository.delete(hotel_id)
+    if not deleted:
+        # Row vanished mid-flight (concurrent delete) — treat as success
+        # since the end state is what the caller wanted.
+        logger.warning("booking_hotels row %s already gone at delete time", hotel_id)
+    logger.info("User %s deleted booking hotel %s", user_id, hotel_id)
+    return None
 
 
 @router.post("/hotels", response_model=PropertySettingsResponse, status_code=status.HTTP_201_CREATED)
