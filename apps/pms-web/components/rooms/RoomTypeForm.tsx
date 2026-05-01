@@ -6,6 +6,7 @@ import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/reac
 import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import { getCurrencySymbol, CURRENCY_SYMBOLS, formatCurrency, formatCompactPrice } from '@/lib/utils'
+import { parseBookingAmenities } from '@/lib/parseBookingAmenities'
 
 const BED_TYPES = ['King Bed', 'Queen Bed', 'Double Bed', 'Twin Bed', 'Single Bed', 'Bunk Bed', 'Sofa Bed']
 
@@ -251,6 +252,13 @@ export default function RoomTypeForm({
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [customAmenitiesByCategory, setCustomAmenitiesByCategory] = useState<Record<string, string[]>>({})
+  const [bookingImportOpen, setBookingImportOpen] = useState(false)
+  const [bookingImportText, setBookingImportText] = useState('')
+  const [bookingImportResult, setBookingImportResult] = useState<{
+    matchedCount: number
+    addedCount: number
+    unmatched: string[]
+  } | null>(null)
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
   const [operatingPeriods, setOperatingPeriods] = useState<{ from: string; to: string }[]>(
     form.operatingPeriods?.length ? form.operatingPeriods.map((p: { from: string; to: string }) => ({
@@ -1829,6 +1837,120 @@ export default function RoomTypeForm({
               <span className="shrink-0 text-[11px] font-medium text-primary-600">{(form.amenities || []).length} selected</span>
             </div>
             <p className="text-[10px] text-gray-400">What&apos;s included — guests see these after clicking &quot;View Details&quot;. Group by category for easy scanning.</p>
+
+            {/* Booking.com paste-import helper */}
+            <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => setBookingImportOpen(o => !o)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <span className="text-[11px] font-semibold text-gray-700">
+                  Paste amenities from Booking.com
+                </span>
+                <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${bookingImportOpen ? '' : '-rotate-90'}`} />
+              </button>
+              {bookingImportOpen && (
+                <div className="mt-2 space-y-2">
+                  <p className="text-[10px] text-gray-500">
+                    Copy the amenities list from a Booking.com listing and paste it here. We&apos;ll match each item to the right category. Unmatched items can be kept as custom amenities.
+                  </p>
+                  <textarea
+                    value={bookingImportText}
+                    onChange={(e) => setBookingImportText(e.target.value)}
+                    rows={5}
+                    placeholder="Free WiFi&#10;Flat-screen TV&#10;Air conditioning&#10;Safety deposit box&#10;..."
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 font-mono"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!bookingImportText.trim()}
+                      onClick={() => {
+                        const result = parseBookingAmenities(bookingImportText, AMENITY_CATEGORIES)
+                        const current = form.amenities || []
+                        const before = current.length
+                        const merged = Array.from(new Set([...current, ...result.matched.map(m => m.amenity)]))
+                        updateForm({ amenities: merged })
+                        // Expand every category that received a new amenity, so users can see what was applied.
+                        const touched = Array.from(new Set(result.matched.map(m => m.category)))
+                        setExpandedAmenityCategories(prev => Array.from(new Set([...prev, ...touched])))
+                        setBookingImportResult({
+                          matchedCount: result.matched.length,
+                          addedCount: merged.length - before,
+                          unmatched: result.unmatched,
+                        })
+                      }}
+                      className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[11px] font-medium rounded-lg transition-colors"
+                    >
+                      Parse &amp; add
+                    </button>
+                    {(bookingImportText || bookingImportResult) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBookingImportText('')
+                          setBookingImportResult(null)
+                        }}
+                        className="px-2 py-1.5 text-[11px] text-gray-500 hover:text-gray-700"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {bookingImportResult && (
+                    <div className="space-y-1.5 text-[11px]">
+                      <p className="text-gray-700">
+                        Matched <span className="font-semibold text-primary-700">{bookingImportResult.matchedCount}</span> amenity{bookingImportResult.matchedCount === 1 ? '' : 'ies'}
+                        {bookingImportResult.addedCount !== bookingImportResult.matchedCount && (
+                          <> · <span className="font-semibold">{bookingImportResult.addedCount}</span> newly added</>
+                        )}
+                        {bookingImportResult.unmatched.length > 0 && (
+                          <> · <span className="font-semibold text-amber-700">{bookingImportResult.unmatched.length}</span> unmatched</>
+                        )}
+                      </p>
+                      {bookingImportResult.unmatched.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-gray-500 mb-1">
+                            Click an item to add it as a custom amenity, or ignore it.
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {bookingImportResult.unmatched.map((label) => {
+                              const amenities = form.amenities || []
+                              const alreadyAdded = amenities.some(a => a.toLowerCase() === label.toLowerCase())
+                              return (
+                                <button
+                                  key={label}
+                                  type="button"
+                                  disabled={alreadyAdded}
+                                  onClick={() => {
+                                    if (alreadyAdded) return
+                                    const fallbackCategory = AMENITY_CATEGORIES[AMENITY_CATEGORIES.length - 1].name
+                                    updateForm({ amenities: [...amenities, label] })
+                                    setCustomAmenitiesByCategory(prev => ({
+                                      ...prev,
+                                      [fallbackCategory]: [...(prev[fallbackCategory] || []), label],
+                                    }))
+                                  }}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors ${
+                                    alreadyAdded
+                                      ? 'bg-primary-50 text-primary-700 border-primary-200 cursor-default'
+                                      : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50'
+                                  }`}
+                                >
+                                  {alreadyAdded ? <CheckIcon className="w-3 h-3" /> : <PlusIcon className="w-3 h-3" />}
+                                  {label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="space-y-1">
               {AMENITY_CATEGORIES.map((cat) => {
