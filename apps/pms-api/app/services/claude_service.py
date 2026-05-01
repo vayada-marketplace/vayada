@@ -73,7 +73,7 @@ EXTRACTION_TOOL = {
                             "description": "Room amenities. Map to these known values when possible: "
                             "Free WiFi, Flat-screen TV, Smart TV, Netflix / Streaming, Work desk, "
                             "Laptop-friendly workspace, Minibar, Refrigerator, Microwave, Kitchenware, "
-                            "Electric kettle, Stovetop, Dining table, Bath, Shower, Free toiletries, "
+                            "Electric kettle, Stovetop, Dining table, Bathtub, Shower, Free toiletries, "
                             "Hairdryer, Toilet, Toilet paper, Hot Tub, Towels, Slippers, Bathrobe, "
                             "Air conditioning, Heating, Fan, Fireplace, Extra pillows, Blackout curtains, "
                             "Wardrobe, Bed linen, Washing machine, Dryer, Iron/Ironing board, Clothes rack, "
