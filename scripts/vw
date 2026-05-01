@@ -429,7 +429,7 @@ delay 0.4
 tell application "System Events"
     keystroke "t" using command down
     delay 0.5
-    keystroke "cd $worktree && claude '$as_prompt'"
+    keystroke "cd $worktree && claude --permission-mode auto '$as_prompt'"
     keystroke return
 end tell
 APPLESCRIPT
@@ -477,7 +477,7 @@ delay 0.4
 tell application "System Events"
     keystroke "t" using command down
     delay 0.5
-    keystroke "cd $MAIN_REPO && claude '$as_prompt'"
+    keystroke "cd $MAIN_REPO && claude --permission-mode auto '$as_prompt'"
     keystroke return
 end tell
 APPLESCRIPT
