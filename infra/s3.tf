@@ -49,3 +49,14 @@ resource "aws_s3_bucket_cors_configuration" "uploads" {
     max_age_seconds = 3600
   }
 }
+
+resource "aws_s3_object" "bimi_logo" {
+  bucket        = aws_s3_bucket.uploads.id
+  key           = "branding/vayada-bimi.svg"
+  source        = "${path.module}/bimi/vayada-bimi.svg"
+  etag          = filemd5("${path.module}/bimi/vayada-bimi.svg")
+  content_type  = "image/svg+xml"
+  cache_control = "public, max-age=86400"
+
+  depends_on = [aws_s3_bucket_policy.uploads_public_read]
+}
