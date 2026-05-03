@@ -998,6 +998,128 @@ class TestPayoutService:
             "property_payout": 880.0,
         }
 
+    async def test_commission_plan_custom_direct_rate(self, init_database):
+        """Property-configured 8% direct rate is honoured (regression for VAY-318)."""
+        result = self._call(plan="commission", booking_engine_fee_pct=8.0)
+        assert result == {
+            "platform_fee": 80.0,
+            "affiliate_commission": 0.0,
+            "property_payout": 920.0,
+        }
+
+    async def test_commission_plan_zero_ota_rate(self, init_database):
+        """Property-configured 0% OTA rate means no platform fee on channel bookings."""
+        result = self._call(
+            plan="commission",
+            channel="booking_com",
+            channel_manager_fee_pct=0.0,
+        )
+        assert result == {
+            "platform_fee": 0.0,
+            "affiliate_commission": 0.0,
+            "property_payout": 1000.0,
+        }
+
+    async def test_empty_channel_falls_back_to_direct(self, init_database):
+        """An empty channel falls back to the direct rate (VAY-318 spec)."""
+        result = self._call(
+            plan="commission",
+            channel="",
+            booking_engine_fee_pct=8.0,
+            channel_manager_fee_pct=15.0,
+        )
+        # Should use the (lower) direct rate, not the OTA rate.
+        assert result["platform_fee"] == 80.0
+
+
+class TestFetchBillingConfig:
+    """Tests for the cross-DB billing-config lookup that backs platform-fee calc.
+
+    Regression for VAY-318: when the booking_hotels row is missing or the
+    cross-DB lookup fails, we must NOT silently fall back to a non-zero
+    percentage — that historically charged Fixed-plan hotels 2% on top of
+    their monthly subscription and under-billed Commission-plan hotels with
+    custom rates.
+    """
+
+    async def test_default_is_zero_fee(self, init_database):
+        """The fallback config charges nothing — safe default for missing rows."""
+        from app.services.payout_service import DEFAULT_BILLING_CONFIG
+
+        assert DEFAULT_BILLING_CONFIG["booking_engine_fee_pct"] == 0.0
+        assert DEFAULT_BILLING_CONFIG["channel_manager_fee_pct"] == 0.0
+        assert DEFAULT_BILLING_CONFIG["affiliate_platform_fee_pct"] == 0.0
+
+    async def test_no_booking_db_url_returns_defaults(self, init_database):
+        """Test/dev path: no booking_db configured → defaults."""
+        from app.services.payout_service import (
+            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+        )
+
+        with patch("app.services.payout_service.app_settings") as mock_settings:
+            mock_settings.BOOKING_ENGINE_DATABASE_URL = ""
+            result = await fetch_billing_config("any-hotel-id")
+
+        assert result == DEFAULT_BILLING_CONFIG
+        # Must be a copy — callers mutate the dict freely.
+        assert result is not DEFAULT_BILLING_CONFIG
+
+    async def test_missing_row_logs_error_and_returns_defaults(self, init_database):
+        """A missing booking_hotels row is logged at error level (data-integrity issue)."""
+        from app.services.payout_service import (
+            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+        )
+
+        with patch("app.services.payout_service.app_settings") as mock_settings, \
+             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
+                   new=AsyncMock(return_value=None)), \
+             patch("app.services.payout_service.logger") as mock_logger:
+            mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
+            result = await fetch_billing_config("missing-hotel-id")
+
+        assert result == DEFAULT_BILLING_CONFIG
+        mock_logger.error.assert_called_once()
+        assert "missing-hotel-id" in str(mock_logger.error.call_args)
+
+    async def test_query_exception_logs_error_and_returns_defaults(self, init_database):
+        """A cross-DB exception is logged at error level and falls back safely."""
+        from app.services.payout_service import (
+            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+        )
+
+        with patch("app.services.payout_service.app_settings") as mock_settings, \
+             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
+                   new=AsyncMock(side_effect=RuntimeError("connection refused"))), \
+             patch("app.services.payout_service.logger") as mock_logger:
+            mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
+            result = await fetch_billing_config("hotel-with-broken-conn")
+
+        assert result == DEFAULT_BILLING_CONFIG
+        mock_logger.error.assert_called_once()
+
+    async def test_row_present_returns_configured_values(self, init_database):
+        """A real row returns the per-hotel configured percentages and active plan."""
+        from app.services.payout_service import fetch_billing_config
+
+        row = {
+            "billing_active_plan": "commission",
+            "booking_engine_fee_pct": 8.00,
+            "channel_manager_fee_pct": 0.00,
+            "affiliate_platform_fee_pct": 2.00,
+        }
+        with patch("app.services.payout_service.app_settings") as mock_settings, \
+             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
+                   new=AsyncMock(return_value=row)):
+            mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
+            result = await fetch_billing_config("hotel-id")
+
+        assert result == {
+            "active_plan": "commission",
+            "booking_engine_fee_pct": 8.0,
+            "channel_manager_fee_pct": 0.0,
+            "affiliate_platform_fee_pct": 2.0,
+        }
+
 
 # ── Expire Booking (Scheduler) ──────────────────────────────────
 
