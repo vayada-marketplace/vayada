@@ -18,11 +18,20 @@ def resolve_last_minute_discount(
     days_before: int,
 ) -> Optional[int]:
     """Return the last-minute discount percent for the given days-before-check-in,
-    or None if no discount applies. Room-level config overrides hotel-level."""
-    config = room_config or hotel_config
-    if not config or not config.get("enabled"):
+    or None if no discount applies.
+
+    The hotel-level ``enabled`` flag is the master switch — when it is off (or
+    no hotel config exists), no discount applies anywhere, regardless of any
+    per-room config. Per-room configs can still opt a room out (``enabled``
+    false) or override the tier table when the master switch is on.
+    """
+    if not hotel_config or not hotel_config.get("enabled"):
         return None
-    for tier in config.get("tiers") or []:
+    if room_config is not None and not room_config.get("enabled", True):
+        return None
+    room_tiers = (room_config or {}).get("tiers") or []
+    tiers = room_tiers if room_tiers else (hotel_config.get("tiers") or [])
+    for tier in tiers:
         tier_min = tier.get("daysBeforeMin", 0)
         tier_max = tier.get("daysBeforeMax")
         pct = tier.get("discountPercent", 0)
