@@ -33,7 +33,7 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "billing_active_plan": "commission",
     "billing_commission_rate": 5,
     "billing_fixed_fee": 49,
-    "booking_engine_fee_pct": 2.0,
+    "booking_engine_fee_pct": 5.0,
     "channel_manager_fee_pct": 3.0,
     "affiliate_platform_fee_pct": 2.0,
     "fixed_base_fee": 30,
@@ -96,10 +96,14 @@ class PropertySettingsResponse(BaseModel):
     billing_fixed_fee: float
     billing_pending_switch: Optional[str]
     billing_switch_effective_date: Optional[str] = None
-    # Per-source platform fees (read-only for the hotel; Vayada admin owns these).
-    booking_engine_fee_pct: float = 2.0
+    # Direct-booking Commission rate (read-only for the hotel; Vayada admin owns it).
+    booking_engine_fee_pct: float = 5.0
+    # Channel manager (OTA) and affiliate platform fees are separate platform fees,
+    # not part of the hotel-facing Commission card. Admin still controls them.
     channel_manager_fee_pct: float = 3.0
     affiliate_platform_fee_pct: float = 2.0
+    # Optional internal note explaining a custom commission rate (admin-only context).
+    billing_commission_note: Optional[str] = None
     # Live room count + projected Fixed-plan fee at that count.
     active_room_count: int = 0
     fixed_plan_projected_monthly_fee: float = 0.0

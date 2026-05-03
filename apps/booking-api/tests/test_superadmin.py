@@ -200,3 +200,82 @@ class TestSuperadminSetPassword:
             headers=get_auth_headers(hotel_user["token"]),
         )
         assert resp.status_code == 403
+
+
+class TestSuperadminCommissionOverride:
+    """VAY-319: Commission rate override + audit log."""
+
+    async def test_update_commission_writes_audit_row(self, client, cleanup_database):
+        admin = await create_test_user()
+        await _make_superadmin(admin)
+        owner = await create_test_user()
+        hotel = await create_test_booking_hotel(str(owner["id"]))
+
+        resp = await client.patch(
+            f"/admin/superadmin/hotels/{hotel['id']}/billing",
+            json={
+                "booking_engine_fee_pct": 4.0,
+                "commission_note": "Negotiated rate for partner",
+            },
+            headers=get_auth_headers(admin["token"]),
+        )
+        assert resp.status_code == 200
+
+        history_resp = await client.get(
+            f"/admin/superadmin/hotels/{hotel['id']}/commission-history",
+            headers=get_auth_headers(admin["token"]),
+        )
+        assert history_resp.status_code == 200
+        history = history_resp.json()
+        assert len(history) == 1
+        assert history[0]["new_value"] == 4.0
+        assert history[0]["note"] == "Negotiated rate for partner"
+        assert history[0]["admin_user_id"] == str(admin["id"])
+
+    async def test_update_commission_rejects_out_of_range(self, client, cleanup_database):
+        admin = await create_test_user()
+        await _make_superadmin(admin)
+        owner = await create_test_user()
+        hotel = await create_test_booking_hotel(str(owner["id"]))
+
+        resp = await client.patch(
+            f"/admin/superadmin/hotels/{hotel['id']}/billing",
+            json={"booking_engine_fee_pct": 51},
+            headers=get_auth_headers(admin["token"]),
+        )
+        assert resp.status_code == 400
+
+    async def test_update_commission_no_op_skips_audit(self, client, cleanup_database):
+        admin = await create_test_user()
+        await _make_superadmin(admin)
+        owner = await create_test_user()
+        hotel = await create_test_booking_hotel(str(owner["id"]))
+
+        # First write changes the rate — should record one history row.
+        await client.patch(
+            f"/admin/superadmin/hotels/{hotel['id']}/billing",
+            json={"booking_engine_fee_pct": 6.5},
+            headers=get_auth_headers(admin["token"]),
+        )
+        # Same value again — should NOT record a second history row.
+        await client.patch(
+            f"/admin/superadmin/hotels/{hotel['id']}/billing",
+            json={"booking_engine_fee_pct": 6.5},
+            headers=get_auth_headers(admin["token"]),
+        )
+
+        history_resp = await client.get(
+            f"/admin/superadmin/hotels/{hotel['id']}/commission-history",
+            headers=get_auth_headers(admin["token"]),
+        )
+        assert history_resp.status_code == 200
+        assert len(history_resp.json()) == 1
+
+    async def test_commission_history_requires_superadmin(self, client, hotel_user, cleanup_database):
+        owner = await create_test_user()
+        hotel = await create_test_booking_hotel(str(owner["id"]))
+        resp = await client.get(
+            f"/admin/superadmin/hotels/{hotel['id']}/commission-history",
+            headers=get_auth_headers(hotel_user["token"]),
+        )
+        assert resp.status_code == 403

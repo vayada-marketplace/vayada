@@ -150,6 +150,7 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         booking_engine_fee_pct=float(_coalesce(hotel, 'booking_engine_fee_pct')),
         channel_manager_fee_pct=float(_coalesce(hotel, 'channel_manager_fee_pct')),
         affiliate_platform_fee_pct=float(_coalesce(hotel, 'affiliate_platform_fee_pct')),
+        billing_commission_note=hotel.get('billing_commission_note'),
         active_room_count=room_count,
         fixed_plan_projected_monthly_fee=projected_fee,
         payout_account_holder=_coalesce(hotel, 'payout_account_holder'),
