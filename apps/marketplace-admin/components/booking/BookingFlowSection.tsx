@@ -8,7 +8,7 @@ import {
   XMarkIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline'
-import { bookingSettingsService, type AddonItem, type AddonSettings, type DesignSettings, type PromoCodeItem } from '@/services/booking'
+import { bookingSettingsService, type AddonItem, type AddonSettings, type DesignSettings, type PromoCodeItem, type CommissionRateChange } from '@/services/booking'
 
 type Tab = 'filters' | 'addons' | 'promos' | 'benefits' | 'payment'
 
@@ -480,11 +480,17 @@ export default function BookingFlowSection({ hotelId }: { hotelId: string }) {
   )
 }
 
+const COMMISSION_DEFAULT_PCT = 5
+
 function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: (type: 'success' | 'error', message: string) => void }) {
   const [activePlan, setActivePlan] = useState('commission')
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
   const [switchDate, setSwitchDate] = useState<string | null>(null)
-  const [beFee, setBeFee] = useState(2)
+  const [beFee, setBeFee] = useState(COMMISSION_DEFAULT_PCT)
+  const [commissionNote, setCommissionNote] = useState('')
+  const [savedCommissionNote, setSavedCommissionNote] = useState('')
+  const [savedBeFee, setSavedBeFee] = useState(COMMISSION_DEFAULT_PCT)
+  const [history, setHistory] = useState<CommissionRateChange[]>([])
   const [channelFee, setChannelFee] = useState(3)
   const [affiliatePlatformFee, setAffiliatePlatformFee] = useState(2)
   const [fixedBase, setFixedBase] = useState(30)
@@ -494,15 +500,28 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  const beFeeError =
+    Number.isNaN(beFee) || beFee < 0 || beFee > 50
+      ? 'Direct bookings % must be between 0 and 50'
+      : null
+
   useEffect(() => {
-    bookingSettingsService.listAllHotels()
-      .then((hotels) => {
+    Promise.all([
+      bookingSettingsService.listAllHotels(),
+      bookingSettingsService.listCommissionHistory(hotelId).catch(() => [] as CommissionRateChange[]),
+    ])
+      .then(([hotels, hist]) => {
         const hotel = hotels.find((h) => h.id === hotelId)
         if (hotel) {
           setActivePlan(hotel.billing_active_plan || 'commission')
           setPendingSwitch(hotel.billing_pending_switch)
           setSwitchDate(hotel.billing_switch_effective_date)
-          setBeFee(hotel.booking_engine_fee_pct ?? 2)
+          const rate = hotel.booking_engine_fee_pct ?? COMMISSION_DEFAULT_PCT
+          setBeFee(rate)
+          setSavedBeFee(rate)
+          const note = hotel.billing_commission_note ?? ''
+          setCommissionNote(note)
+          setSavedCommissionNote(note)
           setChannelFee(hotel.channel_manager_fee_pct ?? 3)
           setAffiliatePlatformFee(hotel.affiliate_platform_fee_pct ?? 2)
           setFixedBase(hotel.fixed_base_fee ?? 30)
@@ -510,6 +529,7 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
           setPerExtraRoom(hotel.fixed_per_extra_room_fee ?? 5)
           setRoomCount(hotel.active_room_count ?? 0)
         }
+        setHistory(hist)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -519,9 +539,19 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
     (fixedBase + Math.max(0, roomCount - roomsIncluded) * perExtraRoom) * 100
   ) / 100
 
+  const isCustomRate = Math.abs(beFee - COMMISSION_DEFAULT_PCT) > 1e-9
+  const rateChanged = Math.abs(beFee - savedBeFee) > 1e-9
+  const noteChanged = commissionNote !== savedCommissionNote
+
   const handleSave = async () => {
+    if (beFeeError) {
+      showFeedback('error', beFeeError)
+      return
+    }
     setSaving(true)
     try {
+      // Send the note alongside the rate so the audit row captures it on rate changes
+      // and so a note-only edit still persists.
       await bookingSettingsService.updateHotelBilling(hotelId, {
         booking_engine_fee_pct: beFee,
         channel_manager_fee_pct: channelFee,
@@ -529,7 +559,16 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
         fixed_base_fee: fixedBase,
         fixed_rooms_included: roomsIncluded,
         fixed_per_extra_room_fee: perExtraRoom,
+        commission_note: commissionNote.trim() || null,
       })
+      setSavedBeFee(beFee)
+      setSavedCommissionNote(commissionNote)
+      if (rateChanged) {
+        const refreshed = await bookingSettingsService
+          .listCommissionHistory(hotelId)
+          .catch(() => history)
+        setHistory(refreshed)
+      }
       showFeedback('success', 'Billing settings saved')
     } catch {
       showFeedback('error', 'Failed to save billing settings')
@@ -559,12 +598,85 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-        <div>
-          <h2 className="text-[14px] font-semibold text-gray-900">Platform Fees (Commission Plan)</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Per-booking percentages Vayada charges on the Commission plan.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-[14px] font-semibold text-gray-900">Commission Override</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              Direct-booking commission for this property. Standard rate is {COMMISSION_DEFAULT_PCT}% — set a different value here to honor a custom agreement.
+            </p>
+          </div>
+          {isCustomRate && (
+            <span className="px-2 py-0.5 text-[10px] font-bold uppercase bg-amber-100 text-amber-700 rounded-full tracking-wide whitespace-nowrap">
+              Custom rate
+            </span>
+          )}
         </div>
-        <FeeInput label="Booking engine" suffix="% on direct bookings" value={beFee} onChange={setBeFee} />
-        <FeeInput label="Channel manager (OTA)" suffix="% on OTA bookings (Booking.com, Airbnb…)" value={channelFee} onChange={setChannelFee} />
+        <div>
+          <label className="block text-[12px] font-medium text-gray-700 mb-1">Direct bookings %</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={0.5}
+              value={beFee}
+              onChange={(e) => setBeFee(Number(e.target.value))}
+              className={`w-24 px-3 py-2 border rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 ${
+                beFeeError ? 'border-red-400 focus:ring-red-500' : 'border-gray-300 focus:ring-primary-500'
+              }`}
+            />
+            <span className="text-[13px] text-gray-600">% on direct bookings (0–50)</span>
+          </div>
+          {beFeeError && <p className="text-[11px] text-red-600 mt-1">{beFeeError}</p>}
+        </div>
+        <div>
+          <label className="block text-[12px] font-medium text-gray-700 mb-1">
+            Internal note <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={commissionNote}
+            onChange={(e) => setCommissionNote(e.target.value)}
+            rows={2}
+            placeholder="e.g. Negotiated by Anna on 2026-04-12, contract ref #4421"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <p className="text-[11px] text-gray-400 mt-1">
+            Saved with the audit log entry on rate changes. Not visible to the hotel.
+          </p>
+        </div>
+        <div>
+          <h3 className="text-[12px] font-semibold text-gray-700 mb-2">Change history</h3>
+          {history.length === 0 ? (
+            <p className="text-[12px] text-gray-400">No changes recorded yet.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100 border border-gray-100 rounded-md">
+              {history.map((entry) => (
+                <li key={entry.id} className="px-3 py-2 text-[12px] text-gray-700">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">
+                      {entry.old_value}% → {entry.new_value}%
+                    </span>
+                    <span className="text-gray-400">
+                      {new Date(entry.changed_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    by {entry.admin_name || entry.admin_email || entry.admin_user_id.slice(0, 8)}
+                    {entry.note ? ` — ${entry.note}` : ''}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-gray-900">Channel Manager Fee</h2>
+          <p className="text-[12px] text-gray-500 mt-0.5">Vayada&apos;s cut on OTA-sourced bookings (Booking.com, Airbnb…). Independent of the Commission rate above.</p>
+        </div>
+        <FeeInput label="Channel manager (OTA)" suffix="% on OTA bookings" value={channelFee} onChange={setChannelFee} />
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
@@ -593,8 +705,11 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <button onClick={handleSave} disabled={saving} className="px-5 py-2 text-[13px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
+      <div className="flex items-center justify-end gap-2">
+        {(rateChanged || noteChanged) && !saving && (
+          <span className="text-[11px] text-amber-700">Unsaved changes</span>
+        )}
+        <button onClick={handleSave} disabled={saving || !!beFeeError} className="px-5 py-2 text-[13px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
           {saving ? 'Saving...' : 'Save Billing Settings'}
         </button>
       </div>
