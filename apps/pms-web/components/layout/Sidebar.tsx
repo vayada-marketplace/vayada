@@ -10,6 +10,9 @@ import {
 } from '@heroicons/react/24/outline'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/i18n'
+import { messagingService } from '@/services/messaging'
+
+const UNREAD_POLL_MS = 60_000
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
@@ -39,7 +42,8 @@ const BASE_NAV_ITEMS: Omit<NavItem, 'badge'>[] = [
   { labelKey: 'layout.sidebar.dashboard', href: '/dashboard', icon: DashboardIcon },
   { labelKey: 'layout.sidebar.calendar', href: '/calendar', icon: CalendarIcon },
   { labelKey: 'layout.sidebar.reservations', href: '/bookings', icon: ReservationsIcon },
-{ labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
+  { labelKey: 'layout.sidebar.inbox', href: '/inbox', icon: InboxIcon },
+  { labelKey: 'layout.sidebar.roomsAndRates', href: '/rooms', icon: RoomsIcon },
   { labelKey: 'layout.sidebar.channelManager', href: '/channel-manager', icon: ChannelsIcon },
   { labelKey: 'layout.sidebar.financials', href: '/financials', icon: FinancialsIcon },
   { labelKey: 'layout.sidebar.settings', href: '/settings', icon: SettingsIcon },
@@ -49,6 +53,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [showSwitcher, setShowSwitcher] = useState(false)
+  const [inboxUnread, setInboxUnread] = useState(0)
   const { t } = useTranslation()
   const switcherRef = useRef<HTMLDivElement>(null)
 
@@ -62,7 +67,24 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  const navItems: NavItem[] = BASE_NAV_ITEMS.map(item => item)
+  useEffect(() => {
+    let cancelled = false
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      messagingService.unreadCount()
+        .then(res => { if (!cancelled) setInboxUnread(res.unreadCount) })
+        .catch(() => { /* ignore — likely 401 on logout, or feature flag off */ })
+    }
+    tick()
+    const id = setInterval(tick, UNREAD_POLL_MS)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  const navItems: NavItem[] = BASE_NAV_ITEMS.map(item => (
+    item.href === '/inbox' && inboxUnread > 0
+      ? { ...item, badge: inboxUnread }
+      : item
+  ))
 
   return (
     <aside
@@ -175,14 +197,14 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <>
                   <span className="flex-1">{t(item.labelKey)}</span>
                   {item.badge != null && (
-                    <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-blue-600 text-white rounded-full shrink-0">
-                      {item.badge}
+                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-bold bg-emerald-600 text-white rounded-full shrink-0">
+                      {item.badge > 99 ? '99+' : item.badge}
                     </span>
                   )}
                 </>
               )}
               {collapsed && item.badge != null && (
-                <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-blue-600 rounded-full" />
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-600 rounded-full" />
               )}
             </Link>
           )
