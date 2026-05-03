@@ -14,22 +14,34 @@ logger = logging.getLogger(__name__)
 MAX_PAYOUT_RETRIES = 3
 
 
-# Defaults match the pricing PDF and are used when a hotel row predates the
-# pricing_config migration (or in tests where booking_db is not connected).
+# Safe-by-default fallback: when we can't read the hotel's real billing config we
+# bill *nothing* rather than guess a percentage. Guessing previously caused
+# Fixed-plan hotels to be charged a per-booking fee on top of their monthly
+# subscription, and Commission-plan hotels with non-default rates to be
+# under-billed (see VAY-318). Hitting this fallback in production means the
+# booking_hotels row is missing or the cross-DB read failed — both are logged as
+# errors so the data issue gets fixed instead of silently mis-billing.
 DEFAULT_BILLING_CONFIG = {
-    "active_plan": "commission",
-    "booking_engine_fee_pct": 2.00,
-    "channel_manager_fee_pct": 3.00,
-    "affiliate_platform_fee_pct": 2.00,
+    "active_plan": "fixed",
+    "booking_engine_fee_pct": 0.00,
+    "channel_manager_fee_pct": 0.00,
+    "affiliate_platform_fee_pct": 0.00,
 }
+
+KNOWN_DIRECT_CHANNELS = {"direct"}
 
 
 async def fetch_billing_config(hotel_id: str) -> dict:
-    """Read per-hotel platform-fee config from booking_db, falling back to defaults.
+    """Read per-hotel platform-fee config from booking_db.
 
     Applies a pending plan switch inline if its effective date has passed — so
-    bookings on/after the 1st of the month see the new plan even if nothing
-    else has touched this hotel's row yet.
+    bookings on/after the switch date see the new plan even if nothing else has
+    touched this hotel's row yet.
+
+    Falls back to ``DEFAULT_BILLING_CONFIG`` (zero fees) when booking_db is
+    unconfigured (test path), unreachable, or has no row for ``hotel_id``. In
+    production any miss here is a data-integrity issue — we log an ``error``
+    so it surfaces, rather than silently charging a default percentage.
     """
     if not app_settings.BOOKING_ENGINE_DATABASE_URL:
         return dict(DEFAULT_BILLING_CONFIG)
@@ -57,9 +69,18 @@ async def fetch_billing_config(hotel_id: str) -> dict:
             hotel_id,
         )
     except Exception as exc:
-        logger.warning("Failed to fetch billing config from booking_db: %s", exc)
+        logger.error(
+            "Failed to fetch billing config from booking_db for hotel %s: %s — "
+            "falling back to zero-fee defaults",
+            hotel_id, exc,
+        )
         return dict(DEFAULT_BILLING_CONFIG)
     if not row:
+        logger.error(
+            "No booking_hotels row found for hotel %s — falling back to zero-fee "
+            "defaults. The hotel needs a billing config row before fees can be billed.",
+            hotel_id,
+        )
         return dict(DEFAULT_BILLING_CONFIG)
     return {
         "active_plan": row["billing_active_plan"],
@@ -90,8 +111,17 @@ def calculate_split(
                        Affiliate bookings do NOT add the affiliate platform fee — the
                        channel fee (direct or OTA) already covers the platform cut.
       Affiliate commission is additive — paid by the property on top of the platform fee.
+
+    A missing/empty channel is treated as ``direct`` with a warning logged — the
+    direct rate is the lower of the two on every plan we support, so this is the
+    safer fallback when the booking source can't be determined.
     """
-    is_channel_booking = channel != "direct"
+    if not channel:
+        logger.warning(
+            "calculate_split called with empty channel — defaulting to 'direct' rate"
+        )
+        channel = "direct"
+    is_channel_booking = channel not in KNOWN_DIRECT_CHANNELS
 
     platform_fee_pct = 0.0
     if plan == "commission":
