@@ -14,7 +14,7 @@ class BookingHotelRepository:
     async def get_by_user_id(
         user_id: str,
         *,
-        columns: str = "slug, name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, email_notifications, new_booking_alerts, payment_alerts, weekly_reports",
+        columns: str = "slug, name, contact_email, contact_phone, contact_whatsapp, contact_address, timezone, currency, supported_currencies, supported_languages, email_notifications, new_booking_alerts, payment_alerts, ota_booking_alerts, weekly_reports",
     ) -> Optional[dict]:
         row = await Database.fetchrow(f"SELECT {columns} FROM booking_hotels WHERE user_id = $1", user_id)
         return dict(row) if row else None
@@ -119,6 +119,7 @@ class BookingHotelRepository:
         email_notifications: bool = _D['email_notifications'],
         new_booking_alerts: bool = _D['new_booking_alerts'],
         payment_alerts: bool = _D['payment_alerts'],
+        ota_booking_alerts: bool = _D['ota_booking_alerts'],
         weekly_reports: bool = _D['weekly_reports'],
         special_requests_enabled: bool = _D['special_requests_enabled'],
         arrival_time_enabled: bool = _D['arrival_time_enabled'],
@@ -142,7 +143,7 @@ class BookingHotelRepository:
                 check_in_time, check_out_time,
                 check_in_from, check_in_until, check_out_from, check_out_until,
                 pay_at_property_enabled, online_card_payment, bank_transfer, free_cancellation_days,
-                email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
+                email_notifications, new_booking_alerts, payment_alerts, ota_booking_alerts, weekly_reports,
                 special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
                 social_instagram, social_facebook, social_tiktok, social_youtube,
                 payout_account_holder, payout_account_type, payout_iban, payout_account_number,
@@ -150,8 +151,8 @@ class BookingHotelRepository:
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
                 $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23, $24, $25, $26,
-                $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40
+                $19, $20, $21, $22, $23, $24, $25, $26, $27,
+                $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41
             ) RETURNING *
         """
         row = await Database.fetchrow(
@@ -162,7 +163,7 @@ class BookingHotelRepository:
             check_in_time, check_out_time,
             check_in_from, check_in_until, check_out_from, check_out_until,
             pay_at_property_enabled, online_card_payment, bank_transfer, free_cancellation_days,
-            email_notifications, new_booking_alerts, payment_alerts, weekly_reports,
+            email_notifications, new_booking_alerts, payment_alerts, ota_booking_alerts, weekly_reports,
             special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
             social_instagram, social_facebook, social_tiktok, social_youtube,
             payout_account_holder, payout_account_type, payout_iban, payout_account_number,
