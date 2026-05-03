@@ -7,6 +7,8 @@ export type {
   HotelSummary,
   AddonItem,
   SuperAdminHotel,
+  HotelBillingUpdate,
+  CommissionRateChange,
   AddonSettings,
   PromoCodeItem,
 } from './settingsService'

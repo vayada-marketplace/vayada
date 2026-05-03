@@ -59,6 +59,7 @@ export interface SuperAdminHotel extends HotelSummary {
   booking_engine_fee_pct: number
   channel_manager_fee_pct: number
   affiliate_platform_fee_pct: number
+  billing_commission_note: string | null
   fixed_base_fee: number
   fixed_rooms_included: number
   fixed_per_extra_room_fee: number
@@ -73,6 +74,20 @@ export interface HotelBillingUpdate {
   fixed_base_fee?: number
   fixed_rooms_included?: number
   fixed_per_extra_room_fee?: number
+  // Free-text reason persisted on the hotel and attached to the audit-log row
+  // when booking_engine_fee_pct changes.
+  commission_note?: string | null
+}
+
+export interface CommissionRateChange {
+  id: string
+  admin_user_id: string
+  admin_name: string
+  admin_email: string
+  old_value: number
+  new_value: number
+  note: string | null
+  changed_at: string
 }
 
 export interface AddonSettings {
@@ -99,6 +114,11 @@ export const bookingSettingsService = {
 
   updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) =>
     bookingApiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
+
+  listCommissionHistory: (hotelId: string) =>
+    bookingApiClient.get<CommissionRateChange[]>(
+      `/admin/superadmin/hotels/${hotelId}/commission-history`,
+    ),
 
   createHotelForUser: (userId: string, name: string) =>
     bookingApiClient.post<{ id: string; name: string; slug: string }>(
