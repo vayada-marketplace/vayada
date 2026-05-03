@@ -192,8 +192,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           {profileOpen && (
             <div className="absolute top-full right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
               <div className="px-3.5 py-2.5">
-                <p className="text-[13px] font-semibold text-gray-900">{userName || t('layout.header.user')}</p>
-                <p className="text-xs text-gray-500">{userEmail}</p>
+                <p className="text-[13px] font-semibold text-gray-900 truncate" title={userName || undefined}>{userName || t('layout.header.user')}</p>
+                <p className="text-xs text-gray-500 truncate" title={userEmail || undefined}>{userEmail}</p>
               </div>
               <div className="border-t border-gray-100" />
               <div className="py-1">
