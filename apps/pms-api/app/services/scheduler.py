@@ -23,6 +23,7 @@ from app.services.payout_service import (
 )
 from app.services.xendit_service import XenditError
 from app.services.channex.inbound import poll_bookings_for_hotel
+from app.services.channex.messaging import poll_messages_for_all_hotels
 from app.services.channex.orchestrator import push_ari_for_hotel
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,15 @@ async def full_channex_ari_sync():
             logger.error("Failed to sync Channex ARI for hotel %s: %s", hotel_id, e)
 
 
+async def poll_channex_messages():
+    """Safety-net sweep: reconcile Channex message threads in case the webhook
+    missed an event. Idempotent."""
+    try:
+        await poll_messages_for_all_hotels()
+    except Exception as e:
+        logger.error("Channex message sweep failed: %s", e)
+
+
 def setup_scheduler():
     """Configure and return the scheduler with all jobs."""
     scheduler.add_job(
@@ -308,6 +318,13 @@ def setup_scheduler():
         full_channex_ari_sync,
         trigger=CronTrigger(hour=app_settings.CHANNEX_FULL_SYNC_HOUR, minute=0),
         id="full_channex_ari_sync",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        poll_channex_messages,
+        trigger=IntervalTrigger(minutes=app_settings.CHANNEX_MESSAGE_POLL_INTERVAL_MINUTES),
+        id="poll_channex_messages",
         replace_existing=True,
     )
 

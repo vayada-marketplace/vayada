@@ -99,6 +99,38 @@ class ChannexConnectionRepository:
         )
 
     @staticmethod
+    async def set_messaging_app_installed(hotel_id: str, installed: bool) -> None:
+        await Database.execute(
+            """
+            UPDATE channex_connections
+            SET messaging_app_installed = $2, updated_at = now()
+            WHERE hotel_id = $1
+            """,
+            hotel_id, installed,
+        )
+
+    @staticmethod
+    async def update_last_message_sync(hotel_id: str, synced_at: datetime) -> None:
+        await Database.execute(
+            """
+            UPDATE channex_connections
+            SET last_message_sync_at = $2, updated_at = now()
+            WHERE hotel_id = $1
+            """,
+            hotel_id, synced_at,
+        )
+
+    @staticmethod
+    async def list_with_messaging() -> List[dict]:
+        rows = await Database.fetch(
+            "SELECT * FROM channex_connections "
+            "WHERE is_active = true "
+            "  AND channex_property_id IS NOT NULL "
+            "  AND messaging_app_installed = true"
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def deactivate(hotel_id: str) -> None:
         await Database.execute(
             """

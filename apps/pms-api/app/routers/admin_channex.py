@@ -4,7 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Depends
 
-from app.dependencies import require_hotel_admin
+from app.config import settings
+from app.dependencies import require_hotel_admin, require_super_admin
 from app.utils import get_hotel_id
 from app.repositories.channex_mapping_repo import (
     ChannexConnectionRepository,
@@ -23,6 +24,7 @@ from app.models.channex import (
     ConnectedChannel,
     ConnectedChannelsResponse,
 )
+from app.database import Database
 from app.services import channex_service
 from app.services.channex.provisioning import provision_property
 from app.services.channex.orchestrator import push_ari_for_hotel
@@ -363,3 +365,102 @@ async def channex_iframe_url(
         raise HTTPException(status_code=502, detail=f"Failed to generate iframe URL: {e}")
 
     return {"iframe_url": url}
+
+
+# ── Messaging app management (super-admin / one-time setup) ──────────
+
+WEBHOOK_HEADER_NAME = "X-Vayada-Webhook-Token"
+
+
+@router.post("/channex/messaging/backfill")
+async def channex_messaging_backfill(
+    user_id: str = Depends(require_super_admin),
+):
+    """Install the Channex Messaging & Reviews app on every existing
+    channex_connections row that doesn't have it yet. Idempotent."""
+    api_key = channex_service.get_platform_api_key()
+
+    rows = await Database.fetch(
+        "SELECT hotel_id, channex_property_id FROM channex_connections "
+        "WHERE is_active = true "
+        "  AND channex_property_id IS NOT NULL "
+        "  AND messaging_app_installed = false"
+    )
+
+    installed = []
+    failed = []
+    for r in rows:
+        hotel_id = str(r["hotel_id"])
+        property_id = str(r["channex_property_id"])
+        try:
+            already = await channex_service.is_messaging_app_installed(api_key, property_id)
+            if not already:
+                await channex_service.install_messaging_app(api_key, property_id)
+            await ChannexConnectionRepository.set_messaging_app_installed(hotel_id, True)
+            installed.append(hotel_id)
+        except Exception as e:
+            logger.warning("Failed to install messaging app for hotel %s: %s", hotel_id, e)
+            failed.append({"hotel_id": hotel_id, "error": str(e)})
+
+    return {"installed": installed, "failed": failed}
+
+
+@router.post("/channex/webhook/setup")
+async def channex_webhook_setup(
+    callback_url: str,
+    user_id: str = Depends(require_super_admin),
+):
+    """One-time setup: register (or update) a single global Channex webhook
+    that pushes `message` events to our /webhooks/channex endpoint, with our
+    shared secret in the X-Vayada-Webhook-Token header.
+
+    Pass the public callback URL (e.g.
+    `https://api.vayada.com/webhooks/channex`)."""
+    if not settings.CHANNEX_WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=400,
+            detail="CHANNEX_WEBHOOK_SECRET must be set before registering",
+        )
+
+    api_key = channex_service.get_platform_api_key()
+    headers = {WEBHOOK_HEADER_NAME: settings.CHANNEX_WEBHOOK_SECRET}
+
+    try:
+        existing = await channex_service.list_webhooks(api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to list webhooks: {e}")
+
+    match = None
+    for w in existing:
+        attrs = w.get("attributes") or {}
+        if attrs.get("callback_url") == callback_url:
+            match = w
+            break
+
+    if match:
+        try:
+            updated = await channex_service.update_webhook(
+                api_key, match["id"],
+                {
+                    "event_mask": "message",
+                    "is_global": True,
+                    "is_active": True,
+                    "send_data": True,
+                    "headers": headers,
+                },
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to update webhook: {e}")
+        return {"status": "updated", "webhook_id": updated.get("id", match["id"])}
+
+    try:
+        created = await channex_service.create_webhook(
+            api_key,
+            callback_url=callback_url,
+            event_mask="message",
+            is_global=True,
+            headers=headers,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to create webhook: {e}")
+    return {"status": "created", "webhook_id": created.get("id")}

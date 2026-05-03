@@ -514,3 +514,203 @@ def build_iframe_url(
     if channels:
         url += f"&channels={channels}"
     return url
+
+
+# ── Applications (per-property addon installs) ───────────────────────
+
+MESSAGING_APP_CODE = "channex_messages"
+
+
+async def list_installed_applications(api_key: str, property_id: str) -> List[dict]:
+    data = await _request(
+        "GET", "/api/v1/applications/installed", api_key,
+        params={"filter[property_id]": property_id},
+    )
+    return data.get("data", [])
+
+
+async def install_application(
+    api_key: str, property_id: str, application_code: str
+) -> dict:
+    """Install an application on a Channex property. Idempotent at our layer:
+    callers should check `list_installed_applications` first, but Channex itself
+    may also reject duplicate installs."""
+    data = await _request(
+        "POST", "/api/v1/applications/install", api_key,
+        json={
+            "application_installation": {
+                "property_id": property_id,
+                "application_code": application_code,
+            }
+        },
+    )
+    return data.get("data", data)
+
+
+async def is_messaging_app_installed(api_key: str, property_id: str) -> bool:
+    apps = await list_installed_applications(api_key, property_id)
+    for app in apps:
+        attrs = app.get("attributes", app) or {}
+        if attrs.get("application_code") == MESSAGING_APP_CODE:
+            return True
+    return False
+
+
+async def install_messaging_app(api_key: str, property_id: str) -> dict:
+    return await install_application(api_key, property_id, MESSAGING_APP_CODE)
+
+
+# ── Webhooks (account-level subscription) ────────────────────────────
+
+async def list_webhooks(api_key: str) -> List[dict]:
+    data = await _request("GET", "/api/v1/webhooks", api_key)
+    return data.get("data", [])
+
+
+async def create_webhook(
+    api_key: str,
+    *,
+    callback_url: str,
+    event_mask: str,
+    is_global: bool = True,
+    property_id: str = None,
+    headers: dict = None,
+    send_data: bool = True,
+    is_active: bool = True,
+) -> dict:
+    payload = {
+        "callback_url": callback_url,
+        "event_mask": event_mask,
+        "is_global": is_global,
+        "send_data": send_data,
+        "is_active": is_active,
+        "headers": headers or {},
+        "request_params": {},
+    }
+    if property_id:
+        payload["property_id"] = property_id
+    data = await _request(
+        "POST", "/api/v1/webhooks", api_key,
+        json={"webhook": payload},
+    )
+    return data.get("data", data)
+
+
+async def update_webhook(api_key: str, webhook_id: str, updates: dict) -> dict:
+    data = await _request(
+        "PUT", f"/api/v1/webhooks/{webhook_id}", api_key,
+        json={"webhook": updates},
+    )
+    return data.get("data", data)
+
+
+async def delete_webhook(api_key: str, webhook_id: str) -> None:
+    await _request("DELETE", f"/api/v1/webhooks/{webhook_id}", api_key)
+
+
+# ── Messaging ────────────────────────────────────────────────────────
+
+async def list_message_threads(
+    api_key: str,
+    property_id: str = None,
+    *,
+    page: int = 1,
+    limit: int = 100,
+    order: str = "desc",
+) -> List[dict]:
+    """List message threads. Without property_id, returns threads across the
+    whole Channex account (used by the safety-net sweep)."""
+    params = {
+        "pagination[page]": page,
+        "pagination[limit]": limit,
+        "order[inserted_at]": order,
+    }
+    if property_id:
+        params["filter[property_id]"] = property_id
+    data = await _request(
+        "GET", "/api/v1/message_threads", api_key, params=params,
+    )
+    return data.get("data", [])
+
+
+async def get_message_thread(api_key: str, thread_id: str) -> dict:
+    data = await _request(
+        "GET", f"/api/v1/message_threads/{thread_id}", api_key,
+    )
+    return data.get("data", data)
+
+
+async def list_thread_messages(
+    api_key: str,
+    thread_id: str,
+    *,
+    page: int = 1,
+    limit: int = 100,
+) -> List[dict]:
+    data = await _request(
+        "GET", f"/api/v1/message_threads/{thread_id}/messages", api_key,
+        params={
+            "pagination[page]": page,
+            "pagination[limit]": limit,
+            "order[inserted_at]": "asc",
+        },
+    )
+    return data.get("data", [])
+
+
+async def post_thread_message(
+    api_key: str,
+    thread_id: str,
+    *,
+    message: str = "",
+    attachment_id: str = None,
+) -> dict:
+    payload: dict = {}
+    if message:
+        payload["message"] = message
+    if attachment_id:
+        payload["attachment_id"] = attachment_id
+    if not payload:
+        raise ValueError("message or attachment_id required")
+    data = await _request(
+        "POST", f"/api/v1/message_threads/{thread_id}/messages", api_key,
+        json={"message": payload},
+    )
+    return data.get("data", data)
+
+
+async def close_thread(api_key: str, thread_id: str) -> dict:
+    data = await _request(
+        "POST", f"/api/v1/message_threads/{thread_id}/close", api_key,
+    )
+    return data.get("data", data)
+
+
+async def mark_thread_no_reply_needed(api_key: str, thread_id: str) -> dict:
+    """Booking.com only — marks a thread as not requiring a reply (counts toward response time)."""
+    data = await _request(
+        "POST", f"/api/v1/message_threads/{thread_id}/no_reply_needed", api_key,
+    )
+    return data.get("data", data)
+
+
+async def upload_attachment(
+    api_key: str,
+    *,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+) -> dict:
+    """Upload an attachment to Channex. Returns the attachment object whose
+    `id` is then passed to `post_thread_message` as `attachment_id`."""
+    import base64
+    payload = {
+        "file": base64.b64encode(file_bytes).decode("ascii"),
+        "file_name": filename,
+        "file_type": content_type,
+    }
+    data = await _request(
+        "POST", "/api/v1/attachments", api_key,
+        json={"attachment": payload},
+    )
+    return data.get("data", data)

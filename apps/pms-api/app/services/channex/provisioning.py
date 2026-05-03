@@ -65,6 +65,29 @@ async def provision_property(hotel_id: str) -> dict:
         await ChannexConnectionRepository.set_property_id(hotel_id, channex_property_id)
         logger.info("Created Channex property %s for hotel %s", channex_property_id, hotel_id)
 
+    # Step 1b: Install Channex Messaging & Reviews app so OTA guest messages
+    # flow into the unified inbox. Idempotent — re-checks on each provision.
+    if not conn.get("messaging_app_installed"):
+        try:
+            already = await channex_service.is_messaging_app_installed(
+                api_key, channex_property_id,
+            )
+            if not already:
+                await channex_service.install_messaging_app(api_key, channex_property_id)
+                logger.info(
+                    "Installed Channex messaging app on property %s",
+                    channex_property_id,
+                )
+            await ChannexConnectionRepository.set_messaging_app_installed(hotel_id, True)
+        except Exception as e:
+            # Non-fatal: provisioning continues without messaging. Backfill
+            # endpoint can retry later. Most likely cause is a plan-tier or
+            # paid-add-on restriction.
+            logger.warning(
+                "Failed to install Channex messaging app for hotel %s: %s",
+                hotel_id, e,
+            )
+
     # Step 2: Create room types + rate plans for each vayada room type
     room_types = await Database.fetch(
         """
