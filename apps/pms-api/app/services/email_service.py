@@ -507,6 +507,88 @@ async def send_affiliate_payout_notification(
     await _send_email(affiliate_email, subject, _wrap_html(content))
 
 
+_OTA_CHANNEL_LABELS = {
+    "bookingcom": "Booking.com",
+    "booking.com": "Booking.com",
+    "booking_com": "Booking.com",
+    "booking": "Booking.com",
+    "airbnb": "Airbnb",
+    "expedia": "Expedia",
+    "agoda": "Agoda",
+    "vrbo": "Vrbo",
+    "hostelworld": "Hostelworld",
+    "tripadvisor": "Tripadvisor",
+    "hotels.com": "Hotels.com",
+    "hotelscom": "Hotels.com",
+}
+
+
+def _ota_channel_label(channel: str | None) -> str:
+    """Map a Channex ``ota_name`` to a guest-facing label. Falls back to a
+    title-cased version of the raw value, or ``"OTA"`` when nothing usable
+    was provided (per ticket spec)."""
+    if not channel:
+        return "OTA"
+    key = channel.strip().lower()
+    if key in {"", "channex", "direct"}:
+        return "OTA"
+    if key in _OTA_CHANNEL_LABELS:
+        return _OTA_CHANNEL_LABELS[key]
+    return channel.replace("_", " ").title()
+
+
+async def send_host_ota_booking_imported(
+    hotel_email: str, booking: dict, *, event: str = "imported"
+):
+    """Notify host that an OTA booking arrived (or was modified/cancelled)
+    via Channex. Gated by the ``ota_booking_alerts`` toggle in
+    booking_hotels — callers must check that before invoking."""
+    if not hotel_email:
+        return
+
+    channel_label = _ota_channel_label(booking.get("channel"))
+    guest_name = (
+        f"{booking.get('guest_first_name', '') or ''} "
+        f"{booking.get('guest_last_name', '') or ''}"
+    ).strip() or "Guest"
+
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+
+    if event == "modified":
+        subject = f"OTA booking modified — {channel_label} — {guest_name}"
+        heading = "OTA Booking Modified"
+        body_intro = (
+            f"A booking from <strong>{channel_label}</strong> for "
+            f"<strong>{guest_name}</strong> was modified."
+        )
+    elif event == "cancelled":
+        subject = f"OTA booking cancelled — {channel_label} — {guest_name}"
+        heading = "OTA Booking Cancelled"
+        body_intro = (
+            f"A booking from <strong>{channel_label}</strong> for "
+            f"<strong>{guest_name}</strong> was cancelled."
+        )
+    else:
+        subject = f"New booking from {channel_label} — {guest_name}"
+        heading = "New OTA Booking"
+        body_intro = (
+            f"A new booking has been imported from <strong>{channel_label}</strong>."
+        )
+
+    content = f"""
+    <h2>{heading}</h2>
+    <p class="detail">{body_intro}</p>
+    <hr class="divider">
+    <p class="detail"><strong>Source:</strong> {channel_label}</p>
+    <p class="detail"><strong>Guest:</strong> {guest_name}</p>
+    {_booking_details_html(booking)}
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    await _send_email(hotel_email, subject, _wrap_html(content))
+
+
 async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
     if not hotel_email:
