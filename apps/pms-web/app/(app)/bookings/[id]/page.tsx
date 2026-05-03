@@ -311,25 +311,23 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <span className="font-semibold text-gray-900">Total</span>
               <span className="font-bold text-gray-900">{formatCurrency(booking.totalAmount, booking.currency)}</span>
             </div>
-            {booking.platformFeeAmount != null && (
-              <>
-                <div className="flex justify-between pt-2 border-t border-gray-100">
-                  <span className="text-gray-500">Platform Fee</span>
-                  <span className="font-medium text-gray-600">-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
-                </div>
-                {booking.affiliateCommissionAmount != null && booking.affiliateCommissionAmount > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Affiliate Commission</span>
-                    <span className="font-medium text-gray-600">{formatCurrency(booking.affiliateCommissionAmount, booking.currency)}</span>
-                  </div>
-                )}
-                {booking.propertyPayoutAmount != null && (
-                  <div className="flex justify-between pt-2 border-t border-gray-100">
-                    <span className="font-semibold text-gray-900">Property Payout</span>
-                    <span className="font-bold text-green-600">{formatCurrency(booking.propertyPayoutAmount, booking.currency)}</span>
-                  </div>
-                )}
-              </>
+            {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
+              <div className="flex justify-between pt-2 border-t border-gray-100">
+                <span className="text-gray-500">Platform Fee</span>
+                <span className="font-medium text-gray-600">-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
+              </div>
+            )}
+            {booking.affiliateCommissionAmount != null && booking.affiliateCommissionAmount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Affiliate Commission</span>
+                <span className="font-medium text-gray-600">{formatCurrency(booking.affiliateCommissionAmount, booking.currency)}</span>
+              </div>
+            )}
+            {booking.propertyPayoutAmount != null && booking.propertyPayoutAmount !== booking.totalAmount && (
+              <div className="flex justify-between pt-2 border-t border-gray-100">
+                <span className="font-semibold text-gray-900">Property Payout</span>
+                <span className="font-bold text-green-600">{formatCurrency(booking.propertyPayoutAmount, booking.currency)}</span>
+              </div>
             )}
           </div>
         </div>
