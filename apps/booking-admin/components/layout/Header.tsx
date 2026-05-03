@@ -224,8 +224,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
             <div className="absolute top-full right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
               {/* User info */}
               <div className="px-3.5 py-2.5">
-                <p className="text-[13px] font-semibold text-gray-900">{userName || t('layout.header.user')}</p>
-                <p className="text-xs text-gray-500">{userEmail}</p>
+                <p className="text-[13px] font-semibold text-gray-900 truncate" title={userName || undefined}>{userName || t('layout.header.user')}</p>
+                <p className="text-xs text-gray-500 truncate" title={userEmail || undefined}>{userEmail}</p>
                 {isSuperAdmin && (
                   <span className="inline-flex items-center mt-1 px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 rounded">
                     {t('layout.header.superAdmin')}
