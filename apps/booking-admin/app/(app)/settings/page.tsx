@@ -122,6 +122,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   email_notifications: true,
   new_booking_alerts: true,
   payment_alerts: true,
+  ota_booking_alerts: false,
   billing_active_plan: 'commission',
   billing_commission_rate: 5,
   billing_fixed_fee: 49,
@@ -731,7 +732,14 @@ export default function SettingsPage() {
               enabled={settings.new_booking_alerts}
               onChange={() => updateSetting('new_booking_alerts', !settings.new_booking_alerts)}
               label="New Booking Alerts"
-              description="Get notified when a new booking is made"
+              description="Get notified when a new direct booking is made"
+            />
+
+            <ToggleSwitch
+              enabled={settings.ota_booking_alerts}
+              onChange={() => updateSetting('ota_booking_alerts', !settings.ota_booking_alerts)}
+              label="OTA Booking Alerts"
+              description="Get notified when a booking is imported from an OTA (Booking.com, Airbnb, etc.)"
             />
 
             <ToggleSwitch
