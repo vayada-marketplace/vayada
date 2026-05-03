@@ -876,19 +876,18 @@ export default function SettingsPage() {
                   <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
                 )}
               </div>
-              <p className="text-[12px] text-gray-500 mb-3">Percentage per booking, varies by source</p>
+              <p className="text-[12px] text-gray-500 mb-3">Percentage per direct booking</p>
               <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-2">
                 <div className="flex items-center justify-between text-[13px]">
                   <span className="text-gray-600">Direct bookings</span>
-                  <span className="font-semibold text-gray-900">{settings.booking_engine_fee_pct ?? 2}%</span>
-                </div>
-                <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-gray-600">Channel manager (OTA)</span>
-                  <span className="font-semibold text-gray-900">{settings.channel_manager_fee_pct ?? 3}%</span>
-                </div>
-                <div className="flex items-center justify-between text-[13px] pt-2 border-t border-gray-200">
-                  <span className="text-gray-600">+ on affiliate bookings</span>
-                  <span className="font-semibold text-gray-900">{settings.affiliate_platform_fee_pct ?? 2}%</span>
+                  <span className="flex items-center gap-2">
+                    {(settings.booking_engine_fee_pct ?? 5) !== 5 && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase bg-amber-100 text-amber-700 rounded-full tracking-wide">
+                        Custom rate
+                      </span>
+                    )}
+                    <span className="font-semibold text-gray-900">{settings.booking_engine_fee_pct ?? 5}%</span>
+                  </span>
                 </div>
                 <p className="text-[10px] text-gray-400 text-center pt-1">No monthly fee — pay only when you earn</p>
               </div>
