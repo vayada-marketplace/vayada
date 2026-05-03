@@ -4,7 +4,8 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 
-from app.database import Database
+from app.config import settings as app_settings
+from app.database import BookingEngineDatabase, Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_mapping_repo import (
@@ -13,10 +14,59 @@ from app.repositories.channex_mapping_repo import (
     ChannexRoomTypeMappingRepository,
 )
 from app.services import channex_service
+from app.services.email_service import send_host_ota_booking_imported
 
 from app.services.channex.ari_push import push_availability_for_room_type
 
 logger = logging.getLogger(__name__)
+
+
+async def _maybe_notify_ota_booking(
+    hotel_id: str, booking_id: str, *, event: str
+) -> None:
+    """Send the host OTA-booking notification iff the hotel opted in.
+
+    Checks ``email_notifications`` (master) AND ``ota_booking_alerts``
+    in booking_db; both must be true. Failures are logged and swallowed
+    — a missing booking_db connection or notification toggle row must
+    never break the inbound import pipeline.
+    """
+    if not app_settings.BOOKING_ENGINE_DATABASE_URL:
+        return
+    try:
+        toggles = await BookingEngineDatabase.fetchrow(
+            "SELECT email_notifications, ota_booking_alerts, contact_email "
+            "FROM booking_hotels WHERE id = $1",
+            hotel_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to read OTA notification toggles for hotel %s: %s",
+            hotel_id, exc,
+        )
+        return
+    if not toggles:
+        return
+    if not (toggles["email_notifications"] and toggles["ota_booking_alerts"]):
+        return
+
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        return
+
+    # Recipient comes from the PMS hotels row (kept in sync with booking_db
+    # contact_email), with the booking_db value as a fallback.
+    hotel_row = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", hotel_id
+    )
+    hotel_email = (
+        (hotel_row["contact_email"] if hotel_row else None)
+        or toggles["contact_email"]
+    )
+    if not hotel_email:
+        return
+
+    await send_host_ota_booking_imported(hotel_email, booking, event=event)
 
 
 async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
@@ -54,6 +104,9 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
                     start_date=booking["check_in"],
                     end_date=booking["check_out"],
                 ))
+                asyncio.create_task(_maybe_notify_ota_booking(
+                    hotel_id, existing_booking_id, event="cancelled",
+                ))
         elif status == "modified":
             # Update existing booking with new details from OTA
             await _apply_booking_modification(existing_booking_id, attrs, hotel_id)
@@ -61,6 +114,9 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
                 "Updated vayada booking %s (Channex %s modified)",
                 existing_booking_id, channex_booking_id,
             )
+            asyncio.create_task(_maybe_notify_ota_booking(
+                hotel_id, existing_booking_id, event="modified",
+            ))
 
         await ChannexBookingMappingRepository.update_sync_time(
             existing_booking_id,
@@ -203,6 +259,10 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
         hotel_id, room_type_id,
         start_date=check_in,
         end_date=check_out,
+    ))
+
+    asyncio.create_task(_maybe_notify_ota_booking(
+        hotel_id, booking_id, event="imported",
     ))
 
 
