@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     CHANNEX_POLL_INTERVAL_MINUTES: int = 5
     CHANNEX_FULL_SYNC_HOUR: int = 4
     CHANNEX_API_DELAY_SECONDS: float = 0.5
+    # Shared secret sent by Channex on each webhook (registered as a custom
+    # header — Channex does not natively sign webhooks). Compared against
+    # X-Vayada-Webhook-Token on incoming requests.
+    CHANNEX_WEBHOOK_SECRET: str = ""
+    CHANNEX_MESSAGE_POLL_INTERVAL_MINUTES: int = 5
 
     # Listing Import (Claude AI + Firecrawl)
     ANTHROPIC_API_KEY: str = ""

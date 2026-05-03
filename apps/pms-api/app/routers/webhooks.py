@@ -281,3 +281,44 @@ async def _handle_invoice_callback(data: dict):
 
     else:
         logger.debug("Xendit invoice status %s for %s", invoice_status, xendit_invoice_id)
+
+
+@router.post("/webhooks/channex")
+async def channex_webhook(request: Request):
+    """Handle Channex webhook events. Channex doesn't sign webhooks natively —
+    we register the webhook with a custom X-Vayada-Webhook-Token header set to
+    settings.CHANNEX_WEBHOOK_SECRET, and verify it here.
+
+    Phase 1 only handles the `message` event; other events return 200 to avoid
+    Channex retry loops while we expand coverage."""
+    if not settings.CHANNEX_WEBHOOK_SECRET:
+        logger.error("Channex webhook hit but CHANNEX_WEBHOOK_SECRET not configured")
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
+    token = request.headers.get("x-vayada-webhook-token", "")
+    if not hmac.compare_digest(token, settings.CHANNEX_WEBHOOK_SECRET):
+        logger.warning("Channex webhook auth failed (token mismatch)")
+        raise HTTPException(status_code=401, detail="Invalid webhook token")
+
+    import json
+    payload = await request.body()
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    event_type = event.get("event")
+    event_payload = event.get("payload") or {}
+
+    if event_type == "message":
+        from app.services.channex.messaging import process_inbound_message_event
+        try:
+            await process_inbound_message_event(event_payload, event)
+        except Exception as e:
+            logger.exception("Failed to process Channex message event: %s", e)
+            # Still 200 — Channex retries indefinitely otherwise; we'll catch
+            # missed messages with the safety-net poll.
+        return {"status": "ok"}
+
+    logger.debug("Ignoring Channex webhook event=%r", event_type)
+    return {"status": "ignored", "event": event_type}
