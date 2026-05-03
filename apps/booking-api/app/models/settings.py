@@ -20,6 +20,7 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "email_notifications": True,
     "new_booking_alerts": True,
     "payment_alerts": True,
+    "ota_booking_alerts": False,
     "weekly_reports": False,
     "refer_a_guest_enabled": False,
     "special_requests_enabled": True,
@@ -80,6 +81,7 @@ class PropertySettingsResponse(BaseModel):
     email_notifications: bool
     new_booking_alerts: bool
     payment_alerts: bool
+    ota_booking_alerts: bool
     weekly_reports: bool
     refer_a_guest_enabled: bool
     special_requests_enabled: bool
@@ -139,6 +141,7 @@ class PropertySettingsUpdate(BaseModel):
     email_notifications: Optional[bool] = None
     new_booking_alerts: Optional[bool] = None
     payment_alerts: Optional[bool] = None
+    ota_booking_alerts: Optional[bool] = None
     weekly_reports: Optional[bool] = None
     refer_a_guest_enabled: Optional[bool] = None
     special_requests_enabled: Optional[bool] = None
