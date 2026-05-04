@@ -8,6 +8,7 @@ export interface MarketplaceListing {
   hotel_profile_id: string
   hotel_name: string
   hotel_picture: string | null
+  owner_email: string | null
   name: string
   location: string
   description: string
