@@ -7,7 +7,7 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: '€',
   USD: '$',
   GBP: '£',
-  IDR: 'Rp',
+  IDR: 'IDR ',
 }
 
 export function currencySymbol(currencyCode: string): string {
