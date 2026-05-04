@@ -105,6 +105,7 @@ async def get_all_listings():
                 hotel_profile_id=str(listing['hotel_profile_id']),
                 hotel_name=listing['hotel_name'],
                 hotel_picture=listing['hotel_picture'],
+                owner_email=listing.get('owner_email'),
                 name=listing['name'],
                 location=listing['location'],
                 description=listing['description'],

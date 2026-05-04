@@ -21,6 +21,7 @@ class ListingMarketplaceResponse(BaseModel):
     hotelProfileId: str = Field(alias="hotel_profile_id")
     hotelName: str = Field(alias="hotel_name")
     hotelPicture: Optional[str] = Field(None, alias="hotel_picture")
+    ownerEmail: Optional[str] = Field(None, alias="owner_email")
     name: str
     location: str
     description: str
