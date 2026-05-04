@@ -222,6 +222,127 @@ class TestAdminRoomTypes:
             "Garden King (Copy) 2",
         }
 
+    async def test_rename_room_type_renames_auto_named_rooms(self, client, cleanup_database):
+        """VAY-322: when a room type is renamed, the auto-generated room
+        numbers ("Garden King 1", "Garden King 2", ...) must adopt the new
+        name so the calendar stops showing the stale prefix."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 3,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        room_type_id = create_resp.json()["id"]
+
+        rename_resp = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"name": "Garden Queen"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rename_resp.status_code == 200
+        assert rename_resp.json()["name"] == "Garden Queen"
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rooms_resp.status_code == 200
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert len(rooms) == 3
+        assert {r["roomNumber"] for r in rooms} == {
+            "Garden Queen 1",
+            "Garden Queen 2",
+            "Garden Queen 3",
+        }
+
+    async def test_rename_room_type_preserves_manually_named_rooms(self, client, cleanup_database):
+        """VAY-322: rooms whose numbers don't follow the auto pattern (e.g.
+        the user renamed one to "101") must NOT be rewritten on rename."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 2,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        room_to_rename = next(
+            r for r in rooms_resp.json()
+            if r["roomTypeId"] == room_type_id and r["roomNumber"] == "Garden King 1"
+        )
+        manual_rename = await client.patch(
+            f"/admin/rooms/{room_to_rename['id']}",
+            json={"roomNumber": "Penthouse"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert manual_rename.status_code == 200
+
+        rename_resp = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"name": "Garden Queen"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rename_resp.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {"Penthouse", "Garden Queen 2"}
+
+    async def test_update_room_type_without_name_change_keeps_room_numbers(self, client, cleanup_database):
+        """A PATCH that doesn't include a name change must not touch the
+        room_number column."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 2,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        room_type_id = create_resp.json()["id"]
+
+        rate_only = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"baseRate": 200.0},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rate_only.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {"Garden King 1", "Garden King 2"}
+
     async def test_get_room_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
