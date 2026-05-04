@@ -79,7 +79,7 @@ export const createEmptyRoom = (): RoomType => ({
   category: '',
   baseRate: '',
   nonRefundableRate: '',
-  nonRefundableDiscount: 10,
+  nonRefundableDiscount: 5,
   flexibleRateEnabled: true,
   flexibleCancellationType: 'free',
   partialRefundCancelWindowDays: 30,
