@@ -8,7 +8,7 @@ export function cn(...inputs: ClassValue[]) {
 export function getCurrencySymbol(currency: string): string {
   const symbols: Record<string, string> = {
     USD: '$', EUR: '\u20AC', GBP: '\u00A3', JPY: '\u00A5', CNY: '\u00A5',
-    KRW: '\u20A9', INR: '\u20B9', THB: '\u0E3F', IDR: 'Rp', MYR: 'RM',
+    KRW: '\u20A9', INR: '\u20B9', THB: '\u0E3F', IDR: 'IDR ', MYR: 'RM',
     PHP: '\u20B1', VND: '\u20AB', SGD: 'S$', AUD: 'A$', NZD: 'NZ$',
     CAD: 'C$', CHF: 'CHF', SEK: 'kr', NOK: 'kr', DKK: 'kr',
     HKD: 'HK$', TWD: 'NT$', ZAR: 'R', BRL: 'R$', MXN: 'MX$',
