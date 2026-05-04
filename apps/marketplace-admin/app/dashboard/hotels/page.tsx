@@ -26,24 +26,38 @@ export default function HotelsPage() {
   const router = useRouter()
   const [hotels, setHotels] = useState<HotelRow[]>([])
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [settingUp, setSettingUp] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
-    loadHotels()
-  }, [])
+    const timer = setTimeout(() => setDebouncedSearch(search), 400)
+    return () => clearTimeout(timer)
+  }, [search])
 
-  const loadHotels = async () => {
+  useEffect(() => {
+    loadHotels(debouncedSearch)
+  }, [debouncedSearch])
+
+  const loadHotels = async (searchTerm: string) => {
     try {
       setLoading(true)
       setError('')
 
+      const marketplaceParams: {
+        type: 'hotel'
+        page: number
+        page_size: number
+        search?: string
+      } = { type: 'hotel', page: 1, page_size: 100 }
+      if (searchTerm) marketplaceParams.search = searchTerm
+
       // Fetch both sources in parallel
       const [bookingHotels, marketplaceRes] = await Promise.all([
         bookingSettingsService.listAllHotels().catch(() => [] as SuperAdminHotel[]),
-        usersService.getAllUsers({ type: 'hotel', page: 1, page_size: 100 }),
+        usersService.getAllUsers(marketplaceParams),
       ])
 
       // Build a set of marketplace user emails that already have a booking hotel
