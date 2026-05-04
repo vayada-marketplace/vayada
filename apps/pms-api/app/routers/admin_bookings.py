@@ -12,7 +12,7 @@ from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.payout_repo import PayoutRepository
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign
+from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign, BookingRoomSwap
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
@@ -361,6 +361,164 @@ async def move_booking_to_room(
             str(booking["room_type_id"]),
             start_date=booking["check_in"],
             end_date=booking["check_out"],
+        )
+    )
+
+    updated = await BookingRepository.get_by_id(booking_id)
+    return _booking_to_admin(updated)
+
+
+@router.patch("/bookings/{booking_id}/swap-room", response_model=BookingAdminResponse)
+async def swap_booking_rooms(
+    booking_id: str,
+    data: BookingRoomSwap,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Swap room assignments between two reservations.
+
+    Two-way swap: source booking takes partner's current room and vice versa.
+    Unassigned-source case: source takes partner's room and partner moves to a
+    free room provided in `partner_destination_room_id`. Both updates happen
+    atomically in one SQL statement so the swap can never half-apply.
+    """
+    if data.partner_booking_id == booking_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot swap a booking with itself",
+        )
+
+    hotel_id = await get_hotel_id(user_id)
+
+    source = await BookingRepository.get_by_id(booking_id)
+    if not source or str(source["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    partner = await BookingRepository.get_by_id(data.partner_booking_id)
+    if not partner or str(partner["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Partner booking not found")
+
+    # Both bookings must be in a swappable status. Cancelled is excluded
+    # outright; checked-in/checked-out are deferred to a future iteration.
+    SWAPPABLE_STATUSES = {"pending", "confirmed"}
+    for label, b in (("source", source), ("partner", partner)):
+        if b["status"] not in SWAPPABLE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label.capitalize()} booking is not in a swappable status",
+            )
+
+    # v1 only swaps within the same room type — the move-room endpoint
+    # already enforces this and rate-plan implications of cross-type moves
+    # are out of scope for this ticket.
+    if str(source["room_type_id"]) != str(partner["room_type_id"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Bookings must belong to the same room type to swap",
+        )
+
+    source_room_id = str(source["room_id"]) if source.get("room_id") else None
+    partner_room_id = str(partner["room_id"]) if partner.get("room_id") else None
+
+    if not partner_room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Partner booking has no room assigned — nothing to swap",
+        )
+
+    # Determine target room for each booking.
+    new_source_room_id = partner_room_id
+    if source_room_id:
+        # Standard 2-way swap: partner takes source's room.
+        new_partner_room_id = source_room_id
+        if data.partner_destination_room_id and data.partner_destination_room_id != source_room_id:
+            raise HTTPException(
+                status_code=400,
+                detail="partnerDestinationRoomId is only used when source is unassigned",
+            )
+    else:
+        # Unassigned source: partner must move to a free room provided by caller.
+        if not data.partner_destination_room_id:
+            raise HTTPException(
+                status_code=400,
+                detail="partnerDestinationRoomId is required when source booking is unassigned",
+            )
+        new_partner_room_id = data.partner_destination_room_id
+        # The free room must belong to this hotel and the same room type.
+        free_room = await RoomRepository.get_by_id(new_partner_room_id)
+        if not free_room or str(free_room["hotel_id"]) != hotel_id:
+            raise HTTPException(status_code=404, detail="Destination room not found")
+        if str(free_room["room_type_id"]) != str(partner["room_type_id"]):
+            raise HTTPException(
+                status_code=400,
+                detail="Destination room does not belong to the same room type",
+            )
+
+    if new_source_room_id == source_room_id and new_partner_room_id == partner_room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Swap is a no-op — bookings already in target rooms",
+        )
+
+    # Conflict check: after the swap, neither room may overlap any other booking.
+    # Both bookings are excluded from each room's check because they are the
+    # ones moving.
+    excluded = [booking_id, data.partner_booking_id]
+    source_room_ok = await BookingRepository.is_room_available_excluding(
+        new_source_room_id, source["check_in"], source["check_out"], excluded,
+    )
+    if not source_room_ok:
+        raise HTTPException(
+            status_code=409,
+            detail="Target room for source booking has a conflict",
+        )
+    partner_room_ok = await BookingRepository.is_room_available_excluding(
+        new_partner_room_id, partner["check_in"], partner["check_out"], excluded,
+    )
+    if not partner_room_ok:
+        raise HTTPException(
+            status_code=409,
+            detail="Target room for partner booking has a conflict",
+        )
+
+    # Atomic two-row update.
+    await BookingRepository.swap_room_assignments(
+        booking_id, new_source_room_id,
+        data.partner_booking_id, new_partner_room_id,
+    )
+
+    # Audit: one event per booking, each pointing at the other.
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="room_swapped",
+        payload={
+            "from_room_id": source_room_id,
+            "to_room_id": new_source_room_id,
+            "paired_booking_id": data.partner_booking_id,
+        },
+        actor_user_id=user_id,
+    )
+    await BookingEventRepository.record(
+        booking_id=data.partner_booking_id,
+        hotel_id=hotel_id,
+        event_type="room_swapped",
+        payload={
+            "from_room_id": partner_room_id,
+            "to_room_id": new_partner_room_id,
+            "paired_booking_id": booking_id,
+        },
+        actor_user_id=user_id,
+    )
+
+    # Push availability for the affected room type. Same room type for both
+    # bookings (enforced above), and Channex tracks availability per type, so
+    # one push covering the union of both date ranges is sufficient.
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id,
+            str(source["room_type_id"]),
+            start_date=min(source["check_in"], partner["check_in"]),
+            end_date=max(source["check_out"], partner["check_out"]),
         )
     )
 

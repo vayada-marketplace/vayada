@@ -178,6 +178,15 @@ class BookingRoomAssign(BaseModel):
     room_id: str
 
 
+class BookingRoomSwap(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    partner_booking_id: str
+    # Optional: only used when the source booking is unassigned. The partner
+    # then moves to this free room while the source takes the partner's room.
+    partner_destination_room_id: Optional[str] = None
+
+
 class BookingLookup(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
