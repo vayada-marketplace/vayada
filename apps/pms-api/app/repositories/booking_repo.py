@@ -409,6 +409,55 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def list_for_currency_conversion(hotel_id: str) -> List[dict]:
+        """Minimal projection used when re-denominating bookings on a
+        hotel currency change (VAY-335). Cancelled rows are still
+        included so the per-row currency stays consistent with the
+        hotel's display currency."""
+        rows = await Database.fetch(
+            """
+            SELECT id, total_amount, nightly_rate, addon_total,
+                   promo_discount, last_minute_discount_amount, currency
+            FROM bookings
+            WHERE hotel_id = $1
+            """,
+            hotel_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def update_amounts_and_currency(
+        booking_id: str,
+        *,
+        total_amount: float,
+        nightly_rate: float,
+        addon_total: float,
+        promo_discount: float,
+        last_minute_discount_amount: float,
+        currency: str,
+    ) -> None:
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET total_amount = $2,
+                nightly_rate = $3,
+                addon_total = $4,
+                promo_discount = $5,
+                last_minute_discount_amount = $6,
+                currency = $7,
+                updated_at = now()
+            WHERE id = $1
+            """,
+            booking_id,
+            total_amount,
+            nightly_rate,
+            addon_total,
+            promo_discount,
+            last_minute_discount_amount,
+            currency,
+        )
+
+    @staticmethod
     async def list_expired_pending(before_date) -> List[dict]:
         """Find bookings where host response deadline has passed."""
         rows = await Database.fetch(

@@ -835,6 +835,123 @@ class TestPaymentSettingsAdmin:
         resp = await client.get("/admin/payment-settings")
         assert resp.status_code == 401
 
+    async def test_currency_change_converts_historical_bookings(self, client, cleanup_database):
+        """VAY-335: changing the hotel display currency must re-denominate
+        bookings (and their payments), not just relabel them. A USD booking
+        of 145 must become ~Rp 2_320_000 — not Rp 145 — after switching to IDR.
+        """
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+
+        # Seed: USD booking with a captured payment.
+        await Database.execute(
+            """
+            INSERT INTO bookings (
+                hotel_id, room_type_id, booking_reference,
+                guest_first_name, guest_last_name, guest_email, guest_phone,
+                special_requests, check_in, check_out,
+                adults, children, nightly_rate, total_amount, currency, status,
+                addon_total, promo_discount, last_minute_discount_amount
+            ) VALUES (
+                $1, $2, 'VAY-USD145',
+                'Alice', 'Tester', 'alice@test.com', '+1',
+                '', '2026-06-01', '2026-06-02',
+                1, 0, 145.00, 145.00, 'USD', 'confirmed',
+                0, 0, 0
+            )
+            """,
+            str(hotel["id"]), str(room["id"]),
+        )
+        booking_id = await Database.fetchval(
+            "SELECT id FROM bookings WHERE booking_reference = 'VAY-USD145'"
+        )
+        await Database.execute(
+            """
+            INSERT INTO payments (booking_id, amount, currency, payment_method, status)
+            VALUES ($1, 145.00, 'USD', 'card', 'captured')
+            """,
+            booking_id,
+        )
+
+        # Patch the booking-engine currency lookup (USD before the change)
+        # and the FX call so the test stays hermetic.
+        with patch(
+            "app.routers.admin_payments._get_booking_engine_currency",
+            new=AsyncMock(return_value="USD"),
+        ), patch(
+            "app.routers.admin_payments.get_exchange_rate",
+            new=AsyncMock(return_value=16000.0),
+        ):
+            resp = await client.patch(
+                "/admin/payment-settings",
+                headers=get_auth_headers(user["token"]),
+                json={"defaultCurrency": "IDR"},
+            )
+
+        assert resp.status_code == 200, resp.text
+
+        bk_row = await Database.fetchrow(
+            "SELECT total_amount, nightly_rate, currency FROM bookings WHERE id = $1",
+            booking_id,
+        )
+        # IDR uses 0 decimals — 145 * 16000 = 2,320,000 (no fractional Rp).
+        assert bk_row["currency"] == "IDR"
+        assert float(bk_row["total_amount"]) == 2_320_000.0
+        assert float(bk_row["nightly_rate"]) == 2_320_000.0
+
+        pmt_row = await Database.fetchrow(
+            "SELECT amount, currency FROM payments WHERE booking_id = $1",
+            booking_id,
+        )
+        assert pmt_row["currency"] == "IDR"
+        assert float(pmt_row["amount"]) == 2_320_000.0
+
+    async def test_currency_change_skips_bookings_already_in_target(self, client, cleanup_database):
+        """A booking whose currency already matches the new one is left
+        untouched — no FX math, no spurious updates."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+
+        await Database.execute(
+            """
+            INSERT INTO bookings (
+                hotel_id, room_type_id, booking_reference,
+                guest_first_name, guest_last_name, guest_email, guest_phone,
+                special_requests, check_in, check_out,
+                adults, children, nightly_rate, total_amount, currency, status
+            ) VALUES (
+                $1, $2, 'VAY-IDRSKIP',
+                'Bob', 'Local', 'bob@test.com', '+1',
+                '', '2026-06-01', '2026-06-02',
+                1, 0, 1500000.00, 1500000.00, 'IDR', 'confirmed'
+            )
+            """,
+            str(hotel["id"]), str(room["id"]),
+        )
+
+        with patch(
+            "app.routers.admin_payments._get_booking_engine_currency",
+            new=AsyncMock(return_value="USD"),
+        ), patch(
+            "app.routers.admin_payments.get_exchange_rate",
+            new=AsyncMock(return_value=16000.0),
+        ):
+            resp = await client.patch(
+                "/admin/payment-settings",
+                headers=get_auth_headers(user["token"]),
+                json={"defaultCurrency": "IDR"},
+            )
+
+        assert resp.status_code == 200, resp.text
+        bk_row = await Database.fetchrow(
+            "SELECT total_amount, currency FROM bookings WHERE booking_reference = 'VAY-IDRSKIP'"
+        )
+        # Untouched: same amount, same currency — not re-multiplied by 16000.
+        assert bk_row["currency"] == "IDR"
+        assert float(bk_row["total_amount"]) == 1_500_000.0
+
 
 # ── Cancellation Policy (Admin) ──────────────────────────────────
 

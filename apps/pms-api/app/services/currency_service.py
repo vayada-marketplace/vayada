@@ -58,6 +58,15 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
         raise ValueError(f"All exchange rate APIs failed for {from_currency} -> {to_currency}")
 
 
+ZERO_DECIMAL_CURRENCIES = frozenset({
+    "IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF",
+})
+
+
+def decimals_for_currency(currency: str) -> int:
+    return 0 if currency in ZERO_DECIMAL_CURRENCIES else 2
+
+
 def convert_amount(amount: float, rate: float, decimals: int = 2) -> float:
     """Convert an amount using the given exchange rate."""
     return round(amount * rate, decimals)
