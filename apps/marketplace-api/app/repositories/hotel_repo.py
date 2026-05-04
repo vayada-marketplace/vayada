@@ -320,10 +320,9 @@ class HotelRepository:
                 hl.created_at,
                 hp.name as hotel_name,
                 hp.picture as hotel_picture,
-                u.email as owner_email
+                hp.user_id as user_id
             FROM hotel_listings hl
             JOIN hotel_profiles hp ON hp.id = hl.hotel_profile_id
-            JOIN users u ON u.id = hp.user_id
             WHERE hp.profile_complete = true
             AND hp.user_id = ANY($1::uuid[])
             ORDER BY hl.created_at DESC

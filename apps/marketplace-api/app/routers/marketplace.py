@@ -30,9 +30,11 @@ async def get_all_listings():
     Includes hotel information, listing details, and collaboration offerings.
     """
     try:
-        # Pre-fetch verified user IDs
-        verified_users = await UserRepository.get_verified_users()
+        # Pre-fetch verified users (id + email) — users live in AuthDatabase, so we
+        # can't JOIN them in the listings query and must merge in Python.
+        verified_users = await UserRepository.get_verified_users(columns="id, email")
         verified_ids = [r['id'] for r in verified_users]
+        emails_by_user_id = {str(u['id']): u['email'] for u in verified_users}
 
         if not verified_ids:
             return []
@@ -105,7 +107,7 @@ async def get_all_listings():
                 hotel_profile_id=str(listing['hotel_profile_id']),
                 hotel_name=listing['hotel_name'],
                 hotel_picture=listing['hotel_picture'],
-                owner_email=listing.get('owner_email'),
+                owner_email=emails_by_user_id.get(str(listing['user_id'])),
                 name=listing['name'],
                 location=listing['location'],
                 description=listing['description'],
