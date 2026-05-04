@@ -22,9 +22,12 @@ interface CalendarRoom {
 interface CalendarBookingLite {
   id: string
   roomId: string | null
+  roomTypeId?: string
   checkIn: string
   checkOut: string
   status: string
+  guestFirstName?: string
+  guestLastName?: string
 }
 
 interface BookingDetailModalProps {
@@ -35,7 +38,18 @@ interface BookingDetailModalProps {
   bookings?: CalendarBookingLite[]
 }
 
-type View = 'detail' | 'roomPicker' | 'moveSuccess'
+type View = 'detail' | 'roomPicker' | 'swapConfirm' | 'moveSuccess'
+
+interface SwapPlan {
+  partnerBookingId: string
+  partnerBookingLabel: string
+  partnerCheckIn: string
+  partnerCheckOut: string
+  partnerCurrentRoomId: string
+  partnerDestinationRoomId: string
+  // Room the *source* booking ends up in (always partner's current room).
+  sourceDestinationRoomId: string
+}
 
 const datesOverlap = (
   aStart: string,
@@ -61,6 +75,7 @@ export default function BookingDetailModal({
   const [saving, setSaving] = useState(false)
   const [view, setView] = useState<View>('detail')
   const [pickerSelectedRoomId, setPickerSelectedRoomId] = useState<string>('')
+  const [pendingSwap, setPendingSwap] = useState<SwapPlan | null>(null)
   const [movingRoom, setMovingRoom] = useState(false)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [movedToRoomNumber, setMovedToRoomNumber] = useState<string>('')
@@ -145,21 +160,79 @@ export default function BookingDetailModal({
     : []
 
   // Candidate rooms for the "Move to another room" picker: same room type,
-  // not the current room. Each is annotated with availability for the
-  // booking's exact dates, computed from already-loaded calendar bookings
-  // (excluding the booking being moved). The backend re-validates on submit.
-  const moveCandidates = booking
+  // not the current room. Each is annotated with one of three states:
+  //   - available  → fully free for the booking's dates → simple move
+  //   - swap       → occupied, but a swap with the occupier resolves cleanly
+  //                 (backend will atomically exchange the two assignments)
+  //   - blocked    → occupied with no swap path → disabled
+  // All availability/swap math is computed locally from the already-loaded
+  // calendar bookings; the backend re-validates on submit.
+  type Candidate =
+    | { room: typeof rooms[number]; kind: 'available' }
+    | {
+        room: typeof rooms[number]
+        kind: 'swap'
+        partner: CalendarBookingLite
+        partnerDestinationRoomId: string
+      }
+    | { room: typeof rooms[number]; kind: 'blocked' }
+
+  const candidates: Candidate[] = booking
     ? rooms
         .filter((r) => r.roomTypeId === booking.roomTypeId && r.id !== booking.roomId)
-        .map((r) => {
-          const isAvailable = !bookings.some(
+        .map((r): Candidate => {
+          const occupier = bookings.find(
             (b) =>
               b.id !== booking.id &&
               b.roomId === r.id &&
               b.status !== 'cancelled' &&
               datesOverlap(booking.checkIn, booking.checkOut, b.checkIn, b.checkOut),
           )
-          return { room: r, isAvailable }
+          if (!occupier) return { room: r, kind: 'available' }
+          // Swap eligibility:
+          //  • Source assigned: occupier moves into source's room. Verify
+          //    occupier's dates fit there (no other conflict).
+          //  • Source unassigned: occupier needs a different free same-type
+          //    room. Find one that is free for occupier's dates.
+          if (booking.roomId) {
+            const sourceRoomId = booking.roomId
+            const conflictInSourceRoom = bookings.some(
+              (b) =>
+                b.id !== booking.id &&
+                b.id !== occupier.id &&
+                b.roomId === sourceRoomId &&
+                b.status !== 'cancelled' &&
+                datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
+            )
+            if (conflictInSourceRoom) return { room: r, kind: 'blocked' }
+            return {
+              room: r,
+              kind: 'swap',
+              partner: occupier,
+              partnerDestinationRoomId: sourceRoomId,
+            }
+          } else {
+            const freeForOccupier = rooms.find(
+              (rr) =>
+                rr.roomTypeId === booking.roomTypeId &&
+                rr.id !== r.id &&
+                !bookings.some(
+                  (b) =>
+                    b.id !== booking.id &&
+                    b.id !== occupier.id &&
+                    b.roomId === rr.id &&
+                    b.status !== 'cancelled' &&
+                    datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
+                ),
+            )
+            if (!freeForOccupier) return { room: r, kind: 'blocked' }
+            return {
+              room: r,
+              kind: 'swap',
+              partner: occupier,
+              partnerDestinationRoomId: freeForOccupier.id,
+            }
+          }
         })
     : []
 
@@ -167,10 +240,39 @@ export default function BookingDetailModal({
     ? rooms.find((r) => r.id === booking.roomId) || null
     : null
 
+  const partnerLabel = (p: CalendarBookingLite): string => {
+    const name = `${p.guestFirstName ?? ''} ${p.guestLastName ?? ''}`.trim()
+    return name || 'occupied'
+  }
+
   const enterRoomPicker = () => {
     setMoveError(null)
     setPickerSelectedRoomId('')
+    setPendingSwap(null)
     setView('roomPicker')
+  }
+
+  const selectedCandidate = pickerSelectedRoomId
+    ? candidates.find((c) => c.room.id === pickerSelectedRoomId) ?? null
+    : null
+
+  const handlePickerContinue = () => {
+    if (!booking || !selectedCandidate) return
+    if (selectedCandidate.kind === 'swap') {
+      setPendingSwap({
+        partnerBookingId: selectedCandidate.partner.id,
+        partnerBookingLabel: partnerLabel(selectedCandidate.partner),
+        partnerCheckIn: selectedCandidate.partner.checkIn,
+        partnerCheckOut: selectedCandidate.partner.checkOut,
+        partnerCurrentRoomId: selectedCandidate.room.id,
+        partnerDestinationRoomId: selectedCandidate.partnerDestinationRoomId,
+        sourceDestinationRoomId: selectedCandidate.room.id,
+      })
+      setMoveError(null)
+      setView('swapConfirm')
+      return
+    }
+    void handleConfirmMove()
   }
 
   const handleConfirmMove = async () => {
@@ -196,6 +298,40 @@ export default function BookingDetailModal({
         err?.message ||
         'Failed to move booking'
       setMoveError(typeof detail === 'string' ? detail : 'Failed to move booking')
+    } finally {
+      setMovingRoom(false)
+    }
+  }
+
+  const handleConfirmSwap = async () => {
+    if (!booking || !pendingSwap) return
+    setMoveError(null)
+    setMovingRoom(true)
+    try {
+      // partnerDestinationRoomId is only meaningful when source is unassigned.
+      // For the standard 2-way swap (source has a room) the backend infers it.
+      const partnerDest = booking.roomId ? undefined : pendingSwap.partnerDestinationRoomId
+      const updated = await bookingsService.swapRoom(
+        bookingId,
+        pendingSwap.partnerBookingId,
+        partnerDest,
+      )
+      const target = rooms.find((r) => r.id === pendingSwap.sourceDestinationRoomId)
+      setMovedToRoomNumber(target?.roomNumber || updated.roomNumber || '')
+      setBooking(updated)
+      setView('moveSuccess')
+      onStatusChange()
+      window.setTimeout(() => {
+        setView((v) => (v === 'moveSuccess' ? 'detail' : v))
+      }, 1200)
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.detail ||
+        err?.data?.detail ||
+        err?.message ||
+        'Failed to swap rooms'
+      setMoveError(typeof detail === 'string' ? detail : 'Failed to swap rooms')
+      setView('swapConfirm')
     } finally {
       setMovingRoom(false)
     }
@@ -238,7 +374,9 @@ export default function BookingDetailModal({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <h2 className="text-lg font-bold text-gray-900">Move to another room</h2>
+              <h2 className="text-lg font-bold text-gray-900">
+                {booking.roomId ? 'Move to another room' : 'Assign room'}
+              </h2>
             </div>
             <p className="text-sm text-gray-500 mb-4 ml-8">
               {booking.guestFirstName} {booking.guestLastName} &middot;{' '}
@@ -265,50 +403,68 @@ export default function BookingDetailModal({
               </div>
             )}
 
-            {moveCandidates.length === 0 ? (
+            {candidates.length === 0 ? (
               <div className="py-8 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-lg">
                 No other rooms of this type available.
               </div>
             ) : (
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
-                {moveCandidates.map(({ room, isAvailable }) => {
+                {candidates.map((cand) => {
+                  const { room, kind } = cand
                   const isSelected = pickerSelectedRoomId === room.id
+                  const enabled = kind !== 'blocked'
+                  const dotColor =
+                    kind === 'available'
+                      ? 'bg-green-500'
+                      : kind === 'swap'
+                      ? 'bg-amber-500'
+                      : 'bg-gray-300'
+                  const badgeText =
+                    kind === 'available'
+                      ? 'Available'
+                      : kind === 'swap'
+                      ? 'Swap'
+                      : 'Unavailable'
+                  const badgeStyle =
+                    kind === 'available'
+                      ? 'text-green-700'
+                      : kind === 'swap'
+                      ? 'text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide'
+                      : 'text-gray-400'
                   return (
                     <button
                       key={room.id}
                       type="button"
-                      disabled={!isAvailable}
-                      onClick={() => isAvailable && setPickerSelectedRoomId(room.id)}
+                      disabled={!enabled}
+                      onClick={() => enabled && setPickerSelectedRoomId(room.id)}
                       className={`w-full flex items-center justify-between px-3 py-2.5 border rounded-lg transition-colors text-left ${
                         isSelected
                           ? 'bg-primary-50 border-primary-400'
-                          : isAvailable
+                          : enabled
                           ? 'bg-white border-gray-200 hover:bg-gray-50'
                           : 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                            isAvailable ? 'bg-green-500' : 'bg-gray-300'
-                          }`}
-                        />
-                        <span className={`text-sm font-medium truncate ${isAvailable ? 'text-gray-900' : 'text-gray-500'}`}>
-                          #{room.roomNumber}
-                          {room.floor ? ` (Floor ${room.floor})` : ''}
-                        </span>
-                        <span className="text-xs text-gray-400 truncate">
-                          &middot; {room.roomTypeName}
-                        </span>
+                      <div className="flex flex-col min-w-0 gap-0.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
+                          <span className={`text-sm font-medium truncate ${enabled ? 'text-gray-900' : 'text-gray-500'}`}>
+                            #{room.roomNumber}
+                            {room.floor ? ` (Floor ${room.floor})` : ''}
+                          </span>
+                          <span className="text-xs text-gray-400 truncate">
+                            &middot; {room.roomTypeName}
+                          </span>
+                        </div>
+                        {kind === 'swap' && (
+                          <span className="text-[11px] text-gray-500 ml-4 truncate">
+                            Currently {partnerLabel(cand.partner)} &middot;{' '}
+                            {cand.partner.checkIn} &rarr; {cand.partner.checkOut}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span
-                          className={`text-xs ${
-                            isAvailable ? 'text-green-700' : 'text-gray-400'
-                          }`}
-                        >
-                          {isAvailable ? 'Available' : 'Unavailable'}
-                        </span>
+                        <span className={`text-xs ${badgeStyle}`}>{badgeText}</span>
                         {isSelected && (
                           <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
@@ -329,21 +485,110 @@ export default function BookingDetailModal({
 
             <div className="mt-5 pt-4 border-t border-gray-200">
               <button
-                onClick={handleConfirmMove}
-                disabled={!pickerSelectedRoomId || movingRoom}
+                onClick={handlePickerContinue}
+                disabled={!selectedCandidate || movingRoom}
                 className="w-full px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {movingRoom
                   ? 'Moving...'
-                  : pickerSelectedRoomId
-                  ? `Move to #${
-                      rooms.find((r) => r.id === pickerSelectedRoomId)?.roomNumber || ''
-                    }`
-                  : 'Select a room to continue'}
+                  : !selectedCandidate
+                  ? 'Select a room to continue'
+                  : selectedCandidate.kind === 'swap'
+                  ? `Review swap with ${partnerLabel(selectedCandidate.partner)}`
+                  : `Move to #${selectedCandidate.room.roomNumber || ''}`}
               </button>
               <p className="mt-2 text-xs text-gray-500 text-center">
                 The original confirmation number and payment record are preserved.
               </p>
+            </div>
+          </div>
+        ) : view === 'swapConfirm' && pendingSwap ? (
+          /* ── SWAP CONFIRM ── */
+          <div className="p-6">
+            <div className="flex items-center gap-3 mb-1">
+              <button
+                onClick={() => setView('roomPicker')}
+                aria-label="Back"
+                className="text-gray-500 hover:text-gray-800 -ml-1 p-1 rounded hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <h2 className="text-lg font-bold text-gray-900">Confirm room swap</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-4 ml-8">
+              Both bookings keep their confirmation numbers, payment records, and guest history.
+            </p>
+
+            {(() => {
+              const sourceFromRoom = currentRoom
+              const sourceToRoom = rooms.find((r) => r.id === pendingSwap.sourceDestinationRoomId) || null
+              const partnerFromRoom = rooms.find((r) => r.id === pendingSwap.partnerCurrentRoomId) || null
+              const partnerToRoom = rooms.find((r) => r.id === pendingSwap.partnerDestinationRoomId) || null
+              const Card = ({
+                title, dates, fromRoom, toRoom,
+              }: {
+                title: string
+                dates: string
+                fromRoom: typeof rooms[number] | null
+                toRoom: typeof rooms[number] | null
+              }) => (
+                <div className="border border-gray-200 rounded-lg p-3">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{title}</p>
+                  <p className="text-xs text-gray-500 mb-2">{dates}</p>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-600">
+                      {fromRoom ? `#${fromRoom.roomNumber}` : 'Unassigned'}
+                    </span>
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                    <span className="font-semibold text-gray-900">
+                      {toRoom ? `#${toRoom.roomNumber}` : '—'}
+                    </span>
+                  </div>
+                </div>
+              )
+              return (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <Card
+                    title={`${booking.guestFirstName} ${booking.guestLastName}`}
+                    dates={`${booking.checkIn} → ${booking.checkOut}`}
+                    fromRoom={sourceFromRoom}
+                    toRoom={sourceToRoom}
+                  />
+                  <Card
+                    title={pendingSwap.partnerBookingLabel}
+                    dates={`${pendingSwap.partnerCheckIn} → ${pendingSwap.partnerCheckOut}`}
+                    fromRoom={partnerFromRoom}
+                    toRoom={partnerToRoom}
+                  />
+                </div>
+              )
+            })()}
+
+            {moveError && (
+              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {moveError}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-5 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => setView('roomPicker')}
+                disabled={movingRoom}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleConfirmSwap}
+                disabled={movingRoom}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {movingRoom ? 'Swapping…' : 'Confirm swap'}
+              </button>
             </div>
           </div>
         ) : view === 'moveSuccess' ? (
@@ -659,8 +904,10 @@ export default function BookingDetailModal({
               </div>
             ) : (
               <div className="pt-2 border-t border-gray-200 space-y-2">
-                {/* Move-to-another-room — visible for assigned, non-cancelled bookings */}
-                {booking.status !== 'cancelled' && booking.roomId && (
+                {/* Move-to-another-room — assigned bookings get the standard
+                    flow; unassigned bookings open the picker too so they can
+                    pick a free room or trigger a swap when none is free. */}
+                {booking.status !== 'cancelled' && (
                   <button
                     onClick={enterRoomPicker}
                     className="w-full px-4 py-2 text-sm font-medium text-primary-700 border border-primary-300 hover:bg-primary-50 rounded-lg transition-colors flex items-center justify-center gap-2"
@@ -668,7 +915,7 @@ export default function BookingDetailModal({
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
                     </svg>
-                    Move to another room
+                    {booking.roomId ? 'Move to another room' : 'Assign room'}
                   </button>
                 )}
                 {/* Edit button — always shown for non-cancelled bookings */}
