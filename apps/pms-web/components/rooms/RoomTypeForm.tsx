@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
-import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode } from '@/services/rooms'
+import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode, PartialRefundTier } from '@/services/rooms'
 import ImageUpload from '@/components/ImageUpload'
 import { getCurrencySymbol, CURRENCY_SYMBOLS, formatCurrency, formatCompactPrice } from '@/lib/utils'
 import { parseBookingAmenities } from '@/lib/parseBookingAmenities'
@@ -150,6 +150,147 @@ function sortSeasonsChronologically<T extends { from: string }>(arr: T[]): T[] {
   })
 }
 
+function PartialRefundTiersEditor({
+  tiers,
+  onChange,
+}: {
+  tiers: PartialRefundTier[]
+  onChange: (next: PartialRefundTier[]) => void
+}) {
+  const sorted = [...tiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+  const usedDays = new Set(sorted.map(t => t.minDaysBeforeCheckIn))
+
+  const updateTier = (idx: number, patch: Partial<PartialRefundTier>) => {
+    const next = sorted.map((t, i) => (i === idx ? { ...t, ...patch } : t))
+    next.sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+    onChange(next)
+  }
+
+  const removeTier = (idx: number) => {
+    onChange(sorted.filter((_, i) => i !== idx))
+  }
+
+  const addTier = () => {
+    if (sorted.length >= 10) return
+    const lowest = sorted.length > 0 ? sorted[sorted.length - 1].minDaysBeforeCheckIn : 30
+    let candidate = Math.max(0, lowest - 7)
+    while (usedDays.has(candidate) && candidate > 0) candidate -= 1
+    if (usedDays.has(candidate)) {
+      candidate = 0
+      while (usedDays.has(candidate) && candidate < 365) candidate += 1
+    }
+    onChange([...sorted, { minDaysBeforeCheckIn: candidate, refundPercent: 0 }]
+      .sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn))
+  }
+
+  const hasDuplicateDays = sorted.length !== new Set(sorted.map(t => t.minDaysBeforeCheckIn)).size
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Refund schedule</div>
+      <div className="text-[11px] text-gray-500 leading-relaxed">
+        Set how much guests get refunded based on how many days before check-in they cancel. The highest matching threshold is applied; cancellations below the lowest threshold are non-refundable.
+      </div>
+      <div className="space-y-1.5">
+        {sorted.map((tier, idx) => (
+          <div key={idx} className="flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-2.5 py-1.5">
+            <span className="text-[11px] text-gray-500 shrink-0">Cancel ≥</span>
+            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => updateTier(idx, { minDaysBeforeCheckIn: Math.max(0, tier.minDaysBeforeCheckIn - 1) })}
+                className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+              >&minus;</button>
+              <input
+                type="number"
+                min={0}
+                max={365}
+                value={tier.minDaysBeforeCheckIn}
+                onChange={(e) => updateTier(idx, { minDaysBeforeCheckIn: Math.max(0, Math.min(365, parseInt(e.target.value) || 0)) })}
+                className="w-[44px] px-1 py-1 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() => updateTier(idx, { minDaysBeforeCheckIn: Math.min(365, tier.minDaysBeforeCheckIn + 1) })}
+                className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+              >+</button>
+            </div>
+            <span className="text-[11px] text-gray-500 shrink-0">days before → refund</span>
+            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => updateTier(idx, { refundPercent: Math.max(0, tier.refundPercent - 5) })}
+                className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+              >&minus;</button>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={tier.refundPercent}
+                onChange={(e) => updateTier(idx, { refundPercent: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) })}
+                className="w-[44px] px-1 py-1 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() => updateTier(idx, { refundPercent: Math.min(100, tier.refundPercent + 5) })}
+                className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
+              >+</button>
+            </div>
+            <span className="text-[11px] text-gray-500 shrink-0">%</span>
+            <button
+              type="button"
+              onClick={() => removeTier(idx)}
+              className="ml-auto p-1 text-gray-400 hover:text-red-500 transition-colors"
+              aria-label="Remove tier"
+            >
+              <XMarkIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+        {sorted.length === 0 && (
+          <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
+            No tiers — every cancellation will be non-refundable. Add a tier to grant a refund.
+          </div>
+        )}
+      </div>
+      {hasDuplicateDays && (
+        <div className="text-[11px] text-amber-600">
+          Two tiers share the same days-before threshold; please change one of them.
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={addTier}
+          disabled={sorted.length >= 10}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-primary-600 hover:text-primary-700 disabled:text-gray-400 disabled:cursor-not-allowed"
+        >
+          <PlusIcon className="w-3.5 h-3.5" />
+          Add tier
+        </button>
+        {sorted.length >= 10 && (
+          <span className="text-[10px] text-gray-400">Max 10 tiers</span>
+        )}
+      </div>
+      {sorted.length > 0 && (
+        <div className="rounded-lg bg-primary-50/60 border border-primary-100 px-3 py-2 text-[11px] text-primary-700 leading-relaxed space-y-0.5">
+          <div className="font-semibold">Policy preview</div>
+          {sorted.map((t, i) => (
+            <div key={i}>
+              {i === 0
+                ? `≥ ${t.minDaysBeforeCheckIn} days before check-in: ${t.refundPercent}% refund`
+                : `${sorted[i - 1].minDaysBeforeCheckIn - 1}–${t.minDaysBeforeCheckIn} days: ${t.refundPercent}% refund`}
+            </div>
+          ))}
+          {sorted[sorted.length - 1].minDaysBeforeCheckIn > 0 && (
+            <div>{`< ${sorted[sorted.length - 1].minDaysBeforeCheckIn} days: non-refundable`}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PAYMENT_METHODS: { key: string; label: string; hint: string }[] = [
   { key: 'card', label: 'Card (online)', hint: 'Stripe — authorized at booking, captured on host approval' },
   { key: 'pay_at_property', label: 'Pay at property', hint: 'Guest pays on arrival — cash or terminal' },
@@ -294,6 +435,18 @@ export default function RoomTypeForm({
   const [flexibleCancellationType, setFlexibleCancellationType] = useState<'free' | 'partial_refund'>(form.flexibleCancellationType ?? 'free')
   const [partialRefundCancelWindowDays, setPartialRefundCancelWindowDays] = useState(form.partialRefundCancelWindowDays ?? 30)
   const [partialRefundAmountPercent, setPartialRefundAmountPercent] = useState(form.partialRefundAmountPercent ?? 50)
+  // Tiered partial-refund schedule (VAY-324). When non-empty this overrides
+  // the legacy single-tier (window/percent) pair on the server. We seed from
+  // the legacy values for rooms saved before the migration so the editor
+  // shows their current behavior as a one-tier list rather than empty state.
+  const [partialRefundTiers, setPartialRefundTiers] = useState<PartialRefundTier[]>(() => {
+    const initial = form.partialRefundTiers
+    if (initial && initial.length > 0) return [...initial].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+    return [{
+      minDaysBeforeCheckIn: form.partialRefundCancelWindowDays ?? 30,
+      refundPercent: form.partialRefundAmountPercent ?? 50,
+    }]
+  })
   const [nonRefundableEnabled, setNonRefundableEnabled] = useState(form.nonRefundableEnabled ?? false)
   const [nonRefundableDiscount, setNonRefundableDiscount] = useState(form.nonRefundableDiscount ?? 5)
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(form.nonRefundableCancellationPolicy || 'Non-refundable from booking')
@@ -359,6 +512,7 @@ export default function RoomTypeForm({
       flexibleCancellationType,
       partialRefundCancelWindowDays,
       partialRefundAmountPercent,
+      partialRefundTiers,
       nonRefundableEnabled,
       nonRefundableDiscount,
       nonRefundableCancellationPolicy,
@@ -366,7 +520,7 @@ export default function RoomTypeForm({
       dailyRates,
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, flexibleCancellationType, partialRefundCancelWindowDays, partialRefundAmountPercent, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, mealPlans, dailyRates])
+  }, [operatingPeriods, seasons, weekendSurcharge, cancellationPolicy, flexibleRateEnabled, flexibleCancellationType, partialRefundCancelWindowDays, partialRefundAmountPercent, partialRefundTiers, nonRefundableEnabled, nonRefundableDiscount, nonRefundableCancellationPolicy, mealPlans, dailyRates])
 
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     const updated = { ...form, ...updates }
@@ -1307,59 +1461,10 @@ export default function RoomTypeForm({
                         </div>
                       )}
                       {flexibleCancellationType === 'partial_refund' && (
-                        <div className="space-y-2.5">
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] text-gray-500 w-[110px]">Cancel window:</span>
-                            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => setPartialRefundCancelWindowDays(Math.max(1, partialRefundCancelWindowDays - 1))}
-                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                              >&minus;</button>
-                              <input
-                                type="number"
-                                min={1}
-                                max={365}
-                                value={partialRefundCancelWindowDays}
-                                onChange={(e) => setPartialRefundCancelWindowDays(Math.max(1, Math.min(365, parseInt(e.target.value) || 1)))}
-                                className="w-[50px] px-1 py-1.5 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setPartialRefundCancelWindowDays(Math.min(365, partialRefundCancelWindowDays + 1))}
-                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                              >+</button>
-                            </div>
-                            <span className="text-[11px] text-gray-500">days before check-in</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] text-gray-500 w-[110px]">Refund amount:</span>
-                            <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => setPartialRefundAmountPercent(Math.max(1, partialRefundAmountPercent - 1))}
-                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                              >&minus;</button>
-                              <input
-                                type="number"
-                                min={1}
-                                max={99}
-                                value={partialRefundAmountPercent}
-                                onChange={(e) => setPartialRefundAmountPercent(Math.max(1, Math.min(99, parseInt(e.target.value) || 1)))}
-                                className="w-[50px] px-1 py-1.5 text-[12px] font-semibold text-gray-900 text-center bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setPartialRefundAmountPercent(Math.min(99, partialRefundAmountPercent + 1))}
-                                className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 transition-colors text-[12px] font-medium"
-                              >+</button>
-                            </div>
-                            <span className="text-[11px] text-gray-500">% of booking total</span>
-                          </div>
-                          <div className="rounded-lg bg-primary-50/60 border border-primary-100 px-3 py-2 text-[11px] text-primary-700 leading-relaxed">
-                            Policy preview &mdash; Guests who cancel at least <span className="font-semibold">{partialRefundCancelWindowDays} days</span> before check-in receive a <span className="font-semibold">{partialRefundAmountPercent}% refund</span>. Cancellations after this point are non-refundable.
-                          </div>
-                        </div>
+                        <PartialRefundTiersEditor
+                          tiers={partialRefundTiers}
+                          onChange={setPartialRefundTiers}
+                        />
                       )}
                     </div>
                   )}
