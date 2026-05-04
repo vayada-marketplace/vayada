@@ -40,7 +40,6 @@ export interface CreatorRequirements {
   id: string
   listing_id: string
   platforms: string[]
-  min_followers: number | null
   target_countries: string[]
   target_age_min: number | null
   target_age_max: number | null
