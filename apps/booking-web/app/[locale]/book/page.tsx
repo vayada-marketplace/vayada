@@ -321,7 +321,7 @@ function BookPageContent() {
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t('phoneNumber')} <span className="text-red-500">*</span>
                     </label>
-                    <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500 overflow-hidden">
+                    <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500">
                       <CountryDialCodePicker
                         value={phoneCountryIso}
                         onChange={setPhoneCountryIso}

@@ -112,7 +112,7 @@ export default function CountryDialCodePicker({ value, onChange }: CountryDialCo
         aria-expanded={open}
         aria-controls={listboxId}
         aria-label={t('phoneCountryCode')}
-        className="w-full h-full px-3 py-3 bg-gray-50 border-r border-gray-300 text-left text-gray-900 focus:outline-none flex items-center justify-between gap-1"
+        className="w-full h-full px-3 py-3 rounded-l-lg bg-gray-50 border-r border-gray-300 text-left text-gray-900 focus:outline-none flex items-center justify-between gap-1"
       >
         <span className="truncate">{buttonLabel}</span>
         <svg
