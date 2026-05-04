@@ -99,18 +99,18 @@ class CollaborationOfferingRequest(BaseModel):
         """Validate type-specific fields are present"""
         if self.collaborationType == "Free Stay":
             if self.freeStayMinNights is None or self.freeStayMaxNights is None:
-                raise ValueError("free_stay_min_nights and free_stay_max_nights are required for Free Stay")
+                raise ValueError("Minimum and maximum number of nights are required for Free Stay collaborations.")
             if self.freeStayMaxNights < self.freeStayMinNights:
-                raise ValueError("free_stay_max_nights must be >= free_stay_min_nights")
+                raise ValueError("Maximum number of nights must be greater than or equal to the minimum.")
         elif self.collaborationType == "Paid":
             if self.paidMaxAmount is None:
-                raise ValueError("paid_max_amount is required for Paid collaboration")
+                raise ValueError("A maximum payment amount is required for Paid collaborations.")
         elif self.collaborationType == "Discount":
             if self.discountPercentage is None:
-                raise ValueError("discount_percentage is required for Discount collaboration")
+                raise ValueError("A discount percentage is required for Discount collaborations.")
         elif self.collaborationType == "Affiliate":
             if self.commissionPercentage is None:
-                raise ValueError("commission_percentage is required for Affiliate collaboration")
+                raise ValueError("A commission percentage is required for Affiliate collaborations.")
         return self
 
     model_config = ConfigDict(populate_by_name=True)
@@ -167,7 +167,7 @@ class CreatorRequirementsRequest(BaseModel):
 
         if self.targetAgeMin is not None and self.targetAgeMax is not None:
             if self.targetAgeMax < self.targetAgeMin:
-                raise ValueError("target_age_max must be >= target_age_min")
+                raise ValueError("Maximum target age must be greater than or equal to the minimum.")
         return self
 
     model_config = ConfigDict(populate_by_name=True)
