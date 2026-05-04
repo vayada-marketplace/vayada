@@ -126,6 +126,8 @@
     "phoneNumber": "Nomor Telepon",
     "phoneCountryCode": "Kode negara",
     "selectCountryCode": "Kode negara",
+    "searchCountryCode": "Cari negara atau kode",
+    "noCountriesFound": "Tidak ada negara ditemukan",
     "phoneLocalPlaceholder": "234 567 8900",
     "country": "Negara",
     "selectCountry": "Pilih negara",

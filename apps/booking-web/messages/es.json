@@ -126,6 +126,8 @@
     "phoneNumber": "Número de Teléfono",
     "phoneCountryCode": "Código de país",
     "selectCountryCode": "Código de país",
+    "searchCountryCode": "Buscar país o código",
+    "noCountriesFound": "No se encontraron países",
     "phoneLocalPlaceholder": "234 567 8900",
     "country": "País",
     "selectCountry": "Selecciona un país",
