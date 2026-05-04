@@ -2,7 +2,7 @@ import json
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from app.config import settings
 from app.channels import channel_label as _ota_channel_label  # re-exported for tests
@@ -27,17 +27,24 @@ STYLE = """
 """
 
 
-def _my_booking_url(booking: dict) -> str | None:
+def _my_booking_url(booking: dict, guest_email: str | None = None) -> str | None:
     slug = booking.get("hotel_slug")
     reference = booking.get("booking_reference")
     if not slug or not reference:
         return None
     parsed = urlparse(settings.BOOKING_ENGINE_URL)
-    return f"{parsed.scheme}://{slug}.{parsed.netloc}/booking/{reference}"
+    base = f"{parsed.scheme}://{slug}.{parsed.netloc}/booking/{reference}"
+    # Append the guest email so the confirmation page can hydrate booking
+    # details via the lookup endpoint when the guest opens the link on a
+    # different device than they booked from (sessionStorage is per-tab and
+    # otherwise leaves all fields blank).
+    if guest_email:
+        return f"{base}?email={quote(guest_email, safe='')}"
+    return base
 
 
-def _my_booking_button_html(booking: dict) -> str:
-    url = _my_booking_url(booking)
+def _my_booking_button_html(booking: dict, guest_email: str | None = None) -> str:
+    url = _my_booking_url(booking, guest_email)
     if not url:
         return ""
     return f"""
@@ -110,7 +117,7 @@ async def send_guest_confirmation(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">You can look up your booking anytime using your reference number and email address.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -124,7 +131,7 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">If you have any questions, please contact the hotel directly.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -186,7 +193,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">You will receive an email once the host responds. You can also check your booking status using your reference number.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -206,7 +213,7 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
     <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -228,7 +235,7 @@ async def send_guest_booking_rejected(guest_email: str, booking: dict, reason: s
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We encourage you to search for alternative dates or properties.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -247,7 +254,7 @@ async def send_guest_booking_expired(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We apologize for the inconvenience. Please try booking again or explore other properties.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -307,7 +314,7 @@ async def send_guest_cancellation_refund(
     <hr class="divider">
     <p class="detail">{refund_text}</p>
     <p class="detail">If you have any questions, please contact the hotel directly.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -329,7 +336,7 @@ async def send_guest_booking_withdrawn(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">If you change your mind, you're welcome to submit a new booking request anytime.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -368,7 +375,7 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
     <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
@@ -472,7 +479,7 @@ async def send_guest_payment_confirmed(
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">Thank you for your payment. You will receive a separate confirmation once the host reviews your booking.</p>
-    {_my_booking_button_html(booking)}
+    {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
