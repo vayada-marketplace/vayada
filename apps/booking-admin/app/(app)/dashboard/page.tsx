@@ -325,14 +325,14 @@ export default function DashboardPage() {
                       <span className="text-[11px] text-gray-500">{percentage}%</span>
                     </div>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-full h-8">
+                  <div className="w-full bg-gray-100 rounded-full h-8 overflow-hidden">
                     <div
                       className={`h-8 rounded-full transition-all ${
                         label === 'Completed booking' ? 'bg-primary-600' :
                         label === 'Started booking' ? 'bg-primary-500' :
                         'bg-green-200'
                       }`}
-                      style={{ width: `${Math.max(percentage, 1)}%` }}
+                      style={{ width: `${Math.min(Math.max(percentage, 1), 100)}%` }}
                     />
                   </div>
                 </div>
