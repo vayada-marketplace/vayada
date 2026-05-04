@@ -32,18 +32,43 @@ function formatCurrencyWithCode(value: number, currencyCode: string): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR', t?: (key: string) => string): { text: string; positive: boolean | null } {
+function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR', t?: (key: string) => string, vsLabel?: string): { text: string; positive: boolean | null } {
   const diff = current - previous
   if (diff === 0 && current === 0) return { text: t ? t('dashboard.stats.noDataYet') : 'No data yet', positive: null }
   if (diff === 0) return { text: t ? t('dashboard.stats.samePeriod') : 'Same as previous period', positive: null }
   const formatted = isCurrency ? formatCurrencyWithCode(Math.abs(diff), currencyCode) : Math.abs(diff).toString()
-  const vsPrevious = t ? t('dashboard.stats.vsPrevious') : 'vs previous'
+  const vsPrevious = vsLabel ?? (t ? t('dashboard.stats.vsPrevious') : 'vs previous')
   if (diff > 0) return { text: `\u2191 +${formatted} ${vsPrevious}`, positive: true }
   return { text: `\u2193 -${formatted} ${vsPrevious}`, positive: false }
 }
 
+// Mirrors DashboardRepository._sparkline_buckets in the backend so the modal's
+// bar labels match the bucket boundaries the API actually returned.
+function sparklineBuckets(range: TimeRange): { start: Date; end: Date }[] {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const dayMs = 24 * 60 * 60 * 1000
+  if (range === 'month') {
+    return Array.from({ length: 7 }, (_, i) => {
+      const start = new Date(today.getTime() - (27 - i * 4) * dayMs)
+      const end = i < 6 ? new Date(today.getTime() - (27 - (i + 1) * 4 + 1) * dayMs) : today
+      return { start, end }
+    })
+  }
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today.getTime() - (6 - i) * dayMs)
+    return { start: d, end: d }
+  })
+}
+
+function formatBucketLabel(bucket: { start: Date; end: Date }, locale: string): string {
+  const fmt = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' })
+  if (bucket.start.getTime() === bucket.end.getTime()) return fmt.format(bucket.start)
+  return `${fmt.format(bucket.start)}\u2013${fmt.format(bucket.end)}`
+}
+
 export default function DashboardPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [propertyName, setPropertyName] = useState('')
   const [timeRange, setTimeRange] = useState<TimeRange>('today')
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -52,6 +77,7 @@ export default function DashboardPage() {
   const [sparklines, setSparklines] = useState<Sparklines | null>(null)
   const [currency, setCurrency] = useState('EUR')
   const [loading, setLoading] = useState(true)
+  const [pageViewsModalOpen, setPageViewsModalOpen] = useState(false)
 
   useEffect(() => {
     settingsService.getPropertySettings().then((settings: PropertySettings) => {
@@ -123,10 +149,18 @@ export default function DashboardPage() {
     return 'text-sm md:text-base'
   }
 
-  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency, t) : null
-  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous, false, 'EUR', t) : null
-  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency, t) : null
-  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, false, 'EUR', t) : null
+  // The previous-period comparison was a vague "vs previous"; spell out
+  // the actual comparison window so hotel managers can read the delta.
+  const vsLabel = timeRange === 'today'
+    ? t('dashboard.stats.vsYesterday')
+    : timeRange === 'week'
+    ? t('dashboard.stats.vsLastWeek')
+    : t('dashboard.stats.vsLast30Days')
+
+  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency, t, vsLabel) : null
+  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous, false, 'EUR', t, vsLabel) : null
+  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency, t, vsLabel) : null
+  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, false, 'EUR', t, vsLabel) : null
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-5 md:space-y-8">
@@ -216,15 +250,20 @@ export default function DashboardPage() {
         </div>
 
         {/* Page Views */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5 flex flex-col">
-          <div className="flex items-start justify-between">
+        <button
+          type="button"
+          onClick={() => setPageViewsModalOpen(true)}
+          className="bg-white border border-gray-200 rounded-xl p-4 md:p-5 flex flex-col text-left hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-300"
+          aria-label={t('dashboard.pageViewsModal.openLabel')}
+        >
+          <div className="flex items-start justify-between w-full">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('dashboard.stats.pageViews')} {timeRange === 'today' ? t('dashboard.timeRange.today') : timeRange === 'week' ? t('dashboard.timeRange.week') : t('dashboard.timeRange.month')}</span>
             <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
           </div>
-          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate">{stats ? stats.page_views : '--'}</p>
+          <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-3 truncate w-full">{stats ? stats.page_views : '--'}</p>
           {viewsDiff && (
             <p className={`text-[13px] mt-1 ${viewsDiff.positive === null ? 'text-gray-500' : viewsDiff.positive ? 'text-green-600' : 'text-red-500'}`}>
               {viewsDiff.text}
@@ -236,8 +275,20 @@ export default function DashboardPage() {
             </p>
           )}
           {sparklines && renderSparkline(sparklines.page_views, 'bg-gray-200')}
-        </div>
+        </button>
       </div>
+
+      {pageViewsModalOpen && sparklines && (
+        <PageViewsDetailModal
+          range={timeRange}
+          sparkline={sparklines.page_views}
+          current={stats?.page_views ?? 0}
+          previous={stats?.page_views_previous ?? 0}
+          locale={locale}
+          t={t}
+          onClose={() => setPageViewsModalOpen(false)}
+        />
+      )}
 
       {/* Bookings by Source + Conversion Funnel */}
       <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 ${loading ? 'opacity-60' : ''}`}>
@@ -340,6 +391,106 @@ export default function DashboardPage() {
             ) : (
               <p className="text-[13px] text-gray-500 text-center py-8">{t('dashboard.bookingsBySource.noData')}</p>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface PageViewsDetailModalProps {
+  range: TimeRange
+  sparkline: number[]
+  current: number
+  previous: number
+  locale: string
+  t: (key: string, params?: Record<string, string | number>) => string
+  onClose: () => void
+}
+
+function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, onClose }: PageViewsDetailModalProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const buckets = sparklineBuckets(range)
+  const max = Math.max(...sparkline, 1)
+  const total = sparkline.reduce((a, b) => a + b, 0)
+  const diff = current - previous
+  const pctChange = previous > 0 ? Math.round((diff / previous) * 100) : null
+
+  const periodLabel = range === 'today'
+    ? t('dashboard.pageViewsModal.subtitleToday')
+    : range === 'week'
+    ? t('dashboard.pageViewsModal.subtitleWeek')
+    : t('dashboard.pageViewsModal.subtitleMonth')
+
+  const vsLabel = range === 'today'
+    ? t('dashboard.stats.vsYesterday')
+    : range === 'week'
+    ? t('dashboard.stats.vsLastWeek')
+    : t('dashboard.stats.vsLast30Days')
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">{t('dashboard.pageViewsModal.title')}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 -mr-2 -mt-1 p-2"
+            aria-label={t('dashboard.pageViewsModal.close')}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-[13px] text-gray-500 mb-5">{periodLabel}</p>
+
+        <div className="flex items-end gap-2 h-40 mb-2">
+          {sparkline.map((v, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+              <span className="text-[11px] font-medium text-gray-700 mb-1">{v}</span>
+              <div
+                className="w-full bg-primary-500 rounded-t"
+                style={{ height: `${Math.max((v / max) * 100, 2)}%` }}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 mb-5">
+          {buckets.map((b, i) => (
+            <span key={i} className="flex-1 text-center text-[11px] text-gray-500 truncate" title={formatBucketLabel(b, locale)}>
+              {formatBucketLabel(b, locale)}
+            </span>
+          ))}
+        </div>
+
+        <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-4 text-[13px]">
+          <div>
+            <div className="text-gray-500">{t('dashboard.pageViewsModal.totalInWindow')}</div>
+            <div className="text-xl font-semibold text-gray-900">{total}</div>
+          </div>
+          <div>
+            <div className="text-gray-500">{vsLabel}</div>
+            <div className={`text-xl font-semibold ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-500' : 'text-gray-900'}`}>
+              {diff > 0 ? '+' : ''}{diff}
+              {pctChange !== null && (
+                <span className="text-[13px] font-normal ml-2">({diff > 0 ? '+' : ''}{pctChange}%)</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
