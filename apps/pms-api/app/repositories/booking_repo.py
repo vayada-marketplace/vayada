@@ -240,6 +240,55 @@ class BookingRepository:
         return (count or 0) == 0
 
     @staticmethod
+    async def is_room_available_excluding(
+        room_id: str,
+        check_in,
+        check_out,
+        exclude_booking_ids: List[str],
+    ) -> bool:
+        """Like is_room_available, but excludes any number of bookings.
+
+        Used by the swap-room flow where two bookings are vacating the same
+        room set at once and must not be counted against each other.
+        """
+        count = await Database.fetchval(
+            """
+            SELECT COUNT(*) FROM bookings
+            WHERE room_id = $1
+              AND status IN ('pending', 'confirmed')
+              AND check_in < $3
+              AND check_out > $2
+              AND id <> ALL($4::uuid[])
+            """,
+            room_id,
+            check_in,
+            check_out,
+            exclude_booking_ids,
+        )
+        return (count or 0) == 0
+
+    @staticmethod
+    async def swap_room_assignments(
+        booking_a_id: str,
+        new_room_a_id: Optional[str],
+        booking_b_id: str,
+        new_room_b_id: Optional[str],
+    ) -> None:
+        """Atomically reassign two bookings' room_ids in a single statement."""
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET room_id = CASE id
+                    WHEN $1::uuid THEN $2::uuid
+                    WHEN $3::uuid THEN $4::uuid
+                END,
+                updated_at = now()
+            WHERE id IN ($1::uuid, $3::uuid)
+            """,
+            booking_a_id, new_room_a_id, booking_b_id, new_room_b_id,
+        )
+
+    @staticmethod
     async def update_status(booking_id: str, new_status: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """
