@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -11,6 +10,13 @@ import { Collaboration, CollaborationStatus } from '../../lib/types/collaboratio
 import { getCurrencySymbol } from '../../lib/utils/getCurrencySymbol';
 import { collaborationsService } from '../../services/api';
 import { ApiErrorResponse } from '../../services/api/client';
+import {
+    marketplaceService,
+    MarketplaceListing,
+    MarketplaceCreator,
+} from '../../services/api/marketplace';
+import { MarketplaceListingModal } from '../marketplace/MarketplaceListingModal';
+import { MarketplaceCreatorModal } from '../marketplace/MarketplaceCreatorModal';
 
 interface CollaborationDetailModalProps {
     isOpen: boolean;
@@ -37,6 +43,67 @@ export function CollaborationDetailModal({
     const [actionInFlight, setActionInFlight] = useState<null | 'accept' | 'decline' | 'approve'>(null);
     const [error, setError] = useState('');
     const [responseMessage, setResponseMessage] = useState('');
+
+    // Marketplace popup state
+    const [listingsCache, setListingsCache] = useState<MarketplaceListing[] | null>(null);
+    const [creatorsCache, setCreatorsCache] = useState<MarketplaceCreator[] | null>(null);
+    const [listingPopup, setListingPopup] = useState<{ listing: MarketplaceListing | null; notFound?: string } | null>(null);
+    const [creatorPopup, setCreatorPopup] = useState<{ creator: MarketplaceCreator | null; notFound?: string } | null>(null);
+    const [loadingMarketplace, setLoadingMarketplace] = useState<null | 'listing' | 'creator'>(null);
+
+    const openListingPopup = async (listingId: string) => {
+        setLoadingMarketplace('listing');
+        try {
+            let listings = listingsCache;
+            if (!listings) {
+                listings = await marketplaceService.getListings();
+                setListingsCache(listings);
+            }
+            const found = listings.find((l) => l.id === listingId);
+            if (found) {
+                setListingPopup({ listing: found });
+            } else {
+                setListingPopup({
+                    listing: null,
+                    notFound: 'This hotel listing is not currently visible on the marketplace (the hotel may be unverified or its profile is incomplete).',
+                });
+            }
+        } catch {
+            setListingPopup({
+                listing: null,
+                notFound: 'Failed to load hotel listing details.',
+            });
+        } finally {
+            setLoadingMarketplace(null);
+        }
+    };
+
+    const openCreatorPopup = async (creatorId: string) => {
+        setLoadingMarketplace('creator');
+        try {
+            let creators = creatorsCache;
+            if (!creators) {
+                creators = await marketplaceService.getCreators();
+                setCreatorsCache(creators);
+            }
+            const found = creators.find((c) => c.id === creatorId);
+            if (found) {
+                setCreatorPopup({ creator: found });
+            } else {
+                setCreatorPopup({
+                    creator: null,
+                    notFound: 'This creator is not currently visible on the marketplace (they may be unverified or their profile is incomplete).',
+                });
+            }
+        } catch {
+            setCreatorPopup({
+                creator: null,
+                notFound: 'Failed to load creator details.',
+            });
+        } finally {
+            setLoadingMarketplace(null);
+        }
+    };
 
     if (!collaboration) return null;
 
@@ -93,6 +160,7 @@ export function CollaborationDetailModal({
     const showActions = canRespond || canApprove;
 
     return (
+        <>
         <Modal
             isOpen={isOpen}
             onClose={handleClose}
@@ -103,40 +171,28 @@ export function CollaborationDetailModal({
                 {/* Header: Parties & Status */}
                 <div className="flex flex-col md:flex-row justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100">
                     {/* Creator */}
-                    {collaboration.creator_user_id ? (
-                        <Link
-                            href={`/dashboard/users/${collaboration.creator_user_id}`}
-                            onClick={handleClose}
-                            className="flex items-center space-x-3 rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
-                            title={`View ${collaboration.creator_name}'s profile`}
-                        >
-                            <Avatar
-                                src={collaboration.creator_profile_picture}
-                                alt={collaboration.creator_name}
-                                name={collaboration.creator_name}
-                                size="lg"
-                                className="border border-gray-200"
-                            />
-                            <div>
-                                <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.creator_name}</p>
-                                <p className="text-xs text-gray-500">Creator</p>
-                            </div>
-                        </Link>
-                    ) : (
-                        <div className="flex items-center space-x-3 p-1 -m-1">
-                            <Avatar
-                                src={collaboration.creator_profile_picture}
-                                alt={collaboration.creator_name}
-                                name={collaboration.creator_name}
-                                size="lg"
-                                className="border border-gray-200"
-                            />
-                            <div>
-                                <p className="text-sm font-bold text-gray-900">{collaboration.creator_name}</p>
-                                <p className="text-xs text-gray-500">Creator</p>
-                            </div>
+                    <button
+                        type="button"
+                        onClick={() => openCreatorPopup(collaboration.creator_id)}
+                        disabled={loadingMarketplace === 'creator'}
+                        className="flex items-center space-x-3 rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors disabled:opacity-60 text-left"
+                        title={`View ${collaboration.creator_name}'s marketplace profile`}
+                    >
+                        <Avatar
+                            src={collaboration.creator_profile_picture}
+                            alt={collaboration.creator_name}
+                            name={collaboration.creator_name}
+                            size="lg"
+                            className="border border-gray-200"
+                        />
+                        <div>
+                            <p className="text-sm font-bold text-gray-900 hover:underline">
+                                {collaboration.creator_name}
+                                {loadingMarketplace === 'creator' && <span className="ml-2 text-xs text-gray-500">Loading…</span>}
+                            </p>
+                            <p className="text-xs text-gray-500">Creator</p>
                         </div>
-                    )}
+                    </button>
                     {/* Status */}
                     <div className="my-4 md:my-0 flex flex-col items-center">
                         <Badge variant={statusVariantMap[collaboration.status]}>
@@ -148,20 +204,24 @@ export function CollaborationDetailModal({
                     </div>
 
                     {/* Hotel */}
-                    <Link
-                        href={`/dashboard/hotels/${collaboration.hotel_id}`}
-                        onClick={handleClose}
-                        className="flex items-center space-x-3 text-right rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors"
-                        title={`View ${collaboration.hotel_name}'s profile`}
+                    <button
+                        type="button"
+                        onClick={() => openListingPopup(collaboration.listing_id)}
+                        disabled={loadingMarketplace === 'listing'}
+                        className="flex items-center space-x-3 text-right rounded-lg p-1 -m-1 hover:bg-gray-100 transition-colors disabled:opacity-60"
+                        title={`View ${collaboration.listing_name} marketplace listing`}
                     >
                         <div>
-                            <p className="text-sm font-bold text-gray-900 hover:underline">{collaboration.hotel_name}</p>
+                            <p className="text-sm font-bold text-gray-900 hover:underline">
+                                {collaboration.hotel_name}
+                                {loadingMarketplace === 'listing' && <span className="ml-2 text-xs text-gray-500">Loading…</span>}
+                            </p>
                             <p className="text-xs text-gray-500">{collaboration.listing_name}</p>
                         </div>
                         <div className="w-12 h-12 rounded-lg bg-gray-200 flex items-center justify-center text-gray-500 font-bold border border-gray-200">
                             {collaboration.hotel_name.charAt(0)}
                         </div>
-                    </Link>
+                    </button>
                 </div>
 
                 {/* Terms & Dates */}
@@ -293,5 +353,20 @@ export function CollaborationDetailModal({
 
             </div>
         </Modal>
+
+        <MarketplaceListingModal
+            isOpen={!!listingPopup}
+            onClose={() => setListingPopup(null)}
+            listing={listingPopup?.listing ?? null}
+            notFoundMessage={listingPopup?.notFound}
+        />
+
+        <MarketplaceCreatorModal
+            isOpen={!!creatorPopup}
+            onClose={() => setCreatorPopup(null)}
+            creator={creatorPopup?.creator ?? null}
+            notFoundMessage={creatorPopup?.notFound}
+        />
+        </>
     );
 }
