@@ -17,6 +17,11 @@ export interface MealPlan {
   chargePer: MealPlanChargeUnit
 }
 
+export interface PartialRefundTier {
+  minDaysBeforeCheckIn: number
+  refundPercent: number
+}
+
 export interface RoomType {
   id: string
   hotelId: string
@@ -49,6 +54,7 @@ export interface RoomType {
   flexibleCancellationType: 'free' | 'partial_refund'
   partialRefundCancelWindowDays: number
   partialRefundAmountPercent: number
+  partialRefundTiers: PartialRefundTier[]
   nonRefundableEnabled: boolean
   nonRefundableDiscount: number
   nonRefundableCancellationPolicy: string
@@ -89,6 +95,7 @@ export interface RoomTypeCreate {
   flexibleCancellationType?: 'free' | 'partial_refund'
   partialRefundCancelWindowDays?: number
   partialRefundAmountPercent?: number
+  partialRefundTiers?: PartialRefundTier[]
   nonRefundableEnabled?: boolean
   nonRefundableDiscount?: number
   nonRefundableCancellationPolicy?: string
