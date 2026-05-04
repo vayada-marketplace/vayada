@@ -107,6 +107,16 @@ export const bookingsService = {
   moveRoom: (id: string, roomId: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, { roomId }),
 
+  swapRoom: (
+    id: string,
+    partnerBookingId: string,
+    partnerDestinationRoomId?: string,
+  ) =>
+    pmsClient.patch<Booking>(`/admin/bookings/${id}/swap-room`, {
+      partnerBookingId,
+      ...(partnerDestinationRoomId ? { partnerDestinationRoomId } : {}),
+    }),
+
   getPaymentSettings: () =>
     pmsClient.get<PaymentSettingsResponse>('/admin/payment-settings'),
 
