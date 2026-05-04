@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Pengaturan Akun",
   "layout.header.signOut": "Keluar",
   "layout.header.language": "Bahasa",
+  "layout.header.currency": "Mata Uang",
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Pemesanan langsung & pendapatan",
   "layout.sidebar.switchApp": "Ganti Aplikasi",

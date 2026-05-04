@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Impostazioni account",
   "layout.header.signOut": "Esci",
   "layout.header.language": "Lingua",
+  "layout.header.currency": "Valuta",
   "layout.sidebar.bookingEngine": "Motore di prenotazione",
   "layout.sidebar.bookingEngineDescription": "Prenotazioni dirette e ricavi",
   "layout.sidebar.switchApp": "Cambia app",

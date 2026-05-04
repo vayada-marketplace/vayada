@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "アカウント設定",
   "layout.header.signOut": "ログアウト",
   "layout.header.language": "言語",
+  "layout.header.currency": "通貨",
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "直接予約と収益",
   "layout.sidebar.switchApp": "アプリを切り替え",

@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Configuración de cuenta",
   "layout.header.signOut": "Cerrar sesión",
   "layout.header.language": "Idioma",
+  "layout.header.currency": "Moneda",
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Reservas directas e ingresos",
   "layout.sidebar.switchApp": "Cambiar aplicación",
