@@ -162,6 +162,7 @@ async def get_rooms_for_guest(
                 flexible_cancellation_type=room.get("flexible_cancellation_type") or "free",
                 partial_refund_cancel_window_days=room.get("partial_refund_cancel_window_days", 30),
                 partial_refund_amount_percent=room.get("partial_refund_amount_percent", 50),
+                partial_refund_tiers=parse_jsonb(room.get("partial_refund_tiers", [])),
                 non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
                 rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
             )

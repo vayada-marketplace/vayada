@@ -74,6 +74,7 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         flexible_cancellation_type=room.get("flexible_cancellation_type") or "free",
         partial_refund_cancel_window_days=room.get("partial_refund_cancel_window_days", 30),
         partial_refund_amount_percent=room.get("partial_refund_amount_percent", 50),
+        partial_refund_tiers=parse_jsonb(room.get("partial_refund_tiers", [])),
         non_refundable_enabled=room.get("non_refundable_enabled", False),
         non_refundable_discount=room.get("non_refundable_discount", 5),
         non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
@@ -228,6 +229,7 @@ async def update_room_type(
         "flexible_cancellation_type",
         "partial_refund_cancel_window_days",
         "partial_refund_amount_percent",
+        "partial_refund_tiers",
     }
     if cancel_fields & updates.keys():
         asyncio.create_task(
@@ -304,6 +306,7 @@ async def duplicate_room_type(
         "flexible_cancellation_type": existing.get("flexible_cancellation_type") or "free",
         "partial_refund_cancel_window_days": existing.get("partial_refund_cancel_window_days", 30),
         "partial_refund_amount_percent": existing.get("partial_refund_amount_percent", 50),
+        "partial_refund_tiers": parse_jsonb(existing.get("partial_refund_tiers", [])),
         "non_refundable_discount": existing.get("non_refundable_discount", 5),
         "non_refundable_enabled": existing.get("non_refundable_enabled", False),
         "non_refundable_cancellation_policy": existing.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
