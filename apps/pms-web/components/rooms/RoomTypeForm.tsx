@@ -1953,10 +1953,10 @@ export default function RoomTypeForm({
 
               {/* Bottom legend */}
               <div className="px-4 py-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#38bdf8' }} /><span className="text-[9px] text-gray-500">Low</span></span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3b82f6' }} /><span className="text-[9px] text-gray-500">Mid</span></span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#1d4ed8' }} /><span className="text-[9px] text-gray-500">High</span></span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4338ca' }} /><span className="text-[9px] text-gray-500">Peak</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#22c55e' }} /><span className="text-[9px] text-gray-500">Low</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#eab308' }} /><span className="text-[9px] text-gray-500">Mid</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#ef4444' }} /><span className="text-[9px] text-gray-500">High</span></span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#991b1b' }} /><span className="text-[9px] text-gray-500">Peak</span></span>
                 {parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) > 0 && (
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} /><span className="text-[9px] text-gray-500">Weekend +</span></span>
                 )}
