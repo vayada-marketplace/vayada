@@ -1,4 +1,5 @@
 import logging
+import secrets
 from datetime import date
 from typing import Any
 
@@ -192,66 +193,90 @@ def _api_to_db_value(api_value, db_column: str):
     return hotel_default(db_column)
 
 
+async def _resolve_unique_slug(name: str, user_id: str) -> str:
+    """Pick a slug for a new booking_hotels row, disambiguating when the
+    derived slug is already taken so two users can launch hotels with
+    the same display name. Tries: bare slug → `{slug}-{user_id[:8]}` →
+    `{slug}-{user_id[:8]}-{random}`. The random tier covers the same
+    user creating two hotels with identical names.
+
+    A race between get_by_slug and the eventual INSERT is still possible;
+    the caller handles that by catching UniqueViolationError and retrying
+    with a random suffix.
+    """
+    base = slugify(name) if name else f"hotel-{user_id[:8]}"
+    if not await BookingHotelRepository.get_by_slug(base):
+        return base
+    suffixed = f"{base}-{user_id[:8]}"
+    if not await BookingHotelRepository.get_by_slug(suffixed):
+        return suffixed
+    return f"{suffixed}-{secrets.token_hex(3)}"
+
+
 async def _create_hotel_from_settings(
     data: PropertySettingsUpdate,
     user_id: str,
 ) -> dict:
     """Create a new booking_hotels row from a PropertySettingsUpdate payload.
 
-    Raises HTTPException(409) on slug collision. Used by both the
-    explicit POST /admin/hotels endpoint (multi-hotel-safe) and the
-    legacy auto-create branch in PATCH /admin/settings/property.
+    Property names are not unique; we derive a slug from the name and
+    auto-disambiguate via _resolve_unique_slug so users can pick whatever
+    name they want. Used by both the explicit POST /admin/hotels endpoint
+    (multi-hotel-safe) and the legacy auto-create branch in
+    PATCH /admin/settings/property.
     """
     name = data.property_name or ''
-    slug = slugify(name) if name else f"hotel-{user_id[:8]}"
+    create_kwargs = dict(
+        name=name,
+        contact_email=data.reservation_email or '',
+        contact_phone=data.phone_number or '',
+        timezone=_api_to_db_value(data.timezone, 'timezone'),
+        currency=_api_to_db_value(data.default_currency, 'currency'),
+        default_language=_api_to_db_value(data.default_language, 'default_language'),
+        supported_languages=_api_to_db_value(data.supported_languages, 'supported_languages'),
+        user_id=user_id,
+        supported_currencies=_api_to_db_value(data.supported_currencies, 'supported_currencies'),
+        contact_whatsapp=data.whatsapp_number or '',
+        contact_address=data.address or '',
+        check_in_time=_api_to_db_value(data.check_in_time, 'check_in_time'),
+        check_out_time=_api_to_db_value(data.check_out_time, 'check_out_time'),
+        check_in_from=data.check_in_from or '',
+        check_in_until=data.check_in_until or '',
+        check_out_from=data.check_out_from or '',
+        check_out_until=data.check_out_until or '',
+        pay_at_property_enabled=_api_to_db_value(data.pay_at_property_enabled, 'pay_at_property_enabled'),
+        online_card_payment=_api_to_db_value(data.online_card_payment, 'online_card_payment'),
+        bank_transfer=_api_to_db_value(data.bank_transfer, 'bank_transfer'),
+        free_cancellation_days=_api_to_db_value(data.free_cancellation_days, 'free_cancellation_days'),
+        email_notifications=_api_to_db_value(data.email_notifications, 'email_notifications'),
+        new_booking_alerts=_api_to_db_value(data.new_booking_alerts, 'new_booking_alerts'),
+        payment_alerts=_api_to_db_value(data.payment_alerts, 'payment_alerts'),
+        ota_booking_alerts=_api_to_db_value(data.ota_booking_alerts, 'ota_booking_alerts'),
+        weekly_reports=_api_to_db_value(data.weekly_reports, 'weekly_reports'),
+        special_requests_enabled=_api_to_db_value(data.special_requests_enabled, 'special_requests_enabled'),
+        arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, 'arrival_time_enabled'),
+        guest_count_enabled=_api_to_db_value(data.guest_count_enabled, 'guest_count_enabled'),
+        refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, 'refer_a_guest_enabled'),
+        social_instagram=data.instagram or '',
+        social_facebook=data.facebook or '',
+        social_tiktok=data.tiktok or '',
+        social_youtube=data.youtube or '',
+        payout_account_holder=data.payout_account_holder or '',
+        payout_account_type=_api_to_db_value(data.payout_account_type, 'payout_account_type'),
+        payout_iban=data.payout_iban or '',
+        payout_account_number=data.payout_account_number or '',
+        payout_bank_name=data.payout_bank_name or '',
+        payout_swift=data.payout_swift or '',
+    )
+    slug = await _resolve_unique_slug(name, user_id)
     try:
-        return await BookingHotelRepository.create(
-            name=name,
-            slug=slug,
-            contact_email=data.reservation_email or '',
-            contact_phone=data.phone_number or '',
-            timezone=_api_to_db_value(data.timezone, 'timezone'),
-            currency=_api_to_db_value(data.default_currency, 'currency'),
-            default_language=_api_to_db_value(data.default_language, 'default_language'),
-            supported_languages=_api_to_db_value(data.supported_languages, 'supported_languages'),
-            user_id=user_id,
-            supported_currencies=_api_to_db_value(data.supported_currencies, 'supported_currencies'),
-            contact_whatsapp=data.whatsapp_number or '',
-            contact_address=data.address or '',
-            check_in_time=_api_to_db_value(data.check_in_time, 'check_in_time'),
-            check_out_time=_api_to_db_value(data.check_out_time, 'check_out_time'),
-            check_in_from=data.check_in_from or '',
-            check_in_until=data.check_in_until or '',
-            check_out_from=data.check_out_from or '',
-            check_out_until=data.check_out_until or '',
-            pay_at_property_enabled=_api_to_db_value(data.pay_at_property_enabled, 'pay_at_property_enabled'),
-            online_card_payment=_api_to_db_value(data.online_card_payment, 'online_card_payment'),
-            bank_transfer=_api_to_db_value(data.bank_transfer, 'bank_transfer'),
-            free_cancellation_days=_api_to_db_value(data.free_cancellation_days, 'free_cancellation_days'),
-            email_notifications=_api_to_db_value(data.email_notifications, 'email_notifications'),
-            new_booking_alerts=_api_to_db_value(data.new_booking_alerts, 'new_booking_alerts'),
-            payment_alerts=_api_to_db_value(data.payment_alerts, 'payment_alerts'),
-            ota_booking_alerts=_api_to_db_value(data.ota_booking_alerts, 'ota_booking_alerts'),
-            weekly_reports=_api_to_db_value(data.weekly_reports, 'weekly_reports'),
-            special_requests_enabled=_api_to_db_value(data.special_requests_enabled, 'special_requests_enabled'),
-            arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, 'arrival_time_enabled'),
-            guest_count_enabled=_api_to_db_value(data.guest_count_enabled, 'guest_count_enabled'),
-            refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, 'refer_a_guest_enabled'),
-            social_instagram=data.instagram or '',
-            social_facebook=data.facebook or '',
-            social_tiktok=data.tiktok or '',
-            social_youtube=data.youtube or '',
-            payout_account_holder=data.payout_account_holder or '',
-            payout_account_type=_api_to_db_value(data.payout_account_type, 'payout_account_type'),
-            payout_iban=data.payout_iban or '',
-            payout_account_number=data.payout_account_number or '',
-            payout_bank_name=data.payout_bank_name or '',
-            payout_swift=data.payout_swift or '',
-        )
+        return await BookingHotelRepository.create(slug=slug, **create_kwargs)
     except asyncpg.UniqueViolationError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A property with this name already exists. Please choose a different name.",
+        # _resolve_unique_slug already deduped, but a concurrent create
+        # may have grabbed the same slug between our pre-check and the
+        # INSERT. Retry once with a guaranteed-unique random-suffixed slug.
+        return await BookingHotelRepository.create(
+            slug=f"{slug}-{secrets.token_hex(3)}", **create_kwargs,
         )
 
 
