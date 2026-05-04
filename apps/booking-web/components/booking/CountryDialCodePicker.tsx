@@ -135,25 +135,22 @@ export default function CountryDialCodePicker({ value, onChange }: CountryDialCo
 
       {open && (
         <div className="absolute z-20 left-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-300 bg-white shadow-lg">
-          <div className="p-2 border-b border-gray-200">
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setHighlight(0)
-              }}
-              onKeyDown={onKeyDown}
-              placeholder={t('searchCountryCode')}
-              aria-label={t('searchCountryCode')}
-              aria-controls={listboxId}
-              aria-activedescendant={
-                filtered[highlight] ? `${listboxId}-opt-${filtered[highlight].iso2}` : undefined
-              }
-              className="w-full px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
-            />
-          </div>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setHighlight(0)
+            }}
+            onKeyDown={onKeyDown}
+            aria-label={t('searchCountryCode')}
+            aria-controls={listboxId}
+            aria-activedescendant={
+              filtered[highlight] ? `${listboxId}-opt-${filtered[highlight].iso2}` : undefined
+            }
+            className="sr-only"
+          />
           <ul
             ref={listRef}
             id={listboxId}
