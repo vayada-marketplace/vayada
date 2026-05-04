@@ -447,8 +447,8 @@ export default function SettingsPage() {
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 {instantBook
-                  ? 'New bookings are confirmed immediately. Card payments are charged at booking time and the guest receives an instant confirmation.'
-                  : 'New bookings arrive as requests. You have 24 hours to accept or reject — card payments are only authorized until you confirm.'}
+                  ? 'On — new bookings are confirmed immediately. Card payments are charged at booking time and the guest receives an instant confirmation.'
+                  : 'Off — new bookings arrive as requests. You have 24 hours to accept or reject; card payments are only authorized until you confirm.'}
               </p>
               <p className="text-[11px] text-gray-400 mt-2">
                 Bank-transfer bookings always require manual review since no payment has been received yet.
