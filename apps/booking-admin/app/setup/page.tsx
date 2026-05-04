@@ -389,6 +389,9 @@ export default function SetupPage() {
               mealPlans: r.mealPlans ?? [],
               cancellationPolicy: r.cancellationPolicy,
               flexibleRateEnabled: r.flexibleRateEnabled,
+              flexibleCancellationType: r.flexibleCancellationType,
+              partialRefundTiers: r.flexibleCancellationType === 'partial_refund' ? r.partialRefundTiers : [],
+              nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy,
             })
           } catch {
             failedRooms.push(r.name)
