@@ -432,24 +432,43 @@ export default function RoomTypeForm({
     return indices
   })()
 
-  // Detect gaps between seasons (MM-DD format)
+  // Detect gaps in season coverage — only within configured operating periods.
+  // Days outside all operating periods are intentionally closed (per the page
+  // copy "Operating periods repeat every year — dates outside are automatically
+  // closed.") and must not be flagged as gaps.
   const seasonGaps = (() => {
-    const valid = seasons.filter(s => s.from && s.to)
-    if (valid.length < 2) return []
-    const sorted = [...valid].sort((a, b) => a.from.localeCompare(b.from))
-    const gaps: { from: string; to: string }[] = []
+    const validPeriods = operatingPeriods.filter(p => p.from && p.to)
+    const validSeasons = seasons.filter(s => s.from && s.to)
+    if (validPeriods.length === 0) return []
+    const TOTAL_DAYS = DAYS_IN_MONTH.reduce((a, b) => a + b, 0)
     const mmddToDoy = (mmdd: string) => { const [m, d] = mmdd.split('-').map(Number); return DAYS_IN_MONTH.slice(0, m - 1).reduce((a, b) => a + b, 0) + d }
     const doyToMmdd = (doy: number) => { let m = 0; let rem = doy; while (m < 12 && rem > DAYS_IN_MONTH[m]) { rem -= DAYS_IN_MONTH[m]; m++ } return `${String(m + 1).padStart(2, '0')}-${String(rem).padStart(2, '0')}` }
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const endDoy = mmddToDoy(sorted[i].to)
-      const nextStartDoy = mmddToDoy(sorted[i + 1].from)
-      if (endDoy + 1 < nextStartDoy) {
-        gaps.push({
-          from: doyToMmdd(endDoy + 1),
-          to: doyToMmdd(nextStartDoy - 1),
-        })
+    const fillRange = (target: boolean[], from: string, to: string) => {
+      const f = mmddToDoy(from)
+      const t = mmddToDoy(to)
+      if (f <= t) {
+        for (let d = f; d <= t; d++) target[d] = true
+      } else {
+        // cross-year wrap (e.g. Nov 1 – Feb 28)
+        for (let d = f; d <= TOTAL_DAYS; d++) target[d] = true
+        for (let d = 1; d <= t; d++) target[d] = true
       }
     }
+    const open = new Array<boolean>(TOTAL_DAYS + 1).fill(false)
+    for (const p of validPeriods) fillRange(open, p.from, p.to)
+    const covered = new Array<boolean>(TOTAL_DAYS + 1).fill(false)
+    for (const s of validSeasons) fillRange(covered, s.from, s.to)
+    const gaps: { from: string; to: string }[] = []
+    let runStart: number | null = null
+    for (let d = 1; d <= TOTAL_DAYS; d++) {
+      const isGap = open[d] && !covered[d]
+      if (isGap && runStart === null) runStart = d
+      if (!isGap && runStart !== null) {
+        gaps.push({ from: doyToMmdd(runStart), to: doyToMmdd(d - 1) })
+        runStart = null
+      }
+    }
+    if (runStart !== null) gaps.push({ from: doyToMmdd(runStart), to: doyToMmdd(TOTAL_DAYS) })
     return gaps
   })()
 
