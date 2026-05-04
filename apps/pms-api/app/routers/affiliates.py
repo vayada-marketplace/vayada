@@ -12,6 +12,7 @@ from app.services import stripe_service
 from app.services.email_service import (
     send_affiliate_registration_received,
     send_hotel_new_affiliate_application,
+    send_vayada_new_affiliate_application,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,17 @@ async def register_affiliate(slug: str, data: AffiliateRegister):
                 payment_method=data.payment_method,
             )
         )
+    asyncio.create_task(
+        send_vayada_new_affiliate_application(
+            hotel_name=hotel["name"],
+            hotel_slug=slug,
+            affiliate_name=data.full_name,
+            affiliate_email=data.email,
+            social_media=data.social_media,
+            user_type=data.user_type,
+            payment_method=data.payment_method,
+        )
+    )
 
     return _affiliate_to_response(affiliate)
 
