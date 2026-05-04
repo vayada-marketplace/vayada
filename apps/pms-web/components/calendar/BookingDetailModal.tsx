@@ -3,7 +3,11 @@
 import { useState, useEffect } from 'react'
 import { bookingsService, Booking } from '@/services/bookings'
 import { formatCurrency } from '@/lib/formatCurrency'
-import { CHANNEL_COLORS, getChannelLabel } from '@/lib/constants/statusStyles'
+import {
+  CHANNEL_COLORS,
+  getChannelLabel,
+  normalizeChannelKey,
+} from '@/lib/constants/statusStyles'
 import Modal from '@/components/Modal'
 
 interface CalendarRoom {
@@ -197,7 +201,8 @@ export default function BookingDetailModal({
     }
   }
 
-  const channelStyle = CHANNEL_COLORS[booking?.channel?.toLowerCase() || 'direct'] || CHANNEL_COLORS.other
+  const channelStyle =
+    CHANNEL_COLORS[normalizeChannelKey(booking?.channel)] || CHANNEL_COLORS.other
 
   return (
     <Modal onClose={onClose} maxWidth="lg">
