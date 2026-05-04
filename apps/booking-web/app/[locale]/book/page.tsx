@@ -8,6 +8,7 @@ import Image from 'next/image'
 import BookingFooter from '@/components/layout/BookingFooter'
 import HeroSection from '@/components/booking/HeroSection'
 import StepIndicator from '@/components/booking/StepIndicator'
+import CountryDialCodePicker from '@/components/booking/CountryDialCodePicker'
 import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { bookingService } from '@/services/api/booking'
 import { formatDate, ensureMinOneNight } from '@/lib/utils'
@@ -321,19 +322,10 @@ function BookPageContent() {
                       {t('phoneNumber')} <span className="text-red-500">*</span>
                     </label>
                     <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500 overflow-hidden">
-                      <select
+                      <CountryDialCodePicker
                         value={phoneCountryIso}
-                        onChange={(e) => setPhoneCountryIso(e.target.value)}
-                        aria-label={t('phoneCountryCode')}
-                        className="flex-shrink-0 w-32 px-3 py-3 bg-gray-50 border-r border-gray-300 text-gray-900 focus:outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem] bg-[right_0.5rem_center] bg-no-repeat pr-8"
-                      >
-                        <option value="">{t('selectCountryCode')}</option>
-                        {COUNTRY_DIAL_CODES.map((c) => (
-                          <option key={c.iso2} value={c.iso2}>
-                            {c.flag} +{c.dial} {c.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setPhoneCountryIso}
+                      />
                       <input
                         type="tel"
                         value={phone}
