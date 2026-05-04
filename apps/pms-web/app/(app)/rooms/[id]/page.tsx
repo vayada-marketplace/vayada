@@ -58,6 +58,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy || 'Non-refundable from booking',
           minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
           ratePaymentMethods: r.ratePaymentMethods ?? null,
+          mealPlans: r.mealPlans ?? [],
         })
       })
       .catch(console.error)
