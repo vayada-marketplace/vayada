@@ -392,6 +392,7 @@ export default function SetupPage() {
               flexibleCancellationType: r.flexibleCancellationType,
               partialRefundTiers: r.flexibleCancellationType === 'partial_refund' ? r.partialRefundTiers : [],
               nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy,
+              ratePaymentMethods: r.ratePaymentMethods ?? null,
             })
           } catch {
             failedRooms.push(r.name)
