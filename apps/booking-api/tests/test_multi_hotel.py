@@ -3,6 +3,7 @@ Tests for multi-hotel support — GET /admin/hotels, X-Hotel-Id header routing,
 fallback behaviour, and cross-hotel isolation.
 """
 import json
+import uuid
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
@@ -328,3 +329,66 @@ class TestCreateNewHotelViaPatch:
             headers=get_auth_headers(hotel_user["token"]),
         )
         assert len(list_resp.json()) == 1
+
+
+# ── Duplicate property names (VAY-341) ───────────────────────────
+
+
+class TestDuplicatePropertyNames:
+    """Two unrelated users must be able to launch hotels with identical
+    property names — name is not unique, slug is. The setup wizard used
+    to 409 on slug collision; now the backend silently disambiguates."""
+
+    async def test_two_users_same_property_name(self, client, cleanup_database):
+        user_a = await create_test_user()
+        user_b = await create_test_user()
+        # Unique-to-this-test name so we don't collide with leftover state
+        # from other tests / dev data.
+        name = f"Shared Hotel Name {uuid.uuid4().hex[:8]}"
+        payload = {
+            "property_name": name,
+            "reservation_email": "owner@example.com",
+        }
+
+        resp_a = await client.post(
+            "/admin/hotels",
+            json=payload,
+            headers=get_auth_headers(user_a["token"]),
+        )
+        resp_b = await client.post(
+            "/admin/hotels",
+            json=payload,
+            headers=get_auth_headers(user_b["token"]),
+        )
+
+        assert resp_a.status_code == 201, resp_a.text
+        assert resp_b.status_code == 201, resp_b.text
+        assert resp_a.json()["property_name"] == name
+        assert resp_b.json()["property_name"] == name
+        # Slugs must differ — that's the URL-level uniqueness we still need.
+        assert resp_a.json()["slug"] != resp_b.json()["slug"]
+
+    async def test_same_user_same_property_name(self, client, cleanup_database):
+        """Same user creating two hotels with the same name also works
+        (e.g. franchise owner with two locations sharing a brand name)."""
+        user = await create_test_user()
+        name = f"My Brand {uuid.uuid4().hex[:8]}"
+        payload = {
+            "property_name": name,
+            "reservation_email": "owner@example.com",
+        }
+
+        resp_first = await client.post(
+            "/admin/hotels",
+            json=payload,
+            headers=get_auth_headers(user["token"]),
+        )
+        resp_second = await client.post(
+            "/admin/hotels",
+            json=payload,
+            headers=get_auth_headers(user["token"]),
+        )
+
+        assert resp_first.status_code == 201, resp_first.text
+        assert resp_second.status_code == 201, resp_second.text
+        assert resp_first.json()["slug"] != resp_second.json()["slug"]
