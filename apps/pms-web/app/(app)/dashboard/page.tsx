@@ -29,12 +29,16 @@ function getInitials(first: string, last: string) {
   return `${first[0] || ''}${last[0] || ''}`.toUpperCase()
 }
 
+const FORECAST_WINDOW_DAYS = 14
+const FORECAST_MAX_WEEK_OFFSET = 24
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const [rooms, setRooms] = useState<RoomType[]>([])
   const [bookings, setBookings] = useState<Booking[]>([])
   const [hotelCurrency, setHotelCurrency] = useState('EUR')
   const [loading, setLoading] = useState(true)
+  const [weekOffset, setWeekOffset] = useState(0)
 
   const today = getToday()
 
@@ -90,9 +94,10 @@ export default function DashboardPage() {
 
   const forecastDays = useMemo(() => {
     const days = []
-    for (let i = 0; i < 14; i++) {
+    const startOffset = weekOffset * 7
+    for (let i = 0; i < FORECAST_WINDOW_DAYS; i++) {
       const date = new Date()
-      date.setDate(date.getDate() + i)
+      date.setDate(date.getDate() + startOffset + i)
       const dateStr = date.toISOString().split('T')[0]
       const occupying = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr)
       const occupied = occupying.length
@@ -105,12 +110,12 @@ export default function DashboardPage() {
         dateStr,
         pct,
         adr,
-        label: i === 0 ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
+        label: dateStr === today ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: date.getDate(),
       })
     }
     return days
-  }, [bookings, totalRooms])
+  }, [bookings, totalRooms, weekOffset, today, t])
 
   if (loading) {
     return (
@@ -256,17 +261,52 @@ export default function DashboardPage() {
 
       {/* Occupancy Forecast */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold text-gray-900">{t('dashboard.occupancyForecast')}</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{t('dashboard.next14Days')}</p>
-          </div>
-          {forecastDays.length >= 14 && (
-            <p className="text-xs text-gray-400">
-              {forecastDays[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} –{' '}
-              {forecastDays[13].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            <p className="text-xs text-gray-400 mt-0.5">
+              {weekOffset === 0
+                ? t('dashboard.next14Days')
+                : t('dashboard.forecastWeeksAhead', { weeks: String(weekOffset) })}
             </p>
-          )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {forecastDays.length >= 14 && (
+              <p className="text-xs text-gray-400 hidden sm:block">
+                {forecastDays[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} –{' '}
+                {forecastDays[13].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </p>
+            )}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setWeekOffset(o => Math.max(0, o - 1))}
+                disabled={weekOffset === 0}
+                aria-label={t('dashboard.forecastPrevWeek')}
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <ChevronLeftIcon />
+              </button>
+              {weekOffset > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(0)}
+                  className="px-2 h-7 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {t('dashboard.forecastJumpToday')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setWeekOffset(o => Math.min(FORECAST_MAX_WEEK_OFFSET, o + 1))}
+                disabled={weekOffset >= FORECAST_MAX_WEEK_OFFSET}
+                aria-label={t('dashboard.forecastNextWeek')}
+                className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          </div>
         </div>
         <ForecastChart days={forecastDays} today={today} currency={hotelCurrency} t={t} />
       </div>
@@ -555,6 +595,22 @@ function ArrowUpIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 19V5" /><path d="M5 12l7-7 7 7" />
+    </svg>
+  )
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  )
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18l6-6-6-6" />
     </svg>
   )
 }
