@@ -435,6 +435,42 @@ async def send_hotel_new_affiliate_application(
     await _send_email(hotel_email, subject, _wrap_html(content))
 
 
+async def send_vayada_new_affiliate_application(
+    hotel_name: str,
+    hotel_slug: str,
+    affiliate_name: str,
+    affiliate_email: str,
+    social_media: str,
+    user_type: str,
+    payment_method: str,
+):
+    """Internal heads-up to the Vayada team for every new Refer-a-Guest
+    signup, so we don't miss applications when the hotel admin is slow
+    to act. Recipient is configurable via VAYADA_AFFILIATE_NOTIFICATION_EMAIL."""
+    recipient = settings.VAYADA_AFFILIATE_NOTIFICATION_EMAIL
+    if not recipient:
+        return
+    subject = f"New Affiliate Application — {hotel_name} — {affiliate_name}"
+    social_row = (
+        f"<p class=\"detail\"><strong>Channel:</strong> {social_media}</p>"
+        if social_media else ""
+    )
+    content = f"""
+    <h2>New affiliate application</h2>
+    <p class="detail">A guest just submitted the Refer-a-Guest form on the booking engine.</p>
+    <hr class="divider">
+    <p class="detail"><strong>Hotel:</strong> {hotel_name} ({hotel_slug})</p>
+    <p class="detail"><strong>Name:</strong> {affiliate_name}</p>
+    <p class="detail"><strong>Email:</strong> {affiliate_email}</p>
+    <p class="detail"><strong>Type:</strong> {user_type.capitalize()}</p>
+    {social_row}
+    <p class="detail"><strong>Payout method:</strong> {payment_method.capitalize()}</p>
+    <hr class="divider">
+    <p class="detail">The hotel admin has been notified separately and is expected to approve or reject in their PMS dashboard.</p>
+    """
+    await _send_email(recipient, subject, _wrap_html(content))
+
+
 async def send_affiliate_invite(affiliate_email: str, affiliate_name: str, hotel_name: str, set_password_url: str):
     """Send affiliate an invite email with a link to set their password and access the dashboard."""
     subject = f"Set Up Your Affiliate Dashboard — {hotel_name}"

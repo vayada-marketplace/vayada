@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "noreply@vayada.com"
     SMTP_USE_TLS: bool = True
     VAYADA_OPS_EMAIL: str = "bookings@vayada.com"
+    # Internal recipient for "new affiliate application" alerts so the Vayada
+    # team catches every Refer-a-Guest signup (independent of the hotel admin).
+    VAYADA_AFFILIATE_NOTIFICATION_EMAIL: str = "p.paetzold@vayada.com"
 
     # S3 / Image Upload
     AWS_REGION: str = "eu-west-1"
