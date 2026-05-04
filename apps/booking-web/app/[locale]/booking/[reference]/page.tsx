@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import BookingNavigation from '@/components/layout/BookingNavigation'
@@ -43,8 +43,10 @@ function CountdownTimer({ deadline }: { deadline: string }) {
 
 export default function BookingConfirmationPage({
   params,
+  searchParams,
 }: {
   params: { reference: string }
+  searchParams: { email?: string }
 }) {
   const t = useTranslations('confirmation')
   const tc = useTranslations('common')
@@ -55,15 +57,48 @@ export default function BookingConfirmationPage({
   const [status, setStatus] = useState<string>('pending')
   const [withdrawing, setWithdrawing] = useState(false)
   const [withdrawError, setWithdrawError] = useState('')
+  const [hydrating, setHydrating] = useState(false)
+  const [hydrateError, setHydrateError] = useState(false)
 
+  // Booking details are written to sessionStorage on the checkout flow, but
+  // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
+  // from the confirmation email on a different device sees no details. The
+  // backend now appends ?email=… to that link — when present, hydrate from the
+  // lookup endpoint so the page works cross-device.
   useEffect(() => {
     trackEvent(slug, 'completed_booking')
     const stored = readLastBooking()
     if (stored && stored.bookingReference === params.reference) {
       setBooking(stored)
       setStatus(stored.status || 'pending')
+      return
     }
-  }, [params.reference, slug])
+
+    const email = searchParams.email
+    if (!email) return
+
+    let cancelled = false
+    setHydrating(true)
+    bookingService
+      .lookup(slug, params.reference, email)
+      .then((fetched) => {
+        if (cancelled) return
+        setBooking(fetched)
+        setStatus(fetched.status || 'pending')
+        saveLastBooking(fetched)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setHydrateError(true)
+      })
+      .finally(() => {
+        if (!cancelled) setHydrating(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [params.reference, searchParams.email, slug])
 
   // Poll for status updates every 30s when pending
   useEffect(() => {
@@ -207,54 +242,72 @@ export default function BookingConfirmationPage({
           </div>
 
           {/* Booking Details */}
-          <div className="text-left space-y-0 divide-y divide-gray-100">
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('hotel')}</span>
-              <span className="font-medium text-gray-900">{booking?.hotelName || hotel.name}</span>
+          {hydrating && !booking ? (
+            <div className="py-8 text-center text-gray-500 text-sm">
+              {t('loadingDetails') || 'Loading booking details…'}
             </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('room')}</span>
-              <span className="font-medium text-gray-900">{booking?.roomName || '—'}</span>
+          ) : !booking && hydrateError ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-gray-600 mb-3">
+                {t('detailsUnavailable') || "We couldn't load your booking details here."}
+              </p>
+              <Link
+                href="/my-booking"
+                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
+              >
+                {t('manageBooking') || 'Manage your booking'}
+              </Link>
             </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('checkIn')}</span>
-              <span className="font-medium text-gray-900">
-                {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('checkOut')}</span>
-              <span className="font-medium text-gray-900">
-                {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('duration')}</span>
-              <span className="font-medium text-gray-900">
-                {booking ? tc('nights', { count: booking.nights }) : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('guests')}</span>
-              <span className="font-medium text-gray-900">
-                {booking ? `${booking.adults} ${booking.adults === 1 ? 'Adult' : 'Adults'}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? 'Child' : 'Children'}` : ''}` : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between py-3">
-              <span className="text-gray-600">{t('totalPaid')}</span>
-              <span className="font-bold text-gray-900 text-lg">
-                {booking ? formatPrice(booking.totalAmount, booking.currency) : '—'}
-              </span>
-            </div>
-            {booking?.paymentMethod && (
+          ) : (
+            <div className="text-left space-y-0 divide-y divide-gray-100">
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('paymentMethodLabel') || 'Payment'}</span>
+                <span className="text-gray-600">{t('hotel')}</span>
+                <span className="font-medium text-gray-900">{booking?.hotelName || hotel.name}</span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('room')}</span>
+                <span className="font-medium text-gray-900">{booking?.roomName || '—'}</span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('checkIn')}</span>
                 <span className="font-medium text-gray-900">
-                  {booking.paymentMethod === 'card' ? 'Card' : 'Pay at Property'}
+                  {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : '—'}
                 </span>
               </div>
-            )}
-          </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('checkOut')}</span>
+                <span className="font-medium text-gray-900">
+                  {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('duration')}</span>
+                <span className="font-medium text-gray-900">
+                  {booking ? tc('nights', { count: booking.nights }) : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('guests')}</span>
+                <span className="font-medium text-gray-900">
+                  {booking ? `${booking.adults} ${booking.adults === 1 ? 'Adult' : 'Adults'}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? 'Child' : 'Children'}` : ''}` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t('totalPaid')}</span>
+                <span className="font-bold text-gray-900 text-lg">
+                  {booking ? formatPrice(booking.totalAmount, booking.currency) : '—'}
+                </span>
+              </div>
+              {booking?.paymentMethod && (
+                <div className="flex justify-between py-3">
+                  <span className="text-gray-600">{t('paymentMethodLabel') || 'Payment'}</span>
+                  <span className="font-medium text-gray-900">
+                    {booking.paymentMethod === 'card' ? 'Card' : 'Pay at Property'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Withdraw button for pending bookings */}
           {isPending && (
