@@ -15,16 +15,7 @@ import {
   isWithinInterval,
 } from 'date-fns'
 import { CalendarBooking } from '@/services/calendar'
-
-const CHANNEL_COLORS: Record<string, string> = {
-  direct: 'bg-blue-500',
-  airbnb: 'bg-pink-500',
-  booking: 'bg-indigo-500',
-  'booking.com': 'bg-indigo-500',
-  expedia: 'bg-yellow-500',
-  channex: 'bg-gray-400',
-  other: 'bg-gray-400',
-}
+import { getChannelBarColor } from '@/lib/constants/statusStyles'
 
 const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
@@ -168,7 +159,7 @@ export default function MobileCalendar({ bookings, onSelectBooking, onNewBooking
                 {hasBookings && !isSelected && (
                   <div className="flex gap-0.5 mt-0.5">
                     {channels.slice(0, 3).map(ch => (
-                      <div key={ch} className={`w-1 h-1 rounded-full ${CHANNEL_COLORS[ch?.toLowerCase()] || CHANNEL_COLORS.other}`} />
+                      <div key={ch} className={`w-1 h-1 rounded-full ${getChannelBarColor(ch)}`} />
                     ))}
                   </div>
                 )}
@@ -207,7 +198,7 @@ export default function MobileCalendar({ bookings, onSelectBooking, onNewBooking
           ) : (
             <div className="space-y-2">
               {selectedDayBookings.map(b => {
-                const channelColor = CHANNEL_COLORS[b.channel?.toLowerCase()] || CHANNEL_COLORS.other
+                const channelColor = getChannelBarColor(b.channel)
                 return (
                   <button
                     key={b.id}

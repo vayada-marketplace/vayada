@@ -29,20 +29,14 @@ import MobileCalendar from '@/components/calendar/MobileCalendar'
 import MonthView from '@/components/calendar/MonthView'
 import { useTranslation } from '@/lib/i18n'
 import { channexService } from '@/services/channex'
+import {
+  getChannelBarColor,
+  normalizeChannelKey,
+} from '@/lib/constants/statusStyles'
 
 const VIEW_DAYS = 21
 const VIEW_MODE_STORAGE_KEY = 'pms.calendar.viewMode'
 type ViewMode = 'timeline' | 'month'
-
-const CHANNEL_COLORS: Record<string, string> = {
-  direct: 'bg-blue-500',
-  airbnb: 'bg-pink-500',
-  booking: 'bg-indigo-500',
-  'booking.com': 'bg-indigo-500',
-  expedia: 'bg-yellow-500',
-  channex: 'bg-gray-500',
-  other: 'bg-gray-500',
-}
 
 const CHANNEL_LEGEND_KEYS: Array<{
   key: string
@@ -60,20 +54,17 @@ const CHANNEL_LEGEND_KEYS: Array<{
 // Legend entries that are always shown regardless of channel manager state.
 const ALWAYS_SHOWN_LEGEND_KEYS = new Set(['direct', 'other'])
 
-// Map a booking's `channel` value onto a legend key. Bookings can carry
-// historical channel values (e.g. "booking" instead of "booking.com") or
-// channels that are no longer connected; we still want them represented in
-// the legend so users can decode the colored bars on the grid.
-const LEGEND_KEY_BY_CHANNEL: Record<string, string> = {
-  direct: 'direct',
-  airbnb: 'airbnb',
-  booking: 'booking.com',
-  'booking.com': 'booking.com',
-  expedia: 'expedia',
-  other: 'other',
+// Resolve a booking's raw `channel` to the legend key it should light
+// up. Bookings can carry historical aliases (``booking_com`` /
+// ``BookingCom`` / ``booking``); ``normalizeChannelKey`` collapses those
+// onto the canonical ``booking.com``. Anything not in the legend
+// (Agoda, Vrbo, …) falls back to the generic ``other`` row so the bar's
+// color still has a label users can decode.
+const LEGEND_KEYS = new Set(CHANNEL_LEGEND_KEYS.map((c) => c.key))
+const normalizeBookingChannel = (channel?: string | null): string => {
+  const key = normalizeChannelKey(channel)
+  return LEGEND_KEYS.has(key) ? key : 'other'
 }
-const normalizeBookingChannel = (channel?: string | null): string =>
-  LEGEND_KEY_BY_CHANNEL[(channel || '').toLowerCase().trim()] || 'other'
 
 export default function CalendarPage() {
   const { t } = useTranslation()
@@ -854,7 +845,7 @@ export default function CalendarPage() {
                       {roomBookings.map((b) => {
                         const style = getBarStyle(b.checkIn, b.checkOut)
                         if (!style) return null
-                        const channelColor = CHANNEL_COLORS[b.channel?.toLowerCase()] || CHANNEL_COLORS.other
+                        const channelColor = getChannelBarColor(b.channel)
                         return (
                           <div
                             key={b.id}
@@ -906,7 +897,7 @@ export default function CalendarPage() {
                     {unassignedBookings.map((b) => {
                       const style = getBarStyle(b.checkIn, b.checkOut)
                       if (!style) return null
-                      const channelColor = CHANNEL_COLORS[b.channel?.toLowerCase()] || CHANNEL_COLORS.other
+                      const channelColor = getChannelBarColor(b.channel)
                       return (
                         <div
                           key={b.id}

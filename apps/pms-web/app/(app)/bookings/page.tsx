@@ -6,6 +6,7 @@ import { bookingsService, Booking, BookingListResponse } from '@/services/bookin
 import { MagnifyingGlassIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from '@/lib/i18n'
 import { formatCurrency } from '@/lib/formatCurrency'
+import { normalizeChannelKey } from '@/lib/constants/statusStyles'
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'border-yellow-200 text-yellow-700 bg-yellow-50',
@@ -215,7 +216,7 @@ export default function ReservationsPage() {
             const guestExtra = getGuestCount(b)
             const nights = getNights(b.checkIn, b.checkOut)
             const balance = getBalanceStatus(b)
-            const source = SOURCE_ICONS[b.channel] || SOURCE_ICONS['direct']
+            const source = SOURCE_ICONS[normalizeChannelKey(b.channel)] || SOURCE_ICONS['direct']
             return (
               <Link
                 key={b.id}
@@ -334,7 +335,7 @@ export default function ReservationsPage() {
                 const guestExtra = getGuestCount(b)
                 const nights = getNights(b.checkIn, b.checkOut)
                 const balance = getBalanceStatus(b)
-                const source = SOURCE_ICONS[b.channel] || SOURCE_ICONS['direct']
+                const source = SOURCE_ICONS[normalizeChannelKey(b.channel)] || SOURCE_ICONS['direct']
                 return (
                   <tr key={b.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/50 transition-colors group">
                     {/* Guest */}

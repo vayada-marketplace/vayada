@@ -17,16 +17,7 @@ import {
   CalendarBooking,
   CalendarBlock,
 } from '@/services/calendar'
-
-const CHANNEL_COLORS: Record<string, string> = {
-  direct: 'bg-blue-500',
-  airbnb: 'bg-pink-500',
-  booking: 'bg-indigo-500',
-  'booking.com': 'bg-indigo-500',
-  expedia: 'bg-yellow-500',
-  channex: 'bg-gray-500',
-  other: 'bg-gray-500',
-}
+import { getChannelBarColor } from '@/lib/constants/statusStyles'
 
 const WEEKDAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -178,9 +169,7 @@ export default function MonthView({
                             </button>
                           ))}
                           {dayBookings.map((b) => {
-                            const channelColor =
-                              CHANNEL_COLORS[b.channel?.toLowerCase()] ||
-                              CHANNEL_COLORS.other
+                            const channelColor = getChannelBarColor(b.channel)
                             return (
                               <button
                                 key={`booking-${b.id}-${day.toISOString()}`}
