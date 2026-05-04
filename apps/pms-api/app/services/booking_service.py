@@ -903,14 +903,54 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     return updated
 
 
+def _parse_partial_refund_tiers(raw) -> list[dict]:
+    """Decode partial_refund_tiers from a DB row (string or list)."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    else:
+        decoded = raw
+    if not isinstance(decoded, list):
+        return []
+    return [t for t in decoded if isinstance(t, dict)]
+
+
+def _resolve_tier_refund(tiers: list[dict], days_until: int) -> tuple[float, int]:
+    """Pick the highest tier the cancellation still meets.
+
+    Tiers are stored sorted descending by min_days_before_check_in (the
+    Pydantic validator and the migration both enforce this), so the first
+    matching tier is the right one. Returns (refund_percent, threshold_days)
+    where threshold_days is the matched tier's min_days_before_check_in (0
+    when no tier matches, used only for display).
+    """
+    for tier in tiers:
+        threshold = tier.get("min_days_before_check_in", tier.get("minDaysBeforeCheckIn"))
+        percent = tier.get("refund_percent", tier.get("refundPercent"))
+        if threshold is None or percent is None:
+            continue
+        try:
+            t_days = int(threshold)
+            t_pct = int(percent)
+        except (TypeError, ValueError):
+            continue
+        if days_until >= t_days:
+            return float(t_pct), t_days
+    return 0.0, 0
+
+
 async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
     """Compute (refund_amount, refund_pct, free_days_for_display) for a booking.
 
     Non-refundable rate plans always return 0 refund — the guest accepted that
     in exchange for the discounted price. For flexible bookings with the room's
-    flexible_cancellation_type set to 'partial_refund', the room's own
-    (window, percent) overrides the hotel-wide cancellation policy. Otherwise
-    the hotel-wide policy applies.
+    flexible_cancellation_type set to 'partial_refund', the room's tiered
+    schedule (or, when empty, the legacy single-tier window/percent) overrides
+    the hotel-wide cancellation policy. Otherwise the hotel-wide policy applies.
     """
     hotel_id = str(booking["hotel_id"])
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
@@ -927,6 +967,10 @@ async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int
     if booking.get("rate_type") == "flexible":
         room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
         if room_type and room_type.get("flexible_cancellation_type") == "partial_refund":
+            tiers = _parse_partial_refund_tiers(room_type.get("partial_refund_tiers"))
+            if tiers:
+                percent, threshold = _resolve_tier_refund(tiers, days_until)
+                return round(total_amount * percent / 100, 2), percent, threshold
             window = room_type.get("partial_refund_cancel_window_days") or 30
             percent = float(room_type.get("partial_refund_amount_percent") or 50)
             if days_until >= window:

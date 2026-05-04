@@ -8,6 +8,62 @@ MAX_ROOM_SIZE = 15000
 VALID_MEAL_PLAN_CODES = {1, 3, 4, 9}
 VALID_MEAL_PLAN_CHARGE_UNITS = {"room", "person"}
 
+MAX_PARTIAL_REFUND_TIERS = 10
+
+
+def _validate_partial_refund_tiers(tiers: list) -> list:
+    """Normalize and validate a tiered partial-refund schedule.
+
+    Each tier is `{min_days_before_check_in: int, refund_percent: int}`.
+    Returns the list sorted descending by `min_days_before_check_in` so
+    refund computation can pick the first matching tier without
+    re-sorting. Accepts both snake_case and camelCase keys to keep API
+    callers (frontend sends camelCase) and DB consumers happy.
+    """
+    if len(tiers) > MAX_PARTIAL_REFUND_TIERS:
+        raise ValueError(
+            f"partial_refund_tiers must contain at most {MAX_PARTIAL_REFUND_TIERS} tiers"
+        )
+    seen_days: set[int] = set()
+    normalized: list[dict] = []
+    for t in tiers:
+        days = t.get("min_days_before_check_in")
+        if days is None:
+            days = t.get("minDaysBeforeCheckIn")
+        percent = t.get("refund_percent")
+        if percent is None:
+            percent = t.get("refundPercent")
+        if days is None or percent is None:
+            raise ValueError(
+                "partial_refund_tiers entries must have min_days_before_check_in and refund_percent"
+            )
+        try:
+            days_int = int(days)
+            percent_int = int(percent)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "partial_refund_tiers entries must be integers"
+            )
+        if days_int < 0 or days_int > 365:
+            raise ValueError(
+                "partial_refund_tiers[].min_days_before_check_in must be between 0 and 365"
+            )
+        if percent_int < 0 or percent_int > 100:
+            raise ValueError(
+                "partial_refund_tiers[].refund_percent must be between 0 and 100"
+            )
+        if days_int in seen_days:
+            raise ValueError(
+                f"partial_refund_tiers contains duplicate min_days_before_check_in={days_int}"
+            )
+        seen_days.add(days_int)
+        normalized.append({
+            "min_days_before_check_in": days_int,
+            "refund_percent": percent_int,
+        })
+    normalized.sort(key=lambda t: t["min_days_before_check_in"], reverse=True)
+    return normalized
+
 
 def _validate_meal_plans(plans: list) -> list:
     seen: set[int] = set()
@@ -169,6 +225,7 @@ class RoomTypeCreate(BaseModel):
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
+    partial_refund_tiers: List[dict] = []
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
@@ -209,6 +266,11 @@ class RoomTypeCreate(BaseModel):
         if v < 1 or v > 99:
             raise ValueError("partial_refund_amount_percent must be between 1 and 99")
         return v
+
+    @field_validator("partial_refund_tiers")
+    @classmethod
+    def validate_partial_refund_tiers(cls, v: List[dict]) -> List[dict]:
+        return _validate_partial_refund_tiers(v)
 
     @field_validator("operating_periods")
     @classmethod
@@ -256,6 +318,7 @@ class RoomTypeUpdate(BaseModel):
     flexible_cancellation_type: Optional[str] = None
     partial_refund_cancel_window_days: Optional[int] = None
     partial_refund_amount_percent: Optional[int] = None
+    partial_refund_tiers: Optional[List[dict]] = None
     non_refundable_enabled: Optional[bool] = None
     non_refundable_discount: Optional[int] = None
     non_refundable_cancellation_policy: Optional[str] = None
@@ -291,6 +354,13 @@ class RoomTypeUpdate(BaseModel):
         if v is not None and (v < 1 or v > 99):
             raise ValueError("partial_refund_amount_percent must be between 1 and 99")
         return v
+
+    @field_validator("partial_refund_tiers")
+    @classmethod
+    def validate_partial_refund_tiers(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+        if v is None:
+            return v
+        return _validate_partial_refund_tiers(v)
 
     @field_validator("operating_periods")
     @classmethod
@@ -346,6 +416,7 @@ class RoomTypeResponse(BaseModel):
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
+    partial_refund_tiers: List[dict] = []
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     rate_payment_methods: Optional[Dict[str, List[str]]] = None
 
@@ -384,6 +455,7 @@ class RoomTypeAdminResponse(BaseModel):
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
+    partial_refund_tiers: List[dict] = []
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
