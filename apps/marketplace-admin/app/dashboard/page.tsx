@@ -70,23 +70,19 @@ export default function DashboardPage() {
   const [deleteError, setDeleteError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 400)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, filterType, filterStatus])
+
   useEffect(() => {
     loadUsers()
-  }, [page, filterType, filterStatus])
-
-  // Debounced search
-  // Debounced search removed for frontend filtering
-  // useEffect(() => {
-  //   const timer = setTimeout(() => {
-  //     if (page === 1) {
-  //       loadUsers()
-  //     } else {
-  //       setPage(1) // Reset to page 1 when search changes
-  //     }
-  //   }, 500)
-  //
-  //   return () => clearTimeout(timer)
-  // }, [searchTerm])
+  }, [page, filterType, filterStatus, debouncedSearch])
 
   const loadUsers = async () => {
     try {
@@ -99,9 +95,7 @@ export default function DashboardPage() {
       }
       if (filterType !== 'all') params.type = filterType
       if (filterStatus !== 'all') params.status = filterStatus
-
-      // Frontend filtering - do not send search to backend
-      // if (searchTerm) params.search = searchTerm
+      if (debouncedSearch) params.search = debouncedSearch
 
       const response = await usersService.getAllUsers(params)
       setUsers(response.users || [])
@@ -136,8 +130,8 @@ export default function DashboardPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    setDebouncedSearch(searchTerm)
     setPage(1)
-    loadUsers()
   }
 
   const handleDeleteUser = async () => {
@@ -334,13 +328,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {users
-                    .filter(user =>
-                      !searchTerm ||
-                      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      user.email.toLowerCase().includes(searchTerm.toLowerCase())
-                    )
-                    .map((user) => (
+                  {users.map((user) => (
                       <tr
                         key={user.id}
                         className="hover:bg-gray-50 cursor-pointer"
