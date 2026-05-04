@@ -1600,9 +1600,14 @@ export default function RoomTypeForm({
                     <div key={idx} className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
                       {/* Header row: toggle, type dropdown, delete */}
                       <div className="flex items-center gap-3">
-                        <div className="relative w-10 h-[22px] rounded-full bg-primary-500 shrink-0">
-                          <div className="absolute top-[2px] left-[20px] w-[18px] h-[18px] rounded-full bg-white shadow" />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeMealPlan(idx)}
+                          aria-label="Deactivate meal plan"
+                          className="relative w-10 h-[22px] rounded-full bg-primary-500 shrink-0 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1"
+                        >
+                          <span className="absolute top-[2px] left-[20px] w-[18px] h-[18px] rounded-full bg-white shadow" />
+                        </button>
                         <select
                           value={mp.code}
                           onChange={(e) => updateMealPlan(idx, { code: parseInt(e.target.value, 10) as MealPlanCode })}
