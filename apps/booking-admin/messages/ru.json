@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Настройки аккаунта",
   "layout.header.signOut": "Выйти",
   "layout.header.language": "Язык",
+  "layout.header.currency": "Валюта",
   "layout.sidebar.bookingEngine": "Система бронирования",
   "layout.sidebar.bookingEngineDescription": "Прямые бронирования и доход",
   "layout.sidebar.switchApp": "Сменить приложение",

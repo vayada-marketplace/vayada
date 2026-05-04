@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Accountinstellingen",
   "layout.header.signOut": "Uitloggen",
   "layout.header.language": "Taal",
+  "layout.header.currency": "Valuta",
   "layout.sidebar.bookingEngine": "Boekingsmodule",
   "layout.sidebar.bookingEngineDescription": "Directe boekingen en omzet",
   "layout.sidebar.switchApp": "Wissel van app",

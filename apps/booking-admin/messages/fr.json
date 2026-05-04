@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Paramètres du compte",
   "layout.header.signOut": "Se déconnecter",
   "layout.header.language": "Langue",
+  "layout.header.currency": "Devise",
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "Réservations directes et revenus",
   "layout.sidebar.switchApp": "Changer d'application",

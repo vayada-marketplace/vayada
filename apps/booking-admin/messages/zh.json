@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "账户设置",
   "layout.header.signOut": "退出登录",
   "layout.header.language": "语言",
+  "layout.header.currency": "货币",
   "layout.sidebar.bookingEngine": "Booking Engine",
   "layout.sidebar.bookingEngineDescription": "直接预订与收入",
   "layout.sidebar.switchApp": "切换应用",

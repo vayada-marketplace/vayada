@@ -11,6 +11,7 @@ import {
 import { authService } from '@/services/auth'
 import { settingsService, HotelSummary, SuperAdminHotel } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
+import { CURRENCY_OPTIONS } from '@/lib/constants/options'
 import ManagePropertiesModal from './ManagePropertiesModal'
 
 const BOOKING_URL_TEMPLATE = process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || 'https://{slug}.booking.vayada.com'
@@ -24,6 +25,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
+  const [currencyOpen, setCurrencyOpen] = useState(false)
+  const [currency, setCurrency] = useState('EUR')
+  const [savingCurrency, setSavingCurrency] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
@@ -68,7 +72,26 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         localStorage.setItem('selectedHotelId', selected.id)
       }
     }).catch(() => {})
+
+    settingsService.getPropertySettings()
+      .then((settings) => {
+        if (settings.default_currency) setCurrency(settings.default_currency)
+      })
+      .catch(() => {})
   }, [])
+
+  const handleCurrencyChange = async (code: string) => {
+    if (code === currency || savingCurrency) return
+    setSavingCurrency(true)
+    try {
+      await settingsService.updatePropertySettings({ default_currency: code })
+      // Reload so the Dashboard and any other currency-aware view picks up
+      // the new property default_currency on its next mount.
+      window.location.reload()
+    } catch {
+      setSavingCurrency(false)
+    }
+  }
 
   const initials = userName
     ? userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -268,6 +291,34 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                         >
                           <span>{lang.flag}</span>
                           <span>{lang.nativeName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Currency selector */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCurrencyOpen(!currencyOpen) }}
+                    disabled={savingCurrency}
+                    className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    <span>{t('layout.header.currency')}</span>
+                    <span className="text-gray-400">{CURRENCY_OPTIONS.find(c => c.code === currency)?.flag} {currency}</span>
+                  </button>
+                  {currencyOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 max-h-72 overflow-y-auto">
+                      {CURRENCY_OPTIONS.map((cur) => (
+                        <button
+                          key={cur.code}
+                          onClick={() => { setCurrencyOpen(false); setProfileOpen(false); handleCurrencyChange(cur.code) }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
+                            currency === cur.code ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span>{cur.flag}</span>
+                          <span>{cur.code}</span>
+                          <span className="text-gray-400 truncate">{cur.name}</span>
                         </button>
                       ))}
                     </div>

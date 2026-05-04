@@ -95,6 +95,7 @@
   "layout.header.accountSettings": "Account Settings",
   "layout.header.signOut": "Sign Out",
   "layout.header.language": "Language",
+  "layout.header.currency": "Currency",
   "layout.header.manageProperties": "Manage Properties",
   "manageProperties.title": "Manage Properties",
   "manageProperties.subtitle": "View and remove the properties on your account.",
