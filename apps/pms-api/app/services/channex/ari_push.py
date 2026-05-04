@@ -279,6 +279,20 @@ async def push_restrictions_for_rate_plan(
     if not values:
         return
 
+    # VAY-349: structured payload log so we can verify exactly what leaves
+    # our system per (date_from..date_to, channel, plan, meal, markup) →
+    # final rate. Lets us tell whether a discrepancy on the OTA side comes
+    # from our payload or from a Channex-side transform.
+    for v in values:
+        logger.info(
+            "channex_ari_push room_type=%s channex_rate_plan=%s channel=%s "
+            "plan=%s meal_plan_code=%d markup_pct=%s date_from=%s date_to=%s "
+            "rate=%s",
+            room_type_id, channex_rate_plan_id, channel, plan_name,
+            meal_plan_code, markup_pct,
+            v["date_from"], v["date_to"], v["rate"],
+        )
+
     try:
         await channex_service.push_restrictions(api_key, values)
         logger.info(

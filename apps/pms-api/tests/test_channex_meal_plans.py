@@ -119,6 +119,49 @@ def test_restriction_entry_no_surcharge_for_room_only():
     assert entry["rate"] == 1_400_000
 
 
+def test_restriction_entry_direct_channel_is_one_to_one_with_base_rate():
+    """VAY-349: with markup=0, no surcharge, no NR discount, the rate sent
+    to Channex must equal the input base_rate exactly. Locks in 1:1 rate
+    parity between the price set in the system and the price pushed to
+    OTAs via the direct rate plan.
+    """
+    room = _make_room_type(base_rate=3_000_000)
+    entry = _build_restriction_entry(
+        room, date(2026, 5, 1),
+        plan_name="standard",
+        markup_pct=Decimal(0),
+        meal_plan_code=0,
+    )
+    assert entry["rate"] == 3_000_000
+
+
+def test_restriction_entry_negative_markup_no_longer_reachable_via_model():
+    """VAY-349 guard: ChannelMarkup model rejects negative markup_pct.
+
+    A negative value here would silently discount the OTA rate (the
+    original bug — 3,000,000 IDR became ~2,626,500 IDR with a -12.45
+    markup). Validation lives at the model boundary; this test makes the
+    invariant explicit so a future widening of the bound triggers a CI
+    failure here, not a revenue-impacting silent discount in production.
+    """
+    from decimal import Decimal as _D
+
+    from pydantic import ValidationError
+
+    from app.models.channex import ChannelMarkup
+
+    # Zero and positive values are accepted.
+    ChannelMarkup(channel="booking_com", markup_pct=_D(0))
+    ChannelMarkup(channel="booking_com", markup_pct=_D("12.45"))
+
+    # Negative values are rejected.
+    try:
+        ChannelMarkup(channel="booking_com", markup_pct=_D("-12.45"))
+    except ValidationError:
+        return
+    raise AssertionError("Negative markup_pct should be rejected by the model")
+
+
 def test_restriction_entry_adds_surcharge_for_breakfast():
     room = _make_room_type(meal_plans=[{"code": 1, "surcharge": 300_000}])
     entry = _build_restriction_entry(room, date(2026, 5, 1), meal_plan_code=1)

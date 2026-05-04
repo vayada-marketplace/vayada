@@ -71,7 +71,11 @@ class ChannelMarkup(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     channel: str
-    markup_pct: Decimal = Field(ge=-50, le=200)
+    # Markup is additive only — it must NOT be used to discount OTA prices below
+    # the direct rate (rate-parity violation, plus a negative value here was the
+    # root cause of VAY-349 where OTA rates silently came out ~12.45% below the
+    # direct price).
+    markup_pct: Decimal = Field(ge=0, le=200)
 
 
 class ChannelMarkupsResponse(BaseModel):
