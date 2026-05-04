@@ -186,7 +186,6 @@ class AdminCreatorRequirementsResponse(BaseModel):
     id: str
     listing_id: str
     platforms: List[str]
-    min_followers: Optional[int] = None
     top_countries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     target_age_min: Optional[int] = None
     target_age_max: Optional[int] = None

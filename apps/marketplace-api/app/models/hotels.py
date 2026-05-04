@@ -123,7 +123,6 @@ class CollaborationOfferingRequest(BaseModel):
 class CreatorRequirementsRequest(BaseModel):
     """Creator requirements request model"""
     platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
-    minFollowers: Optional[int] = Field(None, gt=0, alias="min_followers")
     topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
     targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
     targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")

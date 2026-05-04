@@ -379,11 +379,11 @@ async def create_test_listing(
     requirements = await Database.fetchrow(
         """
         INSERT INTO listing_creator_requirements
-        (listing_id, platforms, min_followers, target_countries, target_age_groups)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, listing_id, platforms, min_followers, target_countries, target_age_groups
+        (listing_id, platforms, target_countries, target_age_groups)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, listing_id, platforms, target_countries, target_age_groups
         """,
-        listing["id"], ["Instagram"], 10000, ["USA", "UK"], ["25-34", "35-44"]
+        listing["id"], ["Instagram"], ["USA", "UK"], ["25-34", "35-44"]
     )
 
     return {

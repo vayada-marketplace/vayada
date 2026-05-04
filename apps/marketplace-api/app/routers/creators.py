@@ -562,7 +562,6 @@ async def get_creator_collaboration_detail(
                 id=str(collab['req_id']),
                 listing_id=str(collab['listing_id']),
                 platforms=collab['req_platforms'],
-                min_followers=collab['req_min_followers'],
                 topCountries=collab['req_target_countries'],
                 target_age_min=collab['req_target_age_min'],
                 target_age_max=collab['req_target_age_max'],

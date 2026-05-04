@@ -84,7 +84,6 @@ async def get_all_listings():
                 id=str(r['id']),
                 listing_id=listing_id_str,
                 platforms=r['platforms'],
-                min_followers=r['min_followers'],
                 target_countries=r['target_countries'],
                 target_age_min=r['target_age_min'],
                 target_age_max=r['target_age_max'],
