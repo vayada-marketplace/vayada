@@ -236,3 +236,41 @@ class TestSummary:
         assert body["outstanding"] == 1500.0
         assert body["overdueCount"] == 1
         assert body["currency"] == "EUR"
+
+    async def test_pending_bookings_excluded_from_summary(self, client, cleanup_database):
+        """Pending booking requests (host hasn't accepted yet) must not
+        contribute to revenue, outstanding, or overdue counts — VAY-334.
+
+        Their `total_amount` already includes addon/upsell revenue at
+        creation time, so counting them would show revenue for stays
+        that may still expire or be rejected.
+        """
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        future_start = (date.today() + timedelta(days=30)).isoformat()
+        future_end = (date.today() + timedelta(days=33)).isoformat()
+        # Confirmed → contributes 200 × 3 = 600 to revenue/outstanding.
+        await create_test_booking(
+            str(hotel["id"]), str(room["id"]),
+            check_in=future_start, check_out=future_end,
+            nightly_rate=200.0, status="confirmed",
+            guest_email="confirmed@example.com",
+        )
+        # Pending → must NOT contribute, even though total_amount is set.
+        await create_test_booking(
+            str(hotel["id"]), str(room["id"]),
+            check_in=future_start, check_out=future_end,
+            nightly_rate=500.0, status="pending",
+            guest_email="pending@example.com",
+        )
+
+        resp = await client.get(
+            "/admin/financials/summary",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["revenueMtd"] == 600.0
+        assert body["outstanding"] == 600.0
+        assert body["overdueCount"] == 0

@@ -107,7 +107,11 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
         created = r["created_at"]
         total = float(r["total_amount"] or 0)
         paid = float(r["paid"] or 0)
-        if r["status"] in ("cancelled", "expired"):
+        # Only accepted (confirmed) bookings contribute. Pending host-response
+        # requests can still expire or be rejected, so counting their
+        # total_amount (which already includes addon/upsell revenue) would
+        # show revenue for stays that may never happen — VAY-334.
+        if r["status"] != "confirmed":
             continue
         if created.date() >= month_start:
             revenue_mtd += total
