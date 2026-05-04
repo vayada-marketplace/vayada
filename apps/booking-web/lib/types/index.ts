@@ -69,6 +69,7 @@ export interface RoomType {
   flexibleCancellationType?: 'free' | 'partial_refund'
   partialRefundCancelWindowDays?: number
   partialRefundAmountPercent?: number
+  partialRefundTiers?: { minDaysBeforeCheckIn: number; refundPercent: number }[]
   originalRate?: number | null
   lastMinuteDiscountPercent?: number | null
   ratePaymentMethods?: Record<string, string[]> | null
