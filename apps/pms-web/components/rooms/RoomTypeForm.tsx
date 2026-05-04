@@ -479,17 +479,17 @@ export default function RoomTypeForm({
   }
 
   const tierColors: Record<string, string> = {
-    Low: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-    Mid: 'text-blue-600 bg-blue-50 border-blue-200',
-    High: 'text-blue-800 bg-blue-100 border-blue-200',
-    Peak: 'text-indigo-700 bg-indigo-100 border-indigo-200',
+    Low: 'text-green-700 bg-green-50 border-green-200',
+    Mid: 'text-yellow-700 bg-yellow-50 border-yellow-200',
+    High: 'text-red-700 bg-red-50 border-red-200',
+    Peak: 'text-red-900 bg-red-100 border-red-300',
   }
 
   const tierDotColors: Record<string, string> = {
-    Low: 'bg-emerald-400',
-    Mid: 'bg-blue-400',
-    High: 'bg-blue-600',
-    Peak: 'bg-indigo-500',
+    Low: 'bg-green-500',
+    Mid: 'bg-yellow-400',
+    High: 'bg-red-500',
+    Peak: 'bg-red-800',
   }
 
   return (
@@ -1700,7 +1700,7 @@ export default function RoomTypeForm({
                 <div className="px-4 py-2.5 border-b border-gray-100 space-y-1">
                   {seasons.map((s, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-[10px]">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#38bdf8','Mid':'#3b82f6','High':'#1d4ed8','Peak':'#4338ca'}[s.tier] || '#9ca3af') }} />
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ({'Low':'#22c55e','Mid':'#eab308','High':'#ef4444','Peak':'#991b1b'}[s.tier] || '#9ca3af') }} />
                       <span className="font-medium text-gray-700">{s.name || `Season ${idx + 1}`}</span>
                       {s.from && s.to && <span className="text-gray-400">{s.from} - {s.to}</span>}
                       {s.rate && <span className="text-gray-500 ml-auto">{formatCurrency(parseFloat(s.rate) || 0, form.currency || 'EUR')}/night</span>}
@@ -1750,7 +1750,7 @@ export default function RoomTypeForm({
                       const hasDailyOverride = dailyRates[dateStr] !== undefined
                       const displayRate = hasDailyOverride ? dailyRates[dateStr] : rate
                       const inGap = inOp && !season && !hasDailyOverride && isInSeasonGap(dateStr)
-                      const seasonBgHex: Record<string, string> = { 'Low': '#f0f9ff', 'Mid': '#eff6ff', 'High': '#dbeafe', 'Peak': '#e0e7ff' }
+                      const seasonBgHex: Record<string, string> = { 'Low': '#dcfce7', 'Mid': '#fef9c3', 'High': '#fee2e2', 'Peak': '#fca5a5' }
                       const cellBg = !inOp ? '#f9fafb' : hasDailyOverride ? '#fefce8' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
                       const isEditing = editingDay === dateStr
 
