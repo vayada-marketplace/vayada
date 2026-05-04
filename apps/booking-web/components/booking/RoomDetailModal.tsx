@@ -269,11 +269,38 @@ export default function RoomDetailModal({
                     <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
-                      <p className="text-xs text-gray-500">
-                        {room.flexibleCancellationType === 'partial_refund'
-                          ? `${room.partialRefundAmountPercent ?? 50}% refund if cancelled at least ${room.partialRefundCancelWindowDays ?? 30} days before`
-                          : `Free cancellation until ${getFreeCancellationDays(room.cancellationPolicy)} days before`}
-                      </p>
+                      {room.flexibleCancellationType === 'partial_refund' ? (
+                        (() => {
+                          const tiers = room.partialRefundTiers && room.partialRefundTiers.length > 0
+                            ? [...room.partialRefundTiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+                            : null
+                          if (tiers) {
+                            return (
+                              <ul className="text-xs text-gray-500 space-y-0.5">
+                                {tiers.map((t, i) => (
+                                  <li key={i}>
+                                    {i === 0
+                                      ? `≥ ${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`
+                                      : `${tiers[i - 1].minDaysBeforeCheckIn - 1}–${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`}
+                                  </li>
+                                ))}
+                                {tiers[tiers.length - 1].minDaysBeforeCheckIn > 0 && (
+                                  <li>{`< ${tiers[tiers.length - 1].minDaysBeforeCheckIn} days before: non-refundable`}</li>
+                                )}
+                              </ul>
+                            )
+                          }
+                          return (
+                            <p className="text-xs text-gray-500">
+                              {`${room.partialRefundAmountPercent ?? 50}% refund if cancelled at least ${room.partialRefundCancelWindowDays ?? 30} days before`}
+                            </p>
+                          )
+                        })()
+                      ) : (
+                        <p className="text-xs text-gray-500">
+                          {`Free cancellation until ${getFreeCancellationDays(room.cancellationPolicy)} days before`}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">

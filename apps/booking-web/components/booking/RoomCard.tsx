@@ -50,11 +50,19 @@ export default function RoomCard({
     ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
     : null
 
+  const partialRefundTiers = (room.partialRefundTiers && room.partialRefundTiers.length > 0)
+    ? [...room.partialRefundTiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+    : null
   const flexibleDescription = room.flexibleCancellationType === 'partial_refund'
-    ? t('partialRefundDesc', {
-        percent: room.partialRefundAmountPercent ?? 50,
-        days: room.partialRefundCancelWindowDays ?? 30,
-      })
+    ? (partialRefundTiers
+        ? t('partialRefundDesc', {
+            percent: partialRefundTiers[0].refundPercent,
+            days: partialRefundTiers[0].minDaysBeforeCheckIn,
+          })
+        : t('partialRefundDesc', {
+            percent: room.partialRefundAmountPercent ?? 50,
+            days: room.partialRefundCancelWindowDays ?? 30,
+          }))
     : t('flexibleDesc', { days: getFreeCancellationDays(room.cancellationPolicy) })
 
   return (
