@@ -132,6 +132,44 @@ class PaymentRepository:
         return dict(row)
 
     @staticmethod
+    async def list_for_hotel_currency_conversion(hotel_id: str) -> List[dict]:
+        """Minimal projection used when re-denominating payments on a
+        hotel currency change (VAY-335)."""
+        rows = await Database.fetch(
+            """
+            SELECT p.id, p.amount, p.refund_amount, p.currency
+            FROM payments p
+            JOIN bookings b ON b.id = p.booking_id
+            WHERE b.hotel_id = $1
+            """,
+            hotel_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def update_amounts_and_currency(
+        payment_id: str,
+        *,
+        amount: float,
+        refund_amount: Optional[float],
+        currency: str,
+    ) -> None:
+        await Database.execute(
+            """
+            UPDATE payments
+            SET amount = $2,
+                refund_amount = $3,
+                currency = $4,
+                updated_at = now()
+            WHERE id = $1
+            """,
+            payment_id,
+            amount,
+            refund_amount,
+            currency,
+        )
+
+    @staticmethod
     async def update_status(payment_id: str, status: str, **kwargs) -> dict:
         sets = ["status = $2", "updated_at = now()"]
         args = [payment_id, status]

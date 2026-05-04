@@ -5,9 +5,16 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.booking_repo import BookingRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.payment_repo import PaymentRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services.currency_service import get_exchange_rate, convert_room_type_rates
+from app.services.currency_service import (
+    convert_amount,
+    convert_room_type_rates,
+    decimals_for_currency,
+    get_exchange_rate,
+)
 from app.models.payment import (
     HotelPaymentSettings,
     HotelPaymentSettingsUpdate,
@@ -118,9 +125,7 @@ async def update_payment_settings(
                     detail=f"Failed to fetch exchange rate for {old_currency} → {new_currency}. Currency not updated.",
                 )
             try:
-                # Determine decimal places: currencies like IDR, JPY, KRW use 0
-                zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
-                decimals = 0 if zero_decimal else 2
+                decimals = decimals_for_currency(new_currency)
                 room_types = await RoomTypeRepository.list_by_hotel_id(hotel_id)
                 converted_count = 0
                 for rt in room_types:
@@ -186,8 +191,7 @@ async def update_payment_settings(
         if old_currency != new_currency:
             try:
                 addons = await hotel_identity_service.list_addons(hotel_id)
-                zero_decimal = new_currency in ("IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF")
-                addon_decimals = 0 if zero_decimal else 2
+                addon_decimals = decimals_for_currency(new_currency)
                 converted_count = 0
                 for addon in addons:
                     addon_currency = addon["currency"]
@@ -209,6 +213,79 @@ async def update_payment_settings(
                     logger.info("Converted %d addon prices to %s", converted_count, new_currency)
             except Exception as e:
                 logger.warning("Failed to convert addon prices: %s", e)
+
+            # VAY-335: Re-denominate historical bookings + payments so the
+            # PMS Dashboard / Financials revenue KPIs reflect the new
+            # display currency. Without this, a $145 booking still reads
+            # as 145 in the new currency (e.g. "Rp 145" instead of the
+            # converted ~Rp 2.4M).
+            try:
+                booking_decimals = decimals_for_currency(new_currency)
+                rate_cache: dict = {old_currency: rate}
+                bookings_converted = 0
+                bookings_to_convert = await BookingRepository.list_for_currency_conversion(hotel_id)
+                for bk in bookings_to_convert:
+                    booking_currency = bk.get("currency") or old_currency
+                    if booking_currency == new_currency:
+                        continue
+                    try:
+                        if booking_currency not in rate_cache:
+                            rate_cache[booking_currency] = await get_exchange_rate(
+                                booking_currency, new_currency,
+                            )
+                        bk_rate = rate_cache[booking_currency]
+                        await BookingRepository.update_amounts_and_currency(
+                            str(bk["id"]),
+                            total_amount=convert_amount(float(bk["total_amount"] or 0), bk_rate, booking_decimals),
+                            nightly_rate=convert_amount(float(bk["nightly_rate"] or 0), bk_rate, booking_decimals),
+                            addon_total=convert_amount(float(bk.get("addon_total") or 0), bk_rate, booking_decimals),
+                            promo_discount=convert_amount(float(bk.get("promo_discount") or 0), bk_rate, booking_decimals),
+                            last_minute_discount_amount=convert_amount(
+                                float(bk.get("last_minute_discount_amount") or 0), bk_rate, booking_decimals,
+                            ),
+                            currency=new_currency,
+                        )
+                        bookings_converted += 1
+                    except Exception as be:
+                        logger.warning("Failed to convert booking %s: %s", bk["id"], be)
+                if bookings_converted:
+                    logger.info(
+                        "Converted %d/%d booking amounts to %s",
+                        bookings_converted, len(bookings_to_convert), new_currency,
+                    )
+
+                payments_converted = 0
+                payments_to_convert = await PaymentRepository.list_for_hotel_currency_conversion(hotel_id)
+                for pmt in payments_to_convert:
+                    payment_currency = pmt.get("currency") or old_currency
+                    if payment_currency == new_currency:
+                        continue
+                    try:
+                        if payment_currency not in rate_cache:
+                            rate_cache[payment_currency] = await get_exchange_rate(
+                                payment_currency, new_currency,
+                            )
+                        pmt_rate = rate_cache[payment_currency]
+                        refund = pmt.get("refund_amount")
+                        await PaymentRepository.update_amounts_and_currency(
+                            str(pmt["id"]),
+                            amount=convert_amount(float(pmt["amount"] or 0), pmt_rate, booking_decimals),
+                            refund_amount=(
+                                convert_amount(float(refund), pmt_rate, booking_decimals)
+                                if refund is not None else None
+                            ),
+                            currency=new_currency,
+                        )
+                        payments_converted += 1
+                    except Exception as pe:
+                        logger.warning("Failed to convert payment %s: %s", pmt["id"], pe)
+                if payments_converted:
+                    logger.info(
+                        "Converted %d/%d payment amounts to %s",
+                        payments_converted, len(payments_to_convert), new_currency,
+                    )
+            except Exception as e:
+                logger.warning("Failed to convert booking/payment amounts: %s", e)
 
     # Match on hotel id (unified across PMS and booking_db — see
     # memory/project_hotel_data_ownership.md) rather than user_id, which
