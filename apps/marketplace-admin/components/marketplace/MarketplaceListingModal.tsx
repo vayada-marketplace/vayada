@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Modal } from '@/components/ui/Modal'
 import { MarketplaceListing } from '@/services/api/marketplace'
 import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
@@ -8,6 +9,7 @@ import {
   MapPinIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline'
 
 interface MarketplaceListingModalProps {
@@ -15,6 +17,7 @@ interface MarketplaceListingModalProps {
   onClose: () => void
   listing: MarketplaceListing | null
   notFoundMessage?: string
+  bookingHotelId?: string | null
 }
 
 const formatNumber = (num: number): string => {
@@ -43,8 +46,19 @@ export function MarketplaceListingModal({
   onClose,
   listing,
   notFoundMessage,
+  bookingHotelId,
 }: MarketplaceListingModalProps) {
+  const router = useRouter()
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
+
+  const handleEdit = () => {
+    onClose()
+    if (bookingHotelId) {
+      router.push(`/dashboard/hotels/${bookingHotelId}`)
+    } else {
+      router.push('/dashboard/hotels')
+    }
+  }
 
   useEffect(() => {
     setCurrentImageIndex(0)
@@ -75,6 +89,19 @@ export function MarketplaceListingModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={listing.name} size="xl">
       <div className="space-y-6">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleEdit}
+            disabled={!bookingHotelId}
+            title={bookingHotelId ? 'Edit hotel settings' : 'Hotel not initialized in booking engine'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <PencilSquareIcon className="w-4 h-4" />
+            Edit hotel settings
+          </button>
+        </div>
+
         {/* Image Gallery */}
         {listing.images && listing.images.length > 0 && (
           <div className="relative">
