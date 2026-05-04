@@ -83,4 +83,4 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '\u{1F1F0}\u{1F1F7}' },
 ]
 
-export const POPULAR_LANGUAGE_CODES = ['id', 'de', 'fr', 'es', 'ja', 'zh', 'ru']
+export const POPULAR_LANGUAGE_CODES = ['id', 'de', 'fr', 'es', 'ja', 'ru']
