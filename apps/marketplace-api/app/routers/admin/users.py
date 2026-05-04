@@ -256,7 +256,6 @@ async def get_user_details(
                             id=str(requirements_data['id']),
                             listing_id=str(requirements_data['listing_id']),
                             platforms=requirements_data['platforms'],
-                            min_followers=requirements_data['min_followers'],
                             top_countries=requirements_data['target_countries'],
                             target_age_min=requirements_data['target_age_min'],
                             target_age_max=requirements_data['target_age_max'],

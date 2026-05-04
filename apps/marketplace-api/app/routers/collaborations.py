@@ -152,22 +152,6 @@ async def create_collaboration(
 
         # Eligibility checks for creator-initiated applications
         if request.initiator_type == "creator":
-            min_followers_required = listing.get('req_min_followers')
-            if min_followers_required:
-                total_followers_row = await Database.fetchrow(
-                    "SELECT COALESCE(SUM(followers), 0) AS total FROM creator_platforms WHERE creator_id = $1",
-                    creator_id,
-                )
-                creator_total_followers = int(total_followers_row['total']) if total_followers_row else 0
-                if creator_total_followers < int(min_followers_required):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            f"This listing requires at least {int(min_followers_required):,} followers. "
-                            f"You currently have {creator_total_followers:,}."
-                        ),
-                    )
-
             max_nights = listing.get('offering_free_stay_max_nights')
             if max_nights and request.travel_date_from and request.travel_date_to:
                 requested_nights = (request.travel_date_to - request.travel_date_from).days

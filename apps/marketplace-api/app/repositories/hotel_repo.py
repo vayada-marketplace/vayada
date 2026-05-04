@@ -232,7 +232,7 @@ class HotelRepository:
         conn: Optional[asyncpg.Connection] = None,
     ) -> Optional[dict]:
         query = """
-            SELECT id, listing_id, platforms, min_followers, target_countries,
+            SELECT id, listing_id, platforms, target_countries,
                    target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
             FROM listing_creator_requirements
             WHERE listing_id = $1
@@ -247,7 +247,6 @@ class HotelRepository:
     async def create_requirements(
         listing_id: str,
         platforms: list,
-        min_followers: int,
         target_countries: list,
         target_age_min: Optional[int],
         target_age_max: Optional[int],
@@ -258,12 +257,12 @@ class HotelRepository:
     ) -> dict:
         query = """
             INSERT INTO listing_creator_requirements
-            (listing_id, platforms, min_followers, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, platforms, min_followers, target_countries,
+            (listing_id, platforms, target_countries, target_age_min, target_age_max, target_age_groups, creator_types)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, platforms, target_countries,
                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
         """
-        args = (listing_id, platforms, min_followers, target_countries,
+        args = (listing_id, platforms, target_countries,
                 target_age_min, target_age_max, target_age_groups, creator_types)
         if conn:
             row = await conn.fetchrow(query, *args)
@@ -368,7 +367,7 @@ class HotelRepository:
             return []
         placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
         query = f"""
-            SELECT id, listing_id, platforms, min_followers, target_countries,
+            SELECT id, listing_id, platforms, target_countries,
                    target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
             FROM listing_creator_requirements
             WHERE listing_id IN ({placeholders})

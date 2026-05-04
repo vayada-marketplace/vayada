@@ -96,7 +96,6 @@ class ListingService:
                 requirements = await HotelRepository.create_requirements(
                     listing_id,
                     request.creatorRequirements.platforms,
-                    request.creatorRequirements.minFollowers,
                     request.creatorRequirements.topCountries,
                     request.creatorRequirements.targetAgeMin,
                     request.creatorRequirements.targetAgeMax,
@@ -175,7 +174,6 @@ class ListingService:
                     await HotelRepository.create_requirements(
                         listing_id,
                         request.creatorRequirements.platforms,
-                        request.creatorRequirements.minFollowers,
                         request.creatorRequirements.topCountries,
                         request.creatorRequirements.targetAgeMin,
                         request.creatorRequirements.targetAgeMax,
@@ -230,7 +228,6 @@ def build_listing_response(
             "id": str(requirements['id']),
             "listing_id": str(requirements.get('listing_id', listing_id)),
             "platforms": requirements['platforms'],
-            "min_followers": requirements['min_followers'],
             "target_countries": requirements['target_countries'],
             "target_age_min": requirements['target_age_min'],
             "target_age_max": requirements['target_age_max'],

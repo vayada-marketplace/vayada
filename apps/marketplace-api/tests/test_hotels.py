@@ -265,7 +265,6 @@ class TestCreateHotelListing:
                 ],
                 "creatorRequirements": {
                     "platforms": ["Instagram"],
-                    "minFollowers": 10000,
                     "topCountries": ["USA", "UK"],
                     "targetAgeGroups": ["25-34"]
                 }
@@ -299,8 +298,7 @@ class TestCreateHotelListing:
                     }
                 ],
                 "creatorRequirements": {
-                    "platforms": ["Instagram"],
-                    "minFollowers": 50000
+                    "platforms": ["Instagram"]
                 }
             },
             headers=get_auth_headers(test_hotel["token"])
@@ -348,7 +346,7 @@ class TestCreateHotelListing:
                         "freeStayMaxNights": 5
                     }
                 ],
-                "creatorRequirements": {"platforms": ["Instagram"], "minFollowers": 1000}
+                "creatorRequirements": {"platforms": ["Instagram"]}
             },
             headers=get_auth_headers(test_creator["token"])
         )
@@ -639,8 +637,7 @@ class TestListingCollaborationOfferings:
                     }
                 ],
                 "creatorRequirements": {
-                    "platforms": ["Instagram", "TikTok"],
-                    "minFollowers": 25000
+                    "platforms": ["Instagram", "TikTok"]
                 }
             },
             headers=get_auth_headers(test_hotel["token"])
@@ -671,8 +668,7 @@ class TestListingCollaborationOfferings:
                     }
                 ],
                 "creatorRequirements": {
-                    "platforms": ["Instagram"],
-                    "minFollowers": 50000
+                    "platforms": ["Instagram"]
                 }
             },
             headers=get_auth_headers(test_hotel["token"])
@@ -720,7 +716,6 @@ class TestListingCollaborationOfferings:
                 ],
                 "creatorRequirements": {
                     "platforms": ["Instagram"],
-                    "minFollowers": 10000,
                 },
             },
             headers=get_auth_headers(test_hotel["token"]),
@@ -770,7 +765,6 @@ class TestCreatorRequirements:
                 ],
                 "creatorRequirements": {
                     "platforms": ["TikTok"],
-                    "minFollowers": 100000,
                     "targetAgeMin": 18,
                     "targetAgeMax": 30,
                     "targetAgeGroups": ["18-24", "25-34"]

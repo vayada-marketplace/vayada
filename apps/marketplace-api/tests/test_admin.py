@@ -236,8 +236,7 @@ class TestCreateUser:
                                 }
                             ],
                             "creatorRequirements": {
-                                "platforms": ["Instagram"],
-                                "minFollowers": 10000
+                                "platforms": ["Instagram"]
                             }
                         }
                     ]
@@ -565,8 +564,7 @@ class TestAdminCreateListing:
                     }
                 ],
                 "creatorRequirements": {
-                    "platforms": ["Instagram"],
-                    "minFollowers": 50000
+                    "platforms": ["Instagram"]
                 }
             },
             headers=get_auth_headers(test_admin["token"])
@@ -598,7 +596,7 @@ class TestAdminCreateListing:
                         "freeStayMaxNights": 5
                     }
                 ],
-                "creatorRequirements": {"platforms": ["Instagram"], "minFollowers": 1000}
+                "creatorRequirements": {"platforms": ["Instagram"]}
             },
             headers=get_auth_headers(test_admin["token"])
         )
