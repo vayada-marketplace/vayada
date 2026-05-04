@@ -5,6 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse
 
 from app.config import settings
+from app.channels import channel_label as _ota_channel_label  # re-exported for tests
 
 logger = logging.getLogger(__name__)
 
@@ -505,36 +506,6 @@ async def send_affiliate_payout_notification(
     <p class="detail">If you have any questions, please don't hesitate to reach out.</p>
     """
     await _send_email(affiliate_email, subject, _wrap_html(content))
-
-
-_OTA_CHANNEL_LABELS = {
-    "bookingcom": "Booking.com",
-    "booking.com": "Booking.com",
-    "booking_com": "Booking.com",
-    "booking": "Booking.com",
-    "airbnb": "Airbnb",
-    "expedia": "Expedia",
-    "agoda": "Agoda",
-    "vrbo": "Vrbo",
-    "hostelworld": "Hostelworld",
-    "tripadvisor": "Tripadvisor",
-    "hotels.com": "Hotels.com",
-    "hotelscom": "Hotels.com",
-}
-
-
-def _ota_channel_label(channel: str | None) -> str:
-    """Map a Channex ``ota_name`` to a guest-facing label. Falls back to a
-    title-cased version of the raw value, or ``"OTA"`` when nothing usable
-    was provided (per ticket spec)."""
-    if not channel:
-        return "OTA"
-    key = channel.strip().lower()
-    if key in {"", "channex", "direct"}:
-        return "OTA"
-    if key in _OTA_CHANNEL_LABELS:
-        return _OTA_CHANNEL_LABELS[key]
-    return channel.replace("_", " ").title()
 
 
 async def send_host_ota_booking_imported(
