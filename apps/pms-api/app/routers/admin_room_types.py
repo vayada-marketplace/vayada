@@ -224,6 +224,17 @@ async def update_room_type(
         }
     room = await RoomTypeRepository.update(room_type_id, updates)
 
+    # Auto-generated room numbers follow the room type name (e.g.
+    # "Garden King 1"). When the name changes — common after the user
+    # duplicates a type and renames the "(Copy)" — rewrite those numbers
+    # so the calendar stops displaying the stale name. Manually-renamed
+    # rooms are left alone (VAY-322).
+    new_name = updates.get("name")
+    if new_name is not None and new_name != existing["name"]:
+        await RoomRepository.rename_auto_named(
+            hotel_id, room_type_id, existing["name"], new_name,
+        )
+
     cancel_fields = {
         "flexible_cancellation_type",
         "partial_refund_cancel_window_days",

@@ -1,5 +1,11 @@
+import logging
 from typing import Optional, List, Iterable, Tuple
+
+import asyncpg
+
 from app.database import Database
+
+logger = logging.getLogger(__name__)
 
 
 class RoomRepository:
@@ -61,6 +67,65 @@ class RoomRepository:
             ids,
             orders,
         )
+
+    @staticmethod
+    async def rename_auto_named(
+        hotel_id: str,
+        room_type_id: str,
+        old_name: str,
+        new_name: str,
+    ) -> int:
+        """Rewrite room_number for rooms still using the auto-generated
+        "{room_type_name} N" naming so they follow a renamed room type.
+
+        Only rooms whose current room_number matches the exact pattern
+        "<old_name> <integer>" are touched — manually-renamed rooms (e.g.
+        "101", "Penthouse") are left alone. Returns the number of rows
+        rewritten. Hotel-scoped to defend against cross-tenant writes.
+
+        If the rename would collide with the unique (hotel_id, room_number)
+        index — e.g. another room type already owns "<new_name> 1" — the
+        whole UPDATE is rolled back and 0 is returned. The caller keeps
+        the room-type rename; only the room_number rewrite is skipped, and
+        the user can resolve the conflict manually.
+        """
+        if old_name == new_name:
+            return 0
+        # POSIX-regex special chars that need escaping inside the anchored
+        # pattern. Backslash first so we don't double-escape later additions.
+        special = r"\.^$*+?()[]{}|"
+        escaped_old = "".join(
+            ("\\" + c) if c in special else c for c in old_name
+        )
+        pattern = f"^{escaped_old} [0-9]+$"
+        try:
+            result = await Database.execute(
+                """
+                UPDATE rooms
+                SET room_number = $4 || substring(room_number from length($3) + 1),
+                    updated_at = now()
+                WHERE hotel_id = $1
+                  AND room_type_id = $2
+                  AND room_number ~ $5
+                """,
+                hotel_id,
+                room_type_id,
+                old_name,
+                new_name,
+                pattern,
+            )
+        except asyncpg.UniqueViolationError:
+            logger.warning(
+                "Skipped renaming auto-named rooms for room_type %s "
+                "(%r -> %r): would collide with existing room numbers",
+                room_type_id, old_name, new_name,
+            )
+            return 0
+        # asyncpg returns "UPDATE <n>" for executes that affect rows.
+        try:
+            return int(result.split()[-1])
+        except (ValueError, AttributeError, IndexError):
+            return 0
 
     @staticmethod
     async def get_by_id(room_id: str) -> Optional[dict]:
