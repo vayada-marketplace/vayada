@@ -177,11 +177,17 @@ export default function BookingNavigation() {
   const selectedLangLabel = LANGUAGES.find((l) => l.code === locale)?.label.slice(0, 2).toUpperCase() || 'EN'
 
   const currencyItems = useMemo(() => {
-    const codes = [hotel.currency, ...(hotel.supportedCurrencies || []).filter((c: string) => c !== hotel.currency)]
-    return codes.map((code: string) => ({
-      value: code,
-      label: CURRENCY_LABELS[code] || code,
-    }))
+    const codes = Array.from(new Set([hotel.currency, ...(hotel.supportedCurrencies || [])]))
+    return codes
+      .map((code: string) => ({
+        value: code,
+        label: CURRENCY_LABELS[code] || code,
+      }))
+      .sort((a, b) => {
+        const nameA = a.label.split(' ').slice(1).join(' ') || a.label
+        const nameB = b.label.split(' ').slice(1).join(' ') || b.label
+        return nameA.localeCompare(nameB)
+      })
   }, [hotel.currency, hotel.supportedCurrencies])
 
   const closeAll = () => {
