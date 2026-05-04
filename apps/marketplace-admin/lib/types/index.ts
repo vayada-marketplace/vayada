@@ -247,7 +247,6 @@ export interface CreatorRequirements {
   id: string
   listingId: string
   platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
-  minFollowers: number | null
   targetCountries: string[]
   targetAgeMin: number | null
   targetAgeMax: number | null

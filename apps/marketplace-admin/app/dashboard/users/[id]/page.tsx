@@ -98,7 +98,6 @@ export default function UserDetailPage() {
     creatorRequirements: {
       id?: string
       platforms: ('Instagram' | 'TikTok' | 'YouTube' | 'Facebook')[]
-      minFollowers: number | null
       targetCountries: string[]
       targetAgeGroups: string[]
     }
@@ -110,7 +109,6 @@ export default function UserDetailPage() {
     collaborationOfferings: [],
     creatorRequirements: {
       platforms: [],
-      minFollowers: null,
       targetCountries: [],
       targetAgeGroups: [],
     },
@@ -473,7 +471,6 @@ export default function UserDetailPage() {
       creatorRequirements: listing.creatorRequirements ? {
         id: listing.creatorRequirements.id,
         platforms: listing.creatorRequirements.platforms || [],
-        minFollowers: listing.creatorRequirements.minFollowers,
         targetCountries: listing.creatorRequirements.targetCountries || [],
         // Convert targetAgeMin/targetAgeMax to targetAgeGroups array
         targetAgeGroups: listing.creatorRequirements.targetAgeMin !== null && listing.creatorRequirements.targetAgeMax !== null
@@ -484,7 +481,6 @@ export default function UserDetailPage() {
           : [],
       } : {
         platforms: [],
-        minFollowers: null,
         targetCountries: [],
         targetAgeGroups: [],
       },
@@ -507,7 +503,6 @@ export default function UserDetailPage() {
       collaborationOfferings: [],
       creatorRequirements: {
         platforms: [],
-        minFollowers: null,
         targetCountries: [],
         targetAgeGroups: [],
       },
@@ -531,7 +526,6 @@ export default function UserDetailPage() {
       collaborationOfferings: [],
       creatorRequirements: {
         platforms: [],
-        minFollowers: null,
         targetCountries: [],
         targetAgeGroups: [],
       },
@@ -633,7 +627,6 @@ export default function UserDetailPage() {
 
       createData.creatorRequirements = {
         platforms: editListingData.creatorRequirements.platforms,
-        minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
         targetCountries: editListingData.creatorRequirements.targetCountries,
         targetAgeMin,
         targetAgeMax,
@@ -810,7 +803,6 @@ export default function UserDetailPage() {
 
       updateData.creatorRequirements = {
         platforms: editListingData.creatorRequirements.platforms,
-        minFollowers: editListingData.creatorRequirements.minFollowers ? parseInt(editListingData.creatorRequirements.minFollowers.toString()) : null,
         targetCountries: editListingData.creatorRequirements.targetCountries,
         targetAgeMin,
         targetAgeMax,
@@ -2790,17 +2782,6 @@ export default function UserDetailPage() {
                       </div>
                     </div>
 
-                    {/* Min Followers */}
-                    <div>
-                      <Input
-                        label="Min Followers"
-                        type="number"
-                        value={editListingData.creatorRequirements.minFollowers?.toString() || ''}
-                        onChange={(e) => handleCreatorRequirementChange('minFollowers', e.target.value ? parseInt(e.target.value) : null)}
-                        placeholder="10000"
-                      />
-                    </div>
-
                     {/* Target Countries */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2914,16 +2895,6 @@ export default function UserDetailPage() {
                         </div>
                       )}
 
-                      {/* Minimum Followers */}
-                      {selectedListing.creatorRequirements.minFollowers !== null && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">Minimum Followers</label>
-                          <p className="mt-1 text-sm text-gray-900">
-                            {selectedListing.creatorRequirements.minFollowers.toLocaleString()}
-                          </p>
-                        </div>
-                      )}
-
                       {/* Age Range */}
                       {selectedListing.creatorRequirements.targetAgeMin !== null && selectedListing.creatorRequirements.targetAgeMax !== null ? (
                         <div>
@@ -2964,7 +2935,6 @@ export default function UserDetailPage() {
 
                       {/* Show message if no requirements are set */}
                       {(!selectedListing.creatorRequirements.platforms || selectedListing.creatorRequirements.platforms.length === 0) &&
-                        selectedListing.creatorRequirements.minFollowers === null &&
                         selectedListing.creatorRequirements.targetAgeMin === null &&
                         selectedListing.creatorRequirements.targetAgeMax === null &&
                         (!selectedListing.creatorRequirements.targetCountries || selectedListing.creatorRequirements.targetCountries.length === 0) && (

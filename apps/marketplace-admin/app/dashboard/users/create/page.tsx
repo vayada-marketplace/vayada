@@ -102,7 +102,6 @@ export default function CreateUserPage() {
 
   interface CreatorRequirement {
     platforms: string[]
-    minFollowers?: string
     targetCountries: string[]
     targetAgeGroups: string[]
   }
@@ -681,9 +680,6 @@ export default function CreateUserPage() {
                 }),
               creatorRequirements: {
                 platforms: listing.creatorRequirements.platforms,
-                ...(listing.creatorRequirements.minFollowers && { 
-                  minFollowers: parseInt(listing.creatorRequirements.minFollowers) 
-                }),
                 targetCountries: listing.creatorRequirements.targetCountries,
                 ...(listing.creatorRequirements.targetAgeGroups.length > 0 && (() => {
                   // Convert age groups to min/max
@@ -1642,13 +1638,6 @@ export default function CreateUserPage() {
                                     ))}
                                   </div>
                                 </div>
-                                <Input
-                                  label="Min Followers"
-                                  type="number"
-                                  value={listing.creatorRequirements.minFollowers || ''}
-                                  onChange={(e) => handleCreatorRequirementChange(listingIndex, 'minFollowers', e.target.value)}
-                                  placeholder="10000"
-                                />
                                 <div className="md:col-span-2">
                                   <label className="block text-sm font-medium text-gray-700 mb-2">Target Countries</label>
                                   <p className="text-sm text-gray-500 mb-3">Select up to 3 countries your target audience is from</p>

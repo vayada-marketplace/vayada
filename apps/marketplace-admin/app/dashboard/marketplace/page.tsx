@@ -314,11 +314,6 @@ export default function MarketplacePreviewPage() {
                       {/* Creator requirements */}
                       {listing.creator_requirements && (
                         <div className="text-xs text-gray-500 border-t pt-2">
-                          {listing.creator_requirements.min_followers && (
-                            <span className="mr-3">
-                              Min {formatNumber(listing.creator_requirements.min_followers)} followers
-                            </span>
-                          )}
                           {listing.creator_requirements.platforms && listing.creator_requirements.platforms.length > 0 && (
                             <span>{listing.creator_requirements.platforms.join(', ')}</span>
                           )}
@@ -556,12 +551,6 @@ export default function MarketplacePreviewPage() {
                     <p className="text-sm">
                       <span className="text-gray-500">Platforms:</span>{' '}
                       <span className="text-gray-900">{selectedListing.creator_requirements.platforms.join(', ')}</span>
-                    </p>
-                  )}
-                  {selectedListing.creator_requirements.min_followers && (
-                    <p className="text-sm">
-                      <span className="text-gray-500">Min Followers:</span>{' '}
-                      <span className="text-gray-900">{formatNumber(selectedListing.creator_requirements.min_followers)}</span>
                     </p>
                   )}
                   {selectedListing.creator_requirements.target_countries && selectedListing.creator_requirements.target_countries.length > 0 && (
