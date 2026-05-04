@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Optional, List, Dict
 
 MAX_ROOM_SIZE = 15000
@@ -96,28 +96,75 @@ def _validate_season_rates(seasons: list) -> list:
     return seasons
 
 
-def _validate_no_season_gaps(seasons: list) -> list:
-    """Raise ValueError if there are gaps between consecutive seasons."""
-    from datetime import date, timedelta
+_DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)  # leap-year so Feb 29 is valid
+_TOTAL_DAYS = sum(_DAYS_IN_MONTH)
 
-    def _parse_date(d: str) -> date:
-        """Parse YYYY-MM-DD or MM-DD (normalized to 2024-MM-DD)."""
-        if len(d) == 5 and d[2] == '-':
-            return date(2024, int(d[:2]), int(d[3:]))
-        return date.fromisoformat(d)
 
-    valid = [s for s in seasons if s.get("from") and s.get("to")]
-    if len(valid) < 2:
+def _mmdd_to_doy(mmdd: str) -> int:
+    """Convert YYYY-MM-DD or MM-DD to day-of-year (1..366) on a leap-year calendar."""
+    if len(mmdd) > 5:
+        mmdd = mmdd[5:]
+    m, d = int(mmdd[:2]), int(mmdd[3:])
+    return sum(_DAYS_IN_MONTH[: m - 1]) + d
+
+
+def _doy_to_mmdd(doy: int) -> str:
+    m = 0
+    rem = doy
+    while m < 12 and rem > _DAYS_IN_MONTH[m]:
+        rem -= _DAYS_IN_MONTH[m]
+        m += 1
+    return f"{m + 1:02d}-{rem:02d}"
+
+
+def _fill_range(target: list[bool], from_mmdd: str, to_mmdd: str) -> None:
+    f = _mmdd_to_doy(from_mmdd)
+    t = _mmdd_to_doy(to_mmdd)
+    if f <= t:
+        for d in range(f, t + 1):
+            target[d] = True
+    else:
+        # Cross-year wrap (e.g. Nov 1 – Feb 28)
+        for d in range(f, _TOTAL_DAYS + 1):
+            target[d] = True
+        for d in range(1, t + 1):
+            target[d] = True
+
+
+def _validate_no_season_gaps(seasons: list, operating_periods: Optional[list] = None) -> list:
+    """Raise ValueError if any open day has no season coverage.
+
+    A day is "open" if it falls inside an operating period. Days outside all
+    operating periods are intentionally closed and never count as gaps. If no
+    operating periods are configured, the property is treated as fully closed
+    year-round, so no seasons are required and no gaps are possible.
+    """
+    valid_seasons = [s for s in seasons if s.get("from") and s.get("to")]
+    valid_periods = [p for p in (operating_periods or []) if p.get("from") and p.get("to")]
+
+    if not valid_periods:
         return seasons
-    sorted_seasons = sorted(valid, key=lambda s: _normalize_season_date(s["from"]))
-    gaps = []
-    for i in range(len(sorted_seasons) - 1):
-        end = _parse_date(sorted_seasons[i]["to"])
-        next_start = _parse_date(sorted_seasons[i + 1]["from"])
-        if end + timedelta(days=1) < next_start:
-            gap_from = end + timedelta(days=1)
-            gap_to = next_start - timedelta(days=1)
-            gaps.append(f"{gap_from.isoformat()} – {gap_to.isoformat()}")
+
+    open_days = [False] * (_TOTAL_DAYS + 1)
+    for p in valid_periods:
+        _fill_range(open_days, p["from"], p["to"])
+
+    covered_days = [False] * (_TOTAL_DAYS + 1)
+    for s in valid_seasons:
+        _fill_range(covered_days, s["from"], s["to"])
+
+    gaps: list[str] = []
+    run_start: Optional[int] = None
+    for d in range(1, _TOTAL_DAYS + 1):
+        is_gap = open_days[d] and not covered_days[d]
+        if is_gap and run_start is None:
+            run_start = d
+        if not is_gap and run_start is not None:
+            gaps.append(f"{_doy_to_mmdd(run_start)} – {_doy_to_mmdd(d - 1)}")
+            run_start = None
+    if run_start is not None:
+        gaps.append(f"{_doy_to_mmdd(run_start)} – {_doy_to_mmdd(_TOTAL_DAYS)}")
+
     if gaps:
         raise ValueError(
             f"Season date ranges have gaps (dates with no price): {'; '.join(gaps)}"
@@ -221,7 +268,12 @@ class RoomTypeCreate(BaseModel):
         _normalize_season_dates(v)
         _validate_season_rates(v)
         _validate_no_season_overlap(v)
-        return _validate_no_season_gaps(v)
+        return v
+
+    @model_validator(mode="after")
+    def validate_seasons_against_operating_periods(self) -> "RoomTypeCreate":
+        _validate_no_season_gaps(self.seasons, self.operating_periods)
+        return self
 
 
 class RoomTypeUpdate(BaseModel):
@@ -306,8 +358,16 @@ class RoomTypeUpdate(BaseModel):
             _normalize_season_dates(v)
             _validate_season_rates(v)
             _validate_no_season_overlap(v)
-            _validate_no_season_gaps(v)
         return v
+
+    @model_validator(mode="after")
+    def validate_seasons_against_operating_periods(self) -> "RoomTypeUpdate":
+        # Only run gap detection when seasons are being submitted in this update.
+        # operating_periods may be None in a partial update — pass it through;
+        # the helper treats missing periods as full-year open (legacy behavior).
+        if self.seasons is not None:
+            _validate_no_season_gaps(self.seasons, self.operating_periods)
+        return self
 
     @field_validator("meal_plans")
     @classmethod
