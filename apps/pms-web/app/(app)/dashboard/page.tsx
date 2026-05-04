@@ -94,12 +94,17 @@ export default function DashboardPage() {
       const date = new Date()
       date.setDate(date.getDate() + i)
       const dateStr = date.toISOString().split('T')[0]
-      const occupied = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr).length
+      const occupying = bookings.filter(b => b.checkIn <= dateStr && b.checkOut > dateStr)
+      const occupied = occupying.length
       const pct = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0
+      const adr = occupying.length > 0
+        ? occupying.reduce((sum, b) => sum + (b.nightlyRate || 0), 0) / occupying.length
+        : null
       days.push({
         date,
         dateStr,
         pct,
+        adr,
         label: i === 0 ? t('common.today') : date.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: date.getDate(),
       })
@@ -263,7 +268,7 @@ export default function DashboardPage() {
             </p>
           )}
         </div>
-        <ForecastChart days={forecastDays} today={today} t={t} />
+        <ForecastChart days={forecastDays} today={today} currency={hotelCurrency} t={t} />
       </div>
     </div>
   )
@@ -312,6 +317,7 @@ type ForecastDay = {
   date: Date
   dateStr: string
   pct: number
+  adr: number | null
   label: string
   dayNum: number
 }
@@ -322,17 +328,57 @@ function occupancyBarClass(pct: number): string {
   return pct >= HIGH_OCCUPANCY_THRESHOLD ? 'bg-blue-600' : 'bg-blue-300'
 }
 
+function niceAdrMax(rawMax: number): number {
+  if (rawMax <= 0) return 100
+  const exponent = Math.floor(Math.log10(rawMax))
+  const base = Math.pow(10, exponent)
+  const normalized = rawMax / base
+  let niceNorm: number
+  if (normalized <= 1) niceNorm = 1
+  else if (normalized <= 2) niceNorm = 2
+  else if (normalized <= 4) niceNorm = 4
+  else if (normalized <= 5) niceNorm = 5
+  else niceNorm = 10
+  return niceNorm * base
+}
+
 function ForecastChart({
   days,
   today,
+  currency,
   t,
 }: {
   days: ForecastDay[]
   today: string
+  currency: string
   t: (key: string, params?: Record<string, string | number>) => string
 }) {
   const chartHeight = 140
   const occupancyTicks = [100, 75, 50, 25, 0]
+
+  const rawAdrMax = days.reduce((max, d) => (d.adr != null && d.adr > max ? d.adr : max), 0)
+  const adrMax = niceAdrMax(rawAdrMax)
+  const hasAdr = days.some(d => d.adr != null)
+  const adrTicks = [adrMax, adrMax * 0.75, adrMax * 0.5, adrMax * 0.25, 0]
+
+  // Build line segments — break the polyline where adr is null so the line gaps over empty days.
+  const linePoints = days.map((day, idx) => {
+    if (day.adr == null) return null
+    const xPct = ((idx + 0.5) / days.length) * 100
+    const yPct = adrMax > 0 ? (1 - day.adr / adrMax) * 100 : 100
+    return { xPct, yPct, idx }
+  })
+  const segments: { xPct: number; yPct: number }[][] = []
+  let current: { xPct: number; yPct: number }[] = []
+  for (const p of linePoints) {
+    if (p) {
+      current.push({ xPct: p.xPct, yPct: p.yPct })
+    } else if (current.length > 0) {
+      segments.push(current)
+      current = []
+    }
+  }
+  if (current.length > 0) segments.push(current)
 
   return (
     <div>
@@ -381,11 +427,62 @@ function ForecastChart({
                       {day.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                     </div>
                     <div>{t('dashboard.occupancyAxis')}: {day.pct}%</div>
+                    {day.adr != null && (
+                      <div>{t('dashboard.avgPriceAxis')}: {formatCurrency(Math.round(day.adr), currency)}</div>
+                    )}
                   </div>
                 </div>
               )
             })}
           </div>
+
+          {/* ADR line overlay */}
+          {hasAdr && (
+            <>
+              <svg
+                className="absolute inset-0 pointer-events-none"
+                width="100%"
+                height="100%"
+                preserveAspectRatio="none"
+                viewBox="0 0 100 100"
+              >
+                {segments.map((seg, sIdx) => (
+                  <polyline
+                    key={sIdx}
+                    points={seg.map(p => `${p.xPct},${p.yPct}`).join(' ')}
+                    fill="none"
+                    stroke="#60a5fa"
+                    strokeWidth="1.5"
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                ))}
+              </svg>
+              <div className="absolute inset-0 pointer-events-none">
+                {linePoints.map((p, idx) =>
+                  p ? (
+                    <span
+                      key={idx}
+                      className="absolute w-2 h-2 rounded-full bg-white border-[1.5px] border-blue-400"
+                      style={{
+                        left: `${p.xPct}%`,
+                        top: `${p.yPct}%`,
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    />
+                  ) : null
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Right axis (ADR currency) */}
+        <div className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none" style={{ height: chartHeight }}>
+          {adrTicks.map((tick, idx) => (
+            <span key={idx} className="leading-none">{formatCurrency(Math.round(tick), currency)}</span>
+          ))}
         </div>
       </div>
 
@@ -407,6 +504,9 @@ function ForecastChart({
             )
           })}
         </div>
+        <div className="invisible pl-2 text-[9px] select-none">
+          <span>{formatCurrency(Math.round(adrMax), currency)}</span>
+        </div>
       </div>
 
       {/* Legend */}
@@ -418,6 +518,13 @@ function ForecastChart({
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-3 rounded-sm bg-blue-300" />
           <span>{t('dashboard.legendLow')}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0">
+            <line x1="0" y1="4" x2="18" y2="4" stroke="#60a5fa" strokeWidth="1.5" />
+            <circle cx="9" cy="4" r="2" fill="#ffffff" stroke="#60a5fa" strokeWidth="1.2" />
+          </svg>
+          <span>{t('dashboard.legendAdr', { currency })}</span>
         </div>
       </div>
     </div>
