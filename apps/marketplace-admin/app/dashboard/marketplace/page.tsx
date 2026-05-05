@@ -29,6 +29,7 @@ export default function MarketplacePreviewPage() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [bookingHotelIdByEmail, setBookingHotelIdByEmail] = useState<Record<string, string>>({})
+  const [bookingHotelIdByName, setBookingHotelIdByName] = useState<Record<string, string>>({})
 
   const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null)
   const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null)
@@ -49,11 +50,14 @@ export default function MarketplacePreviewPage() {
   const loadBookingHotels = async () => {
     try {
       const hotels = await bookingSettingsService.listAllHotels()
-      const map: Record<string, string> = {}
+      const byEmail: Record<string, string> = {}
+      const byName: Record<string, string> = {}
       for (const h of hotels) {
-        if (h.owner_email) map[h.owner_email.toLowerCase()] = h.id
+        if (h.owner_email) byEmail[h.owner_email.toLowerCase()] = h.id
+        if (h.name) byName[h.name.trim().toLowerCase()] = h.id
       }
-      setBookingHotelIdByEmail(map)
+      setBookingHotelIdByEmail(byEmail)
+      setBookingHotelIdByName(byName)
     } catch (err) {
       console.error('Error loading booking hotels:', err)
     }
@@ -415,9 +419,13 @@ export default function MarketplacePreviewPage() {
         onClose={() => setSelectedListing(null)}
         listing={selectedListing}
         bookingHotelId={
-          selectedListing?.owner_email
-            ? bookingHotelIdByEmail[selectedListing.owner_email.toLowerCase()] ?? null
-            : null
+          (selectedListing?.owner_email
+            ? bookingHotelIdByEmail[selectedListing.owner_email.toLowerCase()]
+            : undefined) ??
+          (selectedListing?.hotel_name
+            ? bookingHotelIdByName[selectedListing.hotel_name.trim().toLowerCase()]
+            : undefined) ??
+          null
         }
       />
 

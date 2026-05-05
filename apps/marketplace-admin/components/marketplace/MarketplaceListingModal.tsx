@@ -93,9 +93,8 @@ export function MarketplaceListingModal({
           <button
             type="button"
             onClick={handleEdit}
-            disabled={!bookingHotelId}
-            title={bookingHotelId ? 'Edit hotel settings' : 'Hotel not initialized in booking engine'}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={bookingHotelId ? 'Edit hotel settings' : 'Open hotels list (no direct match found)'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
           >
             <PencilSquareIcon className="w-4 h-4" />
             Edit hotel settings
