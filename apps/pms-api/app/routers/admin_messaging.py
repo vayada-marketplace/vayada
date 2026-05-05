@@ -29,6 +29,71 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-messaging"])
 
 
+# Channex's Messaging & Reviews app forwards a fixed set of media types to the
+# OTAs. Anything outside this list is silently dropped on the OTA side, so we
+# reject upfront with a clear error.
+ALLOWED_ATTACHMENT_CONTENT_TYPES: frozenset[str] = frozenset({
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/heic",
+    "image/heif",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+})
+
+# Per-channel max attachment size. Booking.com's messaging API caps at ~10MB;
+# Airbnb tolerates up to 25MB. We use the smaller of the relevant cap so the
+# user gets the right limit before they upload.
+_DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+_PER_CHANNEL_MAX_ATTACHMENT_BYTES: dict[str, int] = {
+    "booking.com": 8 * 1024 * 1024,
+    "airbnb": 25 * 1024 * 1024,
+    "expedia": 10 * 1024 * 1024,
+}
+
+
+def max_attachment_bytes_for_channel(channel: Optional[str]) -> int:
+    if not channel:
+        return _DEFAULT_MAX_ATTACHMENT_BYTES
+    return _PER_CHANNEL_MAX_ATTACHMENT_BYTES.get(
+        channel.lower(), _DEFAULT_MAX_ATTACHMENT_BYTES,
+    )
+
+
+def validate_attachment(
+    *, content_type: Optional[str], size_bytes: int, channel: Optional[str],
+) -> None:
+    """Raise HTTPException if the file can't be forwarded to the OTA.
+
+    Validation happens up front rather than after upload so the user sees the
+    real reason instead of a generic Channex 4xx surfaced as a 502.
+    """
+    ct = (content_type or "").lower().split(";")[0].strip()
+    if ct not in ALLOWED_ATTACHMENT_CONTENT_TYPES:
+        channel_label = channel or "the OTA"
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"{channel_label} doesn't accept this file type "
+                f"({ct or 'unknown'}). Try JPG, PNG, HEIC, WEBP, GIF or PDF."
+            ),
+        )
+
+    limit = max_attachment_bytes_for_channel(channel)
+    if size_bytes > limit:
+        limit_mb = limit // (1024 * 1024)
+        channel_label = channel or "this channel"
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Attachment is too large for {channel_label} "
+                f"(max {limit_mb} MB)."
+            ),
+        )
+
+
 def _thread_to_model(row: dict) -> MessageThread:
     return MessageThread(
         id=str(row["id"]),
@@ -127,6 +192,7 @@ async def send_message(
 
     api_key = channex_service.get_platform_api_key()
     source_thread_id = thread["source_thread_id"]
+    channel = thread.get("channel")
 
     # Channex accepts one attachment per message; if more were uploaded, send
     # them as separate messages. Body goes with the first.
@@ -134,14 +200,37 @@ async def send_message(
     last_inserted = None
     for idx, attachment_id in enumerate(attachments):
         msg_body = body.body if idx == 0 else ""
+        logger.info(
+            "Sending Channex message: thread=%s channel=%s "
+            "source_thread_id=%s attachment_id=%s body_len=%d (%d/%d)",
+            thread_id, channel, source_thread_id, attachment_id,
+            len(msg_body), idx + 1, len(attachments),
+        )
         try:
             channex_msg = await channex_service.post_thread_message(
                 api_key, source_thread_id,
                 message=msg_body, attachment_id=attachment_id,
             )
         except Exception as e:
-            logger.exception("Failed to send Channex message")
-            raise HTTPException(status_code=502, detail=f"Channex send failed: {e}")
+            sent_so_far = idx
+            logger.exception(
+                "Failed to send Channex message: thread=%s channel=%s "
+                "attachment_id=%s sent_before_failure=%d/%d",
+                thread_id, channel, attachment_id, sent_so_far, len(attachments),
+            )
+            if sent_so_far > 0:
+                detail = (
+                    f"Channex send failed after {sent_so_far} of "
+                    f"{len(attachments)} attachments delivered: {e}"
+                )
+            else:
+                detail = f"Channex send failed: {e}"
+            raise HTTPException(status_code=502, detail=detail)
+        logger.info(
+            "Channex message accepted: thread=%s channel=%s "
+            "channex_message_id=%s",
+            thread_id, channel, channex_msg.get("id"),
+        )
 
         attrs = channex_msg.get("attributes") or {}
         sent_at_str = attrs.get("inserted_at")
@@ -190,8 +279,12 @@ async def upload_thread_attachment(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     contents = await file.read()
-    if len(contents) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Attachment exceeds 25MB")
+    channel = thread.get("channel")
+    validate_attachment(
+        content_type=file.content_type,
+        size_bytes=len(contents),
+        channel=channel,
+    )
 
     api_key = channex_service.get_platform_api_key()
     try:
@@ -202,10 +295,21 @@ async def upload_thread_attachment(
             content_type=file.content_type or "application/octet-stream",
         )
     except Exception as e:
-        logger.exception("Channex attachment upload failed")
+        logger.exception(
+            "Channex attachment upload failed: thread=%s channel=%s "
+            "filename=%s content_type=%s size=%d",
+            thread_id, channel, file.filename, file.content_type, len(contents),
+        )
         raise HTTPException(status_code=502, detail=f"Upload failed: {e}")
 
-    return {"attachment_id": result["id"]}
+    attachment_id = result.get("id")
+    logger.info(
+        "Channex attachment uploaded: thread=%s channel=%s filename=%s "
+        "content_type=%s size=%d attachment_id=%s",
+        thread_id, channel, file.filename, file.content_type, len(contents),
+        attachment_id,
+    )
+    return {"attachment_id": attachment_id}
 
 
 @router.post("/messaging/threads/{thread_id}/read", response_model=MessageThread)
