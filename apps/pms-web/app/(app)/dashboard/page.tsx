@@ -211,7 +211,12 @@ export default function DashboardPage() {
                       {b.guestFirstName} {b.guestLastName}
                     </p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">3:00 PM</span> · {b.roomName}
+                      <span className="text-gray-500">3:00 PM</span> ·{' '}
+                      {b.roomNumber ? (
+                        <span className="text-gray-500">#{b.roomNumber}</span>
+                      ) : (
+                        <span className="font-medium text-amber-700">{t('calendar.unassigned')}</span>
+                      )}
                     </p>
                   </div>
                   <span className="shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
@@ -248,7 +253,12 @@ export default function DashboardPage() {
                       {b.guestFirstName} {b.guestLastName}
                     </p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">11:00 AM</span> · {b.roomName}
+                      <span className="text-gray-500">11:00 AM</span> ·{' '}
+                      {b.roomNumber ? (
+                        <span className="text-gray-500">#{b.roomNumber}</span>
+                      ) : (
+                        <span className="font-medium text-amber-700">{t('calendar.unassigned')}</span>
+                      )}
                     </p>
                   </div>
                   <span className="shrink-0 text-[11px] font-medium text-green-600">{t('dashboard.settled')} ✓</span>
