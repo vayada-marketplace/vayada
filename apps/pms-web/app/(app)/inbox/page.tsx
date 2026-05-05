@@ -19,6 +19,47 @@ const CHANNEL_BADGE: Record<string, { bg: string; label: string }> = {
 const LIST_POLL_MS = 30_000
 const DETAIL_POLL_MS = 15_000
 
+// Channex's Messaging & Reviews app forwards a fixed set of media types to the
+// OTAs. The list and per-channel size caps are mirrored on the backend in
+// app/routers/admin_messaging.py — keep them in sync.
+const ALLOWED_ATTACHMENT_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/heic',
+  'image/heif',
+  'image/webp',
+  'image/gif',
+  'application/pdf',
+] as const
+const ATTACHMENT_ACCEPT_ATTR = ALLOWED_ATTACHMENT_TYPES.join(',')
+
+function maxAttachmentBytesForChannel(channel: string | null | undefined): number {
+  switch ((channel || '').toLowerCase()) {
+    case 'booking.com': return 8 * 1024 * 1024
+    case 'airbnb': return 25 * 1024 * 1024
+    case 'expedia': return 10 * 1024 * 1024
+    default: return 25 * 1024 * 1024
+  }
+}
+
+function attachmentValidationError(
+  file: File, channel: string | null | undefined,
+): string | null {
+  const ct = (file.type || '').toLowerCase()
+  if (!ALLOWED_ATTACHMENT_TYPES.includes(ct as typeof ALLOWED_ATTACHMENT_TYPES[number])) {
+    const channelLabel = channel || 'this channel'
+    return `${channelLabel} doesn't accept "${file.name}" (${ct || 'unknown type'}). Try JPG, PNG, HEIC, WEBP, GIF or PDF.`
+  }
+  const limit = maxAttachmentBytesForChannel(channel)
+  if (file.size > limit) {
+    const limitMb = Math.floor(limit / (1024 * 1024))
+    const channelLabel = channel || 'this channel'
+    return `"${file.name}" is too large for ${channelLabel} (max ${limitMb} MB).`
+  }
+  return null
+}
+
 function isVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible'
 }
@@ -57,6 +98,7 @@ export default function InboxPage() {
   const [composerBody, setComposerBody] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [sending, setSending] = useState(false)
+  const [composerError, setComposerError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   const fetchThreads = useCallback(async () => {
@@ -102,6 +144,7 @@ export default function InboxPage() {
       setMessages([])
       return
     }
+    setComposerError(null)
     setLoadingDetail(true)
     fetchThreadDetail(selectedId, { markRead: true })
     const i = setInterval(() => fetchThreadDetail(selectedId), DETAIL_POLL_MS)
@@ -117,6 +160,7 @@ export default function InboxPage() {
     if (!selectedId) return
     if (!composerBody.trim() && pendingFiles.length === 0) return
     setSending(true)
+    setComposerError(null)
     try {
       const attachmentIds: string[] = []
       for (const f of pendingFiles) {
@@ -129,8 +173,10 @@ export default function InboxPage() {
       await fetchThreadDetail(selectedId)
       await fetchThreads()
     } catch (e) {
+      // Keep the user's draft + attachments so they can retry without
+      // re-typing or re-attaching.
       console.error('Send failed', e)
-      alert(`Failed to send: ${(e as Error).message}`)
+      setComposerError((e as Error).message || 'Failed to send. Please try again.')
     } finally {
       setSending(false)
     }
@@ -334,15 +380,41 @@ export default function InboxPage() {
                       ))}
                     </div>
                   )}
+                  {composerError && (
+                    <div className="mb-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5 flex items-start justify-between gap-2">
+                      <span className="whitespace-pre-wrap">{composerError}</span>
+                      <button
+                        onClick={() => setComposerError(null)}
+                        className="text-red-500 hover:text-red-700 shrink-0"
+                        aria-label="Dismiss error"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
                   <div className="flex items-end gap-2">
                     <label className="cursor-pointer text-gray-400 hover:text-gray-600 pb-2">
                       📎
                       <input
                         type="file"
+                        accept={ATTACHMENT_ACCEPT_ATTR}
+                        multiple
                         className="hidden"
                         onChange={e => {
                           const files = Array.from(e.target.files || [])
-                          setPendingFiles(prev => [...prev, ...files])
+                          const accepted: File[] = []
+                          const errors: string[] = []
+                          for (const f of files) {
+                            const err = attachmentValidationError(f, thread?.channel)
+                            if (err) errors.push(err)
+                            else accepted.push(f)
+                          }
+                          if (accepted.length > 0) {
+                            setPendingFiles(prev => [...prev, ...accepted])
+                          }
+                          if (errors.length > 0) {
+                            setComposerError(errors.join('\n'))
+                          }
                           e.target.value = ''
                         }}
                       />
