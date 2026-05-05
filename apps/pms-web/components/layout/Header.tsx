@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDownIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
 import { pmsSettingsService, HotelSummary } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
+import SearchModal from './SearchModal'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
 
@@ -34,8 +35,10 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [profileOpen, setProfileOpen] = useState(false)
   const [propertyOpen, setPropertyOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
+  const [shortcutKey, setShortcutKey] = useState<'⌘K' | 'Ctrl K'>('Ctrl K')
 
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
@@ -54,6 +57,30 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Cmd+K (mac) / Ctrl+K (everywhere else) opens the global search modal.
+  // Also handle "/" the way GitHub/Linear do, but only when the user
+  // isn't already typing into a form field.
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform)) {
+      setShortcutKey('⌘K')
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      const isModK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable === true
+      const isSlash = e.key === '/' && !isTyping
+      if (isModK || isSlash) {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   useEffect(() => {
@@ -175,8 +202,19 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </div>
       </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Center: global search trigger */}
+      <div className="flex-1 flex justify-center px-4">
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="w-full max-w-sm flex items-center gap-2 h-8 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-400 hover:bg-white hover:border-gray-300 hover:text-gray-600 transition-colors"
+        >
+          <MagnifyingGlassIcon className="w-3.5 h-3.5 shrink-0" />
+          <span className="text-[12px] flex-1 text-left truncate">{t('search.placeholder')}</span>
+          <kbd className="hidden sm:inline text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-400 leading-none shrink-0">
+            {shortcutKey}
+          </kbd>
+        </button>
+      </div>
 
       {/* Right: avatar */}
       <div className="flex items-center gap-3 shrink-0">
@@ -243,6 +281,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           )}
         </div>
       </div>
+
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   )
 }
