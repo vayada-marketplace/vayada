@@ -10,9 +10,27 @@ interface SearchResult {
   id: string
   label: string
   sublabel: string
-  category: 'reservation' | 'room'
+  category: 'page' | 'reservation' | 'room'
   href: string
 }
+
+interface PageEntry {
+  id: string
+  labelKey: string
+  sublabelKey: string
+  href: string
+}
+
+const PAGES: PageEntry[] = [
+  { id: 'dashboard', labelKey: 'layout.sidebar.dashboard', sublabelKey: 'search.pageDashboardHint', href: '/dashboard' },
+  { id: 'calendar', labelKey: 'layout.sidebar.calendar', sublabelKey: 'search.pageCalendarHint', href: '/calendar' },
+  { id: 'bookings', labelKey: 'layout.sidebar.reservations', sublabelKey: 'search.pageReservationsHint', href: '/bookings' },
+  { id: 'inbox', labelKey: 'layout.sidebar.inbox', sublabelKey: 'search.pageInboxHint', href: '/inbox' },
+  { id: 'rooms', labelKey: 'layout.sidebar.roomsAndRates', sublabelKey: 'search.pageRoomsHint', href: '/rooms' },
+  { id: 'channel-manager', labelKey: 'layout.sidebar.channelManager', sublabelKey: 'search.pageChannelManagerHint', href: '/channel-manager' },
+  { id: 'financials', labelKey: 'layout.sidebar.financials', sublabelKey: 'search.pageFinancialsHint', href: '/financials' },
+  { id: 'settings', labelKey: 'layout.sidebar.settings', sublabelKey: 'search.pageSettingsHint', href: '/settings' },
+]
 
 export default function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation()
@@ -52,6 +70,21 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
 
     const q = query.toLowerCase()
     const timer = setTimeout(async () => {
+      // Pages match instantly against the translated label so the user
+      // can jump between sections regardless of UI language.
+      const pageResults: SearchResult[] = PAGES
+        .filter(p => {
+          const label = t(p.labelKey).toLowerCase()
+          return label.includes(q) || p.id.includes(q)
+        })
+        .map(p => ({
+          id: `page-${p.id}`,
+          label: t(p.labelKey),
+          sublabel: t(p.sublabelKey),
+          category: 'page',
+          href: p.href,
+        }))
+
       // Server-side booking search
       let bookingResults: SearchResult[] = []
       try {
@@ -79,12 +112,12 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
           href: `/rooms`,
         }))
 
-      setResults([...bookingResults, ...roomResults])
+      setResults([...pageResults, ...bookingResults, ...roomResults])
       setActiveIndex(0)
     }, 250)
 
     return () => clearTimeout(timer)
-  }, [query, rooms])
+  }, [query, rooms, t])
 
   const navigate = useCallback((result: SearchResult) => {
     onClose()
@@ -115,6 +148,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   if (!open) return null
 
   const CATEGORY_LABELS: Record<string, string> = {
+    page: t('search.categoryPages'),
     reservation: t('search.categoryReservations'),
     room: t('search.categoryRoomTypes'),
   }
@@ -180,9 +214,18 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                     }`}
                   >
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                      item.category === 'reservation' ? 'bg-blue-50 text-blue-500' : 'bg-emerald-50 text-emerald-500'
+                      item.category === 'page'
+                        ? 'bg-violet-50 text-violet-500'
+                        : item.category === 'reservation'
+                        ? 'bg-blue-50 text-blue-500'
+                        : 'bg-emerald-50 text-emerald-500'
                     }`}>
-                      {item.category === 'reservation' ? (
+                      {item.category === 'page' ? (
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14" />
+                          <path d="m13 18 6-6-6-6" />
+                        </svg>
+                      ) : item.category === 'reservation' ? (
                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
                           <circle cx="9" cy="7" r="4" />
