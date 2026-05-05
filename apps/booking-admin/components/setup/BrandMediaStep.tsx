@@ -191,7 +191,7 @@ export default function BrandMediaStep({
           </div>
 
           {/* Bottom buttons */}
-          <div className="pt-3 shrink-0 border-t border-gray-100 flex items-center justify-between gap-3">
+          <div className="mt-6 shrink-0 flex items-center justify-between gap-3">
             <button
               onClick={onBack}
               className="px-5 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"

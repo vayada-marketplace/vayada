@@ -210,7 +210,7 @@ export default function PromoCodesStep({
           </div>
         )}
 
-        <div className="mt-6 flex justify-between">
+        <div className="mt-6 flex items-center justify-between">
           <button
             onClick={onBack}
             className="px-5 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
