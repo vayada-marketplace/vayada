@@ -38,7 +38,12 @@ interface BookingDetailModalProps {
   bookings?: CalendarBookingLite[]
 }
 
-type View = 'detail' | 'roomPicker' | 'swapConfirm' | 'moveSuccess'
+type View =
+  | 'detail'
+  | 'roomPicker'
+  | 'swapConfirm'
+  | 'unassignConfirm'
+  | 'moveSuccess'
 
 interface SwapPlan {
   partnerBookingId: string
@@ -49,6 +54,14 @@ interface SwapPlan {
   partnerDestinationRoomId: string
   // Room the *source* booking ends up in (always partner's current room).
   sourceDestinationRoomId: string
+}
+
+interface UnassignPlan {
+  occupierBookingId: string
+  occupierLabel: string
+  occupierCheckIn: string
+  occupierCheckOut: string
+  occupierCurrentRoomId: string
 }
 
 const datesOverlap = (
@@ -76,6 +89,7 @@ export default function BookingDetailModal({
   const [view, setView] = useState<View>('detail')
   const [pickerSelectedRoomId, setPickerSelectedRoomId] = useState<string>('')
   const [pendingSwap, setPendingSwap] = useState<SwapPlan | null>(null)
+  const [pendingUnassign, setPendingUnassign] = useState<UnassignPlan | null>(null)
   const [movingRoom, setMovingRoom] = useState(false)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [movedToRoomNumber, setMovedToRoomNumber] = useState<string>('')
@@ -159,80 +173,86 @@ export default function BookingDetailModal({
     ? rooms.filter((r) => r.roomTypeId === booking.roomTypeId && r.status === 'available')
     : []
 
-  // Candidate rooms for the "Move to another room" picker: same room type,
-  // not the current room. Each is annotated with one of three states:
-  //   - available  → fully free for the booking's dates → simple move
-  //   - swap       → occupied, but a swap with the occupier resolves cleanly
-  //                 (backend will atomically exchange the two assignments)
-  //   - blocked    → occupied with no swap path → disabled
-  // All availability/swap math is computed locally from the already-loaded
-  // calendar bookings; the backend re-validates on submit.
+  // Candidate rooms for the "Move to another room" / "Assign room" picker:
+  // same room type, not the current room. Two states per room:
+  //   - available  → fully free for the booking's dates → one-click move.
+  //   - occupied   → one or more existing bookings overlap. The user resolves
+  //                 each via per-occupier actions (Swap or Move to Unassigned).
+  // Swap is offered only when the room has exactly one overlapping occupier
+  // *and* the swap can be completed in one atomic step — multi-overlap or a
+  // missing partner-destination forces the user to free the room one booking
+  // at a time via Move-to-Unassigned. All availability/swap math runs locally;
+  // the backend re-validates on submit.
+  interface OccupierEntry {
+    booking: CalendarBookingLite
+    swap: { partnerDestinationRoomId: string } | null
+  }
   type Candidate =
     | { room: typeof rooms[number]; kind: 'available' }
     | {
         room: typeof rooms[number]
-        kind: 'swap'
-        partner: CalendarBookingLite
-        partnerDestinationRoomId: string
+        kind: 'occupied'
+        occupiers: OccupierEntry[]
       }
-    | { room: typeof rooms[number]; kind: 'blocked' }
 
   const candidates: Candidate[] = booking
     ? rooms
         .filter((r) => r.roomTypeId === booking.roomTypeId && r.id !== booking.roomId)
         .map((r): Candidate => {
-          const occupier = bookings.find(
+          const occupiers = bookings.filter(
             (b) =>
               b.id !== booking.id &&
               b.roomId === r.id &&
               b.status !== 'cancelled' &&
               datesOverlap(booking.checkIn, booking.checkOut, b.checkIn, b.checkOut),
           )
-          if (!occupier) return { room: r, kind: 'available' }
-          // Swap eligibility:
+          if (occupiers.length === 0) return { room: r, kind: 'available' }
+          // Swap eligibility (only when room has exactly one occupier in the
+          // source's date window — otherwise displacing one still leaves the
+          // others overlapping).
           //  • Source assigned: occupier moves into source's room. Verify
           //    occupier's dates fit there (no other conflict).
           //  • Source unassigned: occupier needs a different free same-type
           //    room. Find one that is free for occupier's dates.
-          if (booking.roomId) {
-            const sourceRoomId = booking.roomId
-            const conflictInSourceRoom = bookings.some(
-              (b) =>
-                b.id !== booking.id &&
-                b.id !== occupier.id &&
-                b.roomId === sourceRoomId &&
-                b.status !== 'cancelled' &&
-                datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
-            )
-            if (conflictInSourceRoom) return { room: r, kind: 'blocked' }
-            return {
-              room: r,
-              kind: 'swap',
-              partner: occupier,
-              partnerDestinationRoomId: sourceRoomId,
+          const entries: OccupierEntry[] = occupiers.map((occupier) => {
+            if (occupiers.length !== 1) return { booking: occupier, swap: null }
+            if (booking.roomId) {
+              const sourceRoomId = booking.roomId
+              const conflictInSourceRoom = bookings.some(
+                (b) =>
+                  b.id !== booking.id &&
+                  b.id !== occupier.id &&
+                  b.roomId === sourceRoomId &&
+                  b.status !== 'cancelled' &&
+                  datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
+              )
+              if (conflictInSourceRoom) return { booking: occupier, swap: null }
+              return {
+                booking: occupier,
+                swap: { partnerDestinationRoomId: sourceRoomId },
+              }
+            } else {
+              const freeForOccupier = rooms.find(
+                (rr) =>
+                  rr.roomTypeId === booking.roomTypeId &&
+                  rr.id !== r.id &&
+                  !bookings.some(
+                    (b) =>
+                      b.id !== booking.id &&
+                      b.id !== occupier.id &&
+                      b.roomId === rr.id &&
+                      b.status !== 'cancelled' &&
+                      datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
+                  ),
+              )
+              if (!freeForOccupier) return { booking: occupier, swap: null }
+              return {
+                booking: occupier,
+                swap: { partnerDestinationRoomId: freeForOccupier.id },
+              }
             }
-          } else {
-            const freeForOccupier = rooms.find(
-              (rr) =>
-                rr.roomTypeId === booking.roomTypeId &&
-                rr.id !== r.id &&
-                !bookings.some(
-                  (b) =>
-                    b.id !== booking.id &&
-                    b.id !== occupier.id &&
-                    b.roomId === rr.id &&
-                    b.status !== 'cancelled' &&
-                    datesOverlap(occupier.checkIn, occupier.checkOut, b.checkIn, b.checkOut),
-                ),
-            )
-            if (!freeForOccupier) return { room: r, kind: 'blocked' }
-            return {
-              room: r,
-              kind: 'swap',
-              partner: occupier,
-              partnerDestinationRoomId: freeForOccupier.id,
-            }
-          }
+          })
+          return { room: r, kind: 'occupied', occupiers: entries }
         })
     : []
 
@@ -249,6 +269,7 @@ export default function BookingDetailModal({
     setMoveError(null)
     setPickerSelectedRoomId('')
     setPendingSwap(null)
+    setPendingUnassign(null)
     setView('roomPicker')
   }
 
@@ -258,21 +279,40 @@ export default function BookingDetailModal({
 
   const handlePickerContinue = () => {
     if (!booking || !selectedCandidate) return
-    if (selectedCandidate.kind === 'swap') {
-      setPendingSwap({
-        partnerBookingId: selectedCandidate.partner.id,
-        partnerBookingLabel: partnerLabel(selectedCandidate.partner),
-        partnerCheckIn: selectedCandidate.partner.checkIn,
-        partnerCheckOut: selectedCandidate.partner.checkOut,
-        partnerCurrentRoomId: selectedCandidate.room.id,
-        partnerDestinationRoomId: selectedCandidate.partnerDestinationRoomId,
-        sourceDestinationRoomId: selectedCandidate.room.id,
-      })
-      setMoveError(null)
-      setView('swapConfirm')
-      return
+    // Only the simple "available" path uses this Continue button. Swap and
+    // Move-to-Unassigned are triggered from per-occupier action buttons that
+    // jump straight into their respective confirm views.
+    if (selectedCandidate.kind === 'available') {
+      void handleConfirmMove()
     }
-    void handleConfirmMove()
+  }
+
+  const beginSwap = (room: CalendarRoom, occupier: CalendarBookingLite, partnerDestinationRoomId: string) => {
+    if (!booking) return
+    setPendingSwap({
+      partnerBookingId: occupier.id,
+      partnerBookingLabel: partnerLabel(occupier),
+      partnerCheckIn: occupier.checkIn,
+      partnerCheckOut: occupier.checkOut,
+      partnerCurrentRoomId: room.id,
+      partnerDestinationRoomId,
+      sourceDestinationRoomId: room.id,
+    })
+    setMoveError(null)
+    setView('swapConfirm')
+  }
+
+  const beginUnassign = (room: CalendarRoom, occupier: CalendarBookingLite) => {
+    if (!booking) return
+    setPendingUnassign({
+      occupierBookingId: occupier.id,
+      occupierLabel: partnerLabel(occupier),
+      occupierCheckIn: occupier.checkIn,
+      occupierCheckOut: occupier.checkOut,
+      occupierCurrentRoomId: room.id,
+    })
+    setMoveError(null)
+    setView('unassignConfirm')
   }
 
   const handleConfirmMove = async () => {
@@ -298,6 +338,33 @@ export default function BookingDetailModal({
         err?.message ||
         'Failed to move booking'
       setMoveError(typeof detail === 'string' ? detail : 'Failed to move booking')
+    } finally {
+      setMovingRoom(false)
+    }
+  }
+
+  const handleConfirmUnassign = async () => {
+    if (!booking || !pendingUnassign) return
+    setMoveError(null)
+    setMovingRoom(true)
+    try {
+      await bookingsService.unassignRoom(pendingUnassign.occupierBookingId)
+      // The displaced booking is now in the Unassigned row; the parent calendar
+      // refetches via onStatusChange so the candidate list refreshes and the
+      // newly-freed room appears as Available next time the user reopens or
+      // rechecks the picker. Keep the modal open on the source booking so the
+      // user can chain another action immediately.
+      onStatusChange()
+      setPendingUnassign(null)
+      setPickerSelectedRoomId('')
+      setView('roomPicker')
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.detail ||
+        err?.data?.detail ||
+        err?.message ||
+        'Failed to move booking to Unassigned'
+      setMoveError(typeof detail === 'string' ? detail : 'Failed to move booking to Unassigned')
     } finally {
       setMovingRoom(false)
     }
@@ -408,47 +475,25 @@ export default function BookingDetailModal({
                 No other rooms of this type available.
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+              <div className="space-y-1.5 max-h-96 overflow-y-auto">
                 {candidates.map((cand) => {
                   const { room, kind } = cand
-                  const isSelected = pickerSelectedRoomId === room.id
-                  const enabled = kind !== 'blocked'
-                  const dotColor =
-                    kind === 'available'
-                      ? 'bg-green-500'
-                      : kind === 'swap'
-                      ? 'bg-amber-500'
-                      : 'bg-gray-300'
-                  const badgeText =
-                    kind === 'available'
-                      ? 'Available'
-                      : kind === 'swap'
-                      ? 'Swap'
-                      : 'Unavailable'
-                  const badgeStyle =
-                    kind === 'available'
-                      ? 'text-green-700'
-                      : kind === 'swap'
-                      ? 'text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide'
-                      : 'text-gray-400'
-                  return (
-                    <button
-                      key={room.id}
-                      type="button"
-                      disabled={!enabled}
-                      onClick={() => enabled && setPickerSelectedRoomId(room.id)}
-                      className={`w-full flex items-center justify-between px-3 py-2.5 border rounded-lg transition-colors text-left ${
-                        isSelected
-                          ? 'bg-primary-50 border-primary-400'
-                          : enabled
-                          ? 'bg-white border-gray-200 hover:bg-gray-50'
-                          : 'bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed'
-                      }`}
-                    >
-                      <div className="flex flex-col min-w-0 gap-0.5">
+                  if (kind === 'available') {
+                    const isSelected = pickerSelectedRoomId === room.id
+                    return (
+                      <button
+                        key={room.id}
+                        type="button"
+                        onClick={() => setPickerSelectedRoomId(room.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 border rounded-lg transition-colors text-left ${
+                          isSelected
+                            ? 'bg-primary-50 border-primary-400'
+                            : 'bg-white border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
-                          <span className={`text-sm font-medium truncate ${enabled ? 'text-gray-900' : 'text-gray-500'}`}>
+                          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-500" />
+                          <span className="text-sm font-medium truncate text-gray-900">
                             #{room.roomNumber}
                             {room.floor ? ` (Floor ${room.floor})` : ''}
                           </span>
@@ -456,22 +501,77 @@ export default function BookingDetailModal({
                             &middot; {room.roomTypeName}
                           </span>
                         </div>
-                        {kind === 'swap' && (
-                          <span className="text-[11px] text-gray-500 ml-4 truncate">
-                            Currently {partnerLabel(cand.partner)} &middot;{' '}
-                            {cand.partner.checkIn} &rarr; {cand.partner.checkOut}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs text-green-700">Available</span>
+                          {isSelected && (
+                            <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  }
+                  // Occupied: list every overlapping booking with per-occupier
+                  // action buttons. Resolving a single one frees the room when
+                  // it's the only overlap; with multi-overlap the user steps
+                  // through the occupiers one at a time.
+                  return (
+                    <div
+                      key={room.id}
+                      className="border border-gray-200 rounded-lg bg-gray-50/40"
+                    >
+                      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-amber-500" />
+                          <span className="text-sm font-medium truncate text-gray-900">
+                            #{room.roomNumber}
+                            {room.floor ? ` (Floor ${room.floor})` : ''}
                           </span>
-                        )}
+                          <span className="text-xs text-gray-400 truncate">
+                            &middot; {room.roomTypeName}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                          Occupied
+                        </span>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={`text-xs ${badgeStyle}`}>{badgeText}</span>
-                        {isSelected && (
-                          <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </div>
-                    </button>
+                      <ul className="divide-y divide-gray-200">
+                        {cand.occupiers.map((entry) => (
+                          <li
+                            key={entry.booking.id}
+                            className="px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {partnerLabel(entry.booking)}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {entry.booking.checkIn} &rarr; {entry.booking.checkOut}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {entry.swap && (
+                                <button
+                                  type="button"
+                                  onClick={() => beginSwap(room, entry.booking, entry.swap!.partnerDestinationRoomId)}
+                                  className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors"
+                                >
+                                  Swap
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => beginUnassign(room, entry.booking)}
+                                className="px-2.5 py-1 text-xs font-medium text-gray-700 border border-gray-300 hover:bg-white rounded-md transition-colors"
+                              >
+                                Move to Unassigned
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )
                 })}
               </div>
@@ -486,16 +586,20 @@ export default function BookingDetailModal({
             <div className="mt-5 pt-4 border-t border-gray-200">
               <button
                 onClick={handlePickerContinue}
-                disabled={!selectedCandidate || movingRoom}
+                disabled={
+                  !selectedCandidate ||
+                  selectedCandidate.kind !== 'available' ||
+                  movingRoom
+                }
                 className="w-full px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {movingRoom
                   ? 'Moving...'
                   : !selectedCandidate
-                  ? 'Select a room to continue'
-                  : selectedCandidate.kind === 'swap'
-                  ? `Review swap with ${partnerLabel(selectedCandidate.partner)}`
-                  : `Move to #${selectedCandidate.room.roomNumber || ''}`}
+                  ? 'Select a free room or use Swap / Move to Unassigned'
+                  : selectedCandidate.kind === 'available'
+                  ? `Move to #${selectedCandidate.room.roomNumber || ''}`
+                  : 'Use Swap or Move to Unassigned above'}
               </button>
               <p className="mt-2 text-xs text-gray-500 text-center">
                 The original confirmation number and payment record are preserved.
@@ -588,6 +692,73 @@ export default function BookingDetailModal({
                 className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
               >
                 {movingRoom ? 'Swapping…' : 'Confirm swap'}
+              </button>
+            </div>
+          </div>
+        ) : view === 'unassignConfirm' && pendingUnassign ? (
+          /* ── UNASSIGN CONFIRM ── */
+          <div className="p-6">
+            <div className="flex items-center gap-3 mb-1">
+              <button
+                onClick={() => setView('roomPicker')}
+                aria-label="Back"
+                className="text-gray-500 hover:text-gray-800 -ml-1 p-1 rounded hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <h2 className="text-lg font-bold text-gray-900">Move booking to Unassigned</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-4 ml-8">
+              Frees up #{rooms.find((r) => r.id === pendingUnassign.occupierCurrentRoomId)?.roomNumber || ''}
+              {' '}so you can place {booking.guestFirstName} {booking.guestLastName} there.
+              {' '}The displaced booking keeps its confirmation number, payment record, and guest history.
+            </p>
+
+            {(() => {
+              const occupierFromRoom = rooms.find((r) => r.id === pendingUnassign.occupierCurrentRoomId) || null
+              return (
+                <div className="border border-gray-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {pendingUnassign.occupierLabel}
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2">
+                    {pendingUnassign.occupierCheckIn} → {pendingUnassign.occupierCheckOut}
+                  </p>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-600">
+                      {occupierFromRoom ? `#${occupierFromRoom.roomNumber}` : '—'}
+                    </span>
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                    <span className="font-semibold text-amber-700">Unassigned</span>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {moveError && (
+              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {moveError}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-5 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => setView('roomPicker')}
+                disabled={movingRoom}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleConfirmUnassign}
+                disabled={movingRoom}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {movingRoom ? 'Moving…' : 'Move to Unassigned'}
               </button>
             </div>
           </div>

@@ -117,6 +117,9 @@ export const bookingsService = {
       ...(partnerDestinationRoomId ? { partnerDestinationRoomId } : {}),
     }),
 
+  unassignRoom: (id: string) =>
+    pmsClient.patch<Booking>(`/admin/bookings/${id}/unassign-room`, {}),
+
   getPaymentSettings: () =>
     pmsClient.get<PaymentSettingsResponse>('/admin/payment-settings'),
 
