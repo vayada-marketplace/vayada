@@ -65,6 +65,7 @@ export interface SuperAdminHotel extends HotelSummary {
   fixed_per_extra_room_fee: number
   active_room_count: number
   fixed_plan_projected_monthly_fee: number
+  currency?: string
 }
 
 export interface HotelBillingUpdate {
