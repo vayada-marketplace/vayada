@@ -409,6 +409,18 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def unassign_room(booking_id: str) -> Optional[dict]:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings SET room_id = NULL, updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def list_for_currency_conversion(hotel_id: str) -> List[dict]:
         """Minimal projection used when re-denominating bookings on a
         hotel currency change (VAY-335). Cancelled rows are still

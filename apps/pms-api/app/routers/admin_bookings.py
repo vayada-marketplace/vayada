@@ -368,6 +368,57 @@ async def move_booking_to_room(
     return _booking_to_admin(updated)
 
 
+@router.patch("/bookings/{booking_id}/unassign-room", response_model=BookingAdminResponse)
+async def unassign_booking_room(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Push an assigned booking back to Unassigned (clears room_id).
+
+    Used by the calendar's room picker when the user wants to free a room so a
+    different (currently unassigned) booking can be placed there. The displaced
+    booking simply joins the Unassigned row and can be reassigned later.
+    """
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking["status"] not in ("pending", "confirmed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only pending or confirmed bookings can be unassigned",
+        )
+
+    current_room_id = str(booking["room_id"]) if booking.get("room_id") else None
+    if not current_room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Booking is already unassigned",
+        )
+
+    await BookingRepository.unassign_room(booking_id)
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="room_unassigned",
+        payload={"from_room_id": current_room_id},
+        actor_user_id=user_id,
+    )
+
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id,
+            str(booking["room_type_id"]),
+            start_date=booking["check_in"],
+            end_date=booking["check_out"],
+        )
+    )
+
+    updated = await BookingRepository.get_by_id(booking_id)
+    return _booking_to_admin(updated)
+
+
 @router.patch("/bookings/{booking_id}/swap-room", response_model=BookingAdminResponse)
 async def swap_booking_rooms(
     booking_id: str,
