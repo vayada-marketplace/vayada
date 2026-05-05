@@ -81,8 +81,18 @@ export const messagingService = {
       { method: 'POST', body: form, headers },
     )
     if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`Upload failed (${res.status}): ${text}`)
+      // Backend returns FastAPI's `{ "detail": "..." }` on validation
+      // failures (415 / 413). Surface that text so the user sees the real
+      // reason ("Booking.com doesn't accept .zip files…") instead of a
+      // status code.
+      let detail = ''
+      try {
+        const parsed = await res.json()
+        detail = typeof parsed?.detail === 'string' ? parsed.detail : ''
+      } catch {
+        try { detail = await res.text() } catch { /* ignore */ }
+      }
+      throw new Error(detail || `Upload failed (${res.status})`)
     }
     return res.json()
   },
