@@ -9,6 +9,7 @@ import {
   CheckIcon,
 } from '@heroicons/react/24/outline'
 import { bookingSettingsService, type AddonItem, type AddonSettings, type DesignSettings, type PromoCodeItem, type CommissionRateChange } from '@/services/booking'
+import { getCurrencySymbol } from '@/lib/utils/getCurrencySymbol'
 
 type Tab = 'filters' | 'addons' | 'promos' | 'benefits' | 'payment'
 
@@ -497,8 +498,11 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
   const [roomsIncluded, setRoomsIncluded] = useState(1)
   const [perExtraRoom, setPerExtraRoom] = useState(5)
   const [roomCount, setRoomCount] = useState(0)
+  const [currency, setCurrency] = useState('USD')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  const currencySymbol = getCurrencySymbol(currency)
 
   const beFeeError =
     Number.isNaN(beFee) || beFee < 0 || beFee > 50
@@ -528,6 +532,7 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
           setRoomsIncluded(hotel.fixed_rooms_included ?? 1)
           setPerExtraRoom(hotel.fixed_per_extra_room_fee ?? 5)
           setRoomCount(hotel.active_room_count ?? 0)
+          setCurrency(hotel.currency || 'USD')
         }
         setHistory(hist)
       })
@@ -690,18 +695,18 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
         <div>
           <h2 className="text-[14px] font-semibold text-gray-900">Fixed Plan</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Monthly subscription for hotels on the Fixed plan. {roomsIncluded} room included · +€{perExtraRoom} per extra room.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5">Monthly subscription for hotels on the Fixed plan. {roomsIncluded} room included · +{currencySymbol}{perExtraRoom} per extra room.</p>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <MoneyInput label="Base fee" value={fixedBase} onChange={setFixedBase} suffix="/ month" />
+          <MoneyInput label="Base fee" value={fixedBase} onChange={setFixedBase} suffix="/ month" currencySymbol={currencySymbol} />
           <IntInput label="Rooms included" value={roomsIncluded} onChange={setRoomsIncluded} />
-          <MoneyInput label="Per extra room" value={perExtraRoom} onChange={setPerExtraRoom} suffix="/ room" />
+          <MoneyInput label="Per extra room" value={perExtraRoom} onChange={setPerExtraRoom} suffix="/ room" currencySymbol={currencySymbol} />
         </div>
         <div className="bg-gray-50 rounded-md p-3 flex items-center justify-between">
           <span className="text-[12px] text-gray-600">
             Projected at <strong>{roomCount}</strong> active rooms
           </span>
-          <span className="text-[14px] font-semibold text-gray-900">€{projectedFee.toFixed(2)} / month</span>
+          <span className="text-[14px] font-semibold text-gray-900">{currencySymbol}{projectedFee.toFixed(2)} / month</span>
         </div>
       </div>
 
@@ -729,12 +734,12 @@ function FeeInput({ label, suffix, value, onChange }: { label: string; suffix: s
   )
 }
 
-function MoneyInput({ label, value, onChange, suffix }: { label: string; value: number; onChange: (v: number) => void; suffix: string }) {
+function MoneyInput({ label, value, onChange, suffix, currencySymbol = '$' }: { label: string; value: number; onChange: (v: number) => void; suffix: string; currencySymbol?: string }) {
   return (
     <div>
       <label className="block text-[12px] font-medium text-gray-700 mb-1">{label}</label>
       <div className="flex items-center gap-2">
-        <span className="text-[13px] font-medium text-gray-600">€</span>
+        <span className="text-[13px] font-medium text-gray-600">{currencySymbol}</span>
         <input type="number" min={0} step={1} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-[14px] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-500" />
         <span className="text-[12px] text-gray-500">{suffix}</span>
       </div>
