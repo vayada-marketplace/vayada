@@ -76,12 +76,13 @@ class RoomRepository:
         new_name: str,
     ) -> int:
         """Rewrite room_number for rooms still using the auto-generated
-        "{room_type_name} N" naming so they follow a renamed room type.
+        "{room_type_name}" or "{room_type_name} N" naming so they follow a
+        renamed room type.
 
         Only rooms whose current room_number matches the exact pattern
-        "<old_name> <integer>" are touched — manually-renamed rooms (e.g.
-        "101", "Penthouse") are left alone. Returns the number of rows
-        rewritten. Hotel-scoped to defend against cross-tenant writes.
+        "<old_name>" or "<old_name> <integer>" are touched — manually-renamed
+        rooms (e.g. "101", "Penthouse") are left alone. Returns the number
+        of rows rewritten. Hotel-scoped to defend against cross-tenant writes.
 
         If the rename would collide with the unique (hotel_id, room_number)
         index — e.g. another room type already owns "<new_name> 1" — the
@@ -97,7 +98,7 @@ class RoomRepository:
         escaped_old = "".join(
             ("\\" + c) if c in special else c for c in old_name
         )
-        pattern = f"^{escaped_old} [0-9]+$"
+        pattern = f"^{escaped_old}( [0-9]+)?$"
         try:
             result = await Database.execute(
                 """

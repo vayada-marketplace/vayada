@@ -311,6 +311,116 @@ class TestAdminRoomTypes:
         rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
         assert {r["roomNumber"] for r in rooms} == {"Penthouse", "Garden Queen 2"}
 
+    async def test_rename_room_type_renames_bare_name_room(self, client, cleanup_database):
+        """VAY-322: a single room whose room_number exactly matches the room
+        type name (no numeric suffix) must follow the rename. This is the
+        case the original ticket reporter hit — "Deluxe Room" stayed as
+        "Deluxe Room" after the type was renamed to "Deluxe Party Room"."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Deluxe Room",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        only_room = next(
+            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
+        )
+        # Drop the auto-generated " 1" suffix to reproduce the production
+        # state where a single room is named exactly after its room type.
+        bare_rename = await client.patch(
+            f"/admin/rooms/{only_room['id']}",
+            json={"roomNumber": "Deluxe Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert bare_rename.status_code == 200
+
+        rename_resp = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"name": "Deluxe Party Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rename_resp.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {"Deluxe Party Room"}
+
+    async def test_rename_room_type_handles_mixed_fleet(self, client, cleanup_database):
+        """VAY-322: bare ("Deluxe Room"), numbered ("Deluxe Room 2"), and
+        custom ("Penthouse") room names side by side — bare and numbered
+        must adopt the new prefix; custom must be untouched."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Deluxe Room",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 3,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        room_1 = next(r for r in rooms if r["roomNumber"] == "Deluxe Room 1")
+        room_3 = next(r for r in rooms if r["roomNumber"] == "Deluxe Room 3")
+        # Room 1 → bare name, room 3 → fully custom name.
+        bare = await client.patch(
+            f"/admin/rooms/{room_1['id']}",
+            json={"roomNumber": "Deluxe Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert bare.status_code == 200
+        custom = await client.patch(
+            f"/admin/rooms/{room_3['id']}",
+            json={"roomNumber": "Penthouse"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert custom.status_code == 200
+
+        rename_resp = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"name": "Deluxe Party Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert rename_resp.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {
+            "Deluxe Party Room",
+            "Deluxe Party Room 2",
+            "Penthouse",
+        }
+
     async def test_update_room_type_without_name_change_keeps_room_numbers(self, client, cleanup_database):
         """A PATCH that doesn't include a name change must not touch the
         room_number column."""
