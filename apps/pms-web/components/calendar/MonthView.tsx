@@ -181,7 +181,7 @@ export default function MonthView({
                                 <span className="w-3.5 h-3.5 rounded-full bg-white/25 flex items-center justify-center text-[8px] font-bold flex-shrink-0">
                                   {getInitials(b.guestFirstName, b.guestLastName)}
                                 </span>
-                                <span className="truncate">{b.guestLastName}</span>
+                                <span className="truncate">{b.guestFirstName} {b.guestLastName}</span>
                               </button>
                             )
                           })}
