@@ -67,6 +67,7 @@ export const bookingService = {
     rateType?: string
     addonIds?: string[]
     addonQuantities?: Record<string, number>
+    addonDates?: Record<string, string[]>
     promoCode?: string
   }): Promise<BookingRequestResponse> {
     return pms.post(`/api/hotels/${slug}/bookings`, data)
