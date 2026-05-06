@@ -3,12 +3,25 @@ Dashboard repository — queries PMS database for booking stats
 and booking_events table for funnel/page-view analytics.
 """
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.database import Database, PmsDatabase
 from app.config import settings
 from app.repositories.event_repo import EventRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _today_in_tz(tz_name: str | None) -> tuple[date, str]:
+    """Return (today-in-property-tz, resolved-tz-name).
+
+    Falls back to UTC if the stored timezone is missing or unknown so a
+    misconfigured row never 500s the dashboard."""
+    name = tz_name or "UTC"
+    try:
+        return datetime.now(ZoneInfo(name)).date(), name
+    except ZoneInfoNotFoundError:
+        return datetime.now(ZoneInfo("UTC")).date(), "UTC"
 
 
 def _date_range(range_key: str) -> tuple[date, date, date, date]:
@@ -269,4 +282,83 @@ class DashboardRepository:
             "bookings": bookings,
             "avg_rate": avg_rate,
             "page_views": page_views,
+        }
+
+    @staticmethod
+    async def get_page_views_timeline(hotel: dict, week_offset: int = 0) -> dict:
+        """7-day window of page-view counts plus the directly preceding
+        7-day window for comparison. `week_offset` shifts both windows
+        back by ``7 * week_offset`` days; ``0`` = current week.
+
+        Day boundaries follow the property's IANA timezone so a hotel in
+        Bali doesn't see Berlin-day rollovers in its own dashboard.
+
+        Returns the bucketed data plus the bounding dates so the client
+        can render labels without re-deriving them and accidentally
+        drifting from server time."""
+        hotel_slug = hotel.get("slug") if hotel else None
+        today, tz_name = _today_in_tz(hotel.get("timezone") if hotel else None)
+
+        if week_offset < 0:
+            week_offset = 0
+
+        window_end = today - timedelta(days=7 * week_offset)
+        window_start = window_end - timedelta(days=6)
+        previous_window_end = window_start - timedelta(days=1)
+        previous_window_start = previous_window_end - timedelta(days=6)
+
+        empty_buckets = [
+            {"date": (window_start + timedelta(days=i)).isoformat(), "count": 0}
+            for i in range(7)
+        ]
+        empty_previous = [
+            {"date": (previous_window_start + timedelta(days=i)).isoformat(), "count": 0}
+            for i in range(7)
+        ]
+        if not hotel_slug:
+            return {
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "previous_window_start": previous_window_start.isoformat(),
+                "previous_window_end": previous_window_end.isoformat(),
+                "buckets": empty_buckets,
+                "previous_buckets": empty_previous,
+                "total": 0,
+                "previous_total": 0,
+                "has_previous_data": False,
+            }
+
+        # Single query covers both windows (14 contiguous days) so the
+        # comparison metric doesn't double the round-trip count.
+        counts = await EventRepository.count_by_day_in_tz(
+            hotel_slug, "page_visit", previous_window_start, window_end, tz_name,
+        )
+
+        buckets = [
+            {
+                "date": (window_start + timedelta(days=i)).isoformat(),
+                "count": counts.get(window_start + timedelta(days=i), 0),
+            }
+            for i in range(7)
+        ]
+        previous_buckets = [
+            {
+                "date": (previous_window_start + timedelta(days=i)).isoformat(),
+                "count": counts.get(previous_window_start + timedelta(days=i), 0),
+            }
+            for i in range(7)
+        ]
+        total = sum(b["count"] for b in buckets)
+        previous_total = sum(b["count"] for b in previous_buckets)
+
+        return {
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "previous_window_start": previous_window_start.isoformat(),
+            "previous_window_end": previous_window_end.isoformat(),
+            "buckets": buckets,
+            "previous_buckets": previous_buckets,
+            "total": total,
+            "previous_total": previous_total,
+            "has_previous_data": previous_total > 0,
         }

@@ -42,3 +42,20 @@ class SparklineResponse(BaseModel):
     bookings: list[int]
     avg_rate: list[float]
     page_views: list[int]
+
+
+class PageViewBucket(BaseModel):
+    date: str
+    count: int
+
+
+class PageViewsTimelineResponse(BaseModel):
+    window_start: str
+    window_end: str
+    previous_window_start: str
+    previous_window_end: str
+    buckets: list[PageViewBucket]
+    previous_buckets: list[PageViewBucket]
+    total: int
+    previous_total: int
+    has_previous_data: bool

@@ -8,6 +8,7 @@ from app.models.dashboard import (
     BookingsBySourceResponse,
     ConversionFunnelResponse,
     SparklineResponse,
+    PageViewsTimelineResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,3 +51,11 @@ async def get_sparklines(
     hotel: dict = Depends(require_current_hotel),
 ):
     return await DashboardRepository.get_sparklines(hotel, range)
+
+
+@router.get("/dashboard/page-views", response_model=PageViewsTimelineResponse)
+async def get_page_views_timeline(
+    week_offset: int = Query(0, ge=0, le=520),
+    hotel: dict = Depends(require_current_hotel),
+):
+    return await DashboardRepository.get_page_views_timeline(hotel, week_offset)
