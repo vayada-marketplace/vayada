@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { marketplaceService, MarketplaceListing, MarketplaceCreator } from '@/services/api/marketplace'
 import { ApiErrorResponse } from '@/services/api/client'
-import { bookingSettingsService } from '@/services/booking'
 import { MarketplaceListingModal } from '@/components/marketplace/MarketplaceListingModal'
 import { MarketplaceCreatorModal } from '@/components/marketplace/MarketplaceCreatorModal'
 import {
@@ -28,8 +27,6 @@ export default function MarketplacePreviewPage() {
   const [loadingCreators, setLoadingCreators] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [bookingHotelIdByEmail, setBookingHotelIdByEmail] = useState<Record<string, string>>({})
-  const [bookingHotelIdByName, setBookingHotelIdByName] = useState<Record<string, string>>({})
 
   const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null)
   const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null)
@@ -44,23 +41,7 @@ export default function MarketplacePreviewPage() {
   }, [router])
 
   const loadData = async () => {
-    await Promise.all([loadListings(), loadCreators(), loadBookingHotels()])
-  }
-
-  const loadBookingHotels = async () => {
-    try {
-      const hotels = await bookingSettingsService.listAllHotels()
-      const byEmail: Record<string, string> = {}
-      const byName: Record<string, string> = {}
-      for (const h of hotels) {
-        if (h.owner_email) byEmail[h.owner_email.toLowerCase()] = h.id
-        if (h.name) byName[h.name.trim().toLowerCase()] = h.id
-      }
-      setBookingHotelIdByEmail(byEmail)
-      setBookingHotelIdByName(byName)
-    } catch (err) {
-      console.error('Error loading booking hotels:', err)
-    }
+    await Promise.all([loadListings(), loadCreators()])
   }
 
   const loadListings = async () => {
@@ -418,15 +399,6 @@ export default function MarketplacePreviewPage() {
         isOpen={!!selectedListing}
         onClose={() => setSelectedListing(null)}
         listing={selectedListing}
-        bookingHotelId={
-          (selectedListing?.owner_email
-            ? bookingHotelIdByEmail[selectedListing.owner_email.toLowerCase()]
-            : undefined) ??
-          (selectedListing?.hotel_name
-            ? bookingHotelIdByName[selectedListing.hotel_name.trim().toLowerCase()]
-            : undefined) ??
-          null
-        }
       />
 
       <MarketplaceCreatorModal
