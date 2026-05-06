@@ -205,3 +205,74 @@ class BookingLookup(BaseModel):
 
     booking_reference: str
     guest_email: EmailStr
+
+
+class ChangeRequestPayload(BaseModel):
+    """Guest-supplied desired state for a booking change request."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    guest_email: EmailStr
+    check_in: date
+    check_out: date
+    addon_ids: List[str] = []
+    addon_quantities: Dict[str, int] = {}
+    addon_dates: Dict[str, List[str]] = {}
+
+
+class ChangeRequestPreview(BaseModel):
+    """Returned by the preview endpoint so the guest can see the price diff
+    (and any block reason) before they submit."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    old_total: float
+    new_total: float
+    price_difference: float
+    currency: str
+    blocked: bool = False
+    block_reason: Optional[str] = None
+    available: bool = True
+
+
+class ChangeRequestResponse(BaseModel):
+    """Full change-request row, returned to guest UI + PMS UI."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    booking_id: str
+    status: str  # pending | approved | declined | cancelled
+    old_check_in: str
+    old_check_out: str
+    old_addon_ids: List[str] = []
+    old_addon_quantities: Dict[str, int] = {}
+    old_addon_dates: Dict[str, List[str]] = {}
+    old_total: float
+    requested_check_in: str
+    requested_check_out: str
+    requested_addon_ids: List[str] = []
+    requested_addon_quantities: Dict[str, int] = {}
+    requested_addon_dates: Dict[str, List[str]] = {}
+    requested_addon_names: List[str] = []
+    new_total: float
+    price_difference: float
+    currency: str
+    decline_reason: Optional[str] = None
+    decided_at: Optional[str] = None
+    created_at: str
+
+    @field_validator(
+        "old_addon_ids", "old_addon_quantities", "old_addon_dates",
+        "requested_addon_ids", "requested_addon_quantities",
+        "requested_addon_dates", "requested_addon_names",
+        mode="before",
+    )
+    @classmethod
+    def parse_json(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+
+class ChangeRequestDecline(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    reason: Optional[str] = None
