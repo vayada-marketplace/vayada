@@ -156,10 +156,11 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         <div className="relative" ref={propertyRef}>
           <button
             onClick={() => setPropertyOpen(!propertyOpen)}
-            className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors"
+            className="flex items-center gap-1 text-[13px] text-gray-700 hover:text-gray-900 transition-colors max-w-[140px] sm:max-w-[220px]"
+            title={selectedHotel?.name || undefined}
           >
-            <span className="font-medium">{selectedHotel?.name || t('layout.header.noProperties')}</span>
-            <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${propertyOpen ? 'rotate-180' : ''}`} />
+            <span className="font-medium truncate">{selectedHotel?.name || t('layout.header.noProperties')}</span>
+            <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${propertyOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {propertyOpen && (
@@ -226,15 +227,24 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </div>
       </div>
 
-      {/* Center: global search trigger */}
-      <div className="flex-1 flex justify-center px-4">
+      {/* Center: global search trigger.
+          Mobile (< sm) collapses to an icon-only button so the row fits a
+          320px viewport — VAY-374. The same modal opens either way. */}
+      <div className="flex-1 flex justify-end sm:justify-center px-2 sm:px-4 min-w-0">
         <button
           onClick={() => setSearchOpen(true)}
-          className="w-full max-w-sm flex items-center gap-2 h-8 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-400 hover:bg-white hover:border-gray-300 hover:text-gray-600 transition-colors"
+          aria-label={t('search.placeholder')}
+          className="sm:hidden w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-gray-500 hover:bg-white hover:border-gray-300 hover:text-gray-700 transition-colors shrink-0"
+        >
+          <MagnifyingGlassIcon className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="hidden sm:flex w-full max-w-sm items-center gap-2 h-8 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-400 hover:bg-white hover:border-gray-300 hover:text-gray-600 transition-colors"
         >
           <MagnifyingGlassIcon className="w-3.5 h-3.5 shrink-0" />
           <span className="text-[12px] flex-1 text-left truncate">{t('search.placeholder')}</span>
-          <kbd className="hidden sm:inline text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-400 leading-none shrink-0">
+          <kbd className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-400 leading-none shrink-0">
             {shortcutKey}
           </kbd>
         </button>
