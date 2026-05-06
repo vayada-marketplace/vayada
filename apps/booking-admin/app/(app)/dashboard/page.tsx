@@ -11,6 +11,7 @@ import {
   type ConversionFunnel,
   type Sparklines,
   type TimeRange,
+  type PageViewsTimeline,
 } from '@/services/dashboard'
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -48,29 +49,16 @@ function formatDiff(
   return { text: `\u2193 -${formatted} ${vsPrevious}`, positive: false }
 }
 
-// Mirrors DashboardRepository._sparkline_buckets in the backend so the modal's
-// bar labels match the bucket boundaries the API actually returned.
-function sparklineBuckets(range: TimeRange): { start: Date; end: Date }[] {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const dayMs = 24 * 60 * 60 * 1000
-  if (range === 'month') {
-    return Array.from({ length: 7 }, (_, i) => {
-      const start = new Date(today.getTime() - (27 - i * 4) * dayMs)
-      const end = i < 6 ? new Date(today.getTime() - (27 - (i + 1) * 4 + 1) * dayMs) : today
-      return { start, end }
-    })
-  }
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today.getTime() - (6 - i) * dayMs)
-    return { start: d, end: d }
-  })
+// ISO date strings come from the backend already aligned to the property
+// timezone; `parseIsoDate` builds a Date at local midnight so Intl
+// formatting doesn't shift the day backwards on negative-UTC clients.
+function parseIsoDate(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1)
 }
 
-function formatBucketLabel(bucket: { start: Date; end: Date }, locale: string): string {
-  const fmt = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' })
-  if (bucket.start.getTime() === bucket.end.getTime()) return fmt.format(bucket.start)
-  return `${fmt.format(bucket.start)}\u2013${fmt.format(bucket.end)}`
+function formatShortDate(iso: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(parseIsoDate(iso))
 }
 
 export default function DashboardPage() {
@@ -291,12 +279,8 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {pageViewsModalOpen && sparklines && (
+      {pageViewsModalOpen && (
         <PageViewsDetailModal
-          range={timeRange}
-          sparkline={sparklines.page_views}
-          current={stats?.page_views ?? 0}
-          previous={stats?.page_views_previous ?? 0}
           locale={locale}
           t={t}
           onClose={() => setPageViewsModalOpen(false)}
@@ -412,39 +396,48 @@ export default function DashboardPage() {
 }
 
 interface PageViewsDetailModalProps {
-  range: TimeRange
-  sparkline: number[]
-  current: number
-  previous: number
   locale: string
   t: (key: string, params?: Record<string, string | number>) => string
   onClose: () => void
 }
 
-function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, onClose }: PageViewsDetailModalProps) {
+function PageViewsDetailModal({ locale, t, onClose }: PageViewsDetailModalProps) {
+  // Self-fetching: the modal owns its own week_offset state and reloads
+  // when the user navigates. Keeping this out of the parent dashboard
+  // means the parent's today/week/month tabs don't accidentally reset
+  // the user's drill-down position when the modal opens.
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [data, setData] = useState<PageViewsTimeline | null>(null)
+  const [loading, setLoading] = useState(true)
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const buckets = sparklineBuckets(range)
-  const max = Math.max(...sparkline, 1)
-  const total = sparkline.reduce((a, b) => a + b, 0)
-  const diff = current - previous
-  const pctChange = previous > 0 ? Math.round((diff / previous) * 100) : null
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    dashboardService.getPageViewsTimeline(weekOffset)
+      .then((d) => { if (!cancelled) setData(d) })
+      .catch(() => { /* keep last data on error */ })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [weekOffset])
 
-  const periodLabel = range === 'today'
-    ? t('dashboard.pageViewsModal.subtitleToday')
-    : range === 'week'
-    ? t('dashboard.pageViewsModal.subtitleWeek')
-    : t('dashboard.pageViewsModal.subtitleMonth')
+  const max = data ? Math.max(...data.buckets.map((b) => b.count), 1) : 1
+  const diff = data ? data.total - data.previous_total : 0
+  const pctChange = data && data.previous_total > 0
+    ? Math.round((diff / data.previous_total) * 100)
+    : null
 
-  const vsLabel = range === 'today'
-    ? t('dashboard.stats.vsYesterday')
-    : range === 'week'
-    ? t('dashboard.stats.vsLastWeek')
-    : t('dashboard.stats.vsLast30Days')
+  const rangeLabel = data
+    ? t('dashboard.pageViewsModal.subtitleRange', {
+        start: formatShortDate(data.window_start, locale),
+        end: formatShortDate(data.window_end, locale),
+      })
+    : ''
 
   return (
     <div
@@ -470,23 +463,52 @@ function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, 
             </svg>
           </button>
         </div>
-        <p className="text-[13px] text-gray-500 mb-5">{periodLabel}</p>
 
-        <div className="flex items-end gap-2 h-40 mb-2">
-          {sparkline.map((v, i) => (
+        <div className="flex items-center justify-between mb-5">
+          <button
+            type="button"
+            onClick={() => setWeekOffset((o) => o + 1)}
+            className="p-1 -ml-1 text-gray-500 hover:text-gray-900 disabled:opacity-30"
+            aria-label={t('dashboard.pageViewsModal.previousWeek')}
+            disabled={loading}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+          <p className="text-[13px] text-gray-500 text-center flex-1">{rangeLabel || ' '}</p>
+          <button
+            type="button"
+            onClick={() => setWeekOffset((o) => Math.max(0, o - 1))}
+            className="p-1 -mr-1 text-gray-500 hover:text-gray-900 disabled:opacity-30"
+            aria-label={t('dashboard.pageViewsModal.nextWeek')}
+            disabled={weekOffset === 0 || loading}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        </div>
+
+        <div className={`flex items-end gap-2 h-40 mb-2 transition-opacity ${loading ? 'opacity-50' : ''}`}>
+          {(data?.buckets ?? Array.from({ length: 7 }, () => ({ date: '', count: 0 }))).map((b, i) => (
             <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-              <span className="text-[11px] font-medium text-gray-700 mb-1">{formatNumber(v, locale)}</span>
+              <span className="text-[11px] font-medium text-gray-700 mb-1">{formatNumber(b.count, locale)}</span>
               <div
                 className="w-full bg-primary-500 rounded-t"
-                style={{ height: `${Math.max((v / max) * 100, 2)}%` }}
+                style={{ height: `${Math.max((b.count / max) * 100, 2)}%` }}
               />
             </div>
           ))}
         </div>
         <div className="flex gap-2 mb-5">
-          {buckets.map((b, i) => (
-            <span key={i} className="flex-1 text-center text-[11px] text-gray-500 truncate" title={formatBucketLabel(b, locale)}>
-              {formatBucketLabel(b, locale)}
+          {(data?.buckets ?? []).map((b) => (
+            <span
+              key={b.date}
+              className="flex-1 text-center text-[11px] text-gray-500 truncate"
+              title={formatShortDate(b.date, locale)}
+            >
+              {formatShortDate(b.date, locale)}
             </span>
           ))}
         </div>
@@ -494,16 +516,20 @@ function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, 
         <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-4 text-[13px]">
           <div>
             <div className="text-gray-500">{t('dashboard.pageViewsModal.totalInWindow')}</div>
-            <div className="text-xl font-semibold text-gray-900">{formatNumber(total, locale)}</div>
+            <div className="text-xl font-semibold text-gray-900">{formatNumber(data?.total ?? 0, locale)}</div>
           </div>
           <div>
-            <div className="text-gray-500">{vsLabel}</div>
-            <div className={`text-xl font-semibold ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-500' : 'text-gray-900'}`}>
-              {diff > 0 ? '+' : ''}{formatNumber(diff, locale)}
-              {pctChange !== null && (
-                <span className="text-[13px] font-normal ml-2">({diff > 0 ? '+' : ''}{formatNumber(pctChange, locale)}%)</span>
-              )}
-            </div>
+            <div className="text-gray-500">{t('dashboard.pageViewsModal.vsPrevious7Days')}</div>
+            {data && data.has_previous_data ? (
+              <div className={`text-xl font-semibold ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                {diff > 0 ? '+' : ''}{formatNumber(diff, locale)}
+                {pctChange !== null && (
+                  <span className="text-[13px] font-normal ml-2">({diff > 0 ? '+' : ''}{formatNumber(pctChange, locale)}%)</span>
+                )}
+              </div>
+            ) : (
+              <div className="text-[13px] text-gray-500 mt-1">{t('dashboard.pageViewsModal.noPrevious')}</div>
+            )}
           </div>
         </div>
       </div>
