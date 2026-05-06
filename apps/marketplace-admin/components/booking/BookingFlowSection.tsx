@@ -492,7 +492,6 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
   const [savedCommissionNote, setSavedCommissionNote] = useState('')
   const [savedBeFee, setSavedBeFee] = useState(COMMISSION_DEFAULT_PCT)
   const [history, setHistory] = useState<CommissionRateChange[]>([])
-  const [channelFee, setChannelFee] = useState(3)
   const [affiliatePlatformFee, setAffiliatePlatformFee] = useState(2)
   const [fixedBase, setFixedBase] = useState(30)
   const [roomsIncluded, setRoomsIncluded] = useState(1)
@@ -526,7 +525,6 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
           const note = hotel.billing_commission_note ?? ''
           setCommissionNote(note)
           setSavedCommissionNote(note)
-          setChannelFee(hotel.channel_manager_fee_pct ?? 3)
           setAffiliatePlatformFee(hotel.affiliate_platform_fee_pct ?? 2)
           setFixedBase(hotel.fixed_base_fee ?? 30)
           setRoomsIncluded(hotel.fixed_rooms_included ?? 1)
@@ -559,7 +557,6 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
       // and so a note-only edit still persists.
       await bookingSettingsService.updateHotelBilling(hotelId, {
         booking_engine_fee_pct: beFee,
-        channel_manager_fee_pct: channelFee,
         affiliate_platform_fee_pct: affiliatePlatformFee,
         fixed_base_fee: fixedBase,
         fixed_rooms_included: roomsIncluded,
@@ -674,14 +671,6 @@ function PaymentTab({ hotelId, showFeedback }: { hotelId: string; showFeedback: 
             </ul>
           )}
         </div>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-        <div>
-          <h2 className="text-[14px] font-semibold text-gray-900">Channel Manager Fee</h2>
-          <p className="text-[12px] text-gray-500 mt-0.5">Vayada&apos;s cut on OTA-sourced bookings (Booking.com, Airbnb…). Independent of the Commission rate above.</p>
-        </div>
-        <FeeInput label="Channel manager (OTA)" suffix="% on OTA bookings" value={channelFee} onChange={setChannelFee} />
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
