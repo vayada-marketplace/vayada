@@ -118,6 +118,77 @@ class TestGetUsers:
 
         assert response.status_code == 403
 
+    async def test_get_users_avatar_falls_back_to_creator_profile_picture(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database
+    ):
+        """Creator with profile_picture but no users.avatar should surface the picture as avatar."""
+        creator = await create_test_creator()
+        picture_url = "https://example.com/creator.jpg"
+        await Database.execute(
+            "UPDATE creators SET profile_picture = $1 WHERE user_id = $2",
+            picture_url, creator["user"]["id"]
+        )
+
+        response = await client.get(
+            "/admin/users?type=creator",
+            headers=get_auth_headers(test_admin["token"])
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        match = next((u for u in data["users"] if u["id"] == str(creator["user"]["id"])), None)
+        assert match is not None
+        assert match["avatar"] == picture_url
+
+    async def test_get_users_avatar_falls_back_to_hotel_picture(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database
+    ):
+        """Hotel with hotel_profiles.picture but no users.avatar should surface the picture as avatar."""
+        hotel = await create_test_hotel()
+        picture_url = "https://example.com/hotel.jpg"
+        await Database.execute(
+            "UPDATE hotel_profiles SET picture = $1 WHERE user_id = $2",
+            picture_url, hotel["user"]["id"]
+        )
+
+        response = await client.get(
+            "/admin/users?type=hotel",
+            headers=get_auth_headers(test_admin["token"])
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        match = next((u for u in data["users"] if u["id"] == str(hotel["user"]["id"])), None)
+        assert match is not None
+        assert match["avatar"] == picture_url
+
+    async def test_get_users_avatar_override_takes_precedence(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database
+    ):
+        """When users.avatar is set, it takes precedence over creator profile_picture."""
+        creator = await create_test_creator()
+        override_url = "https://example.com/admin-override.jpg"
+        creator_picture_url = "https://example.com/creator.jpg"
+        await AuthDatabase.execute(
+            "UPDATE users SET avatar = $1 WHERE id = $2",
+            override_url, creator["user"]["id"]
+        )
+        await Database.execute(
+            "UPDATE creators SET profile_picture = $1 WHERE user_id = $2",
+            creator_picture_url, creator["user"]["id"]
+        )
+
+        response = await client.get(
+            "/admin/users?type=creator",
+            headers=get_auth_headers(test_admin["token"])
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        match = next((u for u in data["users"] if u["id"] == str(creator["user"]["id"])), None)
+        assert match is not None
+        assert match["avatar"] == override_url
+
 
 class TestGetUserDetails:
     """Tests for GET /admin/users/{user_id}"""

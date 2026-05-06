@@ -96,20 +96,49 @@ async def get_users(
 
         users_data = await AuthDatabase.fetch(users_query, *params)
 
-        users = [
-            UserResponse(
-                id=str(u['id']),
+        # users.avatar is an admin-settable override. When it's null, fall back
+        # to the creator's profile_picture or hotel's picture so the admin Users
+        # list reflects the photo the creator/hotel actually uploaded.
+        creator_user_ids = [str(u['id']) for u in users_data if u['type'] == 'creator']
+        hotel_user_ids = [str(u['id']) for u in users_data if u['type'] == 'hotel']
+
+        creator_pictures: dict[str, Optional[str]] = {}
+        if creator_user_ids:
+            creator_rows = await Database.fetch(
+                "SELECT user_id, profile_picture FROM creators WHERE user_id = ANY($1::uuid[])",
+                creator_user_ids,
+            )
+            creator_pictures = {str(r['user_id']): r['profile_picture'] for r in creator_rows}
+
+        hotel_pictures: dict[str, Optional[str]] = {}
+        if hotel_user_ids:
+            hotel_rows = await Database.fetch(
+                "SELECT user_id, picture FROM hotel_profiles WHERE user_id = ANY($1::uuid[])",
+                hotel_user_ids,
+            )
+            hotel_pictures = {str(r['user_id']): r['picture'] for r in hotel_rows}
+
+        users = []
+        for u in users_data:
+            user_id_str = str(u['id'])
+            avatar = u['avatar']
+            if not avatar:
+                if u['type'] == 'creator':
+                    avatar = creator_pictures.get(user_id_str)
+                elif u['type'] == 'hotel':
+                    avatar = hotel_pictures.get(user_id_str)
+
+            users.append(UserResponse(
+                id=user_id_str,
                 email=u['email'],
                 name=u['name'],
                 type=u['type'],
                 status=u['status'],
                 email_verified=u['email_verified'],
-                avatar=u['avatar'],
+                avatar=avatar,
                 created_at=u['created_at'],
                 updated_at=u['updated_at']
-            )
-            for u in users_data
-        ]
+            ))
 
         logger.info(f"Admin {admin_id} fetched users list (page {page}, total: {total})")
 
