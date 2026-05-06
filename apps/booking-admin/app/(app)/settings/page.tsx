@@ -15,6 +15,9 @@ import {
 } from '@heroicons/react/24/outline'
 import { settingsService, customDomainService, type PropertySettings, type CustomDomainStatus } from '@/services/settings'
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
+import { useTranslation } from '@/lib/i18n'
+
+type Translate = (key: string, params?: Record<string, string | number>) => string
 
 type Tab = 'property' | 'booking' | 'notifications' | 'security' | 'billing'
 
@@ -40,7 +43,7 @@ const STRIPE_COUNTRIES = [
   { c: 'VN', n: 'Vietnam', f: '🇻🇳' }, { c: 'ZA', n: 'South Africa', f: '🇿🇦' },
 ].sort((a, b) => a.n.localeCompare(b.n))
 
-function CountrySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CountrySelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: Translate }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -65,7 +68,7 @@ function CountrySelect({ value, onChange }: { value: string; onChange: (v: strin
         onClick={() => { setOpen(!open); setSearch('') }}
         className="w-full px-2.5 py-1.5 text-left border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white flex items-center justify-between"
       >
-        <span>{selected ? `${selected.f} ${selected.n}` : 'Select country'}</span>
+        <span>{selected ? `${selected.f} ${selected.n}` : t('settings.billing.selectCountry')}</span>
         <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
       </button>
       {open && (
@@ -75,14 +78,14 @@ function CountrySelect({ value, onChange }: { value: string; onChange: (v: strin
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search country..."
+              placeholder={t('settings.billing.searchCountry')}
               autoFocus
               className="w-full px-2.5 py-1.5 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <ul className="max-h-52 overflow-y-auto py-1">
             {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-[13px] text-gray-400">No results</li>
+              <li className="px-3 py-2 text-[13px] text-gray-400">{t('settings.billing.noResults')}</li>
             ) : filtered.map(c => (
               <li
                 key={c.c}
@@ -140,6 +143,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
 }
 
 export default function SettingsPage() {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<Tab>('property')
   const [settings, setSettings] = useState<PropertySettings>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
@@ -180,10 +184,10 @@ export default function SettingsPage() {
       setChangingEmail(true)
       setEmailFeedback(null)
       const res = await settingsService.changeEmail(emailForm.new_email, emailForm.password)
-      setEmailFeedback({ type: 'success', message: res.message || 'A verification link has been sent to your new email address.' })
+      setEmailFeedback({ type: 'success', message: res.message || t('settings.security.emailSuccess') })
       setEmailForm({ new_email: '', password: '' })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to update email'
+      const message = err instanceof Error ? err.message : t('settings.security.emailError')
       setEmailFeedback({ type: 'error', message })
     } finally {
       setChangingEmail(false)
@@ -192,21 +196,21 @@ export default function SettingsPage() {
 
   const handleChangePassword = async () => {
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      setPasswordFeedback({ type: 'error', message: 'New passwords do not match' })
+      setPasswordFeedback({ type: 'error', message: t('settings.security.passwordMismatch') })
       return
     }
     if (passwordForm.new_password.length < 8) {
-      setPasswordFeedback({ type: 'error', message: 'Password must be at least 8 characters' })
+      setPasswordFeedback({ type: 'error', message: t('settings.security.passwordLength') })
       return
     }
     try {
       setChangingPassword(true)
       setPasswordFeedback(null)
       await settingsService.changePassword(passwordForm.current_password, passwordForm.new_password)
-      setPasswordFeedback({ type: 'success', message: 'Password updated successfully' })
+      setPasswordFeedback({ type: 'success', message: t('settings.security.passwordSuccess') })
       setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
     } catch {
-      setPasswordFeedback({ type: 'error', message: 'Failed to update password. Check your current password.' })
+      setPasswordFeedback({ type: 'error', message: t('settings.security.passwordError') })
     } finally {
       setChangingPassword(false)
     }
@@ -218,11 +222,11 @@ export default function SettingsPage() {
       const data = await settingsService.getPropertySettings()
       setSettings(data)
     } catch {
-      setFeedback({ type: 'error', message: 'Failed to load settings' })
+      setFeedback({ type: 'error', message: t('settings.feedback.loadError') })
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     fetchSettings()
@@ -260,7 +264,7 @@ export default function SettingsPage() {
       const link = await pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link')
       window.open(link.url, '_blank')
     } catch (err: any) {
-      const msg = err instanceof TypeError ? 'Could not reach the payment server. Please try again later.' : (err.message || 'Failed to create account')
+      const msg = err instanceof TypeError ? t('settings.billing.errorPaymentServerUnreachable') : (err.message || t('settings.billing.errorAccountCreate'))
       setPaymentError(msg)
     } finally {
       setCreatingAccount(false)
@@ -272,7 +276,7 @@ export default function SettingsPage() {
       const link = await pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link')
       window.open(link.url, '_blank')
     } catch (err: any) {
-      setPaymentError(err.message || 'Failed to get onboarding link')
+      setPaymentError(err.message || t('settings.billing.errorOnboardingLink'))
     }
   }
 
@@ -282,12 +286,12 @@ export default function SettingsPage() {
     setPaymentSuccess('')
     if (paymentProvider === 'xendit') {
       if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-        setPaymentError('Account number must be 5-20 digits')
+        setPaymentError(t('settings.billing.errorAccountNumberFormat'))
         setSavingPayment(false)
         return
       }
       if (!xenditAccountHolderName.trim()) {
-        setPaymentError('Account holder name is required')
+        setPaymentError(t('settings.billing.errorAccountHolderRequired'))
         setSavingPayment(false)
         return
       }
@@ -297,9 +301,9 @@ export default function SettingsPage() {
         paymentProvider,
         ...(paymentProvider === 'xendit' ? { xenditChannelCode, xenditAccountNumber, xenditAccountHolderName } : {}),
       })
-      setPaymentSuccess('Payment settings saved')
+      setPaymentSuccess(t('settings.billing.paymentSettingsSaved'))
     } catch (err: any) {
-      setPaymentError(err.message || 'Failed to save')
+      setPaymentError(err.message || t('settings.billing.errorPaymentSaveFailed'))
     } finally {
       setSavingPayment(false)
     }
@@ -328,9 +332,9 @@ export default function SettingsPage() {
       } catch {
         // Non-fatal: PMS sync may fail if not using vayada PMS
       }
-      setFeedback({ type: 'success', message: 'Settings saved successfully' })
+      setFeedback({ type: 'success', message: t('settings.feedback.saveSuccess') })
     } catch {
-      setFeedback({ type: 'error', message: 'Failed to save settings' })
+      setFeedback({ type: 'error', message: t('settings.feedback.saveError') })
     } finally {
       setSaving(false)
     }
@@ -354,9 +358,9 @@ export default function SettingsPage() {
         ssl_status: 'initializing',
       })
       setDomainInput('')
-      setFeedback({ type: 'success', message: 'Custom domain connected. Add the DNS record below to activate it.' })
+      setFeedback({ type: 'success', message: t('settings.feedback.domainConnected') })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to connect domain'
+      const message = err instanceof Error ? err.message : t('settings.feedback.domainConnectError')
       setFeedback({ type: 'error', message })
     } finally {
       setDomainLoading(false)
@@ -369,9 +373,9 @@ export default function SettingsPage() {
     try {
       await customDomainService.disconnect()
       setDomainStatus({ configured: false })
-      setFeedback({ type: 'success', message: 'Custom domain removed' })
+      setFeedback({ type: 'success', message: t('settings.feedback.domainRemoved') })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to remove domain'
+      const message = err instanceof Error ? err.message : t('settings.feedback.domainRemoveError')
       setFeedback({ type: 'error', message })
     } finally {
       setDomainLoading(false)
@@ -386,17 +390,17 @@ export default function SettingsPage() {
   }
 
   const tabs = [
-    { id: 'property' as const, label: 'Property', icon: PropertyIcon },
-    { id: 'booking' as const, label: 'Booking', icon: BookingIcon },
-    { id: 'notifications' as const, label: 'Notifications', icon: NotificationsIcon },
-    { id: 'security' as const, label: 'Security', icon: SecurityIcon },
-    { id: 'billing' as const, label: 'Billing', icon: BillingIcon },
+    { id: 'property' as const, label: t('settings.tabs.property'), icon: PropertyIcon },
+    { id: 'booking' as const, label: t('settings.tabs.booking'), icon: BookingIcon },
+    { id: 'notifications' as const, label: t('settings.tabs.notifications'), icon: NotificationsIcon },
+    { id: 'security' as const, label: t('settings.tabs.security'), icon: SecurityIcon },
+    { id: 'billing' as const, label: t('settings.tabs.billing'), icon: BillingIcon },
   ]
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
-      <h1 className="text-2xl md:text-xl font-bold text-gray-900">Settings</h1>
-      <p className="text-sm text-gray-500 mt-0.5">Manage your property and account preferences</p>
+      <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t('settings.title')}</h1>
+      <p className="text-sm text-gray-500 mt-0.5">{t('settings.subtitle')}</p>
 
       {/* Tab bar */}
       <div className="mt-4 md:mt-5 relative">
@@ -436,24 +440,24 @@ export default function SettingsPage() {
             <>
               {/* Property Information card */}
               <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-                <h2 className="text-sm font-semibold text-gray-900">Property Information</h2>
-                <p className="text-[13px] text-gray-500 mt-0.5 mb-3">Basic details about your property</p>
+                <h2 className="text-sm font-semibold text-gray-900">{t('settings.property.propertyInfo')}</h2>
+                <p className="text-[13px] text-gray-500 mt-0.5 mb-3">{t('settings.property.propertyInfoDesc')}</p>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Property Name
+                      {t('settings.property.nameLabel')}
                     </label>
                     <input
                       type="text"
                       value={settings.property_name}
                       onChange={(e) => updateSetting('property_name', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="Enter property name"
+                      placeholder={t('settings.property.namePlaceholder')}
                     />
                   </div>
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Address
+                      {t('settings.property.addressLabel')}
                     </label>
                     <div className="relative">
                       <MapPinIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -462,7 +466,7 @@ export default function SettingsPage() {
                         value={settings.address}
                         onChange={(e) => updateSetting('address', e.target.value)}
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Sekotong, Lombok Barat, NTB 83365, Indonesia"
+                        placeholder={t('settings.property.addressPlaceholder')}
                       />
                     </div>
                   </div>
@@ -473,13 +477,13 @@ export default function SettingsPage() {
               <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <PhoneIcon className="w-4 h-4 text-gray-700" />
-                  <h2 className="text-sm font-semibold text-gray-900">Contact Information</h2>
+                  <h2 className="text-sm font-semibold text-gray-900">{t('settings.property.contactTitle')}</h2>
                 </div>
-                <p className="text-[13px] text-gray-500 mb-3">How guests can reach you — shown on your booking site</p>
+                <p className="text-[13px] text-gray-500 mb-3">{t('settings.property.contactSubtitle')}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Phone Number
+                      {t('settings.property.phoneLabel')}
                     </label>
                     <div className="relative">
                       <PhoneIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -488,13 +492,13 @@ export default function SettingsPage() {
                         value={settings.phone_number}
                         onChange={(e) => updateSetting('phone_number', e.target.value)}
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="+62 370 123 4567"
+                        placeholder={t('settings.property.phonePlaceholder')}
                       />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      WhatsApp
+                      {t('settings.property.whatsappLabel')}
                     </label>
                     <div className="relative">
                       <ChatBubbleLeftIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -503,13 +507,13 @@ export default function SettingsPage() {
                         value={settings.whatsapp_number}
                         onChange={(e) => updateSetting('whatsapp_number', e.target.value)}
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="+62 812 3456 7890"
+                        placeholder={t('settings.property.whatsappPlaceholder')}
                       />
                     </div>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                      Reservation Email
+                      {t('settings.property.emailLabel')}
                     </label>
                     <div className="relative">
                       <EnvelopeIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -518,7 +522,7 @@ export default function SettingsPage() {
                         value={settings.reservation_email}
                         onChange={(e) => updateSetting('reservation_email', e.target.value)}
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="reservations@hotel.com"
+                        placeholder={t('settings.property.emailPlaceholder')}
                       />
                     </div>
                   </div>
@@ -529,48 +533,48 @@ export default function SettingsPage() {
               <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <GlobeAltIcon className="w-4 h-4 text-gray-700" />
-                  <h2 className="text-sm font-semibold text-gray-900">Social Media</h2>
+                  <h2 className="text-sm font-semibold text-gray-900">{t('settings.property.socialTitle')}</h2>
                 </div>
-                <p className="text-[13px] text-gray-500 mb-3">Links shown in your booking site footer</p>
+                <p className="text-[13px] text-gray-500 mb-3">{t('settings.property.socialSubtitle')}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Instagram</label>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('settings.property.instagramLabel')}</label>
                     <input
                       type="url"
                       value={settings.instagram || ''}
                       onChange={(e) => updateSetting('instagram', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="https://instagram.com/yourhotel"
+                      placeholder={t('settings.property.instagramPlaceholder')}
                     />
                   </div>
                   <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">Facebook</label>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('settings.property.facebookLabel')}</label>
                     <input
                       type="url"
                       value={settings.facebook || ''}
                       onChange={(e) => updateSetting('facebook', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="https://facebook.com/yourhotel"
+                      placeholder={t('settings.property.facebookPlaceholder')}
                     />
                   </div>
                   <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">TikTok</label>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('settings.property.tiktokLabel')}</label>
                     <input
                       type="url"
                       value={settings.tiktok || ''}
                       onChange={(e) => updateSetting('tiktok', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="https://www.tiktok.com/@yourhotel"
+                      placeholder={t('settings.property.tiktokPlaceholder')}
                     />
                   </div>
                   <div>
-                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">YouTube</label>
+                    <label className="block text-[13px] font-medium text-gray-700 mb-0.5">{t('settings.property.youtubeLabel')}</label>
                     <input
                       type="url"
                       value={settings.youtube || ''}
                       onChange={(e) => updateSetting('youtube', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="https://youtube.com/@yourhotel"
+                      placeholder={t('settings.property.youtubePlaceholder')}
                     />
                   </div>
                 </div>
@@ -578,7 +582,7 @@ export default function SettingsPage() {
 
               {/* Save button */}
               <div className="flex justify-end">
-                <SaveButton onClick={handleSave} saving={saving} />
+                <SaveButton onClick={handleSave} saving={saving}>{t('common.save')}</SaveButton>
               </div>
             </>
           )}
@@ -593,36 +597,36 @@ export default function SettingsPage() {
             <ToggleSwitch
               enabled={settings.refer_a_guest_enabled ?? false}
               onChange={() => updateSetting('refer_a_guest_enabled', !settings.refer_a_guest_enabled)}
-              label={'"Refer a Guest" Feature'}
-              description="Allow guests to refer friends and earn rewards through your booking page"
+              label={t('settings.booking.referAGuest')}
+              description={t('settings.booking.referAGuestDesc')}
             />
           </div>
 
           {/* Booking Policies */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 className="text-sm font-semibold text-gray-900">Booking Policies</h2>
+            <h2 className="text-sm font-semibold text-gray-900">{t('settings.booking.policiesTitle')}</h2>
             <p className="text-[13px] text-gray-500 mt-0.5 mb-4">
-              Shown in pop-ups when guests click the links on the payment page. Leave empty to hide the link.
+              {t('settings.booking.policiesSubtitle')}
             </p>
 
             <div className="mb-4">
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Terms &amp; Conditions</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">{t('settings.booking.termsLabel')}</label>
               <textarea
                 value={settings.terms_text ?? ''}
                 onChange={(e) => updateSetting('terms_text', e.target.value)}
                 rows={8}
-                placeholder="Enter your full Terms and Conditions here. Plain text or basic line breaks supported."
+                placeholder={t('settings.booking.termsPlaceholder')}
                 className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"
               />
             </div>
 
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Cancellation Policy</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">{t('settings.booking.cancellationLabel')}</label>
               <textarea
                 value={settings.cancellation_policy_text ?? ''}
                 onChange={(e) => updateSetting('cancellation_policy_text', e.target.value)}
                 rows={6}
-                placeholder="Enter your full Cancellation Policy here. Plain text or basic line breaks supported."
+                placeholder={t('settings.booking.cancellationPlaceholder')}
                 className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"
               />
             </div>
@@ -630,7 +634,7 @@ export default function SettingsPage() {
 
           {/* Custom Domain */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 className="text-sm font-semibold text-gray-900">Custom Domain</h2>
+            <h2 className="text-sm font-semibold text-gray-900">{t('settings.booking.customDomain')}</h2>
             {domainStatus?.configured ? (
               <div className="space-y-4 mt-3">
                 <div className="flex items-center gap-3">
@@ -641,24 +645,24 @@ export default function SettingsPage() {
                         ? 'bg-yellow-100 text-yellow-700'
                         : 'bg-gray-100 text-gray-700'
                     }`}>
-                    {domainStatus.ssl_status === 'active' ? 'Active' : domainStatus.status === 'pending' ? 'Pending DNS' : domainStatus.ssl_status || 'Checking...'}
+                    {domainStatus.ssl_status === 'active' ? t('settings.booking.active') : domainStatus.status === 'pending' ? t('settings.booking.pendingDns') : domainStatus.ssl_status || t('settings.booking.checking')}
                   </span>
                   <button
                     onClick={handleRefreshDomainStatus}
                     className="text-[11px] text-primary-600 hover:text-primary-700"
                   >
-                    Refresh
+                    {t('settings.booking.refresh')}
                   </button>
                 </div>
 
                 {domainStatus.ssl_status !== 'active' && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-[13px] font-medium text-blue-900 mb-2">DNS Setup Required</p>
-                    <p className="text-[13px] text-blue-700 mb-2">Add a CNAME record in your DNS provider:</p>
+                    <p className="text-[13px] font-medium text-blue-900 mb-2">{t('settings.booking.dnsSetupRequired')}</p>
+                    <p className="text-[13px] text-blue-700 mb-2">{t('settings.booking.dnsInstructions')}</p>
                     <div className="bg-white rounded p-3 font-mono text-[11px] text-gray-800 space-y-1">
-                      <div><span className="text-gray-500">Type:</span> CNAME</div>
-                      <div><span className="text-gray-500">Name:</span> {domainStatus.domain}</div>
-                      <div><span className="text-gray-500">Target:</span> custom.booking.vayada.com</div>
+                      <div><span className="text-gray-500">{t('settings.booking.dnsType')}</span> CNAME</div>
+                      <div><span className="text-gray-500">{t('settings.booking.dnsName')}</span> {domainStatus.domain}</div>
+                      <div><span className="text-gray-500">{t('settings.booking.dnsTarget')}</span> custom.booking.vayada.com</div>
                     </div>
                   </div>
                 )}
@@ -674,20 +678,20 @@ export default function SettingsPage() {
                   disabled={domainLoading}
                   className="px-4 py-2 text-[13px] font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
                 >
-                  {domainLoading ? 'Removing...' : 'Remove Domain'}
+                  {domainLoading ? t('settings.booking.removing') : t('settings.booking.removeDomain')}
                 </button>
               </div>
             ) : (
               <div className="space-y-3 mt-1">
                 <p className="text-[13px] text-gray-500">
-                  Use your own domain for your booking page instead of the default subdomain.
+                  {t('settings.booking.customDomainDesc')}
                 </p>
                 <div className="flex gap-3">
                   <input
                     type="text"
                     value={domainInput}
                     onChange={(e) => setDomainInput(e.target.value)}
-                    placeholder="booking.yourdomain.com"
+                    placeholder={t('settings.booking.customDomainPlaceholder')}
                     className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                   <button
@@ -695,7 +699,7 @@ export default function SettingsPage() {
                     disabled={domainLoading || !domainInput.trim()}
                     className="px-4 py-2 text-[13px] font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
                   >
-                    {domainLoading ? 'Connecting...' : 'Connect Domain'}
+                    {domainLoading ? t('settings.booking.connecting') : t('settings.booking.connectDomain')}
                   </button>
                 </div>
               </div>
@@ -704,7 +708,7 @@ export default function SettingsPage() {
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving} />
+            <SaveButton onClick={handleSave} saving={saving}>{t('common.save')}</SaveButton>
           </div>
         </div>
       )}
@@ -715,15 +719,15 @@ export default function SettingsPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <div className="flex items-center gap-1.5 mb-0.5">
               <EnvelopeIcon className="w-4 h-4 text-gray-700" />
-              <h2 className="text-sm font-semibold text-gray-900">Email Notifications</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{t('settings.notifications.title')}</h2>
             </div>
-            <p className="text-[13px] text-gray-500 mb-4">Configure when and how you receive updates</p>
+            <p className="text-[13px] text-gray-500 mb-4">{t('settings.notifications.subtitle')}</p>
 
             <ToggleSwitch
               enabled={settings.email_notifications}
               onChange={() => updateSetting('email_notifications', !settings.email_notifications)}
-              label="Email Notifications"
-              description="Receive notifications via email"
+              label={t('settings.notifications.emailNotifications')}
+              description={t('settings.notifications.emailNotificationsDesc')}
             />
 
             <div className="border-t border-gray-200 my-2" />
@@ -731,29 +735,29 @@ export default function SettingsPage() {
             <ToggleSwitch
               enabled={settings.new_booking_alerts}
               onChange={() => updateSetting('new_booking_alerts', !settings.new_booking_alerts)}
-              label="New Booking Alerts"
-              description="Get notified when a new direct booking is made"
+              label={t('settings.notifications.newBookingAlerts')}
+              description={t('settings.notifications.newBookingAlertsDesc')}
             />
 
             <ToggleSwitch
               enabled={settings.ota_booking_alerts}
               onChange={() => updateSetting('ota_booking_alerts', !settings.ota_booking_alerts)}
-              label="OTA Booking Alerts"
-              description="Get notified when a booking is imported from an OTA (Booking.com, Airbnb, etc.)"
+              label={t('settings.notifications.otaBookingAlerts')}
+              description={t('settings.notifications.otaBookingAlertsDesc')}
             />
 
             <ToggleSwitch
               enabled={settings.payment_alerts}
               onChange={() => updateSetting('payment_alerts', !settings.payment_alerts)}
-              label="Payment Alerts"
-              description="Get notified about payment events"
+              label={t('settings.notifications.paymentAlerts')}
+              description={t('settings.notifications.paymentAlertsDesc')}
             />
 
           </div>
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving} />
+            <SaveButton onClick={handleSave} saving={saving}>{t('common.save')}</SaveButton>
           </div>
         </div>
       )}
@@ -765,14 +769,14 @@ export default function SettingsPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <div className="flex items-center gap-1.5 mb-0.5">
               <EnvelopeIcon className="w-4 h-4 text-gray-700" />
-              <h2 className="text-sm font-semibold text-gray-900">Change Email</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{t('settings.security.changeEmailTitle')}</h2>
             </div>
-            <p className="text-[13px] text-gray-500 mb-4">Update your account email address</p>
+            <p className="text-[13px] text-gray-500 mb-4">{t('settings.security.changeEmailSubtitle')}</p>
 
             <div className="space-y-3 max-w-sm">
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
-                  New Email
+                  {t('settings.security.newEmailLabel')}
                 </label>
                 <div className="relative">
                   <EnvelopeIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -781,15 +785,15 @@ export default function SettingsPage() {
                     value={emailForm.new_email}
                     onChange={(e) => setEmailForm({ ...emailForm, new_email: e.target.value })}
                     className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder="Enter new email address"
+                    placeholder={t('settings.security.newEmailPlaceholder')}
                   />
                 </div>
               </div>
               <PasswordField
-                label="Current Password"
+                label={t('settings.security.currentPasswordLabel')}
                 value={emailForm.password}
                 onChange={(value) => setEmailForm({ ...emailForm, password: value })}
-                placeholder="Confirm with your password"
+                placeholder={t('settings.security.confirmWithPassword')}
               />
             </div>
 
@@ -804,7 +808,7 @@ export default function SettingsPage() {
                 disabled={!emailForm.new_email || !emailForm.password}
                 icon={<EnvelopeIcon className="w-3.5 h-3.5" />}
               >
-                Update Email
+                {t('settings.security.updateEmail')}
               </SaveButton>
             </div>
           </div>
@@ -813,28 +817,28 @@ export default function SettingsPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <div className="flex items-center gap-1.5 mb-0.5">
               <LockClosedIcon className="w-4 h-4 text-gray-700" />
-              <h2 className="text-sm font-semibold text-gray-900">Change Password</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{t('settings.security.changePasswordTitle')}</h2>
             </div>
-            <p className="text-[13px] text-gray-500 mb-4">Update your account password</p>
+            <p className="text-[13px] text-gray-500 mb-4">{t('settings.security.changePasswordSubtitle')}</p>
 
             <div className="space-y-3 max-w-sm">
               <PasswordField
-                label="Current Password"
+                label={t('settings.security.currentPasswordLabel')}
                 value={passwordForm.current_password}
                 onChange={(value) => setPasswordForm({ ...passwordForm, current_password: value })}
-                placeholder="Enter current password"
+                placeholder={t('settings.security.currentPasswordPlaceholder')}
               />
               <PasswordField
-                label="New Password"
+                label={t('settings.security.newPasswordLabel')}
                 value={passwordForm.new_password}
                 onChange={(value) => setPasswordForm({ ...passwordForm, new_password: value })}
-                placeholder="Enter new password"
+                placeholder={t('settings.security.newPasswordPlaceholder')}
               />
               <PasswordField
-                label="Confirm New Password"
+                label={t('settings.security.confirmNewPasswordLabel')}
                 value={passwordForm.confirm_password}
                 onChange={(value) => setPasswordForm({ ...passwordForm, confirm_password: value })}
-                placeholder="Confirm new password"
+                placeholder={t('settings.security.confirmNewPasswordPlaceholder')}
               />
             </div>
 
@@ -849,7 +853,7 @@ export default function SettingsPage() {
                 disabled={!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
                 icon={<LockClosedIcon className="w-3.5 h-3.5" />}
               >
-                Update Password
+                {t('settings.security.updatePassword')}
               </SaveButton>
             </div>
           </div>
@@ -868,28 +872,28 @@ export default function SettingsPage() {
                   : 'border-gray-200'
               }`}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[14px] font-semibold text-gray-900">Commission</h3>
+                <h3 className="text-[14px] font-semibold text-gray-900">{t('settings.billing.commission')}</h3>
                 {settings.billing_active_plan === 'commission' && !settings.billing_pending_switch && (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">CURRENT</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">{t('settings.billing.current')}</span>
                 )}
                 {settings.billing_pending_switch === 'commission' && (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">{t('settings.billing.nextMonth')}</span>
                 )}
               </div>
-              <p className="text-[12px] text-gray-500 mb-3">Percentage per direct booking</p>
+              <p className="text-[12px] text-gray-500 mb-3">{t('settings.billing.percentagePerDirect')}</p>
               <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-2">
                 <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-gray-600">Direct bookings</span>
+                  <span className="text-gray-600">{t('settings.billing.directBookings')}</span>
                   <span className="flex items-center gap-2">
                     {(settings.booking_engine_fee_pct ?? 5) !== 5 && (
                       <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase bg-amber-100 text-amber-700 rounded-full tracking-wide">
-                        Custom rate
+                        {t('settings.billing.customRate')}
                       </span>
                     )}
                     <span className="font-semibold text-gray-900">{settings.booking_engine_fee_pct ?? 5}%</span>
                   </span>
                 </div>
-                <p className="text-[10px] text-gray-400 text-center pt-1">No monthly fee — pay only when you earn</p>
+                <p className="text-[10px] text-gray-400 text-center pt-1">{t('settings.billing.noMonthlyFee')}</p>
               </div>
               {settings.billing_active_plan !== 'commission' && !settings.billing_pending_switch && (
                 <button
@@ -901,7 +905,7 @@ export default function SettingsPage() {
                   }}
                   className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Switch from next month
+                  {t('settings.billing.switchFromNextMonth')}
                 </button>
               )}
               {settings.billing_pending_switch === 'commission' && (
@@ -914,7 +918,7 @@ export default function SettingsPage() {
                   }}
                   className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
                 >
-                  Cancel switch
+                  {t('settings.billing.cancelSwitch')}
                 </button>
               )}
             </div>
@@ -927,22 +931,22 @@ export default function SettingsPage() {
                   : 'border-gray-200'
               }`}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[14px] font-semibold text-gray-900">Fixed Fee</h3>
+                <h3 className="text-[14px] font-semibold text-gray-900">{t('settings.billing.fixedFee')}</h3>
                 {settings.billing_active_plan === 'fixed' && !settings.billing_pending_switch && (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">CURRENT</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">{t('settings.billing.current')}</span>
                 )}
                 {settings.billing_pending_switch === 'fixed' && (
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">NEXT MONTH</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">{t('settings.billing.nextMonth')}</span>
                 )}
               </div>
-              <p className="text-[12px] text-gray-500 mb-3">Flat monthly subscription</p>
+              <p className="text-[12px] text-gray-500 mb-3">{t('settings.billing.flatMonthly')}</p>
               <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
                 <span className="text-3xl font-bold text-gray-900">${(settings.fixed_plan_projected_monthly_fee ?? settings.billing_fixed_fee ?? 30).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
-                <p className="text-[11px] text-gray-400 mt-1">per month</p>
+                <p className="text-[11px] text-gray-400 mt-1">{t('settings.billing.perMonth')}</p>
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {typeof settings.active_room_count === 'number'
-                    ? `At ${settings.active_room_count} active room${settings.active_room_count === 1 ? '' : 's'} · base + per-extra-room pricing`
-                    : 'Base fee + per room pricing'}
+                    ? t(settings.active_room_count === 1 ? 'settings.billing.atActiveRoomsOne' : 'settings.billing.atActiveRoomsOther', { count: settings.active_room_count })
+                    : t('settings.billing.baseFeePerRoom')}
                 </p>
               </div>
               {settings.billing_active_plan !== 'fixed' && !settings.billing_pending_switch && (
@@ -955,7 +959,7 @@ export default function SettingsPage() {
                   }}
                   className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Switch from next month
+                  {t('settings.billing.switchFromNextMonth')}
                 </button>
               )}
               {settings.billing_pending_switch === 'fixed' && (
@@ -968,7 +972,7 @@ export default function SettingsPage() {
                   }}
                   className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
                 >
-                  Cancel switch
+                  {t('settings.billing.cancelSwitch')}
                 </button>
               )}
             </div>
@@ -977,17 +981,18 @@ export default function SettingsPage() {
           {settings.billing_pending_switch && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-[13px] text-amber-800">
-                Your plan will switch to <strong>{settings.billing_pending_switch === 'commission' ? 'Commission' : 'Fixed Fee'}</strong>{settings.billing_switch_effective_date
-                  ? ` on ${new Date(settings.billing_switch_effective_date).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}`
-                  : ' at the start of next month'}.
+                {t('settings.billing.switchBannerLeadTo')} <strong>{settings.billing_pending_switch === 'commission' ? t('settings.billing.commission') : t('settings.billing.fixedFee')}</strong>{' '}
+                {settings.billing_switch_effective_date
+                  ? t('settings.billing.switchBannerOnDate', { date: new Date(settings.billing_switch_effective_date).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) })
+                  : t('settings.billing.switchBannerNextMonth')}
               </p>
             </div>
           )}
 
           {/* Payment Methods */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
-            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which payment options are available to guests. Enable multiple to give guests flexibility.</p>
+            <h2 className="text-sm font-semibold text-gray-900">{t('settings.billing.paymentMethods')}</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">{t('settings.billing.paymentMethodsDesc')}</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Online Card Payment */}
               <button
@@ -1001,24 +1006,24 @@ export default function SettingsPage() {
                   {settings.online_card_payment && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </div>
                 <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-                <span className="text-[13px] font-semibold text-gray-900">Online Card</span>
-                <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays online with credit or debit card via Stripe</p>
+                <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.onlineCard')}</span>
+                <p className="text-[11px] text-gray-500 mt-1 mb-3">{t('settings.billing.onlineCardDesc')}</p>
                 <div className="mt-auto space-y-1.5">
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Instant confirmation</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureInstantConfirmation')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Visa, Mastercard, Amex</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureCardBrands')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Auto payout to your bank</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureAutoPayout')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Stripe fees apply</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureStripeFees')}</span>
                   </div>
                 </div>
               </button>
@@ -1035,28 +1040,28 @@ export default function SettingsPage() {
                     {settings.pay_at_property_enabled && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                   </div>
                   <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                  <span className="text-[13px] font-semibold text-gray-900">Pay at Hotel</span>
-                  <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays cash or card at check-in — no online payment</p>
+                  <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.payAtHotel')}</span>
+                  <p className="text-[11px] text-gray-500 mt-1 mb-3">{t('settings.billing.payAtHotelDesc')}</p>
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                      <span className="text-[10px] text-gray-500">No processing fees</span>
+                      <span className="text-[10px] text-gray-500">{t('settings.billing.featureNoProcessingFees')}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                      <span className="text-[10px] text-gray-500">No Stripe account needed</span>
+                      <span className="text-[10px] text-gray-500">{t('settings.billing.featureNoStripeAccount')}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                      <span className="text-[10px] text-gray-500">Higher no-show risk</span>
+                      <span className="text-[10px] text-gray-500">{t('settings.billing.featureNoShowRisk')}</span>
                     </div>
                   </div>
                 </div>
                 {settings.pay_at_property_enabled && (
                   <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200">
                     {[
-                      { key: 'cash', label: 'Cash' },
-                      { key: 'card', label: 'Card' },
+                      { key: 'cash', label: t('settings.billing.cash') },
+                      { key: 'card', label: t('settings.billing.card') },
                     ].map((m) => {
                       const selected = settings.pay_at_hotel_methods.includes(m.key)
                       return (
@@ -1080,7 +1085,7 @@ export default function SettingsPage() {
                       )
                     })}
                     <span className="text-[11px] text-gray-400 ml-1">
-                      {settings.pay_at_hotel_methods.length === 2 ? 'Cash & Card accepted' : settings.pay_at_hotel_methods.includes('cash') ? 'Cash only' : 'Card only'}
+                      {settings.pay_at_hotel_methods.length === 2 ? t('settings.billing.cashCardAccepted') : settings.pay_at_hotel_methods.includes('cash') ? t('settings.billing.cashOnly') : t('settings.billing.cardOnly')}
                     </span>
                   </div>
                 )}
@@ -1098,37 +1103,37 @@ export default function SettingsPage() {
                   {settings.bank_transfer && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </div>
                 <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" /></svg>
-                <span className="text-[13px] font-semibold text-gray-900">Bank Transfer</span>
-                <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest transfers money directly to your bank account</p>
+                <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.bankTransfer')}</span>
+                <p className="text-[11px] text-gray-500 mt-1 mb-3">{t('settings.billing.bankTransferDesc')}</p>
                 <div className="mt-auto space-y-1.5">
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">No processing fees</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureNoProcessingFees')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Direct to your account</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureDirectToAccount')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Good for large bookings</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureGoodForLargeBookings')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                    <span className="text-[10px] text-gray-500">Manual verification needed</span>
+                    <span className="text-[10px] text-gray-500">{t('settings.billing.featureManualVerification')}</span>
                   </div>
                 </div>
               </button>
             </div>
             <div className="flex justify-end pt-4">
-              <SaveButton onClick={handleSave} saving={saving} />
+              <SaveButton onClick={handleSave} saving={saving}>{t('common.save')}</SaveButton>
             </div>
           </div>
 
           {/* Payments — Provider Selection */}
           {settings.online_card_payment && <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 className="text-sm font-semibold text-gray-900">Payment Provider</h2>
-            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose how you want to accept online card payments from guests.</p>
+            <h2 className="text-sm font-semibold text-gray-900">{t('settings.billing.paymentProvider')}</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">{t('settings.billing.paymentProviderDesc')}</p>
 
             {paymentError && (
               <FeedbackAlert type="error" message={paymentError} className="mb-3" />
@@ -1150,8 +1155,8 @@ export default function SettingsPage() {
                 <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'vayada' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
                   {paymentProvider === 'vayada' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </div>
-                <span className="text-[13px] font-semibold text-gray-900">vayada Payment</span>
-                <p className="text-[11px] text-gray-500 mt-1">We handle everything. No setup needed.</p>
+                <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.providerVayada')}</span>
+                <p className="text-[11px] text-gray-500 mt-1">{t('settings.billing.providerVayadaDesc')}</p>
               </button>
               <button
                 type="button"
@@ -1164,8 +1169,8 @@ export default function SettingsPage() {
                 <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'stripe' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
                   {paymentProvider === 'stripe' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </div>
-                <span className="text-[13px] font-semibold text-gray-900">Stripe Connect</span>
-                <p className="text-[11px] text-gray-500 mt-1">Your own Stripe account. Direct payouts.</p>
+                <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.providerStripe')}</span>
+                <p className="text-[11px] text-gray-500 mt-1">{t('settings.billing.providerStripeDesc')}</p>
               </button>
               <button
                 type="button"
@@ -1178,8 +1183,8 @@ export default function SettingsPage() {
                 <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'xendit' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
                   {paymentProvider === 'xendit' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </div>
-                <span className="text-[13px] font-semibold text-gray-900">Xendit</span>
-                <p className="text-[11px] text-gray-500 mt-1">Indonesian bank payouts via Xendit.</p>
+                <span className="text-[13px] font-semibold text-gray-900">{t('settings.billing.providerXendit')}</span>
+                <p className="text-[11px] text-gray-500 mt-1">{t('settings.billing.providerXenditDesc')}</p>
               </button>
             </div>
 
@@ -1187,20 +1192,20 @@ export default function SettingsPage() {
             {paymentProvider === 'vayada' ? (
               <div className="space-y-3">
                 <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                  <p className="text-[13px] text-green-800 font-medium">No setup required</p>
+                  <p className="text-[13px] text-green-800 font-medium">{t('settings.billing.vayadaNoSetupTitle')}</p>
                   <p className="text-[12px] text-green-700 mt-1">
-                    vayada processes card payments on your behalf. Guest payments are collected securely and payouts are sent to your bank account on file.
+                    {t('settings.billing.vayadaNoSetupDesc')}
                   </p>
                 </div>
                 <div className="flex justify-end pt-2">
-                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>{t('common.save')}</SaveButton>
                 </div>
               </div>
             ) : paymentProvider === 'xendit' ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.bankLabel')}</label>
                     <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500">
                       <option value="ID_BCA">BCA</option>
                       <option value="ID_MANDIRI">Mandiri</option>
@@ -1211,36 +1216,36 @@ export default function SettingsPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.accountNumberLabel')}</label>
                     <input type="text" inputMode="numeric" maxLength={20} value={xenditAccountNumber} onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))} placeholder="1234567890" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
-                  <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder="Full name as on bank account" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.accountHolderNameLabel')}</label>
+                  <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder={t('settings.billing.accountHolderPlaceholderXendit')} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
                 <div className="flex justify-end pt-2">
-                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>{t('common.save')}</SaveButton>
                 </div>
               </div>
             ) : stripeAccountId ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-semibold text-gray-700">Stripe</span>
+                  <span className="text-[12px] font-semibold text-gray-700">{t('settings.billing.stripe')}</span>
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                    {stripeOnboarded ? 'Connected' : 'Pending Onboarding'}
+                    {stripeOnboarded ? t('settings.billing.connected') : t('settings.billing.pendingOnboarding')}
                   </span>
                 </div>
                 {!stripeOnboarded && (
                   <div>
-                    <p className="text-[13px] text-gray-600 mb-2">Complete your onboarding to start accepting card payments.</p>
+                    <p className="text-[13px] text-gray-600 mb-2">{t('settings.billing.completeOnboardingDesc')}</p>
                     <button onClick={handleOnboarding} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
-                      Complete Onboarding
+                      {t('settings.billing.completeOnboarding')}
                     </button>
                   </div>
                 )}
                 <div className="flex justify-end pt-2">
-                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment} />
+                  <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>{t('common.save')}</SaveButton>
                 </div>
               </div>
             ) : (
@@ -1248,15 +1253,15 @@ export default function SettingsPage() {
                 <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
                   <div className="flex items-center gap-2">
                     <svg className="h-5" viewBox="0 0 60 25" fill="none"><path fillRule="evenodd" clipRule="evenodd" d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z" fill="#635BFF" /></svg>
-                    <p className="text-[11px] text-gray-500">Secure payments processed by Stripe. Payouts go directly to your bank account.</p>
+                    <p className="text-[11px] text-gray-500">{t('settings.billing.stripeBlurb')}</p>
                   </div>
                 </div>
                 <div className="max-w-xs">
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Country</label>
-                  <CountrySelect value={connectCountry} onChange={setConnectCountry} />
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.countryLabel')}</label>
+                  <CountrySelect value={connectCountry} onChange={setConnectCountry} t={t} />
                 </div>
                 <button onClick={handleCreateStripeAccount} disabled={creatingAccount || !connectEmail} className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors">
-                  {creatingAccount ? 'Connecting...' : 'Connect Payment Account'}
+                  {creatingAccount ? t('settings.billing.connectingAccount') : t('settings.billing.connectPaymentAccount')}
                 </button>
               </div>
             )}
@@ -1265,22 +1270,22 @@ export default function SettingsPage() {
           {/* Payout Details */}
           {(settings.pay_at_property_enabled || settings.bank_transfer) && <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">Payout Details</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5">Bank account where guests and vayada pay you.</p>
+              <h2 className="text-sm font-semibold text-gray-900">{t('settings.billing.payoutDetails')}</h2>
+              <p className="text-[12px] text-gray-500 mt-0.5">{t('settings.billing.payoutDetailsDesc')}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.payoutAccountHolder')}</label>
                 <input
                   type="text"
                   value={settings.payout_account_holder || ''}
                   onChange={e => updateSetting('payout_account_holder', e.target.value)}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g. Sunrise Beach Resort Ltd"
+                  placeholder={t('settings.billing.payoutAccountHolderPlaceholder')}
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-[12px] font-medium text-gray-700 mb-1">Account Format</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-1">{t('settings.billing.accountFormatLabel')}</label>
                 <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
                   <button
                     type="button"
@@ -1290,7 +1295,7 @@ export default function SettingsPage() {
                         : 'text-gray-500 hover:text-gray-700'
                       }`}
                   >
-                    IBAN
+                    {t('settings.billing.payoutIban')}
                   </button>
                   <button
                     type="button"
@@ -1300,64 +1305,64 @@ export default function SettingsPage() {
                         : 'text-gray-500 hover:text-gray-700'
                       }`}
                   >
-                    Account Number
+                    {t('settings.billing.accountNumberLabel')}
                   </button>
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1">
                   {(settings.payout_account_type || 'iban') === 'iban'
-                    ? 'Use IBAN if your bank is in Europe or another IBAN country.'
-                    : 'Use a plain account number for banks without IBAN (e.g. Indonesia, US).'}
+                    ? t('settings.billing.useIbanHelp')
+                    : t('settings.billing.usePlainNumberHelp')}
                 </p>
               </div>
               <div className="sm:col-span-2">
                 {(settings.payout_account_type || 'iban') === 'iban' ? (
                   <>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.payoutIban')}</label>
                     <input
                       type="text"
                       value={settings.payout_iban || ''}
                       onChange={e => updateSetting('payout_iban', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. GB29 NWBK 6016 1331 9268 19"
+                      placeholder={t('settings.billing.payoutIbanPlaceholder')}
                     />
                   </>
                 ) : (
                   <>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.accountNumberLabel')}</label>
                     <input
                       type="text"
                       value={settings.payout_account_number || ''}
                       onChange={e => updateSetting('payout_account_number', e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="e.g. 1234567890"
+                      placeholder={t('settings.billing.payoutAccountNumberPlaceholder')}
                     />
                   </>
                 )}
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.payoutBankName')}</label>
                 <input
                   type="text"
                   value={settings.payout_bank_name || ''}
                   onChange={e => updateSetting('payout_bank_name', e.target.value)}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g. HSBC Bank"
+                  placeholder={t('settings.billing.payoutBankNamePlaceholder')}
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">SWIFT / BIC</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">{t('settings.billing.payoutSwift')}</label>
                 <input
                   type="text"
                   value={settings.payout_swift || ''}
                   onChange={e => updateSetting('payout_swift', e.target.value)}
                   className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g. HBUKGB4B"
+                  placeholder={t('settings.billing.payoutSwiftPlaceholder')}
                 />
               </div>
             </div>
 
             <div className="flex justify-end pt-2">
-              <SaveButton onClick={handleSave} saving={saving} />
+              <SaveButton onClick={handleSave} saving={saving}>{t('common.save')}</SaveButton>
             </div>
           </div>}
         </div>
