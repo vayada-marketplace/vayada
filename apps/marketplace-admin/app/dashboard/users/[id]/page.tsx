@@ -2513,7 +2513,16 @@ export default function UserDetailPage() {
                                     <button
                                       key={type}
                                       type="button"
-                                      onClick={() => handleCollaborationOfferingChange(offeringIndex, 'collaborationType', type)}
+                                      onClick={() => {
+                                        handleCollaborationOfferingChange(offeringIndex, 'collaborationType', type)
+                                        // Prefill the Affiliate commission to
+                                        // 5% only when the field is still
+                                        // empty/untouched, so user input or a
+                                        // stored value is never overwritten.
+                                        if (type === 'Affiliate' && offering.commissionPercentage == null) {
+                                          handleCollaborationOfferingChange(offeringIndex, 'commissionPercentage', 5)
+                                        }
+                                      }}
                                       className={`
                                         flex flex-col items-center justify-center p-6 border-2 rounded-lg transition-all
                                         ${isSelected
@@ -2600,7 +2609,7 @@ export default function UserDetailPage() {
                                   max="100"
                                   value={offering.commissionPercentage?.toString() || ''}
                                   onChange={(e) => handleCollaborationOfferingChange(offeringIndex, 'commissionPercentage', e.target.value ? parseInt(e.target.value) : null)}
-                                  placeholder="10"
+                                  placeholder="5"
                                 />
                               </div>
                             )}
