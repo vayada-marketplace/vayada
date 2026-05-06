@@ -3,6 +3,7 @@
   "layout.header.noProperties": "施設なし",
   "layout.header.user": "ユーザー",
   "layout.header.language": "言語",
+  "layout.header.currency": "通貨",
   "layout.sidebar.propertyManagerDescription": "運営・在庫管理",
   "layout.sidebar.bookingEngineDescription": "直接予約・収益",
   "common.save": "保存",

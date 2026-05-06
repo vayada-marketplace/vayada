@@ -3,6 +3,7 @@
   "layout.header.noProperties": "Tidak ada properti",
   "layout.header.user": "Pengguna",
   "layout.header.language": "Bahasa",
+  "layout.header.currency": "Mata Uang",
   "layout.sidebar.propertyManagerDescription": "Operasional & Inventaris",
   "layout.sidebar.bookingEngineDescription": "Pemesanan langsung & pendapatan",
   "common.save": "Simpan",

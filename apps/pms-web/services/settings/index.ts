@@ -15,10 +15,26 @@ export interface HotelSummary {
   country: string
 }
 
+// Slice of the booking-engine PropertySettings the PMS reads/writes —
+// shared with BE Admin so the currency selector hits the same field.
+export interface PropertySettings {
+  default_currency: string
+}
+
+export type PropertySettingsUpdate = Partial<PropertySettings>
+
 export const pmsSettingsService = {
   getSetupStatus: () =>
     pmsClient.get<PmsSetupStatus>('/admin/setup-status'),
 
   listHotels: () =>
     apiClient.get<HotelSummary[]>('/admin/hotels'),
+}
+
+export const settingsService = {
+  getPropertySettings: () =>
+    apiClient.get<PropertySettings>('/admin/settings/property'),
+
+  updatePropertySettings: (data: PropertySettingsUpdate) =>
+    apiClient.patch<PropertySettings>('/admin/settings/property', data),
 }

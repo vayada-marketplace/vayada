@@ -3,6 +3,7 @@
   "layout.header.noProperties": "Geen accommodaties",
   "layout.header.user": "Gebruiker",
   "layout.header.language": "Taal",
+  "layout.header.currency": "Valuta",
   "layout.sidebar.propertyManagerDescription": "Operaties & Inventaris",
   "layout.sidebar.bookingEngineDescription": "Directe boekingen & omzet",
   "common.save": "Opslaan",

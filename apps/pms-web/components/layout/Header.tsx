@@ -5,8 +5,9 @@ import { ChevronDownIcon, PlusIcon, MagnifyingGlassIcon } from '@heroicons/react
 import { useRouter } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { bookingsService } from '@/services/bookings'
-import { pmsSettingsService, HotelSummary } from '@/services/settings'
+import { pmsSettingsService, settingsService, HotelSummary } from '@/services/settings'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
+import { CURRENCY_OPTIONS } from '@/lib/constants/options'
 import SearchModal from './SearchModal'
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
@@ -35,6 +36,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [profileOpen, setProfileOpen] = useState(false)
   const [propertyOpen, setPropertyOpen] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
+  const [currencyOpen, setCurrencyOpen] = useState(false)
+  const [currency, setCurrency] = useState('EUR')
+  const [savingCurrency, setSavingCurrency] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
@@ -97,7 +101,27 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         localStorage.setItem('selectedHotelId', selected.id)
       }
     }).catch(() => {})
+
+    settingsService.getPropertySettings()
+      .then((settings) => {
+        if (settings.default_currency) setCurrency(settings.default_currency)
+      })
+      .catch(() => {})
   }, [])
+
+  const handleCurrencyChange = async (code: string) => {
+    if (code === currency || savingCurrency) return
+    setSavingCurrency(true)
+    try {
+      await settingsService.updatePropertySettings({ default_currency: code })
+      // Reload so the dashboard, bookings, financials, and any other
+      // currency-aware view picks up the new property default_currency
+      // on its next mount.
+      window.location.reload()
+    } catch {
+      setSavingCurrency(false)
+    }
+  }
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
@@ -262,6 +286,34 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                         >
                           <span>{lang.flag}</span>
                           <span>{lang.nativeName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Currency selector */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCurrencyOpen(!currencyOpen) }}
+                    disabled={savingCurrency}
+                    className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    <span>{t('layout.header.currency')}</span>
+                    <span className="text-gray-400">{CURRENCY_OPTIONS.find(c => c.code === currency)?.flag} {currency}</span>
+                  </button>
+                  {currencyOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 max-h-72 overflow-y-auto">
+                      {CURRENCY_OPTIONS.map((cur) => (
+                        <button
+                          key={cur.code}
+                          onClick={() => { setCurrencyOpen(false); setProfileOpen(false); handleCurrencyChange(cur.code) }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-left transition-colors ${
+                            currency === cur.code ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span>{cur.flag}</span>
+                          <span>{cur.code}</span>
+                          <span className="text-gray-400 truncate">{cur.name}</span>
                         </button>
                       ))}
                     </div>
