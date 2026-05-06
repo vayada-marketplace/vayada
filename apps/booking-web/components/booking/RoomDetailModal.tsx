@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useTranslations } from 'next-intl'
 import { RoomType } from '@/lib/types'
 import { useCurrency } from '@/contexts/CurrencyContext'
-import { getNonRefundableRate, getFreeCancellationDays } from '@/lib/constants/booking'
+import { getNonRefundableRate, getFreeCancellationDays, isFlexibleCancellationExpired } from '@/lib/constants/booking'
 
 interface RoomDetailModalProps {
   room: RoomType
@@ -20,6 +20,8 @@ interface RoomDetailModalProps {
   soldOut?: boolean
   checkInTime?: string
   checkOutTime?: string
+  checkIn: string
+  hotelTimezone?: string
 }
 
 export default function RoomDetailModal({
@@ -35,10 +37,26 @@ export default function RoomDetailModal({
   soldOut = false,
   checkInTime,
   checkOutTime,
+  checkIn,
+  hotelTimezone,
 }: RoomDetailModalProps) {
+  const flexibleExpired = isFlexibleCancellationExpired(checkIn, room, hotelTimezone)
+  // VAY-370: hide Flexible Rate when its cancellation deadline has passed, unless there is
+  // no Non-Refundable Rate (in which case keep it shown with replacement copy).
+  const showFlexibleRate =
+    room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null)
   const [imgIndex, setImgIndex] = useState(0)
   const [showAllAmenities, setShowAllAmenities] = useState(false)
-  const [selectedRate, setSelectedRate] = useState<'flexible' | 'nonrefundable'>('flexible')
+  const [selectedRate, setSelectedRate] = useState<'flexible' | 'nonrefundable'>(
+    showFlexibleRate ? 'flexible' : 'nonrefundable',
+  )
+  // If Flexible disappears (e.g. user changes check-in date while modal is open) and the
+  // current selection is no longer available, fall back to nonrefundable.
+  useEffect(() => {
+    if (!showFlexibleRate && selectedRate === 'flexible' && room.nonRefundableRate != null) {
+      setSelectedRate('nonrefundable')
+    }
+  }, [showFlexibleRate, selectedRate, room.nonRefundableRate])
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
   const { formatPrice } = useCurrency()
   const tc = useTranslations('common')
@@ -259,7 +277,7 @@ export default function RoomDetailModal({
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Select Your Rate</p>
             <div className="space-y-3">
               {/* Flexible Rate */}
-              {room.flexibleRateEnabled !== false && (
+              {showFlexibleRate && (
               <button
                 onClick={() => setSelectedRate('flexible')}
                 className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === 'flexible' ? 'border-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
@@ -269,7 +287,9 @@ export default function RoomDetailModal({
                     <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
-                      {room.flexibleCancellationType === 'partial_refund' ? (
+                      {flexibleExpired ? (
+                        <p className="text-xs text-gray-500">Cancellation no longer available</p>
+                      ) : room.flexibleCancellationType === 'partial_refund' ? (
                         (() => {
                           const tiers = room.partialRefundTiers && room.partialRefundTiers.length > 0
                             ? [...room.partialRefundTiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)

@@ -72,6 +72,7 @@
     "rateOptions": "Options de tarif",
     "flexibleRate": "Tarif flexible",
     "flexibleDesc": "Annulation gratuite jusqu'à {days} jours avant",
+    "flexibleNoLongerCancellable": "Annulation plus possible",
     "partialRefundDesc": "Remboursement de {percent}% si annulation au moins {days} jours avant",
     "nonRefundableRate": "Tarif non remboursable",
     "nonRefundableDesc": "Non remboursable",

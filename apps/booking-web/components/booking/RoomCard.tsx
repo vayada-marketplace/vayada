@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { RoomType } from '@/lib/types'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { getNonRefundableRate } from '@/lib/constants/booking'
-import { getFreeCancellationDays } from '@/lib/constants/booking'
+import { getFreeCancellationDays, isFlexibleCancellationExpired } from '@/lib/constants/booking'
 import RateOption from './RateOption'
 
 interface RoomCardProps {
@@ -13,6 +13,8 @@ interface RoomCardProps {
   nights: number
   totalGuests: number
   imageIndex: number
+  checkIn: string
+  hotelTimezone?: string
   onChangeImageIndex: (index: number) => void
   expandedRate: 'flexible' | 'nonrefundable' | null
   onToggleRate: (next: 'flexible' | 'nonrefundable' | null) => void
@@ -25,6 +27,8 @@ export default function RoomCard({
   nights,
   totalGuests,
   imageIndex,
+  checkIn,
+  hotelTimezone,
   onChangeImageIndex,
   expandedRate,
   onToggleRate,
@@ -53,7 +57,10 @@ export default function RoomCard({
   const partialRefundTiers = (room.partialRefundTiers && room.partialRefundTiers.length > 0)
     ? [...room.partialRefundTiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
     : null
-  const flexibleDescription = room.flexibleCancellationType === 'partial_refund'
+  const flexibleExpired = isFlexibleCancellationExpired(checkIn, room, hotelTimezone)
+  const flexibleDescription = flexibleExpired
+    ? t('flexibleNoLongerCancellable')
+    : room.flexibleCancellationType === 'partial_refund'
     ? (partialRefundTiers
         ? t('partialRefundDesc', {
             percent: partialRefundTiers[0].refundPercent,
@@ -64,6 +71,11 @@ export default function RoomCard({
             days: room.partialRefundCancelWindowDays ?? 30,
           }))
     : t('flexibleDesc', { days: getFreeCancellationDays(room.cancellationPolicy) })
+  // VAY-370: when free cancellation is no longer possible, hide Flexible Rate entirely —
+  // unless no Non-Refundable exists, in which case keep Flexible visible with replacement copy.
+  const showFlexibleRate =
+    room.flexibleRateEnabled !== false &&
+    (!flexibleExpired || room.nonRefundableRate == null)
 
   return (
     <div
@@ -221,7 +233,7 @@ export default function RoomCard({
                   onSelect={() => onSelectRate('nonrefundable', requiredRooms)}
                 />
               )}
-              {room.flexibleRateEnabled !== false && (
+              {showFlexibleRate && (
                 <RateOption
                   rateType="flexible"
                   expanded={expandedRate === 'flexible'}
