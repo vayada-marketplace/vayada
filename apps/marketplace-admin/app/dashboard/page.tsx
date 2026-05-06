@@ -340,12 +340,24 @@ export default function DashboardPage() {
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
                               {user.avatar ? (
-                                <img className="h-10 w-10 rounded-full" src={user.avatar} alt={user.name} />
-                              ) : (
-                                <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                                  <UserIcon className="h-6 w-6 text-gray-400" />
-                                </div>
-                              )}
+                                <img
+                                  className="h-10 w-10 rounded-full object-cover bg-gray-200"
+                                  src={user.avatar}
+                                  alt={user.name}
+                                  onError={(e) => {
+                                    const img = e.currentTarget
+                                    img.style.display = 'none'
+                                    const fallback = img.nextElementSibling as HTMLElement | null
+                                    if (fallback) fallback.style.display = 'flex'
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                className="h-10 w-10 rounded-full bg-gray-200 items-center justify-center"
+                                style={{ display: user.avatar ? 'none' : 'flex' }}
+                              >
+                                <UserIcon className="h-6 w-6 text-gray-400" />
+                              </div>
                             </div>
                             <div className="ml-4">
                               <div className="text-sm font-medium text-gray-900">{user.name}</div>
