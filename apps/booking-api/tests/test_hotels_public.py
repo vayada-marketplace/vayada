@@ -31,6 +31,17 @@ class TestGetHotel:
         body = resp.json()
         assert body["name"] == hotel["name"]
 
+    async def test_get_hotel_exposes_timezone(self, client, hotel_with_property):
+        """timezone is exposed on the hotel response so the booking-engine
+        frontend can do property-local date math (e.g. cancellation deadline
+        comparison for VAY-370)."""
+        hotel = hotel_with_property["hotel"]
+        resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "timezone" in body
+        assert body["timezone"] == hotel["timezone"]
+
     async def test_get_hotel_instant_book_default_false(self, client, hotel_with_property):
         """instantBook defaults to false and is exposed on the hotel response so
         the booking-engine frontend can branch its checkout copy.

@@ -49,6 +49,7 @@ class HotelResponse(BaseModel):
     amenities: List[str]
     check_in_time: str
     check_out_time: str
+    timezone: str = "UTC"
     contact: HotelContact
     social_links: Optional[HotelSocialLinks] = None
     booking_filters: List[str] = []

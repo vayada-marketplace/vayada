@@ -75,6 +75,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
         amenities=parse_json(raw_amenities),
         check_in_time=row["check_in_time"],
         check_out_time=row["check_out_time"],
+        timezone=row.get("timezone") or "UTC",
         contact=contact,
         social_links=social_links,
         branding=branding,
