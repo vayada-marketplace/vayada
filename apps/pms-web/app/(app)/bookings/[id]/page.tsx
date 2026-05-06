@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
-import { bookingsService, Booking } from '@/services/bookings'
+import { bookingsService, Booking, BookingChangeRequest } from '@/services/bookings'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import { formatCurrency } from '@/lib/formatCurrency'
@@ -56,13 +56,27 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     confirmLabel?: string
     onConfirm: () => void
   } | null>(null)
+  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null)
+  const [decideOpen, setDecideOpen] = useState<'approve' | 'decline' | null>(null)
+  const [declineReason, setDeclineReason] = useState('')
+  const [decidingChange, setDecidingChange] = useState(false)
+
+  const loadChangeRequest = useCallback(async () => {
+    try {
+      const cr = await bookingsService.getChangeRequest(params.id)
+      setChangeRequest(cr)
+    } catch (err) {
+      console.error(err)
+    }
+  }, [params.id])
 
   useEffect(() => {
     bookingsService.get(params.id)
       .then(setBooking)
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [params.id])
+    loadChangeRequest()
+  }, [params.id, loadChangeRequest])
 
   const doAction = useCallback(async (action: () => Promise<Booking>, errorMsg: string) => {
     setUpdating(true)
@@ -99,6 +113,36 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const confirmReject = () => {
     setRejectOpen(false)
     doAction(() => bookingsService.rejectBooking(params.id, rejectReason.trim() || undefined), 'Failed to reject booking')
+  }
+
+  const handleApproveChange = async () => {
+    setDecidingChange(true)
+    setError('')
+    try {
+      const cr = await bookingsService.approveChangeRequest(params.id)
+      setChangeRequest(cr)
+      const refreshed = await bookingsService.get(params.id)
+      setBooking(refreshed)
+      setDecideOpen(null)
+    } catch (err: any) {
+      setError(err.message || 'Failed to approve change request')
+    } finally {
+      setDecidingChange(false)
+    }
+  }
+
+  const handleDeclineChange = async () => {
+    setDecidingChange(true)
+    setError('')
+    try {
+      const cr = await bookingsService.declineChangeRequest(params.id, declineReason.trim() || undefined)
+      setChangeRequest(cr)
+      setDecideOpen(null)
+    } catch (err: any) {
+      setError(err.message || 'Failed to decline change request')
+    } finally {
+      setDecidingChange(false)
+    }
   }
 
   const updateStatus = (status: 'confirmed' | 'cancelled') => {
@@ -164,6 +208,79 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       {booking.guestWithdrawn && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
           The guest withdrew this booking request.
+        </div>
+      )}
+
+      {changeRequest && changeRequest.status === 'pending' && (
+        <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <p className="text-sm font-semibold text-blue-900">Change Request Pending</p>
+              <p className="text-xs text-blue-700">
+                The guest has requested an edit to this booking. Approve to apply
+                the new details, or decline to keep the booking as-is.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+            <div>
+              <p className="text-blue-900 font-medium">Current</p>
+              <p className="text-blue-800">{changeRequest.oldCheckIn} → {changeRequest.oldCheckOut}</p>
+              <p className="text-blue-800">Total: {formatCurrency(changeRequest.oldTotal, changeRequest.currency)}</p>
+            </div>
+            <div>
+              <p className="text-blue-900 font-medium">Requested</p>
+              <p className="text-blue-800">{changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}</p>
+              <p className="text-blue-800">Total: {formatCurrency(changeRequest.newTotal, changeRequest.currency)}</p>
+              {changeRequest.requestedAddonNames.length > 0 && (
+                <p className="text-blue-800 mt-1">
+                  Add-ons: {changeRequest.requestedAddonNames.join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="text-sm text-blue-900 font-medium mb-4">
+            Price difference: {changeRequest.priceDifference === 0
+              ? 'No change'
+              : (changeRequest.priceDifference > 0
+                  ? `+${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (guest must pay)`
+                  : `${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (refund where applicable)`
+                )
+            }
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setDecideOpen('approve')}
+              disabled={decidingChange}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              <CheckCircleIcon className="w-4 h-4" />
+              Approve Change
+            </button>
+            <button
+              onClick={() => { setDeclineReason(''); setDecideOpen('decline') }}
+              disabled={decidingChange}
+              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              <XCircleIcon className="w-4 h-4" />
+              Decline Change
+            </button>
+          </div>
+        </div>
+      )}
+
+      {changeRequest && changeRequest.status !== 'pending' && (
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
+          Last change request was{' '}
+          <span className="font-medium text-gray-800">{changeRequest.status}</span>
+          {changeRequest.decidedAt && (
+            <> on {new Date(changeRequest.decidedAt).toLocaleString()}</>
+          )}
+          {changeRequest.declineReason && (
+            <span className="block mt-1 text-xs text-gray-500">
+              Reason: {changeRequest.declineReason}
+            </span>
+          )}
         </div>
       )}
 
@@ -399,6 +516,67 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
         />
+      )}
+
+      {decideOpen === 'approve' && changeRequest && (
+        <Modal onClose={() => setDecideOpen(null)}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Approve Change Request?</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            The booking will be updated to use the requested dates and add-ons.
+            {changeRequest.priceDifference > 0 && (
+              <> The guest will be asked to pay the {formatCurrency(changeRequest.priceDifference, changeRequest.currency)} difference.</>
+            )}
+            {changeRequest.priceDifference < 0 && (
+              <> The total will decrease by {formatCurrency(Math.abs(changeRequest.priceDifference), changeRequest.currency)} — handle any refund manually.</>
+            )}
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setDecideOpen(null)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApproveChange}
+              disabled={decidingChange}
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 transition-colors"
+            >
+              {decidingChange ? 'Approving…' : 'Approve'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {decideOpen === 'decline' && (
+        <Modal onClose={() => setDecideOpen(null)}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Decline Change Request</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            The booking will stay as-is. The guest will receive an email with your reason.
+          </p>
+          <textarea
+            value={declineReason}
+            onChange={(e) => setDeclineReason(e.target.value)}
+            placeholder="Reason (optional — will be included in the guest's email)"
+            rows={3}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+          />
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setDecideOpen(null)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeclineChange}
+              disabled={decidingChange}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
+            >
+              {decidingChange ? 'Declining…' : 'Decline'}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {rejectOpen && (
