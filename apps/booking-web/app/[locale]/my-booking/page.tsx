@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import BookingNavigation from '@/components/layout/BookingNavigation'
 import BookingFooter from '@/components/layout/BookingFooter'
@@ -15,6 +16,7 @@ export default function MyBookingPage() {
   const tc = useTranslations('common')
   const { hotel } = useHotel()
   const { formatPrice } = useCurrency()
+  const searchParams = useSearchParams()
   const [reference, setReference] = useState('')
   const [email, setEmail] = useState('')
   const [booking, setBooking] = useState<Booking | null>(null)
@@ -28,15 +30,17 @@ export default function MyBookingPage() {
   const [cancelling, setCancelling] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
 
-  const handleSearch = async () => {
-    if (!reference || !email) return
+  const handleSearch = async (overrideReference?: string, overrideEmail?: string) => {
+    const ref = overrideReference ?? reference
+    const em = overrideEmail ?? email
+    if (!ref || !em) return
     setSearching(true)
     setError('')
     setBooking(null)
     setSuccessMessage('')
 
     try {
-      const result = await bookingService.lookup(slug, reference, email)
+      const result = await bookingService.lookup(slug, ref, em)
       setBooking(result)
     } catch (err: any) {
       setError(err.message || t('notFound') || 'Booking not found')
@@ -44,6 +48,19 @@ export default function MyBookingPage() {
       setSearching(false)
     }
   }
+
+  // Skip the lookup form when the guest came in from the confirmation
+  // email link with ?reference=&email= already populated (VAY-379).
+  useEffect(() => {
+    const qpRef = searchParams.get('reference')
+    const qpEmail = searchParams.get('email')
+    if (qpRef && qpEmail) {
+      setReference(qpRef.toUpperCase())
+      setEmail(qpEmail)
+      handleSearch(qpRef.toUpperCase(), qpEmail)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const isPending = booking?.status === 'pending'
   const isConfirmed = booking?.status === 'confirmed'
@@ -154,7 +171,7 @@ export default function MyBookingPage() {
               />
             </div>
             <button
-              onClick={handleSearch}
+              onClick={() => handleSearch()}
               disabled={searching || !reference || !email}
               className="w-full py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors disabled:opacity-50"
             >
