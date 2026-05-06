@@ -108,6 +108,7 @@ async def get_all_listings():
                 hotel_name=listing['hotel_name'],
                 hotel_picture=listing['hotel_picture'],
                 owner_email=emails_by_user_id.get(str(listing['user_id'])),
+                owner_user_id=str(listing['user_id']) if listing.get('user_id') else None,
                 name=listing['name'],
                 location=listing['location'],
                 description=listing['description'],
