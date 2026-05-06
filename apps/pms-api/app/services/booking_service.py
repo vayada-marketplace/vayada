@@ -179,10 +179,22 @@ async def _compute_addon_total(
     room_currency: str,
     adults: int,
     nights: int,
+    addon_dates: dict | None = None,
 ) -> tuple[float, list[str]]:
     """Sum the addon prices for a stay, converting to ``room_currency`` so the
     booking total matches what the guest saw at checkout. Returns
-    (total, addon_names)."""
+    (total, addon_names).
+
+    Pricing rules (VAY-360):
+    - perPerson: multiply by ``addon_quantities[id]`` (the number of guests
+      opting in, clamped to ``adults``). Defaults to ``adults`` for legacy
+      bookings that didn't send a quantity.
+    - perNight: multiply by the number of selected dates from
+      ``addon_dates[id]`` (clamped to ``nights``). Falls back to
+      ``addon_quantities[id]`` and finally to ``nights`` for legacy bookings.
+    - Both flags: both modifiers compose, so price = unit × people × days.
+    - Neither flag: per-booking; multiply by ``addon_quantities[id]`` (default 1).
+    """
     if not addon_ids:
         return 0.0, []
 
@@ -192,6 +204,7 @@ async def _compute_addon_total(
     rate_cache: dict = {}
     addon_total = 0.0
     addon_names: list[str] = []
+    addon_dates = addon_dates or {}
 
     for aid in addon_ids:
         addon = addon_map.get(aid)
@@ -199,12 +212,27 @@ async def _compute_addon_total(
             continue
         addon_names.append(addon.get("name", "Unknown"))
         price = float(addon["price"])
-        if addon.get("perPerson"):
-            price *= adults
-        if addon.get("perNight"):
-            qty = addon_quantities.get(aid, nights)
-            qty = max(1, min(qty, nights))
+        per_person = bool(addon.get("perPerson"))
+        per_night = bool(addon.get("perNight"))
+
+        if per_person:
+            people = addon_quantities.get(aid, adults)
+            people = max(1, min(int(people), max(1, adults)))
+            price *= people
+
+        if per_night:
+            dates = addon_dates.get(aid) or []
+            if dates:
+                days = max(1, min(len(dates), nights))
+            else:
+                days = int(addon_quantities.get(aid, nights)) if not per_person else nights
+                days = max(1, min(days, nights))
+            price *= days
+
+        if not per_person and not per_night:
+            qty = max(1, int(addon_quantities.get(aid, 1)))
             price *= qty
+
         addon_currency = (addon.get("currency") or room_currency).upper()
         if addon_currency != room_currency:
             if addon_currency not in rate_cache:
@@ -262,6 +290,7 @@ async def _compute_booking_pricing(
         room.get("currency") or "EUR",
         data.adults,
         nights,
+        data.addon_dates or {},
     )
 
     subtotal = room_total + addon_total
@@ -623,6 +652,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "addon_names": pricing.addon_names,
         "addon_total": pricing.addon_total,
         "addon_quantities": data.addon_quantities or {},
+        "addon_dates": data.addon_dates or {},
         "promo_code": pricing.promo_code,
         "promo_discount": pricing.promo_discount,
         "last_minute_discount_percent": pricing.last_minute_discount_pct,

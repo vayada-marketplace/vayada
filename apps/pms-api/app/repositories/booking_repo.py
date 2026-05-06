@@ -36,6 +36,7 @@ class BookingRepository:
                 room_id, channel, status,
                 payment_method, payment_status, host_response_deadline,
                 rate_type, addon_ids, addon_names, addon_total, addon_quantities,
+                addon_dates,
                 promo_code, promo_discount,
                 last_minute_discount_percent, last_minute_discount_amount,
                 guest_country
@@ -43,7 +44,7 @@ class BookingRepository:
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34, $35
+                $31, $32, $33, $34, $35, $36
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -76,6 +77,7 @@ class BookingRepository:
             json.dumps(data.get("addon_names", [])),
             data.get("addon_total", 0),
             json.dumps(data.get("addon_quantities", {})),
+            json.dumps(data.get("addon_dates", {})),
             data.get("promo_code"),
             data.get("promo_discount", 0),
             data.get("last_minute_discount_percent", 0),
