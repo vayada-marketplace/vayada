@@ -64,6 +64,7 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
         addon_ids=b.get("addon_ids") or [],
         addon_total=float(b["addon_total"]) if b.get("addon_total") else 0,
         addon_quantities=b.get("addon_quantities") or {},
+        addon_dates=b.get("addon_dates") or {},
         guest_withdrawn=b.get("guest_withdrawn", False),
         created_at=b["created_at"].isoformat(),
         updated_at=b["updated_at"].isoformat(),

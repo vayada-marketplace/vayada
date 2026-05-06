@@ -31,6 +31,9 @@ class BookingCreate(BaseModel):
     number_of_rooms: int = 1
     addon_ids: List[str] = []
     addon_quantities: Dict[str, int] = {}
+    # For per-day add-ons, the specific ISO dates the guest selected. Empty
+    # list (or missing key) means "every night of the stay".
+    addon_dates: Dict[str, List[str]] = {}
     promo_code: Optional[str] = None
 
 
@@ -118,6 +121,7 @@ class BookingAdminResponse(BaseModel):
     addon_names: List[str] = []
     addon_total: float = 0
     addon_quantities: Dict[str, int] = {}
+    addon_dates: Dict[str, List[str]] = {}
     guest_withdrawn: bool = False
     promo_code: Optional[str] = None
     promo_discount: float = 0
@@ -147,6 +151,15 @@ class BookingAdminResponse(BaseModel):
     def parse_addon_quantities(cls, v):
         if isinstance(v, str):
             return json.loads(v)
+        return v
+
+    @field_validator("addon_dates", mode="before")
+    @classmethod
+    def parse_addon_dates(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return {}
         return v
 
 
