@@ -1,8 +1,9 @@
-import { NextIntlClientProvider, hasLocale } from 'next-intl'
+import { hasLocale } from 'next-intl'
 import { getMessages, setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { routing } from '@/i18n/routing'
+import IntlProviderClient from '@/i18n/IntlProviderClient'
 import Providers from './providers'
 
 export function generateStaticParams() {
@@ -60,9 +61,9 @@ export default async function LocaleLayout({
   return (
     <html lang={locale}>
       <body className="font-body">
-        <NextIntlClientProvider messages={messages}>
+        <IntlProviderClient locale={locale} messages={messages}>
           <Providers locale={locale} slug={slug}>{children}</Providers>
-        </NextIntlClientProvider>
+        </IntlProviderClient>
       </body>
     </html>
   )
