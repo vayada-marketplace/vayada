@@ -653,3 +653,156 @@ async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
     subject, html_body = _render_request_status_email(booking, "cancelled")
     await _send_to_host_and_ops(hotel_email, subject, html_body)
+
+
+# ── Booking change requests (VAY-379) ──────────────────────────────
+
+
+def _format_addons_list(names) -> str:
+    if isinstance(names, str):
+        try:
+            names = json.loads(names)
+        except (TypeError, ValueError):
+            names = []
+    if not names:
+        return "None"
+    return ", ".join(names)
+
+
+def _change_diff_html(booking: dict, change_request: dict) -> str:
+    """Render the side-by-side current vs requested table used in every
+    change-request email."""
+    currency = change_request["currency"]
+    old_total = change_request["old_total"]
+    new_total = change_request["new_total"]
+    diff = change_request["price_difference"]
+    diff_label = "Price difference"
+    if diff > 0:
+        diff_text = f"+{currency} {diff:.2f} (additional payment required)"
+    elif diff < 0:
+        diff_text = f"{currency} {diff:.2f} (refund where applicable)"
+    else:
+        diff_text = f"{currency} 0.00 (no change in total)"
+
+    new_addon_names = _format_addons_list(change_request.get("requested_addon_names"))
+
+    return f"""
+    <p class="detail"><strong>Current dates:</strong> {change_request['old_check_in']} → {change_request['old_check_out']}</p>
+    <p class="detail"><strong>Requested dates:</strong> {change_request['requested_check_in']} → {change_request['requested_check_out']}</p>
+    <p class="detail"><strong>Requested add-ons:</strong> {new_addon_names}</p>
+    <hr class="divider">
+    <p class="detail"><strong>Old total:</strong> {currency} {old_total:.2f}</p>
+    <p class="detail"><strong>New total:</strong> {currency} {new_total:.2f}</p>
+    <p class="detail"><strong>{diff_label}:</strong> {diff_text}</p>
+    """
+
+
+async def send_host_change_request(hotel_email: str, booking: dict, change_request: dict):
+    """Notify host of a guest's change request, with a deep link into PMS
+    and approve/decline shortcut buttons."""
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+    subject = f"Booking Change Requested — {booking['booking_reference']}"
+    content = f"""
+    <h2>Booking Change Requested</h2>
+    <p class="detail">The guest <strong>{booking.get('guest_first_name', '')} {booking.get('guest_last_name', '')}</strong> has requested a change to their booking at <strong>{booking['hotel_name']}</strong>.</p>
+    <p class="detail"><strong>Reference:</strong> {booking['booking_reference']}</p>
+    <p class="detail"><strong>Guest email:</strong> {booking['guest_email']}</p>
+    <hr class="divider">
+    {_change_diff_html(booking, change_request)}
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">Review &amp; Respond in PMS</a>
+    <p class="detail" style="margin-top: 16px;">The change is not applied until you approve it. The guest's booking remains as-is until then.</p>
+    """
+    await _send_to_host_and_ops(hotel_email, subject, _wrap_html(content))
+
+
+async def send_guest_change_request_received(
+    guest_email: str, booking: dict, change_request: dict
+):
+    """Confirm to the guest that we received their change request."""
+    subject = f"Change Request Received — {booking['booking_reference']}"
+    content = f"""
+    <h2>Change Request Received</h2>
+    <p class="detail">We've received your change request for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    <p class="detail">The host will review it shortly. We'll email you as soon as they respond.</p>
+    <hr class="divider">
+    {_change_diff_html(booking, change_request)}
+    <hr class="divider">
+    <p class="detail">Until the host approves, your booking remains as it currently is.</p>
+    {_my_booking_button_html(booking, guest_email)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_guest_change_request_approved(
+    guest_email: str, booking: dict, change_request: dict
+):
+    """Tell the guest their change request was approved + apply to booking."""
+    diff = change_request["price_difference"]
+    if diff > 0:
+        payment_note = (
+            f"Your booking total increased by {change_request['currency']} "
+            f"{diff:.2f}. Please open your booking page to complete the additional "
+            f"payment using the same payment method as the original booking."
+        )
+    elif diff < 0:
+        payment_note = (
+            "Your booking total decreased. Any refund will be processed by the property."
+        )
+    else:
+        payment_note = ""
+
+    subject = f"Change Request Approved — {booking['booking_reference']}"
+    content = f"""
+    <h2>Change Request Approved</h2>
+    <p class="detail">Good news — the host approved your change for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    <hr class="divider">
+    {_change_diff_html(booking, change_request)}
+    <hr class="divider">
+    {f'<p class="detail">{payment_note}</p>' if payment_note else ''}
+    {_my_booking_button_html(booking, guest_email)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_guest_change_request_declined(
+    guest_email: str, booking: dict, change_request: dict
+):
+    """Tell the guest their change request was declined; original booking unchanged."""
+    from html import escape
+    reason = change_request.get("decline_reason")
+    reason_html = (
+        f"<p class='detail'><strong>Reason:</strong> {escape(str(reason))}</p>"
+        if reason else ""
+    )
+    subject = f"Change Request Declined — {booking['booking_reference']}"
+    content = f"""
+    <h2>Change Request Declined</h2>
+    <p class="detail">The host declined your change request for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    {reason_html}
+    <p class="detail">Your original booking remains unchanged.</p>
+    <hr class="divider">
+    {_change_diff_html(booking, change_request)}
+    {_my_booking_button_html(booking, guest_email)}
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
+
+
+async def send_host_change_request_decision(
+    hotel_email: str, booking: dict, change_request: dict, *, approved: bool
+):
+    """Confirm to the host (and ops) that the change-request decision was recorded."""
+    booking_id = booking.get("id", "")
+    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
+    label = "Approved" if approved else "Declined"
+    subject = f"Change Request {label} — {booking['booking_reference']}"
+    content = f"""
+    <h2>Change Request {label}</h2>
+    <p class="detail">The booking change for <strong>{booking['booking_reference']}</strong> has been recorded as <strong>{label.lower()}</strong>.</p>
+    <hr class="divider">
+    {_change_diff_html(booking, change_request)}
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    await _send_to_host_and_ops(hotel_email, subject, _wrap_html(content))

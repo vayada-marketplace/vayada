@@ -16,6 +16,11 @@ from app.models.booking import BookingAdminResponse, BookingStatusUpdate, Bookin
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
+from app.services.booking_change_service import (
+    approve_change as approve_booking_change,
+    decline_change as decline_booking_change,
+)
+from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
 from app.services.channex_sync_service import push_availability_for_room_type
 
 logger = logging.getLogger(__name__)
@@ -607,6 +612,108 @@ async def reject_booking(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _booking_to_admin(updated)
+
+
+# ── Change requests (VAY-379) ─────────────────────────────────────
+
+
+def _change_request_admin(cr: dict) -> dict:
+    """Serialize a change_request DB row for the admin/PMS UI."""
+    import json as _json
+
+    def _decode(val, default):
+        if val is None:
+            return default
+        if isinstance(val, str):
+            try:
+                return _json.loads(val)
+            except (TypeError, ValueError):
+                return default
+        return val
+
+    return {
+        "id": str(cr["id"]),
+        "bookingId": str(cr["booking_id"]),
+        "status": cr["status"],
+        "oldCheckIn": str(cr["old_check_in"]),
+        "oldCheckOut": str(cr["old_check_out"]),
+        "oldAddonIds": _decode(cr.get("old_addon_ids"), []),
+        "oldAddonQuantities": _decode(cr.get("old_addon_quantities"), {}),
+        "oldAddonDates": _decode(cr.get("old_addon_dates"), {}),
+        "oldTotal": float(cr["old_total"]),
+        "requestedCheckIn": str(cr["requested_check_in"]),
+        "requestedCheckOut": str(cr["requested_check_out"]),
+        "requestedAddonIds": _decode(cr.get("requested_addon_ids"), []),
+        "requestedAddonQuantities": _decode(cr.get("requested_addon_quantities"), {}),
+        "requestedAddonDates": _decode(cr.get("requested_addon_dates"), {}),
+        "requestedAddonNames": _decode(cr.get("requested_addon_names"), []),
+        "newTotal": float(cr["new_total"]),
+        "priceDifference": float(cr["price_difference"]),
+        "currency": cr["currency"],
+        "declineReason": cr.get("decline_reason"),
+        "decidedAt": cr["decided_at"].isoformat() if cr.get("decided_at") else None,
+        "createdAt": cr["created_at"].isoformat() if cr.get("created_at") else None,
+    }
+
+
+@router.get("/bookings/{booking_id}/change-request")
+async def admin_get_change_request(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    cr = await BookingChangeRequestRepository.get_latest_for_booking(booking_id)
+    if not cr:
+        return None
+    return _change_request_admin(cr)
+
+
+@router.post("/bookings/{booking_id}/change-request/approve")
+async def admin_approve_change_request(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    pending = await BookingChangeRequestRepository.get_pending_for_booking(booking_id)
+    if not pending:
+        raise HTTPException(status_code=404, detail="No pending change request")
+    try:
+        cr = await approve_booking_change(str(pending["id"]), hotel_id=hotel_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _change_request_admin(cr)
+
+
+class DeclineChangeRequestBody(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/bookings/{booking_id}/change-request/decline")
+async def admin_decline_change_request(
+    booking_id: str,
+    body: DeclineChangeRequestBody = DeclineChangeRequestBody(),
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    pending = await BookingChangeRequestRepository.get_pending_for_booking(booking_id)
+    if not pending:
+        raise HTTPException(status_code=404, detail="No pending change request")
+    try:
+        cr = await decline_booking_change(
+            str(pending["id"]), reason=body.reason, hotel_id=hotel_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _change_request_admin(cr)
 
 
 # ── Payouts ───────────────────────────────────────────────────────

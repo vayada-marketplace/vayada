@@ -91,6 +91,10 @@ async def cleanup_database(init_database):
                 "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
                 test_booking_ids,
             )
+            await Database.execute(
+                "DELETE FROM booking_change_requests WHERE booking_id = ANY($1::uuid[])",
+                test_booking_ids,
+            )
         await Database.execute(
             "DELETE FROM bookings WHERE hotel_id = ANY($1::uuid[])",
             test_hotel_ids,
@@ -151,6 +155,10 @@ async def cleanup_database(init_database):
                 )
                 await Database.execute(
                     "DELETE FROM payments WHERE booking_id = ANY($1::uuid[])",
+                    user_booking_ids,
+                )
+                await Database.execute(
+                    "DELETE FROM booking_change_requests WHERE booking_id = ANY($1::uuid[])",
                     user_booking_ids,
                 )
             await Database.execute(

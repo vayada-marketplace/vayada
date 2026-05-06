@@ -3,7 +3,10 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 
-from app.models.booking import BookingCreate, BookingResponse, BookingLookup
+from app.models.booking import (
+    BookingCreate, BookingResponse, BookingLookup,
+    ChangeRequestPayload,
+)
 from app.services.booking_service import (
     create_booking_request,
     confirm_payment_authorized,
@@ -12,6 +15,11 @@ from app.services.booking_service import (
     handle_guest_cancellation,
     lookup_booking,
     get_booking_status,
+)
+from app.services.booking_change_service import (
+    preview_change as preview_booking_change,
+    submit_change as submit_booking_change,
+    get_change_request_for_guest,
 )
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
@@ -119,6 +127,105 @@ async def get_status(
     if not result:
         raise HTTPException(status_code=404, detail="Booking not found")
     return result
+
+
+@router.post("/{slug}/bookings/{booking_id}/change-request/preview")
+async def post_change_request_preview(
+    slug: str, booking_id: str, data: ChangeRequestPayload,
+):
+    """Preview the price diff for a guest's hypothetical change request."""
+    try:
+        result = await preview_booking_change(
+            slug, booking_id, data.guest_email,
+            check_in=data.check_in,
+            check_out=data.check_out,
+            addon_ids=data.addon_ids,
+            addon_quantities=data.addon_quantities,
+            addon_dates=data.addon_dates,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error previewing change request for %s: %s", booking_id, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return result
+
+
+@router.post("/{slug}/bookings/{booking_id}/change-request")
+async def post_change_request(
+    slug: str, booking_id: str, data: ChangeRequestPayload,
+):
+    """Submit a change request for a confirmed booking."""
+    try:
+        cr = await submit_booking_change(
+            slug, booking_id, data.guest_email,
+            check_in=data.check_in,
+            check_out=data.check_out,
+            addon_ids=data.addon_ids,
+            addon_quantities=data.addon_quantities,
+            addon_dates=data.addon_dates,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error submitting change request for %s: %s", booking_id, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return _change_request_to_dict(cr)
+
+
+@router.get("/{slug}/bookings/{booking_id}/change-request")
+async def get_change_request(
+    slug: str,
+    booking_id: str,
+    email: str = Query(...),
+):
+    """Latest change request for the booking, or null when none exists."""
+    try:
+        cr = await get_change_request_for_guest(slug, booking_id, email)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not cr:
+        return None
+    return _change_request_to_dict(cr)
+
+
+def _change_request_to_dict(cr: dict) -> dict:
+    """Serialize a change_request DB row for guest/admin JSON responses."""
+    import json as _json
+
+    def _decode(val, default):
+        if val is None:
+            return default
+        if isinstance(val, str):
+            try:
+                return _json.loads(val)
+            except (TypeError, ValueError):
+                return default
+        return val
+
+    return {
+        "id": str(cr["id"]),
+        "bookingId": str(cr["booking_id"]),
+        "status": cr["status"],
+        "oldCheckIn": str(cr["old_check_in"]),
+        "oldCheckOut": str(cr["old_check_out"]),
+        "oldAddonIds": _decode(cr.get("old_addon_ids"), []),
+        "oldAddonQuantities": _decode(cr.get("old_addon_quantities"), {}),
+        "oldAddonDates": _decode(cr.get("old_addon_dates"), {}),
+        "oldTotal": float(cr["old_total"]),
+        "requestedCheckIn": str(cr["requested_check_in"]),
+        "requestedCheckOut": str(cr["requested_check_out"]),
+        "requestedAddonIds": _decode(cr.get("requested_addon_ids"), []),
+        "requestedAddonQuantities": _decode(cr.get("requested_addon_quantities"), {}),
+        "requestedAddonDates": _decode(cr.get("requested_addon_dates"), {}),
+        "requestedAddonNames": _decode(cr.get("requested_addon_names"), []),
+        "newTotal": float(cr["new_total"]),
+        "priceDifference": float(cr["price_difference"]),
+        "currency": cr["currency"],
+        "declineReason": cr.get("decline_reason"),
+        "decidedAt": cr["decided_at"].isoformat() if cr.get("decided_at") else None,
+        "createdAt": cr["created_at"].isoformat() if cr.get("created_at") else None,
+    }
 
 
 @router.get("/{slug}/payment-settings")

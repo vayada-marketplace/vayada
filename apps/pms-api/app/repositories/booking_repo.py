@@ -357,6 +357,56 @@ class BookingRepository:
         return await BookingRepository.get_by_id(booking_id)
 
     @staticmethod
+    async def apply_change_request(
+        booking_id: str,
+        *,
+        check_in,
+        check_out,
+        nightly_rate: float,
+        addon_ids: list,
+        addon_quantities: dict,
+        addon_dates: dict,
+        addon_names: list,
+        addon_total: float,
+        total_amount: float,
+    ) -> Optional[dict]:
+        """Apply an approved guest change request to the booking row.
+
+        Mutates dates, add-ons, nightly_rate, addon_total, and total_amount
+        in one statement so the row never reflects a half-applied change.
+        Promo discount and last-minute discount are intentionally left
+        alone — they were locked in at booking time.
+        """
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings
+            SET check_in = $2,
+                check_out = $3,
+                nightly_rate = $4,
+                addon_ids = $5::jsonb,
+                addon_quantities = $6::jsonb,
+                addon_dates = $7::jsonb,
+                addon_names = $8::jsonb,
+                addon_total = $9,
+                total_amount = $10,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            check_in,
+            check_out,
+            nightly_rate,
+            json.dumps(addon_ids),
+            json.dumps(addon_quantities),
+            json.dumps(addon_dates),
+            json.dumps(addon_names),
+            addon_total,
+            total_amount,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def update_payment_status(booking_id: str, payment_status: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """
