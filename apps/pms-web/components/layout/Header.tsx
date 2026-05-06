@@ -42,7 +42,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [searchOpen, setSearchOpen] = useState(false)
   const [hotels, setHotels] = useState<HotelSummary[]>([])
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null)
-  const [shortcutKey, setShortcutKey] = useState<'⌘K' | 'Ctrl K'>('Ctrl K')
 
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
@@ -67,9 +66,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   // Also handle "/" the way GitHub/Linear do, but only when the user
   // isn't already typing into a form field.
   useEffect(() => {
-    if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform)) {
-      setShortcutKey('⌘K')
-    }
     function handleKeyDown(e: KeyboardEvent) {
       const isModK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'
       const target = e.target as HTMLElement | null
@@ -244,9 +240,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         >
           <MagnifyingGlassIcon className="w-3.5 h-3.5 shrink-0" />
           <span className="text-[12px] flex-1 text-left truncate">{t('search.placeholder')}</span>
-          <kbd className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-400 leading-none shrink-0">
-            {shortcutKey}
-          </kbd>
         </button>
       </div>
 
