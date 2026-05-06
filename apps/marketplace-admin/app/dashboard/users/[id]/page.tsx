@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
 import { UserIcon, ArrowLeftIcon, TrashIcon, PencilIcon, XMarkIcon, PhotoIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon, GiftIcon, CurrencyDollarIcon, TagIcon, LinkIcon, CalendarIcon } from '@heroicons/react/24/outline'
@@ -35,10 +35,17 @@ const COUNTRIES = [
 export default function UserDetailPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const userId = params.id as string
 
+  const initialTab = (() => {
+    const t = searchParams?.get('tab')
+    return t === 'profile' || t === 'social' || t === 'listings' ? t : 'profile'
+  })()
+  const deepLinkListingId = searchParams?.get('listingId') ?? null
+
   // Active tab state
-  const [activeTab, setActiveTab] = useState<'profile' | 'social' | 'listings'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'social' | 'listings'>(initialTab)
   const [userDetail, setUserDetail] = useState<UserDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -131,6 +138,16 @@ export default function UserDetailPage() {
   useEffect(() => {
     loadUserDetail()
   }, [userId])
+
+  // Auto-open the listing edit modal when deep-linked via ?tab=listings&listingId=...
+  useEffect(() => {
+    if (!deepLinkListingId || !userDetail) return
+    if (userDetail.type !== 'hotel' || !userDetail.profile) return
+    const listings = (userDetail.profile as HotelProfileDetail).listings
+    if (!listings) return
+    const match = listings.find((l: ListingResponse) => l.id === deepLinkListingId)
+    if (match) setSelectedListing(match)
+  }, [deepLinkListingId, userDetail])
 
   // Initialize edit form when entering edit mode
   useEffect(() => {

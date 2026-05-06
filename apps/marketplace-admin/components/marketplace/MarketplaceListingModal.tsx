@@ -17,7 +17,6 @@ interface MarketplaceListingModalProps {
   onClose: () => void
   listing: MarketplaceListing | null
   notFoundMessage?: string
-  bookingHotelId?: string | null
 }
 
 const formatNumber = (num: number): string => {
@@ -46,18 +45,19 @@ export function MarketplaceListingModal({
   onClose,
   listing,
   notFoundMessage,
-  bookingHotelId,
 }: MarketplaceListingModalProps) {
   const router = useRouter()
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
 
+  const ownerUserId = listing?.owner_user_id ?? null
+  const canEdit = !!(listing && ownerUserId)
+
   const handleEdit = () => {
+    if (!listing || !ownerUserId) return
     onClose()
-    if (bookingHotelId) {
-      router.push(`/dashboard/hotels/${bookingHotelId}`)
-    } else {
-      router.push('/dashboard/hotels')
-    }
+    router.push(
+      `/dashboard/users/${ownerUserId}?tab=listings&listingId=${listing.id}`,
+    )
   }
 
   useEffect(() => {
@@ -93,8 +93,9 @@ export function MarketplaceListingModal({
           <button
             type="button"
             onClick={handleEdit}
-            title={bookingHotelId ? 'Edit hotel settings' : 'Open hotels list (no direct match found)'}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
+            disabled={!canEdit}
+            title={canEdit ? 'Edit hotel settings' : 'This listing is not linked to a user account'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-50"
           >
             <PencilSquareIcon className="w-4 h-4" />
             Edit hotel settings
