@@ -36,6 +36,7 @@ from app.services.email_service import (
     send_guest_cancellation_refund,
     send_guest_booking_withdrawn,
     send_host_booking_accepted,
+    send_host_booking_rejected,
     send_host_guest_cancelled,
     send_host_booking_expired,
 )
@@ -842,11 +843,18 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
     await BookingRepository.update_payment_status(booking_id, "cancelled")
     await PayoutRepository.cancel_by_booking(booking_id)
 
-    # Notify guest
+    # Notify guest, host, and ops
     updated = await BookingRepository.get_by_id(booking_id)
     asyncio.create_task(
         send_guest_booking_rejected(updated["guest_email"], updated, reason=reason)
     )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_rejected(hotel["contact_email"], updated, reason=reason)
+        )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
     asyncio.create_task(channex_handle_cancellation(booking_id))

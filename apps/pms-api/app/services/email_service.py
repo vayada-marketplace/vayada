@@ -136,32 +136,49 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
-# ── New payment flow emails ───────────────────────────────────────
+# ── Host + ops booking-request lifecycle emails ─────────────────────
+#
+# All host-facing booking-request notifications share one structure: a status
+# headline, the full booking detail block (hotel, guest, email, payment,
+# reference, accommodation, dates, guests, addons, total), and a CTA back into
+# the PMS. Every host email is also CC'd to the Vayada ops team so we have a
+# single inbox view of every request's lifecycle.
+#
+# Idempotence: the booking_service transition functions (host_accept,
+# host_reject, expire_booking, guest_withdraw_booking, handle_guest_cancellation)
+# all gate on the current status before transitioning, and the expire
+# scheduler filters on `status='pending'`. A booking can only ever land in one
+# terminal state, so exactly one terminal-status email fires per booking.
 
-async def send_booking_request_notification(hotel_email: str, booking: dict):
-    """Notify host of new booking request with Accept/Reject actions."""
-    if not hotel_email:
-        return
 
+_PAYMENT_LABELS = {
+    "card": "Card (authorization hold)",
+    "pay_at_property": "Pay at property",
+    "bank_transfer": "Bank transfer",
+    "xendit": "Online payment (Xendit)",
+}
+
+
+def _payment_label(booking: dict) -> str:
+    method = booking.get("payment_method", "card")
+    return _PAYMENT_LABELS.get(method, method)
+
+
+def _render_request_status_email(booking: dict, status_event: str) -> tuple[str, str]:
+    """Build (subject, html) for a host/ops booking-request lifecycle email.
+
+    status_event is one of: pending, accepted, declined, cancelled, expired.
+    """
     booking_id = booking.get("id", "")
     pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
-    payment_method = booking.get("payment_method", "card")
-    payment_labels = {
-        "card": "Card (authorization hold)",
-        "pay_at_property": "Pay at property",
-        "bank_transfer": "Bank transfer",
-        "xendit": "Online payment (Xendit)",
-    }
-    payment_label = payment_labels.get(payment_method, payment_method)
+    guest_name = f"{booking.get('guest_first_name', '')} {booking.get('guest_last_name', '')}".strip()
+    ref = booking["booking_reference"]
+    hotel_name = booking["hotel_name"]
 
-    subject = f"New Booking Request: {booking['hotel_name']} — {booking['booking_reference']}"
-    content = f"""
-    <h2>New Booking Request</h2>
-    <p class="detail"><strong>Hotel:</strong> {booking['hotel_name']}</p>
-    <p class="detail"><strong>Guest:</strong> {booking['guest_first_name']} {booking['guest_last_name']}</p>
-    <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
-    <p class="detail"><strong>Payment:</strong> {payment_label}</p>
-    {_booking_details_html(booking)}
+    if status_event == "pending":
+        headline = "New Booking Request"
+        subject = f"New Booking Request: {hotel_name} — {ref}"
+        trailing = f"""
     <div class="alert">
         You have <strong>24 hours</strong> to accept or reject this booking.
         If no action is taken, the booking will expire automatically.
@@ -169,9 +186,64 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     <hr class="divider">
     <a href="{pms_link}" class="btn btn-accept">Review &amp; Respond</a>
     """
-    await _send_email(hotel_email, subject, _wrap_html(content))
+    elif status_event == "accepted":
+        headline = "Booking Confirmed"
+        subject = f"Booking Confirmed: {hotel_name} — {ref}"
+        payment_method = booking.get("payment_method", "card")
+        payment_note = (
+            "Payment has been captured."
+            if payment_method == "card"
+            else "The guest will pay at the property."
+        )
+        trailing = f"""
+    <p class="detail">{payment_note}</p>
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    elif status_event == "declined":
+        headline = "Booking Request Declined"
+        subject = f"Booking Request Declined: {hotel_name} — {ref}"
+        trailing = f"""
+    <p class="detail">You declined the request from <strong>{guest_name}</strong>. Any payment hold has been released.</p>
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    elif status_event == "cancelled":
+        headline = "Booking Request Cancelled"
+        subject = f"Booking Request Cancelled: {hotel_name} — {ref}"
+        trailing = f"""
+    <p class="detail">The room is now available for new bookings. No action is required on your part.</p>
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    elif status_event == "expired":
+        headline = "Booking Request Expired"
+        subject = f"Booking Request Expired: {hotel_name} — {ref}"
+        trailing = f"""
+    <div class="alert">
+        This request expired because no action was taken within 24 hours.
+        Please review and respond to booking requests promptly to avoid losing potential guests.
+    </div>
+    <hr class="divider">
+    <a href="{pms_link}" class="btn">View in PMS</a>
+    """
+    else:
+        raise ValueError(f"Unknown status_event: {status_event}")
 
-    # Also notify vayada ops
+    content = f"""
+    <h2>{headline}</h2>
+    <p class="detail"><strong>Hotel:</strong> {hotel_name}</p>
+    <p class="detail"><strong>Guest:</strong> {guest_name}</p>
+    <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
+    <p class="detail"><strong>Payment:</strong> {_payment_label(booking)}</p>
+    {_booking_details_html(booking)}{trailing}"""
+    return subject, _wrap_html(content)
+
+
+async def _send_to_host_and_ops(hotel_email: str, subject: str, html_body: str):
+    """Send to the hotel host and the Vayada ops watchlist."""
+    if hotel_email:
+        await _send_email(hotel_email, subject, html_body)
     ops_recipients = [
         settings.VAYADA_OPS_EMAIL,
         "p.paetzold@vayada.com",
@@ -179,7 +251,13 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
     ]
     for recipient in ops_recipients:
         if recipient and recipient != hotel_email:
-            await _send_email(recipient, subject, _wrap_html(content))
+            await _send_email(recipient, subject, html_body)
+
+
+async def send_booking_request_notification(hotel_email: str, booking: dict):
+    """Notify host of new booking request with Accept/Reject actions."""
+    subject, html_body = _render_request_status_email(booking, "pending")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
 
 
 async def send_guest_booking_requested(guest_email: str, booking: dict):
@@ -260,38 +338,23 @@ async def send_guest_booking_expired(guest_email: str, booking: dict):
 
 
 async def send_host_booking_withdrawn(hotel_email: str, booking: dict):
-    """Notify host that guest withdrew their booking request."""
-    if not hotel_email:
-        return
-
-    subject = f"Booking Withdrawn: {booking['booking_reference']}"
-    content = f"""
-    <h2>Guest Withdrew Booking Request</h2>
-    <p class="detail">The guest <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has withdrawn their booking request.</p>
-    <hr class="divider">
-    {_booking_details_html(booking)}
-    <hr class="divider">
-    <p class="detail">No action is needed on your part.</p>
-    """
-    await _send_email(hotel_email, subject, _wrap_html(content))
+    """Notify host that guest withdrew their pending booking request."""
+    subject, html_body = _render_request_status_email(booking, "cancelled")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
 
 
 async def send_host_booking_expired(hotel_email: str, booking: dict):
     """Notify host that a booking expired because they didn't respond."""
-    if not hotel_email:
-        return
+    subject, html_body = _render_request_status_email(booking, "expired")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
 
-    subject = f"Booking Expired: {booking['booking_reference']}"
-    content = f"""
-    <h2>Booking Request Expired</h2>
-    <p class="detail">A booking request from <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has expired because no action was taken within 24 hours.</p>
-    <hr class="divider">
-    {_booking_details_html(booking)}
-    <div class="alert">
-        Please ensure you review and respond to booking requests promptly to avoid losing potential guests.
-    </div>
-    """
-    await _send_email(hotel_email, subject, _wrap_html(content))
+
+async def send_host_booking_rejected(
+    hotel_email: str, booking: dict, reason: str | None = None
+):
+    """Notify host (and ops) that they declined the booking request."""
+    subject, html_body = _render_request_status_email(booking, "declined")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
 
 
 async def send_guest_cancellation_refund(
@@ -343,25 +406,8 @@ async def send_guest_booking_withdrawn(guest_email: str, booking: dict):
 
 async def send_host_booking_accepted(hotel_email: str, booking: dict):
     """Confirm to host that they accepted the booking."""
-    if not hotel_email:
-        return
-
-    booking_id = booking.get("id", "")
-    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
-    payment_method = booking.get("payment_method", "card")
-    payment_note = "Payment has been captured." if payment_method == "card" else "Guest will pay at the property."
-
-    subject = f"Booking Accepted: {booking['booking_reference']}"
-    content = f"""
-    <h2>Booking Accepted</h2>
-    <p class="detail">You have accepted the booking from <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong>.</p>
-    <p class="detail">{payment_note}</p>
-    <hr class="divider">
-    {_booking_details_html(booking)}
-    <hr class="divider">
-    <a href="{pms_link}" class="btn">View in PMS</a>
-    """
-    await _send_email(hotel_email, subject, _wrap_html(content))
+    subject, html_body = _render_request_status_email(booking, "accepted")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
 
 
 async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
@@ -605,20 +651,5 @@ async def send_host_ota_booking_imported(
 
 async def send_host_guest_cancelled(hotel_email: str, booking: dict):
     """Notify host that a guest cancelled their confirmed booking."""
-    if not hotel_email:
-        return
-
-    booking_id = booking.get("id", "")
-    pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
-
-    subject = f"Booking Cancelled by Guest: {booking['booking_reference']}"
-    content = f"""
-    <h2>Guest Cancelled Booking</h2>
-    <p class="detail">The guest <strong>{booking['guest_first_name']} {booking['guest_last_name']}</strong> has cancelled their confirmed booking.</p>
-    <hr class="divider">
-    {_booking_details_html(booking)}
-    <hr class="divider">
-    <p class="detail">The room is now available for new bookings.</p>
-    <a href="{pms_link}" class="btn">View in PMS</a>
-    """
-    await _send_email(hotel_email, subject, _wrap_html(content))
+    subject, html_body = _render_request_status_email(booking, "cancelled")
+    await _send_to_host_and_ops(hotel_email, subject, html_body)
