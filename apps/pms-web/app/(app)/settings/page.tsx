@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { bookingsService } from '@/services/bookings'
 import { apiClient } from '@/services/api/client'
-import { useTranslation } from '@/lib/i18n'
+import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
 const CURRENCY_OPTIONS = [
   { code: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
@@ -138,10 +138,11 @@ function CurrencySelect({ value, onChange, t }: { value: string; onChange: (v: s
 }
 
 export default function SettingsPage() {
-  const { t } = useTranslation()
+  const { t, locale, setLocale } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
+  const [highlightedSection, setHighlightedSection] = useState<string | null>(null)
 
   // Currency
   const [currency, setCurrency] = useState('EUR')
@@ -206,6 +207,38 @@ export default function SettingsPage() {
       })
       .catch(() => {})
   }, [])
+
+  // Scroll to the URL hash section and briefly highlight it (used by global search).
+  // Wait until loading is false so the target element exists, and re-run on
+  // hashchange — when the user is already on /settings, the global-search
+  // navigation only updates the hash and would otherwise skip the scroll.
+  useEffect(() => {
+    if (loading) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const handle = () => {
+      const hash = window.location.hash.slice(1)
+      if (!hash) return
+      const el = document.getElementById(hash)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setHighlightedSection(hash)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setHighlightedSection(null), 1800)
+    }
+    handle()
+    window.addEventListener('hashchange', handle)
+    return () => {
+      window.removeEventListener('hashchange', handle)
+      if (timer) clearTimeout(timer)
+    }
+  }, [loading])
+
+  const sectionClass = (id: string) =>
+    `bg-white border rounded-xl p-4 md:p-6 scroll-mt-20 transition-shadow ${
+      highlightedSection === id
+        ? 'border-primary-400 ring-2 ring-primary-300 shadow-md'
+        : 'border-gray-200'
+    }`
 
   const saveTimes = async () => {
     setSavingTimes(true)
@@ -312,7 +345,7 @@ export default function SettingsPage() {
 
       <div className="space-y-5 md:space-y-8">
         {/* Property Details */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+        <div id="property-details" className={sectionClass('property-details')}>
           <h2 className="text-sm font-semibold text-gray-900 mb-1">Property Details</h2>
           <p className="text-xs text-gray-500 mb-4">Required for channel manager (OTA connections).</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -435,7 +468,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Booking Engine — accept mode */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+        <div id="booking-engine" className={sectionClass('booking-engine')}>
           <h2 className="text-sm font-semibold text-gray-900 mb-1">Booking Engine</h2>
           <p className="text-xs text-gray-500 mb-4">
             Choose how new bookings from your booking engine are accepted.
@@ -474,7 +507,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Currency */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+        <div id="currency" className={sectionClass('currency')}>
           <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.currency')}</h2>
           <p className="text-xs text-gray-500 mb-4">{t('settings.currencyDescription')}</p>
           <CurrencySelect value={currency} onChange={setCurrency} t={t} />
@@ -488,7 +521,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Check-in / Check-out */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
+        <div id="check-in-out" className={sectionClass('check-in-out')}>
           <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.checkInCheckOut')}</h2>
           <p className="text-xs text-gray-500 mb-4">{t('settings.checkInCheckOutDescription')}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
@@ -550,6 +583,29 @@ export default function SettingsPage() {
           >
             {savingTimes ? t('common.saving') : t('common.save')}
           </button>
+        </div>
+
+        {/* Language */}
+        <div id="language" className={sectionClass('language')}>
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('settings.language')}</h2>
+          <p className="text-xs text-gray-500 mb-4">{t('settings.languageDescription')}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                type="button"
+                onClick={() => setLocale(lang.code)}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                  locale === lang.code
+                    ? 'bg-primary-50 border-primary-300 text-primary-700 font-medium'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span>{lang.flag}</span>
+                <span className="truncate">{lang.nativeName}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
       </div>
