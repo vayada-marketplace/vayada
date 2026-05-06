@@ -3,6 +3,7 @@
   "layout.header.noProperties": "暂无物业",
   "layout.header.user": "用户",
   "layout.header.language": "语言",
+  "layout.header.currency": "货币",
   "layout.sidebar.propertyManagerDescription": "运营与库存",
   "layout.sidebar.bookingEngineDescription": "直接预订与收入",
   "common.save": "保存",

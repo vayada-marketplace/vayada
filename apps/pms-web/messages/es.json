@@ -3,6 +3,7 @@
   "layout.header.noProperties": "Sin propiedades",
   "layout.header.user": "Usuario",
   "layout.header.language": "Idioma",
+  "layout.header.currency": "Moneda",
   "layout.sidebar.propertyManagerDescription": "Operaciones e Inventario",
   "layout.sidebar.bookingEngineDescription": "Reservas directas e ingresos",
   "common.save": "Guardar",

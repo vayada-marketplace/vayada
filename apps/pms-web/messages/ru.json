@@ -3,6 +3,7 @@
   "layout.header.noProperties": "Нет объектов",
   "layout.header.user": "Пользователь",
   "layout.header.language": "Язык",
+  "layout.header.currency": "Валюта",
   "layout.sidebar.propertyManagerDescription": "Операции и инвентарь",
   "layout.sidebar.bookingEngineDescription": "Прямые бронирования и доход",
   "common.save": "Сохранить",
