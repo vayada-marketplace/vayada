@@ -1,4 +1,6 @@
 import logging
+import re
+from collections import Counter
 from typing import Optional, List, Iterable, Tuple
 
 import asyncpg
@@ -127,6 +129,120 @@ class RoomRepository:
             return int(result.split()[-1])
         except (ValueError, AttributeError, IndexError):
             return 0
+
+    @staticmethod
+    async def heal_stale_room_names(
+        hotel_id: str,
+        room_type_id: str,
+        current_name: str,
+    ) -> int:
+        """Rewrite room_numbers in this room type that look like stale
+        auto-names left over from a previous room-type name.
+
+        rename_auto_named() handles the on-rename case where we still know
+        the old name. heal covers the other case: hotels that renamed
+        their room type before the on-rename fix shipped, so the old name
+        is gone and rename_auto_named can never fire. This runs on every
+        PATCH /admin/room-types/{id} so any save heals stale data, and is
+        also called by scripts/backfill_room_names_vay322.py.
+
+        Heuristic — to avoid stomping a deliberately-customized name
+        ("Penthouse") we only rewrite when we have strong evidence the
+        room was auto-generated:
+          - "shared prefix": ≥2 rooms in this room type share the same
+            prefix that isn't the current name and isn't a sibling room
+            type's name. Auto-naming is the only realistic source of
+            that pattern.
+          - "lone room": this room type has exactly one room and its
+            prefix isn't the current name and isn't a sibling type's
+            name. The screenshot scenario from the ticket lives here —
+            single "#Deluxe Room" under "Deluxe Party Room".
+
+        The "isn't a sibling type's name" guard prevents stealing rooms
+        that match another type's prefix (e.g. don't rewrite a "Garden
+        King 1" room while saving "Deluxe Suite" — that prefix belongs
+        to a different type).
+
+        Returns the number of rooms rewritten. Idempotent.
+        """
+        rooms = await Database.fetch(
+            """
+            SELECT id, room_number
+            FROM rooms
+            WHERE hotel_id = $1 AND room_type_id = $2
+            """,
+            hotel_id,
+            room_type_id,
+        )
+        if not rooms:
+            return 0
+
+        sibling_rows = await Database.fetch(
+            """
+            SELECT name
+            FROM room_types
+            WHERE hotel_id = $1 AND id != $2
+            """,
+            hotel_id,
+            room_type_id,
+        )
+        sibling_names = {row["name"] for row in sibling_rows}
+
+        # Greedy on the prefix so digits inside the name (e.g. "Suite 2"
+        # as a deliberate type name) are preserved, and only a trailing
+        # " <integer>" is treated as the auto-numbered suffix.
+        prefix_re = re.compile(r"^(.*?)( [0-9]+)?$")
+        candidates: List[Tuple[str, str, str, str]] = []
+        for r in rooms:
+            number = r["room_number"]
+            m = prefix_re.match(number)
+            if not m:
+                continue
+            prefix = m.group(1)
+            suffix = m.group(2) or ""
+            if not prefix or prefix == current_name:
+                continue
+            if prefix in sibling_names:
+                continue
+            candidates.append((str(r["id"]), number, prefix, suffix))
+
+        if not candidates:
+            return 0
+
+        prefix_counts = Counter(c[2] for c in candidates)
+        only_room_in_type = len(rooms) == 1
+
+        renames: List[Tuple[str, str, str]] = []
+        for room_id, old_number, prefix, suffix in candidates:
+            shared = prefix_counts[prefix] >= 2
+            if not (shared or only_room_in_type):
+                continue
+            new_number = f"{current_name}{suffix}"
+            if new_number == old_number:
+                continue
+            renames.append((room_id, old_number, new_number))
+
+        renamed = 0
+        for room_id, old_number, new_number in renames:
+            try:
+                await Database.execute(
+                    """
+                    UPDATE rooms
+                    SET room_number = $3, updated_at = now()
+                    WHERE id = $1 AND hotel_id = $2
+                    """,
+                    room_id,
+                    hotel_id,
+                    new_number,
+                )
+                renamed += 1
+            except asyncpg.UniqueViolationError:
+                logger.warning(
+                    "Skipped healing room %s (%r -> %r): would collide with "
+                    "an existing room_number in hotel %s",
+                    room_id, old_number, new_number, hotel_id,
+                )
+        return renamed
 
     @staticmethod
     async def get_by_id(room_id: str) -> Optional[dict]:

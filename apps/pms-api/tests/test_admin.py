@@ -453,6 +453,222 @@ class TestAdminRoomTypes:
         rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
         assert {r["roomNumber"] for r in rooms} == {"Garden King 1", "Garden King 2"}
 
+    async def test_save_room_type_unchanged_heals_stale_lone_room(self, client, cleanup_database):
+        """VAY-322 backfill: hotels that renamed a room type before the
+        on-rename fix shipped end up with stale room_numbers (the
+        screenshot scenario — single "#Deluxe Room" under "Deluxe Party
+        Room"). A subsequent save with the same name must heal them."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Deluxe Party Room",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        assert create_resp.status_code == 201
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        only_room = next(
+            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
+        )
+        # Reproduce the broken pre-fix state: room still carries the
+        # previous type name even though the type is now "Deluxe Party Room".
+        await client.patch(
+            f"/admin/rooms/{only_room['id']}",
+            json={"roomNumber": "Deluxe Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        # No-op save (rate change, name unchanged) should still heal.
+        same_name = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"baseRate": 130.0},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert same_name.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {"Deluxe Party Room"}
+
+    async def test_save_room_type_heals_shared_stale_prefix(self, client, cleanup_database):
+        """VAY-322 backfill: in a multi-room type, multiple rooms sharing
+        the same stale prefix is a strong auto-naming signal — heal them
+        all on next save, even without a name change."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden Queen",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 3,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        # Force two rooms into the stale "Garden King N" naming and
+        # leave one with a custom name that must be preserved.
+        sorted_rooms = sorted(rooms, key=lambda r: r["roomNumber"])
+        await client.patch(
+            f"/admin/rooms/{sorted_rooms[0]['id']}",
+            json={"roomNumber": "Garden King 1"},
+            headers=get_auth_headers(user["token"]),
+        )
+        await client.patch(
+            f"/admin/rooms/{sorted_rooms[1]['id']}",
+            json={"roomNumber": "Garden King 2"},
+            headers=get_auth_headers(user["token"]),
+        )
+        await client.patch(
+            f"/admin/rooms/{sorted_rooms[2]['id']}",
+            json={"roomNumber": "Penthouse"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        same_name = await client.patch(
+            f"/admin/room-types/{room_type_id}",
+            json={"baseRate": 130.0},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert same_name.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {
+            "Garden Queen 1",
+            "Garden Queen 2",
+            "Penthouse",
+        }
+
+    async def test_save_room_type_heal_skips_sibling_type_prefix(self, client, cleanup_database):
+        """VAY-322 backfill: don't steal a sibling room type's prefix.
+        If "Deluxe Suite" exists in the hotel and a "Garden King" room
+        happens to be named "Deluxe Suite 1", saving "Garden King" must
+        leave it alone — that prefix legitimately belongs elsewhere."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Deluxe Suite",
+                "baseRate": 200.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        target_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Garden King",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        target_id = target_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        target_room = next(
+            r for r in rooms_resp.json() if r["roomTypeId"] == target_id
+        )
+        await client.patch(
+            f"/admin/rooms/{target_room['id']}",
+            json={"roomNumber": "Deluxe Suite 7"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        same_name = await client.patch(
+            f"/admin/room-types/{target_id}",
+            json={"baseRate": 130.0},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert same_name.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == target_id]
+        assert {r["roomNumber"] for r in rooms} == {"Deluxe Suite 7"}
+
+    async def test_save_room_type_heal_idempotent(self, client, cleanup_database):
+        """VAY-322 backfill: running twice must be a no-op the second
+        time. Guards against the script and the on-save heal stepping on
+        each other after deploy."""
+        user = await create_test_user()
+        await create_test_hotel(str(user["id"]))
+
+        create_resp = await client.post(
+            "/admin/room-types",
+            json={
+                "name": "Deluxe Party Room",
+                "baseRate": 120.0,
+                "maxOccupancy": 2,
+                "totalRooms": 1,
+            },
+            headers=get_auth_headers(user["token"]),
+        )
+        room_type_id = create_resp.json()["id"]
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        only_room = next(
+            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
+        )
+        await client.patch(
+            f"/admin/rooms/{only_room['id']}",
+            json={"roomNumber": "Deluxe Room"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        for _ in range(2):
+            resp = await client.patch(
+                f"/admin/room-types/{room_type_id}",
+                json={"baseRate": 130.0},
+                headers=get_auth_headers(user["token"]),
+            )
+            assert resp.status_code == 200
+
+        rooms_resp = await client.get(
+            "/admin/rooms",
+            headers=get_auth_headers(user["token"]),
+        )
+        rooms = [r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id]
+        assert {r["roomNumber"] for r in rooms} == {"Deluxe Party Room"}
+
     async def test_get_room_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
