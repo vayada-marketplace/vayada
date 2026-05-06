@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { usersService } from '@/services/api'
@@ -22,6 +22,32 @@ type FilterStatus = 'all' | 'pending' | 'verified' | 'rejected' | 'suspended'
 
 const VALID_TYPES: FilterType[] = ['all', 'hotel', 'creator', 'admin']
 const VALID_STATUSES: FilterStatus[] = ['all', 'pending', 'verified', 'rejected', 'suspended']
+
+const SCROLL_STORAGE_KEY = 'admin:users-list:scroll'
+
+function findScrollContainer(node: HTMLElement | null): HTMLElement | Window {
+  let current: HTMLElement | null = node?.parentElement ?? null
+  while (current) {
+    const overflowY = window.getComputedStyle(current).overflowY
+    if ((overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight > current.clientHeight) {
+      return current
+    }
+    current = current.parentElement
+  }
+  return window
+}
+
+function getScrollTop(target: HTMLElement | Window): number {
+  return target instanceof Window ? target.scrollY : target.scrollTop
+}
+
+function setScrollTop(target: HTMLElement | Window, top: number): void {
+  if (target instanceof Window) {
+    target.scrollTo(0, top)
+  } else {
+    target.scrollTop = top
+  }
+}
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -48,21 +74,36 @@ export default function DashboardPage() {
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
 
-  // Mirror filter state into the URL so navigating away and back restores
-  // the user's view. Debounced to avoid churning history while typing.
-  useEffect(() => {
+  // Anchor for locating the scroll container we live inside (the dashboard
+  // layout's <main overflow-auto>).
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  // One-shot flag so we only restore scroll once per mount, after the first
+  // successful list load.
+  const scrollRestoredRef = useRef(false)
+  // Holds the latest URL that mirrors filter/search/page state, so we can
+  // flush it synchronously on row click before the route changes.
+  const pendingUrlRef = useRef<string>('/dashboard')
+
+  const buildListUrl = useCallback(() => {
     const params = new URLSearchParams()
     if (filterType !== 'all') params.set('type', filterType)
     if (filterStatus !== 'all') params.set('status', filterStatus)
     if (searchTerm) params.set('q', searchTerm)
     if (page > 1) params.set('page', String(page))
     const query = params.toString()
-    const next = query ? `/dashboard?${query}` : '/dashboard'
+    return query ? `/dashboard?${query}` : '/dashboard'
+  }, [filterType, filterStatus, searchTerm, page])
+
+  // Mirror filter state into the URL so navigating away and back restores
+  // the user's view. Debounced to avoid churning history while typing.
+  useEffect(() => {
+    const next = buildListUrl()
+    pendingUrlRef.current = next
     const timer = setTimeout(() => {
       router.replace(next, { scroll: false })
     }, 200)
     return () => clearTimeout(timer)
-  }, [filterType, filterStatus, searchTerm, page, router])
+  }, [buildListUrl, router])
 
   // Modal state
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null)
@@ -83,6 +124,38 @@ export default function DashboardPage() {
   useEffect(() => {
     loadUsers()
   }, [page, filterType, filterStatus, debouncedSearch])
+
+  // After the first successful load, restore the scroll position the user
+  // was at when they navigated away to a user detail page.
+  useEffect(() => {
+    if (scrollRestoredRef.current) return
+    if (loading) return
+    if (typeof window === 'undefined') return
+    const raw = sessionStorage.getItem(SCROLL_STORAGE_KEY)
+    if (raw === null) {
+      scrollRestoredRef.current = true
+      return
+    }
+    sessionStorage.removeItem(SCROLL_STORAGE_KEY)
+    scrollRestoredRef.current = true
+    const offset = Number(raw)
+    if (!Number.isFinite(offset) || offset <= 0) return
+    const target = findScrollContainer(rootRef.current)
+    // Wait one frame so the just-rendered table has its real height before
+    // we try to scroll — otherwise the browser clamps to a too-short page.
+    requestAnimationFrame(() => setScrollTop(target, offset))
+  }, [loading])
+
+  // Save scroll position and flush filter URL, then navigate to a route that
+  // we want users to be able to "come back" from (currently: user detail).
+  const navigateAndRemember = (href: string) => {
+    if (typeof window !== 'undefined') {
+      const target = findScrollContainer(rootRef.current)
+      sessionStorage.setItem(SCROLL_STORAGE_KEY, String(getScrollTop(target)))
+      router.replace(pendingUrlRef.current, { scroll: false })
+    }
+    router.push(href)
+  }
 
   const loadUsers = async () => {
     try {
@@ -214,7 +287,7 @@ export default function DashboardPage() {
   const endItem = Math.min(page * pageSize, total)
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div ref={rootRef} className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200">
         <div className="px-6 py-4 flex justify-between items-center">
@@ -332,7 +405,7 @@ export default function DashboardPage() {
                       <tr
                         key={user.id}
                         className="hover:bg-gray-50 cursor-pointer"
-                        onClick={() => router.push(`/dashboard/users/${user.id}`)}
+                        onClick={() => navigateAndRemember(`/dashboard/users/${user.id}`)}
                       >
                         <td
                           className="px-6 py-4 whitespace-nowrap"
