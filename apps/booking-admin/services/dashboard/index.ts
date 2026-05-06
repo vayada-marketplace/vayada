@@ -42,6 +42,23 @@ export interface Sparklines {
   page_views: number[]
 }
 
+export interface PageViewBucket {
+  date: string
+  count: number
+}
+
+export interface PageViewsTimeline {
+  window_start: string
+  window_end: string
+  previous_window_start: string
+  previous_window_end: string
+  buckets: PageViewBucket[]
+  previous_buckets: PageViewBucket[]
+  total: number
+  previous_total: number
+  has_previous_data: boolean
+}
+
 export type TimeRange = 'today' | 'week' | 'month'
 
 export const dashboardService = {
@@ -56,4 +73,7 @@ export const dashboardService = {
 
   getSparklines: (range: TimeRange = 'today') =>
     apiClient.get<Sparklines>(`/admin/dashboard/sparklines?range=${range}`),
+
+  getPageViewsTimeline: (weekOffset = 0) =>
+    apiClient.get<PageViewsTimeline>(`/admin/dashboard/page-views?week_offset=${weekOffset}`),
 }
