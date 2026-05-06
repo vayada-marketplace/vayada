@@ -107,4 +107,81 @@ export const bookingService = {
   async lookup(slug: string, bookingReference: string, guestEmail: string): Promise<Booking> {
     return pms.post(`/api/hotels/${slug}/bookings/lookup`, { bookingReference, guestEmail })
   },
+
+  // Guest-initiated booking change requests (VAY-379)
+  async previewChangeRequest(
+    slug: string,
+    bookingId: string,
+    payload: ChangeRequestPayload,
+  ): Promise<ChangeRequestPreview> {
+    return pms.post(
+      `/api/hotels/${slug}/bookings/${bookingId}/change-request/preview`,
+      payload,
+    )
+  },
+
+  async submitChangeRequest(
+    slug: string,
+    bookingId: string,
+    payload: ChangeRequestPayload,
+  ): Promise<BookingChangeRequest> {
+    return pms.post(
+      `/api/hotels/${slug}/bookings/${bookingId}/change-request`,
+      payload,
+    )
+  },
+
+  async getChangeRequest(
+    slug: string,
+    bookingId: string,
+    email: string,
+  ): Promise<BookingChangeRequest | null> {
+    const params = new URLSearchParams({ email })
+    return pms.get(
+      `/api/hotels/${slug}/bookings/${bookingId}/change-request?${params}`,
+    )
+  },
+}
+
+export interface ChangeRequestPayload {
+  guestEmail: string
+  checkIn: string
+  checkOut: string
+  addonIds: string[]
+  addonQuantities: Record<string, number>
+  addonDates: Record<string, string[]>
+}
+
+export interface ChangeRequestPreview {
+  oldTotal: number
+  newTotal: number
+  priceDifference: number
+  currency: string
+  blocked: boolean
+  blockReason: string | null
+  available: boolean
+}
+
+export interface BookingChangeRequest {
+  id: string
+  bookingId: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  oldCheckIn: string
+  oldCheckOut: string
+  oldAddonIds: string[]
+  oldAddonQuantities: Record<string, number>
+  oldAddonDates: Record<string, string[]>
+  oldTotal: number
+  requestedCheckIn: string
+  requestedCheckOut: string
+  requestedAddonIds: string[]
+  requestedAddonQuantities: Record<string, number>
+  requestedAddonDates: Record<string, string[]>
+  requestedAddonNames: string[]
+  newTotal: number
+  priceDifference: number
+  currency: string
+  declineReason: string | null
+  decidedAt: string | null
+  createdAt: string
 }

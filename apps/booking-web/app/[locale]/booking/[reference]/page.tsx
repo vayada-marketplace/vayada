@@ -9,7 +9,7 @@ import Image from 'next/image'
 import { useHotel, useSlug } from '@/contexts/HotelContext'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { Booking } from '@/lib/types'
-import { bookingService } from '@/services/api/booking'
+import { bookingService, BookingChangeRequest } from '@/services/api/booking'
 import { trackEvent } from '@/services/api/tracking'
 import { readLastBooking, saveLastBooking } from '@/lib/storage/bookingDraft'
 
@@ -59,6 +59,7 @@ export default function BookingConfirmationPage({
   const [withdrawError, setWithdrawError] = useState('')
   const [hydrating, setHydrating] = useState(false)
   const [hydrateError, setHydrateError] = useState(false)
+  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null)
 
   // Booking details are written to sessionStorage on the checkout flow, but
   // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
@@ -99,6 +100,17 @@ export default function BookingConfirmationPage({
       cancelled = true
     }
   }, [params.reference, searchParams.email, slug])
+
+  // Fetch any existing change request once we know the booking + email.
+  useEffect(() => {
+    const email = booking?.guestEmail || searchParams.email
+    if (!booking?.id || !email) return
+    let cancelled = false
+    bookingService.getChangeRequest(slug, booking.id, email)
+      .then((cr) => { if (!cancelled) setChangeRequest(cr) })
+      .catch(() => { /* 404 / network — leave null */ })
+    return () => { cancelled = true }
+  }, [booking?.id, booking?.guestEmail, searchParams.email, slug])
 
   // Poll for status updates every 30s when pending
   useEffect(() => {
@@ -252,7 +264,7 @@ export default function BookingConfirmationPage({
                 {t('detailsUnavailable') || "We couldn't load your booking details here."}
               </p>
               <Link
-                href="/my-booking"
+                href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(searchParams.email || '')}`}
                 className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
               >
                 {t('manageBooking') || 'Manage your booking'}
@@ -309,6 +321,37 @@ export default function BookingConfirmationPage({
             </div>
           )}
 
+          {/* Change request status (VAY-379) */}
+          {changeRequest && changeRequest.status === 'pending' && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
+              <p className="text-sm font-semibold text-blue-900">
+                {t('changePending') || 'Change request pending approval'}
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                {t('changePendingDesc') || 'The hotel will review your requested change and email you once they respond.'}
+              </p>
+              <p className="text-xs text-blue-700 mt-2">
+                {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
+                {' · '}
+                {changeRequest.priceDifference > 0
+                  ? `+${formatPrice(changeRequest.priceDifference, changeRequest.currency)}`
+                  : formatPrice(changeRequest.priceDifference, changeRequest.currency)}
+              </p>
+            </div>
+          )}
+
+          {/* Request Changes — only for confirmed bookings without a pending request. */}
+          {isConfirmed && (!changeRequest || changeRequest.status !== 'pending') && booking && (
+            <div className="mt-6">
+              <Link
+                href={`/booking/${params.reference}/request-change?email=${encodeURIComponent(booking.guestEmail || searchParams.email || '')}`}
+                className="inline-flex px-6 py-3 border border-primary-200 text-primary-700 font-semibold rounded-full hover:bg-primary-50 transition-colors"
+              >
+                {t('requestChanges') || 'Request Changes'}
+              </Link>
+            </div>
+          )}
+
           {/* Withdraw button for pending bookings */}
           {isPending && (
             <div className="mt-8">
@@ -334,7 +377,7 @@ export default function BookingConfirmationPage({
               {t('backToHotel')}
             </Link>
             <Link
-              href="/my-booking"
+              href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(booking?.guestEmail || searchParams.email || '')}`}
               className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
             >
               {t('manageBooking')}
