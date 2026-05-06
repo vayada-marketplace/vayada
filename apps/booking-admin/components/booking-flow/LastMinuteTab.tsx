@@ -253,13 +253,15 @@ export default function LastMinuteTab() {
               </div>
             )}
           </div>
-
-          {/* Save */}
-          <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving} />
-          </div>
         </>
       )}
+
+      {/* Save — always rendered so users can persist the OFF state.
+          When the master toggle is flipped from ON → OFF, the tiers + stacking
+          panels above unmount, but the user still needs to commit the change. */}
+      <div className="flex justify-end">
+        <SaveButton onClick={handleSave} saving={saving} />
+      </div>
     </div>
   )
 }
