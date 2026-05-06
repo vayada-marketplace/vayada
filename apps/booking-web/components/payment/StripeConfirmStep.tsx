@@ -21,6 +21,7 @@ interface StripeConfirmStepProps {
   addons: Addon[]
   selectedAddonIds: string[]
   addonQuantities: Record<string, number>
+  addonDates?: Record<string, string[]>
   addonTotal: number
   grandTotal: number
   booking: Booking
@@ -44,6 +45,7 @@ export default function StripeConfirmStep({
   addons,
   selectedAddonIds,
   addonQuantities,
+  addonDates,
   addonTotal,
   grandTotal,
   booking,
@@ -113,17 +115,23 @@ export default function StripeConfirmStep({
               <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
             </div>
             {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
-              const qty = addon.perNight ? (addonQuantities?.[addon.id] ?? nights) : (addonQuantities?.[addon.id] ?? 1)
-              const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
-              const annotation = addon.perNight
-                ? (qty < nights ? ` (${qty}/${nights})` : '')
-                : addon.perPerson
-                  ? ` (${qty}/${adults})`
-                  : qty > 1 ? ` ×${qty}` : ''
+              const count = addonQuantities?.[addon.id]
+              const dates = addonDates?.[addon.id]
+              const people = addon.perPerson ? Math.max(1, Math.min(count ?? Math.max(1, adults), Math.max(1, adults))) : 1
+              const days = addon.perNight
+                ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+                : 1
+              const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1
+              const linePrice = convertAndRound(addon.price * people * days * items, addon.currency)
+              const parts: string[] = []
+              if (addon.perPerson && people < adults) parts.push(`${people}/${adults}`)
+              if (addon.perNight && days < nights) parts.push(`${days}/${nights}`)
+              if (!addon.perPerson && !addon.perNight && items > 1) parts.push(`×${items}`)
+              const annotation = parts.length ? ` (${parts.join(' · ')})` : ''
               return (
                 <div key={addon.id} className="flex justify-between text-sm">
                   <span className="text-gray-500">{addon.name}{annotation}</span>
-                  <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
+                  <span className="font-semibold text-gray-900">{formatPrice(linePrice, selectedCurrency)}</span>
                 </div>
               )
             })}

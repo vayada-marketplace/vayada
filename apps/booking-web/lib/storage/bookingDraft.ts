@@ -20,6 +20,8 @@ export interface GuestDetailsDraft {
   referralCode?: string
   addonIds?: string[]
   addonQuantities?: Record<string, number>
+  /** Per-day addon date selections — ISO strings keyed by addon id. */
+  addonDates?: Record<string, string[]>
 }
 
 const GUEST_KEY = 'guestDetails'

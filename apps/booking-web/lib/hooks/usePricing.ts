@@ -21,8 +21,11 @@ export interface PricingInputs {
   checkOut: string
   rateType: string
   roomsParam: number
+  adults: number
   selectedAddonIds: string[]
   addonQuantities: Record<string, number>
+  /** ISO dates per addon for perNight charges. Empty/missing → all stay dates. */
+  addonDates?: Record<string, string[]>
   promoCode: string
 }
 
@@ -50,8 +53,10 @@ export function usePricing({
   checkOut,
   rateType,
   roomsParam,
+  adults,
   selectedAddonIds,
   addonQuantities,
+  addonDates,
   promoCode,
 }: PricingInputs) {
   const { hotel } = useHotel()
@@ -74,21 +79,28 @@ export function usePricing({
 
   // Sum addon line totals in the displayed currency. Each line is rounded
   // first so its shown price matches its contribution.
+  // price = unit × people × days × items, mirroring the backend in
+  // pms-backend/app/services/booking_service._compute_addon_total.
   const selectedKey = selectedAddonIds.join(',')
   const quantitiesKey = JSON.stringify(addonQuantities)
+  const datesKey = JSON.stringify(addonDates ?? {})
   const addonTotal = useMemo(() => {
     let total = 0
     for (const addon of addons) {
       if (!selectedAddonIds.includes(addon.id)) continue
-      const qty = addon.perNight
-        ? (addonQuantities[addon.id] ?? nights)
-        : (addonQuantities[addon.id] ?? 1)
-      total += convertAndRound(addon.price * qty, addon.currency)
+      const count = addonQuantities[addon.id]
+      const dates = addonDates?.[addon.id]
+      const people = addon.perPerson ? Math.max(1, Math.min(count ?? Math.max(1, adults), Math.max(1, adults))) : 1
+      const days = addon.perNight
+        ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+        : 1
+      const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1
+      total += convertAndRound(addon.price * people * days * items, addon.currency)
     }
     return total
-    // selectedKey/quantitiesKey are stable identity proxies for the inputs.
+    // selectedKey/quantitiesKey/datesKey are stable identity proxies for the inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addons, selectedKey, quantitiesKey, nights, convertAndRound])
+  }, [addons, selectedKey, quantitiesKey, datesKey, nights, adults, convertAndRound])
 
   const [promoDiscount, setPromoDiscount] = useState<PromoDiscount | null>(null)
   useEffect(() => {

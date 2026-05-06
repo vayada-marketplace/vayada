@@ -60,6 +60,7 @@ function PaymentPageContent() {
   const [guestDetails, setGuestDetails] = useState<GuestDetailsDraft | null>(null)
   const selectedAddonIds = guestDetails?.addonIds || []
   const addonQuantities = guestDetails?.addonQuantities || {}
+  const addonDates = guestDetails?.addonDates || {}
   const promoCodeParam = searchParams.get('promoCode') || ''
 
   const {
@@ -76,8 +77,10 @@ function PaymentPageContent() {
     checkOut,
     rateType,
     roomsParam,
+    adults: adultsParam,
     selectedAddonIds,
     addonQuantities,
+    addonDates,
     promoCode: promoCodeParam,
   })
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'pay_at_property' | 'xendit' | 'bank_transfer'>('pay_at_property')
@@ -163,6 +166,7 @@ function PaymentPageContent() {
         rateType,
         addonIds: selectedAddonIds,
         addonQuantities,
+        addonDates,
         promoCode: promoCodeParam || undefined,
       })
 
@@ -206,6 +210,7 @@ function PaymentPageContent() {
           addons={addons}
           selectedAddonIds={selectedAddonIds}
           addonQuantities={addonQuantities}
+          addonDates={addonDates}
           addonTotal={addonTotal}
           grandTotal={grandTotal}
           booking={pendingBooking}
@@ -604,17 +609,23 @@ function PaymentPageContent() {
                   <span className="font-semibold text-gray-900">{formatPrice(roomTotal, selectedCurrency)}</span>
                 </div>
                 {addons.filter((a) => selectedAddonIds.includes(a.id)).map((addon) => {
-                  const qty = addon.perNight ? (addonQuantities[addon.id] ?? nights) : (addonQuantities[addon.id] ?? 1)
-                  const unitPriceDisplay = convertAndRound(addon.price * qty, addon.currency)
-                  const annotation = addon.perNight
-                    ? (qty < nights ? ` (${qty}/${nights})` : '')
-                    : addon.perPerson
-                      ? ` (${qty}/${adultsParam})`
-                      : qty > 1 ? ` ×${qty}` : ''
+                  const count = addonQuantities[addon.id]
+                  const dates = addonDates[addon.id]
+                  const people = addon.perPerson ? Math.max(1, Math.min(count ?? Math.max(1, adultsParam), Math.max(1, adultsParam))) : 1
+                  const days = addon.perNight
+                    ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+                    : 1
+                  const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1
+                  const linePrice = convertAndRound(addon.price * people * days * items, addon.currency)
+                  const parts: string[] = []
+                  if (addon.perPerson && people < adultsParam) parts.push(`${people}/${adultsParam}`)
+                  if (addon.perNight && days < nights) parts.push(`${days}/${nights}`)
+                  if (!addon.perPerson && !addon.perNight && items > 1) parts.push(`×${items}`)
+                  const annotation = parts.length ? ` (${parts.join(' · ')})` : ''
                   return (
                     <div key={addon.id} className="flex justify-between text-sm">
                       <span className="text-gray-500">{addon.name}{annotation}</span>
-                      <span className="font-semibold text-gray-900">{formatPrice(unitPriceDisplay, selectedCurrency)}</span>
+                      <span className="font-semibold text-gray-900">{formatPrice(linePrice, selectedCurrency)}</span>
                     </div>
                   )
                 })}
