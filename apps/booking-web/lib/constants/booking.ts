@@ -16,6 +16,58 @@ export function getFreeCancellationDays(cancellationPolicy?: string | null): num
   return match ? parseInt(match[1], 10) : 7
 }
 
+/** Today's date as YYYY-MM-DD in the given IANA timezone (falls back to browser local). */
+function todayInTimezone(timezone?: string | null): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || undefined,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  return fmt.format(new Date())
+}
+
+/** Whole days between two YYYY-MM-DD date strings (b - a). */
+function daysBetween(a: string, b: string): number {
+  const da = new Date(`${a}T00:00:00Z`).getTime()
+  const db = new Date(`${b}T00:00:00Z`).getTime()
+  return Math.round((db - da) / 86_400_000)
+}
+
+/** Smallest "days before check-in" window after which Flexible Rate cancellation is no longer
+ *  meaningful. For free-cancellation rates this is the policy's days-before-checkin. For
+ *  partial-refund rates, Flexible only fully expires once even the lowest tier window has
+ *  passed, so we use the smallest minDaysBeforeCheckIn. */
+export function getFlexibleCancellationCutoffDays(room: {
+  cancellationPolicy?: string | null
+  flexibleCancellationType?: 'free' | 'partial_refund'
+  partialRefundCancelWindowDays?: number | null
+  partialRefundTiers?: { minDaysBeforeCheckIn: number; refundPercent: number }[] | null
+}): number {
+  if (room.flexibleCancellationType === 'partial_refund') {
+    if (room.partialRefundTiers && room.partialRefundTiers.length > 0) {
+      return Math.min(...room.partialRefundTiers.map((t) => t.minDaysBeforeCheckIn))
+    }
+    return room.partialRefundCancelWindowDays ?? 30
+  }
+  return getFreeCancellationDays(room.cancellationPolicy)
+}
+
+/** True when the Flexible Rate cancellation deadline has already passed for the given check-in.
+ *  Boundary day (daysUntilCheckIn === cutoff) is treated as still-allowed; one day later it
+ *  expires. Comparison uses the property's local "today" so a guest in another timezone sees
+ *  the same eligibility as the hotel. */
+export function isFlexibleCancellationExpired(
+  checkIn: string,
+  room: Parameters<typeof getFlexibleCancellationCutoffDays>[0],
+  timezone?: string | null,
+): boolean {
+  if (!checkIn) return false
+  const cutoff = getFlexibleCancellationCutoffDays(room)
+  const daysUntil = daysBetween(todayInTimezone(timezone), checkIn)
+  return daysUntil < cutoff
+}
+
 /** Calculate the discount amount from a promo code. */
 export function calculatePromoDiscount(
   subtotal: number,

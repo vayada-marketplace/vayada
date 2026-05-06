@@ -35,6 +35,7 @@ export interface Hotel {
   amenities: string[]
   checkInTime: string
   checkOutTime: string
+  timezone?: string
   contact: HotelContact
   bookingFilters: string[]
   customFilters?: Record<string, string>

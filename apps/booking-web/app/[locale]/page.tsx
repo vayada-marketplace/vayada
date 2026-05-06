@@ -525,6 +525,8 @@ function HomePageContent() {
               nights={nights}
               totalGuests={committedAdults + committedChildren}
               imageIndex={imageIndices[room.id] ?? 0}
+              checkIn={committedCheckIn}
+              hotelTimezone={hotel.timezone}
               onChangeImageIndex={(i) => setImageIndices((prev) => ({ ...prev, [room.id]: i }))}
               expandedRate={(expandedRates[room.id] as 'flexible' | 'nonrefundable' | null) ?? null}
               onToggleRate={(next) => setExpandedRates((prev) => ({ ...prev, [room.id]: next }))}
@@ -556,6 +558,8 @@ function HomePageContent() {
             soldOut={modalSoldOut}
             checkInTime={hotel.checkInTime}
             checkOutTime={hotel.checkOutTime}
+            checkIn={committedCheckIn}
+            hotelTimezone={hotel.timezone}
             onSelectRate={(rateType) => {
               if (modalSoldOut) return
               const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ''}`
