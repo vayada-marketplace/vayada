@@ -19,3 +19,29 @@ export function getCurrencySymbol(currency: string): string {
   }
   return symbols[currency] || currency
 }
+
+// Locale-aware currency formatter. Falls back to 'en' when locale is empty so
+// number grouping still follows a sensible default rather than the host system.
+export function formatCurrency(
+  value: number,
+  currencyCode: string,
+  locale: string | undefined,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  return new Intl.NumberFormat(locale || 'en', {
+    style: 'currency',
+    currency: currencyCode,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+    ...options,
+  }).format(value)
+}
+
+// Locale-aware integer/number formatter for non-currency values (counts, etc.).
+export function formatNumber(
+  value: number,
+  locale: string | undefined,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  return new Intl.NumberFormat(locale || 'en', options).format(value)
+}

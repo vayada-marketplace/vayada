@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useTranslation } from '@/lib/i18n'
+import { formatCurrency, formatNumber } from '@/lib/utils'
 import { settingsService, type PropertySettings } from '@/services/settings'
 import {
   dashboardService,
@@ -28,15 +29,20 @@ const SOURCE_LABELS: Record<string, string> = {
   google: 'Google Hotels',
 }
 
-function formatCurrencyWithCode(value: number, currencyCode: string): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
-}
-
-function formatDiff(current: number, previous: number, isCurrency = false, currencyCode = 'EUR', t?: (key: string) => string, vsLabel?: string): { text: string; positive: boolean | null } {
+function formatDiff(
+  current: number,
+  previous: number,
+  locale: string,
+  isCurrency = false,
+  currencyCode = 'EUR',
+  t?: (key: string) => string,
+  vsLabel?: string,
+): { text: string; positive: boolean | null } {
   const diff = current - previous
   if (diff === 0 && current === 0) return { text: t ? t('dashboard.stats.noDataYet') : 'No data yet', positive: null }
   if (diff === 0) return { text: t ? t('dashboard.stats.samePeriod') : 'Same as previous period', positive: null }
-  const formatted = isCurrency ? formatCurrencyWithCode(Math.abs(diff), currencyCode) : Math.abs(diff).toString()
+  const absDiff = Math.abs(diff)
+  const formatted = isCurrency ? formatCurrency(absDiff, currencyCode, locale) : formatNumber(absDiff, locale)
   const vsPrevious = vsLabel ?? (t ? t('dashboard.stats.vsPrevious') : 'vs previous')
   if (diff > 0) return { text: `\u2191 +${formatted} ${vsPrevious}`, positive: true }
   return { text: `\u2193 -${formatted} ${vsPrevious}`, positive: false }
@@ -161,10 +167,10 @@ export default function DashboardPage() {
     ? t('dashboard.stats.vsLastWeek')
     : t('dashboard.stats.vsLast30Days')
 
-  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, true, currency, t, vsLabel) : null
-  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous, false, 'EUR', t, vsLabel) : null
-  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, true, currency, t, vsLabel) : null
-  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, false, 'EUR', t, vsLabel) : null
+  const revenueDiff = stats ? formatDiff(stats.revenue, stats.revenue_previous, locale, true, currency, t, vsLabel) : null
+  const bookingsDiff = stats ? formatDiff(stats.bookings, stats.bookings_previous, locale, false, 'EUR', t, vsLabel) : null
+  const rateDiff = stats ? formatDiff(stats.avg_nightly_rate, stats.avg_nightly_rate_previous, locale, true, currency, t, vsLabel) : null
+  const viewsDiff = stats ? formatDiff(stats.page_views, stats.page_views_previous, locale, false, 'EUR', t, vsLabel) : null
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
@@ -204,7 +210,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
           </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? formatCurrencyWithCode(stats.revenue, currency) : '--'}</p>
+          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? formatCurrency(stats.revenue, currency, locale) : '--'}</p>
           {revenueDiff && (
             <p className={`text-[13px] mt-1 ${revenueDiff.positive === true ? 'text-green-600' : revenueDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {revenueDiff.text}
@@ -223,7 +229,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
           </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? stats.bookings : '--'}</p>
+          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? formatNumber(stats.bookings, locale) : '--'}</p>
           {bookingsDiff && (
             <p className={`text-[13px] mt-1 ${bookingsDiff.positive === true ? 'text-green-600' : bookingsDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {bookingsDiff.text}
@@ -231,7 +237,7 @@ export default function DashboardPage() {
           )}
           <p className="text-[11px] text-gray-500 mt-1">
             {stats?.next_arrival
-              ? `${t('dashboard.stats.nextArrival')} ${new Date(stats.next_arrival).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+              ? `${t('dashboard.stats.nextArrival')} ${new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(new Date(stats.next_arrival))}`
               : ' '}
           </p>
           {sparklines && renderSparkline(sparklines.bookings)}
@@ -246,7 +252,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
             </svg>
           </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? formatCurrencyWithCode(stats.avg_nightly_rate, currency) : '--'}</p>
+          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">{stats ? formatCurrency(stats.avg_nightly_rate, currency, locale) : '--'}</p>
           {rateDiff && (
             <p className={`text-[13px] mt-1 ${rateDiff.positive === true ? 'text-green-600' : rateDiff.positive === false ? 'text-red-500' : 'text-gray-500'}`}>
               {rateDiff.text}
@@ -270,7 +276,7 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
           </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate w-full">{stats ? stats.page_views : '--'}</p>
+          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate w-full">{stats ? formatNumber(stats.page_views, locale) : '--'}</p>
           {viewsDiff && (
             <p className={`text-[13px] mt-1 ${viewsDiff.positive === null ? 'text-gray-500' : viewsDiff.positive ? 'text-green-600' : 'text-red-500'}`}>
               {viewsDiff.text}
@@ -278,7 +284,7 @@ export default function DashboardPage() {
           )}
           <p className="text-[11px] text-gray-500 mt-1">
             {stats && stats.bookings > 0 && stats.page_views > 0
-              ? `${((stats.bookings / stats.page_views) * 100).toFixed(1)}% ${t('dashboard.stats.bookingRate')}`
+              ? `${formatNumber((stats.bookings / stats.page_views) * 100, locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% ${t('dashboard.stats.bookingRate')}`
               : ' '}
           </p>
           {sparklines && renderSparkline(sparklines.page_views, 'bg-gray-200')}
@@ -313,7 +319,7 @@ export default function DashboardPage() {
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white flex flex-col items-center justify-center px-1 overflow-hidden">
                   {(() => {
-                    const valueText = sources ? formatCurrencyWithCode(sources.total_revenue, currency) : '--'
+                    const valueText = sources ? formatCurrency(sources.total_revenue, currency, locale) : '--'
                     return (
                       <span className={`${donutValueFontSize(valueText)} font-bold text-gray-900 text-center whitespace-nowrap`}>
                         {valueText}
@@ -341,8 +347,8 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-[13px] font-medium text-gray-900">{s.percentage}%</span>
-                    <span className="text-[13px] text-gray-500">{formatCurrencyWithCode(s.revenue, currency)}</span>
+                    <span className="text-[13px] font-medium text-gray-900">{formatNumber(s.percentage, locale)}%</span>
+                    <span className="text-[13px] text-gray-500">{formatCurrency(s.revenue, currency, locale)}</span>
                   </div>
                 </div>
               ))
@@ -355,7 +361,7 @@ export default function DashboardPage() {
           {sources && sources.sources.length > 0 && sources.sources[0]?.source === 'direct' && sources.sources[0]?.percentage > 50 && (
             <div className="mt-3 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
               <p className="text-[13px] text-blue-700">
-                {sources.sources[0].percentage}% {t('dashboard.bookingsBySource.directBookingShare')}
+                {formatNumber(sources.sources[0].percentage, locale)}% {t('dashboard.bookingsBySource.directBookingShare')}
               </p>
             </div>
           )}
@@ -379,8 +385,8 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[13px] text-gray-700">{label}</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold text-gray-900">{value.toLocaleString()}</span>
-                      <span className="text-[11px] text-gray-500">{percentage}%</span>
+                      <span className="text-[13px] font-semibold text-gray-900">{formatNumber(value, locale)}</span>
+                      <span className="text-[11px] text-gray-500">{formatNumber(percentage, locale)}%</span>
                     </div>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-8 overflow-hidden">
@@ -469,7 +475,7 @@ function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, 
         <div className="flex items-end gap-2 h-40 mb-2">
           {sparkline.map((v, i) => (
             <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-              <span className="text-[11px] font-medium text-gray-700 mb-1">{v}</span>
+              <span className="text-[11px] font-medium text-gray-700 mb-1">{formatNumber(v, locale)}</span>
               <div
                 className="w-full bg-primary-500 rounded-t"
                 style={{ height: `${Math.max((v / max) * 100, 2)}%` }}
@@ -488,14 +494,14 @@ function PageViewsDetailModal({ range, sparkline, current, previous, locale, t, 
         <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-4 text-[13px]">
           <div>
             <div className="text-gray-500">{t('dashboard.pageViewsModal.totalInWindow')}</div>
-            <div className="text-xl font-semibold text-gray-900">{total}</div>
+            <div className="text-xl font-semibold text-gray-900">{formatNumber(total, locale)}</div>
           </div>
           <div>
             <div className="text-gray-500">{vsLabel}</div>
             <div className={`text-xl font-semibold ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-500' : 'text-gray-900'}`}>
-              {diff > 0 ? '+' : ''}{diff}
+              {diff > 0 ? '+' : ''}{formatNumber(diff, locale)}
               {pctChange !== null && (
-                <span className="text-[13px] font-normal ml-2">({diff > 0 ? '+' : ''}{pctChange}%)</span>
+                <span className="text-[13px] font-normal ml-2">({diff > 0 ? '+' : ''}{formatNumber(pctChange, locale)}%)</span>
               )}
             </div>
           </div>
