@@ -235,6 +235,13 @@ async def update_room_type(
         await RoomRepository.rename_auto_named(
             hotel_id, room_type_id, existing["name"], new_name,
         )
+    # Even on a no-op save, sweep stale auto-names left over from a
+    # rename that happened before the on-rename fix shipped (VAY-322).
+    # A hotel admin re-saving the type — without changing anything — is
+    # enough to repair the broken state.
+    await RoomRepository.heal_stale_room_names(
+        hotel_id, room_type_id, room["name"],
+    )
 
     cancel_fields = {
         "flexible_cancellation_type",
