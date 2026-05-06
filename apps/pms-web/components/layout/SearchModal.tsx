@@ -10,7 +10,7 @@ interface SearchResult {
   id: string
   label: string
   sublabel: string
-  category: 'page' | 'reservation' | 'room'
+  category: 'page' | 'setting' | 'reservation' | 'room'
   href: string
 }
 
@@ -19,6 +19,16 @@ interface PageEntry {
   labelKey: string
   sublabelKey: string
   href: string
+}
+
+interface SettingEntry {
+  id: string
+  labelKey: string
+  sublabelKey: string
+  href: string
+  // Lowercase, language-agnostic keywords matched in addition to the
+  // translated label/sublabel — e.g. "money" → currency, "arrival" → check-in.
+  keywords: string[]
 }
 
 const PAGES: PageEntry[] = [
@@ -30,6 +40,53 @@ const PAGES: PageEntry[] = [
   { id: 'channel-manager', labelKey: 'layout.sidebar.channelManager', sublabelKey: 'search.pageChannelManagerHint', href: '/channel-manager' },
   { id: 'financials', labelKey: 'layout.sidebar.financials', sublabelKey: 'search.pageFinancialsHint', href: '/financials' },
   { id: 'settings', labelKey: 'layout.sidebar.settings', sublabelKey: 'search.pageSettingsHint', href: '/settings' },
+]
+
+const SETTINGS: SettingEntry[] = [
+  {
+    id: 'change-language',
+    labelKey: 'search.settingChangeLanguage',
+    sublabelKey: 'search.settingChangeLanguageHint',
+    href: '/settings#language',
+    keywords: ['language', 'locale', 'translate', 'translation', 'sprache', 'idioma', 'langue', 'bahasa', '语言', 'язык'],
+  },
+  {
+    id: 'change-currency',
+    labelKey: 'search.settingChangeCurrency',
+    sublabelKey: 'search.settingChangeCurrencyHint',
+    href: '/settings#currency',
+    keywords: ['currency', 'money', 'price', 'eur', 'usd', 'gbp', 'idr', 'fx'],
+  },
+  {
+    id: 'check-in-out',
+    labelKey: 'search.settingCheckInOut',
+    sublabelKey: 'search.settingCheckInOutHint',
+    href: '/settings#check-in-out',
+    keywords: [
+      'check-in', 'check in', 'checkin',
+      'check-out', 'check out', 'checkout',
+      'arrival', 'arrival time', 'departure', 'departure time',
+      'time', 'times', 'hours',
+    ],
+  },
+  {
+    id: 'property-details',
+    labelKey: 'search.settingPropertyDetails',
+    sublabelKey: 'search.settingPropertyDetailsHint',
+    href: '/settings#property-details',
+    keywords: [
+      'property', 'property details', 'property settings', 'hotel',
+      'address', 'city', 'country', 'state', 'zip', 'phone',
+      'timezone', 'lat', 'long', 'latitude', 'longitude',
+    ],
+  },
+  {
+    id: 'instant-booking',
+    labelKey: 'search.settingInstantBooking',
+    sublabelKey: 'search.settingInstantBookingHint',
+    href: '/settings#booking-engine',
+    keywords: ['instant book', 'instant booking', 'auto accept', 'request to book', 'booking request', 'accept'],
+  },
 ]
 
 export default function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -85,6 +142,23 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
           href: p.href,
         }))
 
+      // Settings actions match against translated label/sublabel + keywords,
+      // so synonyms like "money" or "arrival time" still surface the right setting.
+      const settingResults: SearchResult[] = SETTINGS
+        .filter(s => {
+          const label = t(s.labelKey).toLowerCase()
+          const sublabel = t(s.sublabelKey).toLowerCase()
+          if (label.includes(q) || sublabel.includes(q)) return true
+          return s.keywords.some(k => k.includes(q) || q.includes(k))
+        })
+        .map(s => ({
+          id: `setting-${s.id}`,
+          label: t(s.labelKey),
+          sublabel: t(s.sublabelKey),
+          category: 'setting',
+          href: s.href,
+        }))
+
       // Server-side booking search
       let bookingResults: SearchResult[] = []
       try {
@@ -112,7 +186,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
           href: `/rooms`,
         }))
 
-      setResults([...pageResults, ...bookingResults, ...roomResults])
+      setResults([...pageResults, ...settingResults, ...bookingResults, ...roomResults])
       setActiveIndex(0)
     }, 250)
 
@@ -149,6 +223,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
 
   const CATEGORY_LABELS: Record<string, string> = {
     page: t('search.categoryPages'),
+    setting: t('search.categorySettings'),
     reservation: t('search.categoryReservations'),
     room: t('search.categoryRoomTypes'),
   }
@@ -216,6 +291,8 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                       item.category === 'page'
                         ? 'bg-violet-50 text-violet-500'
+                        : item.category === 'setting'
+                        ? 'bg-amber-50 text-amber-500'
                         : item.category === 'reservation'
                         ? 'bg-blue-50 text-blue-500'
                         : 'bg-emerald-50 text-emerald-500'
@@ -224,6 +301,11 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M5 12h14" />
                           <path d="m13 18 6-6-6-6" />
+                        </svg>
+                      ) : item.category === 'setting' ? (
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                         </svg>
                       ) : item.category === 'reservation' ? (
                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
