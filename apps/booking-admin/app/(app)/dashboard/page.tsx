@@ -142,11 +142,15 @@ export default function DashboardPage() {
     )
   }
 
-  // Scale down for long currency strings (e.g. "IDR 1,234,567,890") so the label fits the inner circle.
+  // Tiers retuned for the smaller inner circle introduced when the dashboard
+  // was tightened — long strings like "IDR 1,234,567,890" (17 chars) must
+  // still fit inside the inner circle without overlapping the colored ring.
   const donutValueFontSize = (text: string): string => {
-    if (text.length <= 8) return 'text-xl md:text-2xl'
-    if (text.length <= 12) return 'text-base md:text-xl'
-    return 'text-sm md:text-base'
+    if (text.length <= 6) return 'text-xl md:text-2xl'
+    if (text.length <= 9) return 'text-base md:text-lg'
+    if (text.length <= 12) return 'text-sm md:text-base'
+    if (text.length <= 14) return 'text-[11px] md:text-xs'
+    return 'text-[9px] md:text-[10px]'
   }
 
   // The previous-period comparison was a vague "vs previous"; spell out
@@ -206,6 +210,8 @@ export default function DashboardPage() {
               {revenueDiff.text}
             </p>
           )}
+          {/* Empty subtitle slot keeps this card the same shape as cards with next-arrival / booking-rate. */}
+          <p className="text-[11px] text-gray-500 mt-1">{' '}</p>
           {sparklines && renderSparkline(sparklines.revenue)}
         </div>
 
@@ -223,11 +229,11 @@ export default function DashboardPage() {
               {bookingsDiff.text}
             </p>
           )}
-          {stats?.next_arrival && (
-            <p className="text-[11px] text-gray-500 mt-1">
-              {t('dashboard.stats.nextArrival')} {new Date(stats.next_arrival).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-            </p>
-          )}
+          <p className="text-[11px] text-gray-500 mt-1">
+            {stats?.next_arrival
+              ? `${t('dashboard.stats.nextArrival')} ${new Date(stats.next_arrival).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+              : ' '}
+          </p>
           {sparklines && renderSparkline(sparklines.bookings)}
         </div>
 
@@ -246,6 +252,7 @@ export default function DashboardPage() {
               {rateDiff.text}
             </p>
           )}
+          <p className="text-[11px] text-gray-500 mt-1">{' '}</p>
           {sparklines && renderSparkline(sparklines.avg_rate)}
         </div>
 
@@ -269,11 +276,11 @@ export default function DashboardPage() {
               {viewsDiff.text}
             </p>
           )}
-          {stats && stats.bookings > 0 && stats.page_views > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1">
-              {((stats.bookings / stats.page_views) * 100).toFixed(1)}% {t('dashboard.stats.bookingRate')}
-            </p>
-          )}
+          <p className="text-[11px] text-gray-500 mt-1">
+            {stats && stats.bookings > 0 && stats.page_views > 0
+              ? `${((stats.bookings / stats.page_views) * 100).toFixed(1)}% ${t('dashboard.stats.bookingRate')}`
+              : ' '}
+          </p>
           {sparklines && renderSparkline(sparklines.page_views, 'bg-gray-200')}
         </button>
       </div>
@@ -304,7 +311,7 @@ export default function DashboardPage() {
                 style={{ background: donutGradient }}
               />
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-white flex flex-col items-center justify-center px-2">
+                <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white flex flex-col items-center justify-center px-1 overflow-hidden">
                   {(() => {
                     const valueText = sources ? formatCurrencyWithCode(sources.total_revenue, currency) : '--'
                     return (
