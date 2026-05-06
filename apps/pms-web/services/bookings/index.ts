@@ -75,6 +75,30 @@ export interface PaymentSettingsResponse {
   cancellationPolicy: CancellationPolicy
 }
 
+export interface BookingChangeRequest {
+  id: string
+  bookingId: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  oldCheckIn: string
+  oldCheckOut: string
+  oldAddonIds: string[]
+  oldAddonQuantities: Record<string, number>
+  oldAddonDates: Record<string, string[]>
+  oldTotal: number
+  requestedCheckIn: string
+  requestedCheckOut: string
+  requestedAddonIds: string[]
+  requestedAddonQuantities: Record<string, number>
+  requestedAddonDates: Record<string, string[]>
+  requestedAddonNames: string[]
+  newTotal: number
+  priceDifference: number
+  currency: string
+  declineReason: string | null
+  decidedAt: string | null
+  createdAt: string
+}
+
 export const bookingsService = {
   list: (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
     const qs = buildQueryString(params)
@@ -135,4 +159,16 @@ export const bookingsService = {
   getStripeOnboardingLink: () =>
     pmsClient.get<{ url: string }>('/admin/stripe/connect-onboarding-link'),
 
+  // Guest-initiated booking change requests (VAY-379)
+  getChangeRequest: (id: string) =>
+    pmsClient.get<BookingChangeRequest | null>(`/admin/bookings/${id}/change-request`),
+
+  approveChangeRequest: (id: string) =>
+    pmsClient.post<BookingChangeRequest>(`/admin/bookings/${id}/change-request/approve`, {}),
+
+  declineChangeRequest: (id: string, reason?: string) =>
+    pmsClient.post<BookingChangeRequest>(
+      `/admin/bookings/${id}/change-request/decline`,
+      { reason },
+    ),
 }
