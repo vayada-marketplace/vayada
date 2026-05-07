@@ -261,8 +261,10 @@ async def full_channex_ari_sync():
 
 
 async def poll_channex_messages():
-    """Safety-net sweep: reconcile Channex message threads in case the webhook
-    missed an event. Idempotent."""
+    """Manual reconciliation sweep — no longer scheduled. Channex requested we
+    stop polling their `BookingMessages` list/feed; we rely on the `message`
+    webhook instead. This function remains available for on-demand admin
+    recovery if a webhook is suspected to have been missed."""
     try:
         await poll_messages_for_all_hotels()
     except Exception as e:
@@ -321,11 +323,8 @@ def setup_scheduler():
         replace_existing=True,
     )
 
-    scheduler.add_job(
-        poll_channex_messages,
-        trigger=IntervalTrigger(minutes=app_settings.CHANNEX_MESSAGE_POLL_INTERVAL_MINUTES),
-        id="poll_channex_messages",
-        replace_existing=True,
-    )
+    # Channex message polling is disabled — Channex flagged the volume; we now
+    # rely on the `message` webhook (handled in routers/webhooks.py). The
+    # `poll_channex_messages` function is kept for manual recovery.
 
     return scheduler
