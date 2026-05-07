@@ -21,6 +21,39 @@ from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
 
+# Channex rate plan titles must fit a 255-char column. Long room-type names
+# combined with channel + meal-plan suffixes have hit that limit in the wild
+# and surfaced as a 422 with a useless URL.
+RATE_PLAN_TITLE_MAX_LENGTH = 255
+
+
+async def _preflight_check(hotel_id: str, currency: str, room_types: list) -> None:
+    """Reject provisioning before calling Channex if the hotel is missing
+    data Channex requires. Raises ValueError with an actionable message —
+    the router maps it to a 400 with that message in the detail."""
+    if not currency:
+        raise ValueError(
+            "Channel manager can't be enabled yet: hotel currency isn't set. "
+            "Set it in Settings → General before enabling."
+        )
+    if not room_types:
+        raise ValueError(
+            "Channel manager can't be enabled yet: no active room types. "
+            "Add at least one room type before enabling."
+        )
+    for rt in room_types:
+        name = rt.get("name") or "Unnamed room"
+        if not rt.get("total_rooms") or int(rt["total_rooms"]) < 1:
+            raise ValueError(
+                f"Channel manager can't be enabled yet: room type '{name}' has no rooms. "
+                "Set total_rooms ≥ 1 before enabling."
+            )
+        if not rt.get("max_occupancy") or int(rt["max_occupancy"]) < 1:
+            raise ValueError(
+                f"Channel manager can't be enabled yet: room type '{name}' has no occupancy. "
+                "Set max_occupancy ≥ 1 before enabling."
+            )
+
 
 async def provision_property(hotel_id: str) -> dict:
     """Create property + room types + rate plans in Channex for a hotel.
@@ -39,6 +72,20 @@ async def provision_property(hotel_id: str) -> dict:
     # Currency is owned by booking_db.booking_hotels (see
     # memory/project_hotel_data_ownership.md).
     currency = await get_be_currency(hotel_id)
+
+    # Pre-flight: validate the data Channex requires before we burn an API
+    # round-trip on a guaranteed 422. Lets us return an actionable 400
+    # instead of "Channex rejected rate_plans: ..." when the gap is on our
+    # side (e.g. hotel currency missing).
+    room_types = await Database.fetch(
+        """
+        SELECT * FROM room_types
+        WHERE hotel_id = $1 AND is_active = true
+        ORDER BY sort_order, name
+        """,
+        hotel_id,
+    )
+    await _preflight_check(hotel_id, currency, room_types)
 
     # Step 1: Create property in Channex (or skip if already exists)
     if conn.get("channex_property_id"):
@@ -88,15 +135,8 @@ async def provision_property(hotel_id: str) -> dict:
                 hotel_id, e,
             )
 
-    # Step 2: Create room types + rate plans for each vayada room type
-    room_types = await Database.fetch(
-        """
-        SELECT * FROM room_types
-        WHERE hotel_id = $1 AND is_active = true
-        ORDER BY sort_order, name
-        """,
-        hotel_id,
-    )
+    # Step 2: Create room types + rate plans for each vayada room type.
+    # `room_types` was loaded above for pre-flight; reuse it.
 
     rooms_created = 0
     rates_created = 0
@@ -174,13 +214,19 @@ async def provision_property(hotel_id: str) -> dict:
         for channel, plan_name, meal_code, plan_title in plans_to_create:
             if (channel, plan_name, meal_code) in existing_combos:
                 continue
+            # Cap to Channex's 255-char column. Long room-type names + suffix
+            # combos have hit the limit and surfaced as a 422.
+            safe_title = plan_title[:RATE_PLAN_TITLE_MAX_LENGTH]
             channex_rp = await channex_service.create_rate_plan(
                 api_key,
                 property_id=channex_property_id,
                 room_type_id=channex_room_type_id,
-                title=plan_title,
+                title=safe_title,
                 sell_mode="per_room",
-                currency=rt["currency"],
+                # Fall back to property currency when the room type itself
+                # has none — Channex requires currency on the rate plan and
+                # null caused the original 422 in VAY-386.
+                currency=rt.get("currency") or currency,
                 options=[{"occupancy": default_occ, "is_primary": True}],
                 meal_plan_code=meal_code,
             )
