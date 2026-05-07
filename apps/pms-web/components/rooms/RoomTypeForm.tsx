@@ -1875,7 +1875,11 @@ export default function RoomTypeForm({
                         rate = Math.round(rate * (1 + surchargeNum / 100))
                       }
 
-                      const dateStr = date.toISOString().split('T')[0]
+                      // Use local-date components, not toISOString — for users east of
+                      // UTC the latter shifts the key one day back, so the override the
+                      // user sees on May 7 ends up persisted under "2026-05-06" and the
+                      // Booking Engine / Channex never find it for May 7. (VAY-380)
+                      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
                       const hasDailyOverride = dailyRates[dateStr] !== undefined
                       const displayRate = hasDailyOverride ? dailyRates[dateStr] : rate
                       const inGap = inOp && !season && !hasDailyOverride && isInSeasonGap(dateStr)
