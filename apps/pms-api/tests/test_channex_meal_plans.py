@@ -14,16 +14,16 @@ from app.services.channex_service import meal_plan_code_to_channex_meal_type
 
 
 def test_meal_plan_code_to_channex_meal_type_known_codes():
-    assert meal_plan_code_to_channex_meal_type(0) == "nomeal"
+    assert meal_plan_code_to_channex_meal_type(0) == "room_only"
     assert meal_plan_code_to_channex_meal_type(1) == "breakfast"
-    assert meal_plan_code_to_channex_meal_type(3) == "halfboard"
-    assert meal_plan_code_to_channex_meal_type(4) == "fullboard"
-    assert meal_plan_code_to_channex_meal_type(9) == "allinclusive"
+    assert meal_plan_code_to_channex_meal_type(3) == "half_board"
+    assert meal_plan_code_to_channex_meal_type(4) == "full_board"
+    assert meal_plan_code_to_channex_meal_type(9) == "all_inclusive"
 
 
-def test_meal_plan_code_to_channex_meal_type_unknown_falls_back_to_nomeal():
+def test_meal_plan_code_to_channex_meal_type_unknown_falls_back_to_room_only():
     # Defends against a stale row sneaking in via a code we don't recognize.
-    assert meal_plan_code_to_channex_meal_type(7) == "nomeal"
+    assert meal_plan_code_to_channex_meal_type(7) == "room_only"
 
 
 # ── _meal_surcharge_for_code ───────────────────────────────────────────

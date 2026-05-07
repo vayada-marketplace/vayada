@@ -312,16 +312,16 @@ async def delete_room_type(
 # enum. Channex relays meal_type to the OTA as the appropriate channel
 # field (e.g. Booking.com's meal_plan_code).
 _MEAL_PLAN_CODE_TO_CHANNEX = {
-    0: "nomeal",
+    0: "room_only",
     1: "breakfast",
-    3: "halfboard",
-    4: "fullboard",
-    9: "allinclusive",
+    3: "half_board",
+    4: "full_board",
+    9: "all_inclusive",
 }
 
 
 def meal_plan_code_to_channex_meal_type(code: int) -> str:
-    return _MEAL_PLAN_CODE_TO_CHANNEX.get(code, "nomeal")
+    return _MEAL_PLAN_CODE_TO_CHANNEX.get(code, "room_only")
 
 
 async def create_rate_plan(
