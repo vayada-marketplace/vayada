@@ -138,6 +138,10 @@ async def cleanup_database(init_database):
             "DELETE FROM hotel_profiles WHERE user_id = ANY($1::uuid[])",
             test_user_ids
         )
+        await Database.execute(
+            "DELETE FROM notifications WHERE user_id = ANY($1::uuid[])",
+            test_user_ids
+        )
 
     # Clean up auth data from AuthDatabase
     await AuthDatabase.execute(
@@ -172,7 +176,12 @@ def mock_send_email():
         })
         return True
 
-    with patch("app.email_service.send_email", side_effect=mock_email):
+    # Patch at the source module AND in app.services.notifications, which
+    # imports `send_email` directly via `from app.email_service import
+    # send_email` and would otherwise hold the original reference inside
+    # send_email_background's fire-and-forget tasks.
+    with patch("app.email_service.send_email", side_effect=mock_email), \
+         patch("app.services.notifications.send_email", side_effect=mock_email):
         yield sent_emails
 
 

@@ -432,6 +432,154 @@ class TestUpdateUser:
         assert response.status_code == 400
 
 
+class TestCreatorApprovalNotification:
+    """VAY-385: creator non-verified -> verified transition emits an
+    in-platform notification and a confirmation email.
+    """
+
+    @staticmethod
+    async def _wait_for_emails(mock_send_email, expected_count: int, timeout: float = 1.0):
+        """send_email_background fires a task; yield briefly so it runs."""
+        import asyncio
+
+        deadline = asyncio.get_event_loop().time() + timeout
+        while len(mock_send_email) < expected_count and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.02)
+
+    async def test_pending_to_verified_creates_notification_and_email(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_send_email
+    ):
+        """Pending creator approved -> 1 in-app notification + 1 email."""
+        creator = await create_test_creator(status="pending")
+        user_id = str(creator["user"]["id"])
+
+        response = await client.put(
+            f"/admin/users/{user_id}",
+            json={"status": "verified"},
+            headers=get_auth_headers(test_admin["token"])
+        )
+        assert response.status_code == 200
+
+        notifs = await Database.fetch(
+            "SELECT type, title, body, link_url FROM notifications WHERE user_id = $1",
+            creator["user"]["id"]
+        )
+        assert len(notifs) == 1
+        assert notifs[0]["type"] == "creator_approved"
+        assert "verified" in notifs[0]["title"].lower()
+        assert notifs[0]["link_url"] == "/marketplace"
+
+        await self._wait_for_emails(mock_send_email, 1)
+        approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
+        assert len(approval_emails) == 1
+        assert "approved" in approval_emails[0]["subject"].lower()
+        assert "Marketplace" in approval_emails[0]["body"]
+
+    async def test_already_verified_no_duplicate(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_send_email
+    ):
+        """Setting status=verified on an already-verified creator does not
+        re-trigger the notification or email (ticket edge case)."""
+        creator = await create_test_creator(status="verified")
+        user_id = str(creator["user"]["id"])
+
+        response = await client.put(
+            f"/admin/users/{user_id}",
+            json={"status": "verified"},
+            headers=get_auth_headers(test_admin["token"])
+        )
+        assert response.status_code == 200
+
+        # Give any spurious background email a chance to land
+        import asyncio
+        await asyncio.sleep(0.05)
+
+        notifs = await Database.fetch(
+            "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
+            creator["user"]["id"]
+        )
+        assert len(notifs) == 0
+        approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
+        assert approval_emails == []
+
+    async def test_revoke_then_reapprove_notifies_again(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_send_email
+    ):
+        """Verified -> suspended -> verified should emit a fresh notification
+        on the second approval (ticket edge case)."""
+        creator = await create_test_creator(status="verified")
+        user_id = str(creator["user"]["id"])
+        headers = get_auth_headers(test_admin["token"])
+
+        revoke = await client.put(
+            f"/admin/users/{user_id}", json={"status": "suspended"}, headers=headers
+        )
+        assert revoke.status_code == 200
+
+        reapprove = await client.put(
+            f"/admin/users/{user_id}", json={"status": "verified"}, headers=headers
+        )
+        assert reapprove.status_code == 200
+
+        notifs = await Database.fetch(
+            "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
+            creator["user"]["id"]
+        )
+        assert len(notifs) == 1
+
+        await self._wait_for_emails(mock_send_email, 1)
+        approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
+        assert len(approval_emails) == 1
+
+    async def test_hotel_status_change_does_not_create_creator_notification(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_send_email
+    ):
+        """Hotel approvals must not create the creator-only notification."""
+        hotel = await create_test_hotel(status="pending")
+        user_id = str(hotel["user"]["id"])
+
+        response = await client.put(
+            f"/admin/users/{user_id}",
+            json={"status": "verified"},
+            headers=get_auth_headers(test_admin["token"])
+        )
+        assert response.status_code == 200
+
+        import asyncio
+        await asyncio.sleep(0.05)
+
+        notifs = await Database.fetch(
+            "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
+            hotel["user"]["id"]
+        )
+        assert len(notifs) == 0
+
+    async def test_rejected_does_not_notify(
+        self, client: AsyncClient, test_admin, cleanup_database, init_database, mock_send_email
+    ):
+        """Pending -> rejected emits no creator_approved notification."""
+        creator = await create_test_creator(status="pending")
+        user_id = str(creator["user"]["id"])
+
+        response = await client.put(
+            f"/admin/users/{user_id}",
+            json={"status": "rejected"},
+            headers=get_auth_headers(test_admin["token"])
+        )
+        assert response.status_code == 200
+
+        import asyncio
+        await asyncio.sleep(0.05)
+
+        notifs = await Database.fetch(
+            "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
+            creator["user"]["id"]
+        )
+        assert len(notifs) == 0
+        approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
+        assert approval_emails == []
+
+
 class TestDeleteUser:
     """Tests for DELETE /admin/users/{user_id}"""
 
