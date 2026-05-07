@@ -63,6 +63,7 @@ class ChannexSyncStatusResponse(BaseModel):
     rate_plans_provisioned: int = 0
     last_booking_sync_at: Optional[str] = None
     last_ari_sync_at: Optional[str] = None
+    messaging_app_installed: bool = False
 
 
 # ── Channel markups ──────────────────────────────────────────────────

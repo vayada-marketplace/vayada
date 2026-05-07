@@ -130,6 +130,7 @@ async def channex_status(
         rate_plans_provisioned=len(rate_mappings),
         last_booking_sync_at=last_booking.isoformat() if last_booking else None,
         last_ari_sync_at=last_ari.isoformat() if last_ari else None,
+        messaging_app_installed=bool(conn.get("messaging_app_installed")),
     )
 
 
@@ -403,6 +404,33 @@ async def channex_messaging_backfill(
             failed.append({"hotel_id": hotel_id, "error": str(e)})
 
     return {"installed": installed, "failed": failed}
+
+
+@router.post("/channex/messaging/install")
+async def channex_messaging_install(
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Install (or re-attempt installing) the Channex Messaging & Reviews app
+    for the requesting hotel's property. Lets a hotel admin recover from a
+    failed install without waiting for a super-admin backfill. Idempotent."""
+    hotel_id = await get_hotel_id(user_id)
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn["is_active"]:
+        raise HTTPException(status_code=400, detail="Channel manager not enabled")
+    if not conn.get("channex_property_id"):
+        raise HTTPException(status_code=400, detail="Property not provisioned yet")
+
+    api_key = channex_service.get_platform_api_key()
+    property_id = str(conn["channex_property_id"])
+    try:
+        already = await channex_service.is_messaging_app_installed(api_key, property_id)
+        if not already:
+            await channex_service.install_messaging_app(api_key, property_id)
+        await ChannexConnectionRepository.set_messaging_app_installed(hotel_id, True)
+    except Exception as e:
+        logger.warning("Failed to install messaging app for hotel %s: %s", hotel_id, e)
+        raise HTTPException(status_code=502, detail=f"Failed to install messaging app: {e}")
+    return {"status": "installed"}
 
 
 @router.post("/channex/webhook/setup")
