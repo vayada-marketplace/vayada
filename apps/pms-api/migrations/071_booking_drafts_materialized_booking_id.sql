@@ -9,9 +9,12 @@
 -- so a second caller (sequential or racing) can resolve back to the
 -- materialized booking.
 
+-- No FK to bookings(id): the column is stamped *before* the booking
+-- INSERT (the pre-allocated id is the atomic-claim signal), so an
+-- IMMEDIATE FK fires before the row exists. A dangling UUID after a
+-- booking deletion is harmless — the lookup just returns None.
 ALTER TABLE booking_drafts
-    ADD COLUMN IF NOT EXISTS materialized_booking_id UUID
-        REFERENCES bookings(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS materialized_booking_id UUID;
 
 CREATE INDEX IF NOT EXISTS idx_booking_drafts_materialized_booking_id
     ON booking_drafts (materialized_booking_id)
