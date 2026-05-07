@@ -261,7 +261,24 @@ async def update_room_type(
     if "meal_plans" in updates:
         asyncio.create_task(_resync_channex_after_meal_plan_change(hotel_id))
 
+    # Daily price overrides are the highest-priority rate input but only
+    # propagate to OTAs when ARI is pushed. Without this trigger the new
+    # rate stays trapped in the DB until something unrelated kicks off a
+    # sync, which is the bug VAY-380 describes.
+    if "daily_rates" in updates:
+        asyncio.create_task(_push_ari_for_daily_rate_change(hotel_id))
+
     return _room_to_admin(room)
+
+
+async def _push_ari_for_daily_rate_change(hotel_id: str) -> None:
+    try:
+        await push_ari_for_hotel(hotel_id)
+    except Exception:
+        logger.exception(
+            "Channex ARI push after daily_rates change failed for hotel %s",
+            hotel_id,
+        )
 
 
 async def _resync_channex_after_meal_plan_change(hotel_id: str) -> None:
