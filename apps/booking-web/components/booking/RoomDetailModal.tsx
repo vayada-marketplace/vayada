@@ -116,7 +116,7 @@ export default function RoomDetailModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-stretch md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="bg-white md:rounded-2xl shadow-2xl w-full md:max-w-5xl h-full md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col overscroll-contain">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white md:rounded-2xl shadow-2xl w-full md:max-w-5xl h-full md:h-[90vh] overflow-hidden flex flex-col overscroll-contain">
         {/* Top bar with nav */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3 pb-1 flex-shrink-0">
           <button onClick={onPrev} className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 text-gray-500">
@@ -131,7 +131,7 @@ export default function RoomDetailModal({
           </button>
         </div>
 
-        <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
+        <div className="flex flex-col md:flex-row overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
           <div className="md:w-1/2 md:flex-shrink-0 flex flex-col md:min-h-0">
             <div
@@ -186,7 +186,8 @@ export default function RoomDetailModal({
           </div>
 
           {/* Right — Details */}
-          <div className="md:w-1/2 p-6 md:overflow-y-auto">
+          <div className="md:w-1/2 flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-6">
             {soldOut && (
               <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-gray-800">
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-2.99l-7.07-12a2 2 0 00-3.48 0l-7.07 12A2 2 0 004.93 19z" /></svg>
@@ -271,9 +272,10 @@ export default function RoomDetailModal({
             </div>
             )}
 
-            <div className="h-px bg-gray-200 mb-4" />
+            </div>
 
-            {/* Select your rate */}
+            {/* Sticky footer — rate selection always visible regardless of scroll */}
+            <div className="flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Select Your Rate</p>
             <div className="space-y-3">
               {/* Flexible Rate */}
@@ -381,6 +383,7 @@ export default function RoomDetailModal({
                   : tc('onlyLeft', { count: room.remainingRooms })}
               </p>
             )}
+            </div>
           </div>
         </div>
       </div>
