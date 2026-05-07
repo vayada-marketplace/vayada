@@ -24,7 +24,13 @@ interface StripeConfirmStepProps {
   addonDates?: Record<string, string[]>
   addonTotal: number
   grandTotal: number
+  // For the VAY-388 card flow this is the draft preview (status='draft',
+  // empty id). After Stripe authorizes, we replace it with the real
+  // booking returned by confirmAuthorization.
   booking: Booking
+  // Soft-hold draft id from POST /bookings; pass it to
+  // confirmAuthorization to materialize the real booking row.
+  draftId: string | null
   slug: string
   formatPrice: (amount: number, fromCurrency: string) => string
   formatDate: (date: string | Date, locale?: string) => string
@@ -49,6 +55,7 @@ export default function StripeConfirmStep({
   addonTotal,
   grandTotal,
   booking,
+  draftId,
   slug,
   formatPrice,
   formatDate,
@@ -83,13 +90,18 @@ export default function StripeConfirmStep({
         return
       }
 
-      await bookingService.confirmAuthorization(slug, booking.id)
+      // VAY-388: pass the draft id so the backend materializes the real
+      // booking row. Falls back to booking.id for the legacy path (only
+      // hit if a non-card flow ever lands on this component, which it
+      // shouldn't).
+      const handle = draftId || booking.id
+      const materialized = await bookingService.confirmAuthorization(slug, handle)
       saveLastBooking({
-        ...booking,
+        ...materialized,
         paymentMethod: 'card',
         paymentStatus: 'authorized',
       })
-      router.push(`/booking/${booking.bookingReference}`)
+      router.push(`/booking/${materialized.bookingReference}`)
     } catch (err: any) {
       setError(err.message || 'Payment confirmation failed')
       setSubmitting(false)

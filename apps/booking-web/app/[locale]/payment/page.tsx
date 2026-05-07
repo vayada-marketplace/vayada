@@ -98,6 +98,9 @@ function PaymentPageContent() {
   const [error, setError] = useState('')
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [pendingBooking, setPendingBooking] = useState<Booking | null>(null)
+  // VAY-388: draft id returned for card payments — passed to
+  // confirmAuthorization once Stripe authorizes the card.
+  const [draftId, setDraftId] = useState<string | null>(null)
 
   // Load guest details from the booking draft (set by /book on submit)
   useEffect(() => {
@@ -173,9 +176,12 @@ function PaymentPageContent() {
       const booking = result.booking
 
       if (paymentMethod === 'card' && result.clientSecret) {
+        // VAY-388: `booking` is a draft preview here, not a persisted row.
+        // We hold the draftId so StripeConfirmStep can materialize the
+        // booking after Stripe authorizes the card.
         setPendingBooking(booking)
         setClientSecret(result.clientSecret)
-        // The Stripe form will be rendered, user confirms payment there
+        setDraftId(result.draftId || null)
       } else if (paymentMethod === 'xendit' && result.xenditInvoiceUrl) {
         // Redirect to Xendit payment page (QRIS, e-wallets, VA)
         saveLastBooking(booking)
@@ -214,6 +220,7 @@ function PaymentPageContent() {
           addonTotal={addonTotal}
           grandTotal={grandTotal}
           booking={pendingBooking}
+          draftId={draftId}
           slug={slug}
           formatPrice={formatPrice}
           formatDate={formatDate}
