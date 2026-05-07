@@ -7,6 +7,7 @@ export interface ChannexSyncStatus {
   ratePlansProvisioned: number
   lastBookingSyncAt: string | null
   lastAriSyncAt: string | null
+  messagingAppInstalled: boolean
 }
 
 export interface ChannexRoomTypeMapping {
@@ -84,6 +85,10 @@ export const channexService = {
 
   syncBookings: () =>
     pmsClient.post<{ status: string }>('/admin/channex/sync-bookings'),
+
+  // Messaging app install (idempotent retry for the requesting hotel)
+  installMessagingApp: () =>
+    pmsClient.post<{ status: string }>('/admin/channex/messaging/install'),
 
   // Channel iframe
   getIframeUrl: () =>

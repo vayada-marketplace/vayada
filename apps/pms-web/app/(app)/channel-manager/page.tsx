@@ -24,6 +24,7 @@ export default function ChannelManagerPage() {
   // Sync
   const [syncingAri, setSyncingAri] = useState(false)
   const [syncingBookings, setSyncingBookings] = useState(false)
+  const [installingMessagingApp, setInstallingMessagingApp] = useState(false)
 
   // Channel iframe
   const [iframeUrl, setIframeUrl] = useState<string | null>(null)
@@ -162,6 +163,20 @@ export default function ChannelManagerPage() {
     }
   }
 
+  const handleInstallMessagingApp = async () => {
+    setInstallingMessagingApp(true)
+    setError('')
+    try {
+      await channexService.installMessagingApp()
+      setSuccess(t('channels.messagingAppInstalledSuccess'))
+      await loadStatus()
+    } catch (err: any) {
+      setError(err.message || t('channels.failedToInstallMessagingApp'))
+    } finally {
+      setInstallingMessagingApp(false)
+    }
+  }
+
   const handleOpenChannels = async () => {
     setLoadingIframe(true)
     setError('')
@@ -278,6 +293,27 @@ export default function ChannelManagerPage() {
                   </p>
                 )}
               </div>
+              {status.messagingAppInstalled ? (
+                <p className="mt-3 text-sm text-gray-600 flex items-center gap-1.5">
+                  <CheckCircleIcon className="w-4 h-4 text-green-600" />
+                  <span className="text-gray-500">{t('channels.messagingApp')}</span>{' '}
+                  {t('channels.messagingAppInstalled')}
+                </p>
+              ) : (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <p className="text-sm text-amber-800">
+                    <strong>{t('channels.messagingApp')}</strong> {t('channels.messagingAppMissing')}
+                  </p>
+                  <button
+                    onClick={handleInstallMessagingApp}
+                    disabled={installingMessagingApp}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+                  >
+                    <ArrowPathIcon className={`w-3.5 h-3.5 ${installingMessagingApp ? 'animate-spin' : ''}`} />
+                    {installingMessagingApp ? t('channels.installingMessagingApp') : t('channels.installMessagingApp')}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* OTA Channel Connections (iframe) */}

@@ -650,5 +650,12 @@
   "financials.recordReferencePlaceholder": "Transaction ID or note",
   "financials.recordSubmit": "Record Payment",
   "financials.recordSubmitting": "Recording…",
-  "financials.recordError": "Failed to record payment"
+  "financials.recordError": "Failed to record payment",
+  "channels.messagingApp": "Messaging app:",
+  "channels.messagingAppInstalled": "installed",
+  "channels.messagingAppMissing": "not installed — guest messages from OTAs won't reach your inbox.",
+  "channels.installMessagingApp": "Install messaging app",
+  "channels.installingMessagingApp": "Installing...",
+  "channels.messagingAppInstalledSuccess": "Messaging app installed",
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
 }
