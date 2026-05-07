@@ -16,13 +16,17 @@ class BookingRepository:
 
     @staticmethod
     async def create(data: dict) -> dict:
-        # Generate unique reference
-        async def ref_exists(ref: str) -> bool:
-            return bool(await Database.fetchval(
-                "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
-            ))
+        # If the caller passed a pre-generated reference (VAY-388 draft
+        # materialization keeps the same code across draft + booking),
+        # use it; otherwise generate a fresh unique one.
+        ref = data.get("booking_reference")
+        if not ref:
+            async def ref_exists(ref: str) -> bool:
+                return bool(await Database.fetchval(
+                    "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
+                ))
 
-        ref = await generate_unique_code(_make_booking_ref, ref_exists, entity_name="booking reference")
+            ref = await generate_unique_code(_make_booking_ref, ref_exists, entity_name="booking reference")
 
         row = await Database.fetchrow(
             """

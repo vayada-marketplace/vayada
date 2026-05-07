@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import settings as app_settings
 from app.database import Database
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
@@ -221,6 +222,16 @@ async def poll_xendit_processing_payouts():
             logger.error("Unexpected error polling Xendit payout %s: %s", payout_id, e)
 
 
+async def cleanup_expired_drafts():
+    """Sweep abandoned booking drafts (VAY-388) once their soft hold has
+    been expired for an hour. Lazy filtering in count_active_for_stay
+    already prevents stale rows from blocking inventory; this just keeps
+    the table from growing forever."""
+    deleted = await BookingDraftRepository.delete_expired(grace_minutes=60)
+    if deleted:
+        logger.info("Cleaned up %d expired booking draft(s)", deleted)
+
+
 async def cancel_stale_unpaid_bookings():
     """Cancel pending bookings where payment was never completed (30+ min old)."""
     result = await Database.fetch(
@@ -284,6 +295,13 @@ def setup_scheduler():
         cancel_stale_unpaid_bookings,
         trigger=IntervalTrigger(minutes=10),
         id="cancel_stale_unpaid_bookings",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        cleanup_expired_drafts,
+        trigger=IntervalTrigger(minutes=10),
+        id="cleanup_expired_drafts",
         replace_existing=True,
     )
 

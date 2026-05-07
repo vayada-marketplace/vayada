@@ -8,6 +8,7 @@ from app.config import settings
 from app.services import stripe_service
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
@@ -16,6 +17,33 @@ from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepos
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
+
+
+async def _materialize_or_get_booking_for_pi(
+    pi_id: str, payment_status: str
+) -> dict | None:
+    """Resolve the booking that a Stripe webhook pertains to.
+
+    With VAY-388 the booking row may not exist yet at the time the first
+    Stripe event arrives — the create-booking flow leaves a soft-hold
+    draft instead. This helper materializes that draft (idempotently)
+    if one exists, otherwise falls back to looking up by an existing
+    payment row. Returns None when neither path resolves to a booking.
+    """
+    draft = await BookingDraftRepository.get_by_payment_intent(pi_id)
+    if draft:
+        from app.services.booking_service import materialize_draft
+
+        booking = await materialize_draft(draft, payment_status=payment_status)
+        if booking:
+            return booking
+        # Lost the race to confirm-authorization — fall through and look
+        # up the booking that the other caller just created.
+
+    payment = await PaymentRepository.get_by_stripe_pi(pi_id)
+    if payment:
+        return await BookingRepository.get_by_id(str(payment["booking_id"]))
+    return None
 
 
 @router.post("/webhooks/stripe")
@@ -37,38 +65,45 @@ async def stripe_webhook(request: Request):
     data = event["data"]["object"]
 
     if event_type == "payment_intent.amount_capturable_updated":
-        # Payment authorized (hold placed)
+        # Payment authorized (hold placed) — request flow.
         pi_id = data["id"]
-        payment = await PaymentRepository.get_by_stripe_pi(pi_id)
-        if payment:
-            await PaymentRepository.update_status(str(payment["id"]), "authorized")
+        booking = await _materialize_or_get_booking_for_pi(pi_id, "authorized")
+        if booking is None:
+            logger.warning("PI auth webhook with no draft or payment row: %s", pi_id)
+        else:
+            payment = await PaymentRepository.get_by_stripe_pi(pi_id)
+            if payment and payment["status"] != "authorized":
+                await PaymentRepository.update_status(str(payment["id"]), "authorized")
             await BookingRepository.update_payment_status(
-                str(payment["booking_id"]), "authorized"
+                str(booking["id"]), "authorized"
             )
             logger.info("Payment authorized via webhook: %s", pi_id)
 
     elif event_type == "payment_intent.succeeded":
-        # Payment captured
+        # Payment captured — instant-book path (also fires on manual
+        # capture later, in which case the booking already exists).
         pi_id = data["id"]
+        booking = await _materialize_or_get_booking_for_pi(pi_id, "captured")
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
-        if payment:
+
+        if booking and payment:
             card = data.get("charges", {}).get("data", [{}])[0].get("payment_method_details", {}).get("card", {})
-            await PaymentRepository.update_status(
-                str(payment["id"]),
-                "captured",
-                card_last_four=card.get("last4"),
-                card_brand=card.get("brand"),
-            )
+            if payment["status"] != "captured":
+                await PaymentRepository.update_status(
+                    str(payment["id"]),
+                    "captured",
+                    card_last_four=card.get("last4"),
+                    card_brand=card.get("brand"),
+                )
             logger.info("Payment captured via webhook: %s", pi_id)
 
-            booking_id = str(payment["booking_id"])
-            booking = await BookingRepository.get_by_id(booking_id)
+            booking_id = str(booking["id"])
 
             # Instant-book hotels capture automatically — when Stripe confirms
             # the charge the booking should jump straight to confirmed without
             # waiting for a host accept. capture_card=False because Stripe
             # already captured.
-            if booking and booking["status"] == "pending":
+            if booking["status"] == "pending":
                 from app.database import Database
                 hotel_row = await Database.fetchrow(
                     "SELECT instant_book FROM hotels WHERE id = $1",
@@ -84,7 +119,7 @@ async def stripe_webhook(request: Request):
                         )
 
             # Send payment confirmation email to guest
-            if booking and booking.get("guest_email"):
+            if booking.get("guest_email"):
                 import asyncio
                 from app.services.email_service import send_guest_payment_confirmed
                 asyncio.create_task(
@@ -95,9 +130,13 @@ async def stripe_webhook(request: Request):
                         "card",
                     )
                 )
+        else:
+            logger.warning("PI succeeded webhook with no draft or payment row: %s", pi_id)
 
     elif event_type == "payment_intent.canceled":
         pi_id = data["id"]
+        # Drop any pending soft hold so inventory frees up immediately.
+        await BookingDraftRepository.delete_by_payment_intent(pi_id)
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
         if payment:
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
@@ -105,6 +144,11 @@ async def stripe_webhook(request: Request):
 
     elif event_type == "payment_intent.payment_failed":
         pi_id = data["id"]
+        # No booking row exists for a failed card draft — drop the soft
+        # hold and we're done. Existing bookings (manual-capture failures
+        # post-authorization) still flow through the legacy path.
+        if await BookingDraftRepository.delete_by_payment_intent(pi_id):
+            logger.info("Draft soft hold released after PI failure: %s", pi_id)
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
         if payment:
             await PaymentRepository.update_status(str(payment["id"]), "failed")

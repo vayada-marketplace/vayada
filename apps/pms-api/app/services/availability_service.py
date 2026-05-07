@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
+from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 
 
@@ -29,12 +30,17 @@ async def remaining_for_stay(
 ) -> int:
     """Rooms of this type still bookable across the given stay.
 
-    Returns ``max(0, total - booked - blocked)`` using the repository's
-    range-aware counters.
+    Returns ``max(0, total - booked - blocked - soft_held)`` where
+    soft_held counts active card-payment drafts (VAY-388) so a guest in
+    the Stripe entry window can't be undercut by another guest checking
+    out concurrently.
     """
     booked = await RoomTypeRepository.count_booked(room_type_id, check_in, check_out)
     blocked = await RoomTypeRepository.count_blocked(room_type_id, check_in, check_out)
-    return max(0, total_rooms - booked - blocked)
+    soft_held = await BookingDraftRepository.count_active_for_stay(
+        room_type_id, check_in, check_out
+    )
+    return max(0, total_rooms - booked - blocked - soft_held)
 
 
 def compute_stay_pricing(
