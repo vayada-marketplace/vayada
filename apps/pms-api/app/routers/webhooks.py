@@ -11,6 +11,7 @@ from app.repositories.booking_repo import BookingRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepository
 
 logger = logging.getLogger(__name__)
 
@@ -289,8 +290,8 @@ async def channex_webhook(request: Request):
     we register the webhook with a custom X-Vayada-Webhook-Token header set to
     settings.CHANNEX_WEBHOOK_SECRET, and verify it here.
 
-    Phase 1 only handles the `message` event; other events return 200 to avoid
-    Channex retry loops while we expand coverage."""
+    Phase 1 only handles the `message` event; other events are logged but not
+    processed yet (see /admin/channex/webhook-events/summary)."""
     if not settings.CHANNEX_WEBHOOK_SECRET:
         logger.error("Channex webhook hit but CHANNEX_WEBHOOK_SECRET not configured")
         raise HTTPException(status_code=503, detail="Webhook not configured")
@@ -307,18 +308,39 @@ async def channex_webhook(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    event_type = event.get("event")
+    event_type = event.get("event") or "unknown"
     event_payload = event.get("payload") or {}
+    property_id = event.get("property_id") or event_payload.get("property_id")
+
+    # Always log the receipt — gives us "did the message webhook fire today?"
+    # observability now that the safety-net poll is gone.
+    try:
+        event_id = await ChannexWebhookEventRepository.insert(
+            event_type=event_type,
+            property_id=str(property_id) if property_id else None,
+            payload=event,
+        )
+    except Exception as e:
+        # Never let logging failure break webhook ingest — Channel retries
+        # cause cascading volume.
+        logger.exception("Failed to log Channex webhook event: %s", e)
+        event_id = None
 
     if event_type == "message":
         from app.services.channex.messaging import process_inbound_message_event
+        ok, err = True, None
         try:
             await process_inbound_message_event(event_payload, event)
         except Exception as e:
             logger.exception("Failed to process Channex message event: %s", e)
-            # Still 200 — Channex retries indefinitely otherwise; we'll catch
-            # missed messages with the safety-net poll.
-        return {"status": "ok"}
+            ok, err = False, str(e)[:500]
+        if event_id:
+            try:
+                await ChannexWebhookEventRepository.mark_processed(event_id, ok, err)
+            except Exception:
+                logger.exception("Failed to mark Channex webhook event processed")
+        # Still 200 even on failure — Channex retries indefinitely otherwise.
+        return {"status": "ok" if ok else "error_logged"}
 
     logger.debug("Ignoring Channex webhook event=%r", event_type)
     return {"status": "ignored", "event": event_type}

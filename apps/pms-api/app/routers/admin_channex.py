@@ -14,6 +14,7 @@ from app.repositories.channex_mapping_repo import (
     ChannexChannelMarkupRepository,
     MARKUP_CHANNELS,
 )
+from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepository
 from app.models.channex import (
     ChannexRoomTypeMappingResponse,
     ChannexRatePlanMappingResponse,
@@ -431,6 +432,33 @@ async def channex_messaging_install(
         logger.warning("Failed to install messaging app for hotel %s: %s", hotel_id, e)
         raise HTTPException(status_code=502, detail=f"Failed to install messaging app: {e}")
     return {"status": "installed"}
+
+
+@router.get("/channex/webhook-events/summary")
+async def channex_webhook_events_summary(
+    hours: int = 24,
+    user_id: str = Depends(require_super_admin),
+):
+    """Counts of Channex webhook events received in the last N hours, grouped
+    by event_type. Use to detect a stuck webhook pipeline (zero `message`
+    events for a sustained window means Channex has stopped delivering)."""
+    if hours < 1 or hours > 24 * 30:
+        raise HTTPException(status_code=400, detail="hours must be 1..720")
+    rows = await ChannexWebhookEventRepository.summary_since(hours)
+    return {
+        "window_hours": hours,
+        "by_event_type": [
+            {
+                "event_type": r["event_type"],
+                "total": r["total"],
+                "ok": r["ok"],
+                "failed": r["failed"],
+                "ignored": r["ignored"],
+                "last_received_at": r["last_received_at"].isoformat() if r["last_received_at"] else None,
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.post("/channex/webhook/setup")
