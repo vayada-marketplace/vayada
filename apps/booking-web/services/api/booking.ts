@@ -2,10 +2,17 @@ import { Booking } from '@/lib/types'
 import { pms } from './client'
 
 export interface BookingRequestResponse {
+  // For card payments (VAY-388) `booking` is a placeholder preview —
+  // status === 'draft' and id is empty until Stripe authorizes the card.
+  // For other payment methods it's a real persisted booking.
   booking: Booking
   clientSecret: string | null
   xenditInvoiceUrl: string | null
   paymentMethod: string
+  // Soft-hold draft id, present when paymentMethod === 'card'. Pass it
+  // to confirmAuthorization() after Stripe.confirmPayment resolves.
+  draftId?: string
+  bookingReference?: string
 }
 
 export interface BankDetails {
@@ -73,8 +80,13 @@ export const bookingService = {
     return pms.post(`/api/hotels/${slug}/bookings`, data)
   },
 
-  async confirmAuthorization(slug: string, bookingId: string): Promise<void> {
-    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/confirm-authorization`)
+  // Materializes the soft-hold draft into a real booking row after
+  // Stripe authorizes the card. Returns the booking so the caller can
+  // redirect with a real reference. Idempotent: a second call after the
+  // Stripe webhook has already materialized the draft returns the same
+  // booking. Accepts a draft id (VAY-388) or a legacy booking id.
+  async confirmAuthorization(slug: string, handle: string): Promise<Booking> {
+    return pms.post(`/api/hotels/${slug}/bookings/${handle}/confirm-authorization`)
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
