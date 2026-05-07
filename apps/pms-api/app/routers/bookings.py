@@ -49,15 +49,20 @@ async def post_booking(slug: str, data: BookingCreate):
     return result
 
 
-@router.post("/{slug}/bookings/{booking_id}/confirm-authorization")
-async def post_confirm_authorization(slug: str, booking_id: str):
-    """Called by frontend after Stripe confirms card authorization."""
+@router.post("/{slug}/bookings/{handle}/confirm-authorization")
+async def post_confirm_authorization(slug: str, handle: str):
+    """Called by frontend after Stripe confirms card authorization.
+
+    ``handle`` is a draft id for the VAY-388 card flow (no booking row
+    exists yet at request time) or a legacy booking id; the service
+    layer dispatches based on which one matches.
+    """
     try:
-        result = await confirm_payment_authorized(booking_id)
+        result = await confirm_payment_authorized(handle)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("Error confirming authorization for %s: %s", booking_id, e)
+        logger.error("Error confirming authorization for %s: %s", handle, e)
         raise HTTPException(status_code=500, detail="Internal server error")
     return result
 

@@ -98,9 +98,11 @@ class TestCreateBookingRequest:
         body = resp.json()
         assert body["paymentMethod"] == "card"
         assert body["clientSecret"] == "pi_test_card_secret_xyz"
-        assert body["booking"]["status"] == "pending"
+        # VAY-388: card flow returns a draft preview, not a real booking row.
+        assert body["booking"]["status"] == "draft"
         assert body["booking"]["guestFirstName"] == "Alice"
         assert body["booking"]["totalAmount"] == 450.0  # 150 * 3 nights
+        assert body["draftId"]
         mock_pi.assert_called_once()
 
     async def test_create_booking_pay_at_property(self, client, cleanup_database):
@@ -279,7 +281,9 @@ class TestConfirmAuthorization:
     """Tests for POST /api/hotels/{slug}/bookings/{id}/confirm-authorization."""
 
     async def test_confirm_authorization(self, client, cleanup_database):
-        """Confirming authorization updates payment status."""
+        """Confirming authorization on a legacy booking-id handle updates
+        payment status (back-compat path; VAY-388 normally goes through
+        the draft id)."""
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
@@ -300,7 +304,8 @@ class TestConfirmAuthorization:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "authorized"
+        assert body["paymentStatus"] == "authorized"
+        assert body["bookingReference"] == booking["booking_reference"]
 
     async def test_confirm_authorization_non_pending(self, client, cleanup_database):
         """Cannot confirm authorization on non-pending booking."""
@@ -316,6 +321,292 @@ class TestConfirmAuthorization:
             f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/confirm-authorization"
         )
         assert resp.status_code == 400
+
+
+# ── Card-payment soft-hold draft (VAY-388) ──────────────────────
+
+
+class TestCardPaymentDraft:
+    """The card-payment flow defers the booking row + inventory commit
+    until Stripe authorizes the card. The intermediate state is a
+    booking_drafts row that holds inventory for ~15 min."""
+
+    async def _create_card_draft(self, client, hotel, room, pi_id="pi_draft_test"):
+        await create_test_payment_settings(
+            str(hotel["id"]),
+            stripe_connect_account_id="acct_draft",
+            stripe_connect_onboarded=True,
+        )
+        with patch(
+            "app.services.stripe_service.create_payment_intent",
+            new_callable=AsyncMock,
+        ) as mock_pi:
+            mock_pi.return_value = {
+                "id": pi_id,
+                "client_secret": f"{pi_id}_secret",
+                "status": "requires_payment_method",
+            }
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Draft",
+                    "guestLastName": "Tester",
+                    "guestEmail": "draft@test.com",
+                    "guestPhone": "+1",
+                    "checkIn": "2026-10-01",
+                    "checkOut": "2026-10-04",
+                    "adults": 2,
+                    "paymentMethod": "card",
+                },
+            )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def test_card_request_creates_draft_not_booking(
+        self, client, hotel_with_rooms
+    ):
+        """No booking row should exist at the end of POST /bookings — only
+        a draft. Inventory comes from the soft hold, not a pending row."""
+        body = await self._create_card_draft(
+            client, hotel_with_rooms["hotel"], hotel_with_rooms["room"]
+        )
+        assert body["draftId"]
+        assert body["bookingReference"].startswith("VAY-")
+
+        rows = await Database.fetch(
+            "SELECT id FROM bookings WHERE hotel_id = $1",
+            str(hotel_with_rooms["hotel"]["id"]),
+        )
+        assert rows == []
+
+        draft = await Database.fetchrow(
+            "SELECT * FROM booking_drafts WHERE id = $1", body["draftId"]
+        )
+        assert draft is not None
+        assert draft["stripe_payment_intent_id"] == "pi_draft_test"
+        assert draft["expires_at"] > datetime.now(timezone.utc)
+
+    async def test_draft_holds_inventory(self, client, cleanup_database):
+        """A second guest can't book the same date range while a draft is
+        live — the draft counts against availability."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
+        # First guest holds the only room via a draft.
+        await self._create_card_draft(client, hotel, room, pi_id="pi_first")
+
+        # Second guest tries to book — the draft must block them.
+        await create_test_payment_settings(
+            str(hotel["id"]), pay_at_property_enabled=True
+        )
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Second",
+                "guestLastName": "Guest",
+                "guestEmail": "second@test.com",
+                "guestPhone": "+2",
+                "checkIn": "2026-10-02",
+                "checkOut": "2026-10-03",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 400
+        assert "available" in resp.json()["detail"].lower()
+
+    async def test_expired_draft_releases_inventory(self, client, cleanup_database):
+        """Once a draft's TTL elapses, count_active_for_stay drops it and
+        a fresh guest can book the same room."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
+        body = await self._create_card_draft(client, hotel, room, pi_id="pi_expire")
+
+        # Force-expire the draft (no time machine in tests).
+        await Database.execute(
+            "UPDATE booking_drafts SET expires_at = NOW() - INTERVAL '1 minute' "
+            "WHERE id = $1",
+            body["draftId"],
+        )
+
+        await create_test_payment_settings(
+            str(hotel["id"]), pay_at_property_enabled=True
+        )
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Late",
+                "guestLastName": "Guest",
+                "guestEmail": "late@test.com",
+                "guestPhone": "+3",
+                "checkIn": "2026-10-02",
+                "checkOut": "2026-10-03",
+                "adults": 1,
+                "paymentMethod": "pay_at_property",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+    @patch(
+        "app.services.email_service.send_booking_request_notification",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "app.services.email_service.send_guest_booking_requested",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "app.services.channex.ari_push.push_availability_for_room_type",
+        new_callable=AsyncMock,
+    )
+    async def test_confirm_authorization_materializes_draft(
+        self,
+        mock_channex,
+        mock_guest_email,
+        mock_host_email,
+        client,
+        hotel_with_rooms,
+    ):
+        """POST /confirm-authorization with a draft id materializes the
+        booking row + payment row, returns a booking-shaped envelope, and
+        is idempotent on a second call."""
+        body = await self._create_card_draft(
+            client,
+            hotel_with_rooms["hotel"],
+            hotel_with_rooms["room"],
+            pi_id="pi_materialize",
+        )
+        draft_id = body["draftId"]
+
+        resp = await client.post(
+            f"/api/hotels/{hotel_with_rooms['hotel']['slug']}/bookings/{draft_id}/confirm-authorization"
+        )
+        assert resp.status_code == 200, resp.text
+        booking = resp.json()
+        assert booking["bookingReference"] == body["bookingReference"]
+        assert booking["paymentStatus"] == "authorized"
+        assert booking["status"] == "pending"
+
+        # The draft is gone, the booking + payment rows exist.
+        draft_row = await Database.fetchrow(
+            "SELECT id FROM booking_drafts WHERE id = $1", draft_id
+        )
+        assert draft_row is None
+        booking_row = await Database.fetchrow(
+            "SELECT * FROM bookings WHERE booking_reference = $1",
+            body["bookingReference"],
+        )
+        assert booking_row is not None
+        assert booking_row["payment_status"] == "authorized"
+        payment_row = await Database.fetchrow(
+            "SELECT * FROM payments WHERE stripe_payment_intent_id = $1",
+            "pi_materialize",
+        )
+        assert payment_row is not None
+        assert payment_row["status"] == "authorized"
+
+        # Idempotency: second call returns the same booking instead of a
+        # 400/duplicate insert (e.g. webhook retry races confirm-auth).
+        second = await client.post(
+            f"/api/hotels/{hotel_with_rooms['hotel']['slug']}/bookings/{draft_id}/confirm-authorization"
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["bookingReference"] == body["bookingReference"]
+
+    @patch(
+        "app.services.email_service.send_booking_request_notification",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "app.services.email_service.send_guest_booking_requested",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "app.services.channex.ari_push.push_availability_for_room_type",
+        new_callable=AsyncMock,
+    )
+    async def test_webhook_materializes_draft(
+        self,
+        mock_channex,
+        mock_guest_email,
+        mock_host_email,
+        client,
+        hotel_with_rooms,
+    ):
+        """The Stripe `payment_intent.amount_capturable_updated` webhook
+        materializes the draft when it fires before the frontend's
+        confirm-authorization call."""
+        body = await self._create_card_draft(
+            client,
+            hotel_with_rooms["hotel"],
+            hotel_with_rooms["room"],
+            pi_id="pi_webhook_materialize",
+        )
+
+        with patch(
+            "app.services.stripe_service.construct_webhook_event"
+        ) as mock_construct:
+            mock_construct.return_value = {
+                "type": "payment_intent.amount_capturable_updated",
+                "data": {"object": {"id": "pi_webhook_materialize"}},
+            }
+            resp = await client.post(
+                "/webhooks/stripe",
+                content=b"{}",
+                headers={"stripe-signature": "test"},
+            )
+        assert resp.status_code == 200
+
+        booking_row = await Database.fetchrow(
+            "SELECT * FROM bookings WHERE booking_reference = $1",
+            body["bookingReference"],
+        )
+        assert booking_row is not None
+        assert booking_row["payment_status"] == "authorized"
+        draft_row = await Database.fetchrow(
+            "SELECT id FROM booking_drafts WHERE id = $1", body["draftId"]
+        )
+        assert draft_row is None
+
+    async def test_webhook_payment_failed_drops_draft(
+        self, client, hotel_with_rooms
+    ):
+        """A failed PaymentIntent must release the soft hold; no booking
+        row is ever created in this branch."""
+        body = await self._create_card_draft(
+            client,
+            hotel_with_rooms["hotel"],
+            hotel_with_rooms["room"],
+            pi_id="pi_failed",
+        )
+
+        with patch(
+            "app.services.stripe_service.construct_webhook_event"
+        ) as mock_construct:
+            mock_construct.return_value = {
+                "type": "payment_intent.payment_failed",
+                "data": {"object": {"id": "pi_failed"}},
+            }
+            resp = await client.post(
+                "/webhooks/stripe",
+                content=b"{}",
+                headers={"stripe-signature": "test"},
+            )
+        assert resp.status_code == 200
+
+        draft_row = await Database.fetchrow(
+            "SELECT id FROM booking_drafts WHERE id = $1", body["draftId"]
+        )
+        assert draft_row is None
+        booking_count = await Database.fetchval(
+            "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1",
+            str(hotel_with_rooms["hotel"]["id"]),
+        )
+        assert booking_count == 0
 
 
 # ── Host Accept/Reject (Admin) ──────────────────────────────────

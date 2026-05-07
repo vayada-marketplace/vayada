@@ -19,6 +19,10 @@ class TestCreateBooking:
     async def test_create_booking(
         self, mock_guest_email, mock_host_email, mock_stripe, client, hotel_with_rooms
     ):
+        # VAY-388: card-payment requests now produce a soft-hold draft
+        # instead of a real booking row. The response carries a draftId
+        # and a preview shaped like a booking; the row only appears once
+        # Stripe authorizes the card (covered in test_card_draft_flow).
         mock_stripe.return_value = {
             "id": "pi_test_123",
             "client_secret": "pi_test_123_secret_abc",
@@ -48,18 +52,34 @@ class TestCreateBooking:
         )
         assert resp.status_code == 200
         body = resp.json()
-        booking = body["booking"]
-        assert booking["guestFirstName"] == "Jane"
-        assert booking["guestLastName"] == "Smith"
-        assert booking["hotelName"] == "Test Hotel"
-        assert booking["roomName"] == "Deluxe Suite"
-        assert booking["nights"] == 5
-        assert booking["nightlyRate"] == 150.0
-        assert booking["totalAmount"] == 750.0
-        assert booking["status"] == "pending"
-        assert booking["bookingReference"].startswith("VAY-")
+        preview = body["booking"]
+        assert preview["guestFirstName"] == "Jane"
+        assert preview["guestLastName"] == "Smith"
+        assert preview["hotelName"] == "Test Hotel"
+        assert preview["roomName"] == "Deluxe Suite"
+        assert preview["nights"] == 5
+        assert preview["nightlyRate"] == 150.0
+        assert preview["totalAmount"] == 750.0
+        assert preview["status"] == "draft"
+        assert preview["bookingReference"].startswith("VAY-")
         assert body["clientSecret"] == "pi_test_123_secret_abc"
         assert body["paymentMethod"] == "card"
+        assert body["draftId"]
+        assert body["bookingReference"] == preview["bookingReference"]
+
+        # And critically: no booking row exists yet, so inventory is not
+        # blocked beyond the soft-hold the draft provides.
+        from app.database import Database
+        booking_count = await Database.fetchval(
+            "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1",
+            str(hotel["id"]),
+        )
+        assert booking_count == 0
+        draft_count = await Database.fetchval(
+            "SELECT COUNT(*) FROM booking_drafts WHERE hotel_id = $1",
+            str(hotel["id"]),
+        )
+        assert draft_count == 1
 
     async def test_create_booking_invalid_room(self, client, hotel_with_rooms):
         hotel = hotel_with_rooms["hotel"]
