@@ -1,4 +1,5 @@
 import asyncio
+import json as _json
 import logging
 from typing import Optional, List
 
@@ -10,6 +11,76 @@ logger = logging.getLogger(__name__)
 
 _client: Optional[httpx.AsyncClient] = None
 _throttle = asyncio.Semaphore(1)
+
+
+class ChannexAPIError(Exception):
+    """Raised when Channex returns a non-2xx response.
+
+    Carries the parsed response body so callers (and the UI) can surface the
+    *actual* validation reason instead of httpx's generic
+    "Client error '422 Unprocessable Content' for url ..." message that
+    points users at MDN's HTTP docs.
+    """
+
+    def __init__(
+        self,
+        *,
+        method: str,
+        path: str,
+        status_code: int,
+        body: dict | str,
+    ):
+        self.method = method
+        self.path = path
+        self.status_code = status_code
+        self.body = body
+        self.summary = _summarize_channex_errors(path, body)
+        super().__init__(self.summary)
+
+
+def _summarize_channex_errors(path: str, body: dict | str) -> str:
+    """Produce a one-line, user-facing summary of a Channex error body.
+
+    Channex error shapes seen in the wild:
+      {"errors": {"detail": "..."}}
+      {"errors": {"title": ["has already been taken"], "occupancy": ["can't be blank"]}}
+      {"errors": [{"detail": "..."}]}
+    """
+    resource = path.rsplit("/", 1)[-1] or path
+
+    if isinstance(body, str):
+        snippet = body.strip()[:200]
+        return f"Channex rejected {resource}: {snippet}" if snippet else f"Channex rejected {resource}"
+
+    errors = body.get("errors") if isinstance(body, dict) else None
+
+    if isinstance(errors, dict):
+        detail = errors.get("detail")
+        if isinstance(detail, str) and detail:
+            return f"Channex rejected {resource}: {detail}"
+        # Per-field errors: "title has already been taken; occupancy can't be blank"
+        parts: list[str] = []
+        for field, messages in errors.items():
+            if isinstance(messages, list):
+                msg = "; ".join(str(m) for m in messages if m)
+            else:
+                msg = str(messages)
+            if msg:
+                parts.append(f"{field} {msg}")
+        if parts:
+            return f"Channex rejected {resource}: {'; '.join(parts)}"
+
+    if isinstance(errors, list):
+        msgs = [
+            e.get("detail") or e.get("title") or str(e)
+            for e in errors
+            if e
+        ]
+        msgs = [m for m in msgs if m]
+        if msgs:
+            return f"Channex rejected {resource}: {'; '.join(msgs)}"
+
+    return f"Channex rejected {resource} (HTTP error)"
 
 
 def _get_client() -> httpx.AsyncClient:
@@ -61,8 +132,22 @@ async def _request(
         response = await client.request(
             method, path, headers=_headers(api_key), json=json, params=params
         )
-        response.raise_for_status()
         await asyncio.sleep(settings.CHANNEX_API_DELAY_SECONDS)
+        if response.status_code >= 400:
+            try:
+                body = response.json()
+            except (ValueError, _json.JSONDecodeError):
+                body = response.text
+            logger.error(
+                "Channex %s %s -> %d: %s",
+                method, path, response.status_code, body,
+            )
+            raise ChannexAPIError(
+                method=method,
+                path=path,
+                status_code=response.status_code,
+                body=body,
+            )
         if response.status_code == 204:
             return {}
         return response.json()
@@ -245,16 +330,20 @@ async def create_rate_plan(
     property_id: str,
     room_type_id: str,
     title: str,
+    options: List[dict],
     sell_mode: str = "per_room",
     rate_mode: str = "manual",
     currency: str = None,
-    options: List[dict] = None,
     meal_plan_code: int = 0,
 ) -> dict:
-    """Create a rate plan in Channex linked to a room type."""
-    if options is None:
-        # Default: single occupancy option matching room type default
-        options = [{"occupancy": 2, "is_primary": True}]
+    """Create a rate plan in Channex linked to a room type.
+
+    `options` must be supplied by the caller — Channex rejects rate plans
+    whose occupancy options don't fit the parent room type, so a sensible
+    default isn't safe.
+    """
+    if not options:
+        raise ValueError("create_rate_plan requires at least one occupancy option")
 
     payload = {
         "property_id": property_id,

@@ -27,6 +27,7 @@ from app.models.channex import (
 )
 from app.database import Database
 from app.services import channex_service
+from app.services.channex_service import ChannexAPIError
 from app.services.channex.provisioning import provision_property
 from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.channex.inbound import poll_bookings_for_hotel
@@ -83,6 +84,15 @@ async def channex_enable(
     # Provision property + rooms + rate plans in Channex
     try:
         result = await provision_property(hotel_id)
+    except ChannexAPIError as e:
+        logger.exception("Channex rejected provisioning for hotel %s", hotel_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Channel manager couldn't be set up: {e.summary}",
+        )
+    except ValueError as e:
+        # Pre-flight validation failed — actionable for the hotel admin.
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Failed to provision Channex for hotel %s", hotel_id)
         raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
@@ -150,6 +160,14 @@ async def channex_provision(
 
     try:
         result = await provision_property(hotel_id)
+    except ChannexAPIError as e:
+        logger.exception("Channex rejected re-provisioning for hotel %s", hotel_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Channel manager couldn't be re-provisioned: {e.summary}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Failed to provision Channex for hotel %s", hotel_id)
         raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
@@ -321,6 +339,14 @@ async def channex_update_markups(
     # (needed for hotels that enabled Channex before this feature shipped).
     try:
         await provision_property(hotel_id)
+    except ChannexAPIError as e:
+        logger.exception("Channex rejected per-channel provisioning for hotel %s", hotel_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Channel manager couldn't be updated: {e.summary}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Failed to provision per-channel rate plans for hotel %s", hotel_id)
         raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
