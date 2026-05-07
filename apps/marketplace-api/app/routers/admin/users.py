@@ -15,10 +15,13 @@ from app.dependencies import get_admin_user
 from app.repositories.user_repo import UserRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
+from app.repositories.notification_repo import NotificationRepository
 from app.services.creator_profile import CreatorProfileService
 from app.services.hotel_profile import HotelProfileService
 from app.services.listings import ListingService
 from app.services.user_deletion import UserDeletionService
+from app.services.notifications import send_email_background
+from app.email_service import create_creator_approved_email_html
 
 from app.models.creators import UpdateCreatorProfileRequest, CreatorProfileResponse
 from app.models.hotels import (
@@ -678,6 +681,37 @@ async def update_hotel_profile(
         )
 
 
+async def _notify_creator_approved(*, user_id: str, user_email: str, user_name: str) -> None:
+    """Create the in-platform notification first, then fire the email in the
+    background. The notification is created synchronously so it lands even
+    when the email provider is misconfigured or rejects the message
+    (VAY-385 edge case: 'if email delivery fails -> still create in
+    platform notification').
+    """
+    try:
+        await NotificationRepository.create(
+            user_id=user_id,
+            type='creator_approved',
+            title="You're verified on the vayada Marketplace",
+            body="Your creator account has been approved. Applications are now unlocked — head to the Marketplace to apply for collaborations.",
+            link_url='/marketplace',
+        )
+    except Exception as e:
+        # Log but do not fail the admin request — the creator can be
+        # re-notified manually if persistence fails for any reason.
+        logger.error(f"Failed to persist creator_approved notification for {user_id}: {e}")
+
+    try:
+        html = create_creator_approved_email_html(user_name=user_name)
+        send_email_background(
+            user_email,
+            "You're approved on the vayada Marketplace",
+            html,
+        )
+    except Exception as e:
+        logger.error(f"Failed to schedule creator_approved email for {user_email}: {e}")
+
+
 @router.put("/users/{user_id}", response_model=UserResponse, status_code=http_status.HTTP_200_OK)
 async def update_user(
     user_id: str,
@@ -777,6 +811,21 @@ async def update_user(
                 ) AND status != 'verified'
                 """,
                 user_id,
+            )
+
+        # VAY-385: notify creator on non-verified -> verified transition.
+        # The transition guard handles both "already verified" no-op and
+        # the revoke -> re-approve case (which transitions back from
+        # rejected/suspended/pending into verified and should re-notify).
+        if (
+            request.status == 'verified'
+            and user['type'] == 'creator'
+            and user['status'] != 'verified'
+        ):
+            await _notify_creator_approved(
+                user_id=user_id,
+                user_email=user['email'],
+                user_name=user['name'],
             )
 
         updated_user = await UserRepository.get_by_id(

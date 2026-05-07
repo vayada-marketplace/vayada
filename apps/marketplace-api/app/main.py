@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.database import Database, AuthDatabase, PmsDatabase, check_database_connection
 from app.config import settings
-from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter, trips, invite_codes
+from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter, trips, invite_codes, notifications
 from app.services.newsletter_scheduler import run_forever as run_newsletter_scheduler
 
 logger = logging.getLogger(__name__)
@@ -117,4 +117,5 @@ app.include_router(gdpr.router)
 app.include_router(newsletter.router)
 app.include_router(trips.router)
 app.include_router(invite_codes.router)
+app.include_router(notifications.router)
 

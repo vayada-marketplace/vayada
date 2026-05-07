@@ -374,6 +374,66 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
     return html
 
 
+def create_creator_approved_email_html(user_name: str) -> str:
+    """Email sent when an admin verifies/approves a creator on the marketplace.
+
+    Triggered by the user.status non-verified -> verified transition for
+    creator accounts.
+    """
+    marketplace_link = f"{settings.FRONTEND_URL}/marketplace"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>You're approved on the vayada Marketplace</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h1 style="color: #2c3e50; margin-top: 0;">You're verified on the vayada Marketplace!</h1>
+        </div>
+
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <p>Hi {user_name},</p>
+
+            <p>Great news — your creator account has been reviewed and approved by our team. You're now a verified member of the vayada Marketplace.</p>
+
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p style="margin: 0; color: #2e7d32; font-weight: bold;">Applications are now unlocked.</p>
+            </div>
+
+            <p><strong>What you can do next:</strong></p>
+            <ul style="color: #555;">
+                <li>Browse hotel listings and find collaborations that fit your audience</li>
+                <li>Apply for collaborations directly through the Marketplace</li>
+                <li>Negotiate terms and confirm trips with verified hotels</li>
+            </ul>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{marketplace_link}"
+                   style="background-color: #007bff; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                    Go to the Marketplace
+                </a>
+            </div>
+
+            <p style="color: #666; font-size: 14px; margin-top: 30px;">
+                Welcome aboard — we're excited to see what you create.
+            </p>
+        </div>
+
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
+            <p>&copy; {settings.EMAIL_FROM_NAME}. All rights reserved.</p>
+            <p>This is an automated message, please do not reply to this email.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+    return html
+
+
 def _collaboration_email_wrapper(title: str, content: str) -> str:
     """Shared wrapper for all collaboration emails."""
     return f"""
