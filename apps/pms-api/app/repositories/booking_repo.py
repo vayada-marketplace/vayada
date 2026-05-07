@@ -28,9 +28,13 @@ class BookingRepository:
 
             ref = await generate_unique_code(_make_booking_ref, ref_exists, entity_name="booking reference")
 
+        # Allow callers (VAY-388 draft materialization) to pre-allocate
+        # the booking id so they can stamp it on the draft *before* the
+        # INSERT, keeping the atomic-claim → insert sequence consistent.
         row = await Database.fetchrow(
             """
             INSERT INTO bookings (
+                id,
                 hotel_id, room_type_id, booking_reference,
                 guest_first_name, guest_last_name, guest_email, guest_phone,
                 special_requests, estimated_arrival_time, number_of_guests,
@@ -45,6 +49,7 @@ class BookingRepository:
                 last_minute_discount_percent, last_minute_discount_amount,
                 guest_country
             ) VALUES (
+                COALESCE($37::uuid, uuid_generate_v4()),
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
@@ -87,6 +92,7 @@ class BookingRepository:
             data.get("last_minute_discount_percent", 0),
             data.get("last_minute_discount_amount", 0),
             data.get("guest_country", ""),
+            data.get("id"),
         )
         return dict(row)
 

@@ -491,17 +491,21 @@ class TestCardPaymentDraft:
         assert booking["paymentStatus"] == "authorized"
         assert booking["status"] == "pending"
 
-        # The draft is gone, the booking + payment rows exist.
-        draft_row = await Database.fetchrow(
-            "SELECT id FROM booking_drafts WHERE id = $1", draft_id
-        )
-        assert draft_row is None
+        # The draft row is kept as the materialization link so a second
+        # confirm-authorization call (or a racing webhook) can resolve
+        # back to the same booking. materialized_booking_id points to it.
         booking_row = await Database.fetchrow(
             "SELECT * FROM bookings WHERE booking_reference = $1",
             body["bookingReference"],
         )
         assert booking_row is not None
         assert booking_row["payment_status"] == "authorized"
+        draft_row = await Database.fetchrow(
+            "SELECT id, materialized_booking_id FROM booking_drafts WHERE id = $1",
+            draft_id,
+        )
+        assert draft_row is not None
+        assert draft_row["materialized_booking_id"] == booking_row["id"]
         payment_row = await Database.fetchrow(
             "SELECT * FROM payments WHERE stripe_payment_intent_id = $1",
             "pi_materialize",
@@ -568,9 +572,11 @@ class TestCardPaymentDraft:
         assert booking_row is not None
         assert booking_row["payment_status"] == "authorized"
         draft_row = await Database.fetchrow(
-            "SELECT id FROM booking_drafts WHERE id = $1", body["draftId"]
+            "SELECT id, materialized_booking_id FROM booking_drafts WHERE id = $1",
+            body["draftId"],
         )
-        assert draft_row is None
+        assert draft_row is not None
+        assert draft_row["materialized_booking_id"] == booking_row["id"]
 
     async def test_webhook_payment_failed_drops_draft(
         self, client, hotel_with_rooms

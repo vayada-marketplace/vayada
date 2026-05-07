@@ -94,6 +94,25 @@ class BookingDraftRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def claim_for_materialization(
+        draft_id: str, booking_id: str
+    ) -> Optional[dict]:
+        """Atomically stamp materialized_booking_id on an unmaterialized
+        draft. Exactly one concurrent caller wins; the rest get None and
+        should resolve to the booking via the now-set link."""
+        row = await Database.fetchrow(
+            """
+            UPDATE booking_drafts
+            SET materialized_booking_id = $2
+            WHERE id = $1 AND materialized_booking_id IS NULL
+            RETURNING *
+            """,
+            draft_id,
+            booking_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def delete(draft_id: str) -> bool:
         result = await Database.execute(
             "DELETE FROM booking_drafts WHERE id = $1", draft_id
@@ -102,8 +121,15 @@ class BookingDraftRepository:
 
     @staticmethod
     async def delete_by_payment_intent(stripe_payment_intent_id: str) -> bool:
+        # Webhook cancel/fail paths only release unmaterialized soft holds;
+        # once a draft has been promoted to a real booking, the booking
+        # owns the lifecycle and the link row stays for idempotency.
         result = await Database.execute(
-            "DELETE FROM booking_drafts WHERE stripe_payment_intent_id = $1",
+            """
+            DELETE FROM booking_drafts
+            WHERE stripe_payment_intent_id = $1
+              AND materialized_booking_id IS NULL
+            """,
             stripe_payment_intent_id,
         )
         return result == "DELETE 1"
@@ -124,6 +150,7 @@ class BookingDraftRepository:
               AND check_in < $3
               AND check_out > $2
               AND expires_at > NOW()
+              AND materialized_booking_id IS NULL
             """,
             room_type_id,
             check_in,
@@ -140,6 +167,7 @@ class BookingDraftRepository:
             """
             DELETE FROM booking_drafts
             WHERE expires_at < NOW() - ($1::int * INTERVAL '1 minute')
+              AND materialized_booking_id IS NULL
             """,
             grace_minutes,
         )

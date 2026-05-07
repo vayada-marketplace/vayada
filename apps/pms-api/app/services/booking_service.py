@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -589,27 +590,34 @@ async def materialize_draft(
     """Atomically convert a soft-hold draft into a real booking + payment row.
 
     ``payment_status`` is the new payments.status (typically "authorized"
-    for the request flow, "captured" for instant-book). The draft is
-    deleted as part of the transaction; whoever loses the race (concurrent
-    webhook + confirm-authorization) gets a None back and should look up
-    the materialized booking via PaymentRepository.get_by_stripe_pi.
+    for the request flow, "captured" for instant-book). The atomic claim
+    stamps the new booking_id onto the draft (rather than DELETEing it),
+    so a second caller — sequential retry or webhook racing
+    confirm-authorization — can resolve back to the same booking via
+    ``draft.materialized_booking_id``.
 
     Returns the booking row on success, None if another caller already
     materialized this draft.
     """
-    # Atomic claim — exactly one caller proceeds, the rest see no rows.
-    deleted = await Database.fetchrow(
-        "DELETE FROM booking_drafts WHERE id = $1 RETURNING *",
-        draft["id"],
+    # Atomic claim — pre-allocate the booking id and stamp it on the
+    # draft. Exactly one concurrent caller wins; the rest see no rows
+    # and fall through to the existing get-by-stripe-pi resolution.
+    # The draft row is intentionally NOT deleted — keeping it (with the
+    # link set) lets a sequential retry of confirm-authorization resolve
+    # back to the same booking instead of 400-ing.
+    new_booking_id = str(uuid.uuid4())
+    claimed = await BookingDraftRepository.claim_for_materialization(
+        str(draft["id"]), new_booking_id
     )
-    if not deleted:
+    if not claimed:
         return None
 
-    payload = deleted["payload"]
+    payload = claimed["payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
 
     booking_data = dict(payload)
+    booking_data["id"] = new_booking_id
     booking_data["check_in"] = date.fromisoformat(booking_data["check_in"])
     booking_data["check_out"] = date.fromisoformat(booking_data["check_out"])
     deadline_str = booking_data.get("host_response_deadline")
@@ -623,7 +631,7 @@ async def materialize_draft(
 
     # The draft already pre-allocated a reference; reuse it so the
     # PaymentIntent metadata + any guest-side links stay consistent.
-    booking_data["booking_reference"] = deleted["booking_reference"]
+    booking_data["booking_reference"] = claimed["booking_reference"]
 
     # Last-mile race: by the time we materialize, another booking may
     # have taken the room (legitimate or not). Prefer assigning a unit,
@@ -644,17 +652,17 @@ async def materialize_draft(
         amount=float(booking_data["total_amount"]),
         currency=booking_data["currency"],
         payment_method="card",
-        stripe_pi_id=deleted["stripe_payment_intent_id"],
+        stripe_pi_id=claimed["stripe_payment_intent_id"],
     )
     if payment_status == "authorized":
         payment = await PaymentRepository.get_by_stripe_pi(
-            deleted["stripe_payment_intent_id"]
+            claimed["stripe_payment_intent_id"]
         )
         if payment:
             await PaymentRepository.update_status(str(payment["id"]), "authorized")
     elif payment_status == "captured":
         payment = await PaymentRepository.get_by_stripe_pi(
-            deleted["stripe_payment_intent_id"]
+            claimed["stripe_payment_intent_id"]
         )
         if payment:
             await PaymentRepository.update_status(str(payment["id"]), "captured")
@@ -1011,16 +1019,32 @@ async def confirm_payment_authorized(handle: str) -> dict:
     """
     draft = await BookingDraftRepository.get_by_id(handle)
     if draft:
+        # Already materialized (sequential retry, or webhook beat us
+        # and we're the second caller) — return the linked booking.
+        if draft.get("materialized_booking_id"):
+            booking = await BookingRepository.get_by_id(
+                str(draft["materialized_booking_id"])
+            )
+            if booking is None:
+                raise ValueError("Booking not found")
+            return _booking_to_response(booking).model_dump(by_alias=True)
+
         booking = await materialize_draft(draft, payment_status="authorized")
         if booking is None:
-            # Lost the race to the webhook — load the booking that the
-            # other caller just created.
-            payment = await PaymentRepository.get_by_stripe_pi(
-                draft["stripe_payment_intent_id"]
-            )
-            if not payment:
-                raise ValueError("Booking materialization failed")
-            booking = await BookingRepository.get_by_id(str(payment["booking_id"]))
+            # Lost the claim to a concurrent caller — load the booking
+            # that the winner just created (link is now set on the draft).
+            refetched = await BookingDraftRepository.get_by_id(handle)
+            if refetched and refetched.get("materialized_booking_id"):
+                booking = await BookingRepository.get_by_id(
+                    str(refetched["materialized_booking_id"])
+                )
+            if booking is None:
+                payment = await PaymentRepository.get_by_stripe_pi(
+                    draft["stripe_payment_intent_id"]
+                )
+                if not payment:
+                    raise ValueError("Booking materialization failed")
+                booking = await BookingRepository.get_by_id(str(payment["booking_id"]))
         return _booking_to_response(booking).model_dump(by_alias=True)
 
     booking = await BookingRepository.get_by_id(handle)
