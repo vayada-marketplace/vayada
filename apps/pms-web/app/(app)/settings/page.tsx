@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { bookingsService } from '@/services/bookings'
 import { apiClient } from '@/services/api/client'
+import { pmsClient } from '@/services/api/pmsClient'
 import { useTranslation, SUPPORTED_LANGUAGES } from '@/lib/i18n'
 
 const CURRENCY_OPTIONS = [
@@ -137,6 +138,22 @@ function CurrencySelect({ value, onChange, t }: { value: string; onChange: (v: s
   )
 }
 
+// Raw HTTP status reason-phrases (e.g. "Not Found", "Bad Gateway") leak
+// through when the API returns FastAPI's default {"detail": "<phrase>"}.
+// They tell the user nothing actionable, so swap them for the fallback.
+const RAW_HTTP_PHRASES = new Set([
+  'not found', 'internal server error', 'bad request', 'forbidden',
+  'unauthorized', 'bad gateway', 'service unavailable', 'gateway timeout',
+  'unprocessable entity', 'conflict', 'method not allowed', 'request timeout',
+])
+
+function humanizeApiError(err: any, fallback: string): string {
+  const msg = (err?.message || '').trim()
+  if (!msg) return fallback
+  if (RAW_HTTP_PHRASES.has(msg.toLowerCase())) return fallback
+  return msg
+}
+
 export default function SettingsPage() {
   const { t, locale, setLocale } = useTranslation()
   const [loading, setLoading] = useState(true)
@@ -191,15 +208,15 @@ export default function SettingsPage() {
       })
       .catch(() => {})
 
-    apiClient.get<any>('/admin/hotel')
+    pmsClient.get<any>('/admin/hotel')
       .then((h) => {
-        if (h.propertyType) setPropertyType(h.propertyType)
+        if (h.property_type) setPropertyType(h.property_type)
         if (h.timezone) setTimezone(h.timezone)
         if (h.country) setCountry(h.country)
         if (h.state) setState(h.state)
         if (h.city) setCity(h.city)
         if (h.address) setAddress(h.address)
-        if (h.zipCode) setZipCode(h.zipCode)
+        if (h.zip_code) setZipCode(h.zip_code)
         if (h.phone) setPhone(h.phone)
         if (h.latitude != null) setLatitude(String(h.latitude))
         if (h.longitude != null) setLongitude(String(h.longitude))
@@ -266,7 +283,7 @@ export default function SettingsPage() {
     setError('')
     setSuccess('')
     try {
-      await apiClient.patch('/admin/hotel', {
+      await pmsClient.patch('/admin/hotel', {
         property_type: propertyType,
         timezone,
         country,
@@ -280,7 +297,7 @@ export default function SettingsPage() {
       })
       setSuccess('Property details saved')
     } catch (err: any) {
-      setError(err.message || 'Failed to save property details')
+      setError(humanizeApiError(err, 'Couldn’t save property details. Please try again, or contact support if the issue persists.'))
     } finally {
       setSavingProperty(false)
     }
@@ -293,11 +310,11 @@ export default function SettingsPage() {
     const previous = instantBook
     setInstantBook(next)
     try {
-      await apiClient.patch('/admin/hotel', { instant_book: next })
+      await pmsClient.patch('/admin/hotel', { instant_book: next })
       setSuccess(next ? 'Instant booking enabled' : 'Booking requests re-enabled')
     } catch (err: any) {
       setInstantBook(previous)
-      setError(err.message || 'Failed to update booking acceptance setting')
+      setError(humanizeApiError(err, 'Couldn’t update booking acceptance setting. Please try again, or contact support if the issue persists.'))
     } finally {
       setSavingInstantBook(false)
     }
