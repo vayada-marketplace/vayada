@@ -30,6 +30,29 @@ def _is_configured() -> bool:
 # ── Reads (lenient — log + None on failure) ──────────────────────────
 
 
+async def get_name(hotel_id: str) -> Optional[str]:
+    """Return the hotel's authoritative display name from booking_db, or
+    ``None`` if booking_db is unconfigured / unreachable / the row is
+    missing. Callers should fall back to whatever local copy they have
+    so guest-facing flows still render on a BE-DB outage.
+
+    Hotel renames happen in booking_db (the identity layer); pms.hotels
+    keeps a stale copy that's only refreshed by the backfill script —
+    so emails / receipts must read through here, not the JOIN.
+    """
+    if not _is_configured():
+        return None
+    try:
+        name = await BookingEngineDatabase.fetchval(
+            "SELECT name FROM booking_hotels WHERE id = $1",
+            hotel_id,
+        )
+    except Exception as e:
+        logger.warning("booking_db name lookup failed for hotel %s: %s", hotel_id, e)
+        return None
+    return name or None
+
+
 async def get_currency(hotel_id: str) -> str:
     """Return the hotel's authoritative currency, or ``DEFAULT_CURRENCY``
     if booking_db is unconfigured / unreachable / the row is missing.
