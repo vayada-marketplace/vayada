@@ -6,6 +6,7 @@ import { ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
 import { bookingsService } from '@/services/bookings'
+import { channexService } from '@/services/channex'
 import RoomTypeForm from '@/components/rooms/RoomTypeForm'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
@@ -21,6 +22,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
 
   const [form, setForm] = useState<RoomTypeUpdate>({})
   const [initialCurrency, setInitialCurrency] = useState('EUR')
+  const [channexConnected, setChannexConnected] = useState(false)
 
   useEffect(() => {
     roomsService.get(params.id)
@@ -74,6 +76,13 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
         }
       })
       .catch(console.error)
+
+    // Tells the save toast whether to mention OTAs (VAY-391). Failures
+    // here are non-fatal — worst case the toast falls back to the
+    // local-only message.
+    channexService.getStatus()
+      .then((status) => setChannexConnected(status.isConnected))
+      .catch(() => setChannexConnected(false))
   }, [params.id])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -94,7 +103,14 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
         await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
       }
       await roomsService.update(params.id, form)
-      setSuccess('Room type updated successfully')
+      // VAY-391: backend now auto-pushes ARI to Channex on rate-affecting
+      // saves, so reflect that in the toast when a channel manager is
+      // wired up. Hotels without Channex see the original message.
+      setSuccess(
+        channexConnected
+          ? 'Changes saved. Updating Booking.com & Airbnb in the background…'
+          : 'Room type updated successfully'
+      )
     } catch (err: any) {
       setError(err.message || 'Failed to update')
     } finally {
