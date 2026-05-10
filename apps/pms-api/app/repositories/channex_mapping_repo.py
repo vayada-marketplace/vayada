@@ -301,17 +301,18 @@ class ChannexBookingMappingRepository:
         channex_booking_id: str,
         channel_source: str = "channex",
         channex_revision_id: str = None,
+        channex_room_index: int = 0,
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO channex_booking_mappings
                 (hotel_id, booking_id, channex_booking_id,
-                 channel_source, channex_revision_id)
-            VALUES ($1, $2, $3, $4, $5)
+                 channel_source, channex_revision_id, channex_room_index)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             """,
             hotel_id, booking_id, channex_booking_id,
-            channel_source, channex_revision_id,
+            channel_source, channex_revision_id, channex_room_index,
         )
         return dict(row)
 
@@ -327,12 +328,36 @@ class ChannexBookingMappingRepository:
     async def get_by_channex_id(
         hotel_id: str, channex_booking_id: str
     ) -> Optional[dict]:
+        """First (lowest-index) mapping row for a Channex booking.
+
+        Kept for dedup checks ("does this Channex booking exist at all?").
+        For multi-room bookings use :meth:`list_by_channex_id` to get every
+        linked PMS booking."""
         row = await Database.fetchrow(
             "SELECT * FROM channex_booking_mappings "
-            "WHERE hotel_id = $1 AND channex_booking_id = $2",
+            "WHERE hotel_id = $1 AND channex_booking_id = $2 "
+            "ORDER BY channex_room_index "
+            "LIMIT 1",
             hotel_id, channex_booking_id,
         )
         return dict(row) if row else None
+
+    @staticmethod
+    async def list_by_channex_id(
+        hotel_id: str, channex_booking_id: str
+    ) -> List[dict]:
+        """All mapping rows for a Channex booking, ordered by room index.
+
+        A multi-room OTA reservation produces one mapping row per booked
+        room (indexed by the room's position in the Channex ``rooms[]``
+        array)."""
+        rows = await Database.fetch(
+            "SELECT * FROM channex_booking_mappings "
+            "WHERE hotel_id = $1 AND channex_booking_id = $2 "
+            "ORDER BY channex_room_index",
+            hotel_id, channex_booking_id,
+        )
+        return [dict(r) for r in rows]
 
     @staticmethod
     async def update_sync_time(
