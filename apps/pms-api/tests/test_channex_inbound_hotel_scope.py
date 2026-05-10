@@ -84,9 +84,9 @@ async def test_dedupe_lookup_is_hotel_scoped():
     be able to query its own namespace and not see it as 'already exists'."""
     rev = _revision("crt-1", channex_booking_id="ch-bk-99")
     with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.get_by_channex_id",
+        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=[],
     ) as dedupe, patch(
         "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
         new_callable=AsyncMock,
@@ -103,9 +103,9 @@ async def test_room_mapping_lookup_is_hotel_scoped():
     mapping."""
     rev = _revision("crt-shared")
     with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.get_by_channex_id",
+        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=[],
     ), patch(
         "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
         new_callable=AsyncMock,
@@ -122,9 +122,9 @@ async def test_import_refuses_when_room_type_belongs_to_other_hotel():
     booking."""
     rev = _revision("crt-1")
     with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.get_by_channex_id",
+        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=[],
     ), patch(
         "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
         new_callable=AsyncMock,
@@ -150,9 +150,9 @@ async def test_import_proceeds_when_hotels_match():
     rev = _revision("crt-1")
     create_mock = AsyncMock(return_value={"id": "booking-1"})
     with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.get_by_channex_id",
+        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=[],
     ), patch(
         "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
         new_callable=AsyncMock,
