@@ -3,7 +3,20 @@ import secrets
 import string
 from typing import Optional, List
 from app.database import Database
+from app.services import hotel_identity_service
 from app.utils import generate_unique_code
+
+
+async def _overlay_canonical_hotel_name(booking: dict) -> dict:
+    """Replace the JOIN'd ``hotel_name`` with the authoritative one from
+    booking_db so renames in the booking engine flow through to emails
+    and other guest-facing copy. Falls back to the local value (the
+    JOIN against pms.hotels) when booking_db is unreachable or the row
+    is missing — better stale than blank."""
+    canonical = await hotel_identity_service.get_name(booking["hotel_id"])
+    if canonical:
+        booking["hotel_name"] = canonical
+    return booking
 
 
 def _make_booking_ref() -> str:
@@ -110,7 +123,9 @@ class BookingRepository:
             """,
             booking_id,
         )
-        return dict(row) if row else None
+        if not row:
+            return None
+        return await _overlay_canonical_hotel_name(dict(row))
 
     @staticmethod
     async def lookup(booking_reference: str, guest_email: str) -> Optional[dict]:
@@ -128,7 +143,9 @@ class BookingRepository:
             booking_reference,
             guest_email,
         )
-        return dict(row) if row else None
+        if not row:
+            return None
+        return await _overlay_canonical_hotel_name(dict(row))
 
     @staticmethod
     async def list_by_hotel_id(
