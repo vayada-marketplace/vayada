@@ -7,6 +7,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.dependencies import require_hotel_admin
+from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.channex.provisioning import provision_property
 from app.services.channex_sync_service import push_cancellation_policy_for_room_type
@@ -261,22 +262,51 @@ async def update_room_type(
     if "meal_plans" in updates:
         asyncio.create_task(_resync_channex_after_meal_plan_change(hotel_id))
 
-    # Daily price overrides are the highest-priority rate input but only
-    # propagate to OTAs when ARI is pushed. Without this trigger the new
-    # rate stays trapped in the DB until something unrelated kicks off a
-    # sync, which is the bug VAY-380 describes.
-    if "daily_rates" in updates:
-        asyncio.create_task(_push_ari_for_daily_rate_change(hotel_id))
+    # Any rate-affecting save must propagate to OTAs immediately. Without
+    # this, hotels would have to remember to click "Sync Availability &
+    # Rates" on the Channel Manager page after every edit (VAY-391).
+    # meal_plans flows through its own provision+push helper above, so
+    # exclude it here to avoid a duplicate push.
+    rate_affecting = _RATE_AFFECTING_FIELDS & updates.keys()
+    if rate_affecting:
+        asyncio.create_task(
+            _push_ari_after_rate_change(hotel_id, sorted(rate_affecting))
+        )
 
     return _room_to_admin(room)
 
 
-async def _push_ari_for_daily_rate_change(hotel_id: str) -> None:
+# Fields that change what OTAs should see — a write to any of these has to
+# trigger a Channex ARI push. Kept narrow on purpose: cosmetic fields like
+# name/description don't belong here.
+_RATE_AFFECTING_FIELDS = frozenset({
+    "base_rate",
+    "non_refundable_rate",
+    "non_refundable_enabled",
+    "non_refundable_discount",
+    "monthly_rates",
+    "daily_rates",
+    "operating_periods",
+    "seasons",
+    "weekend_surcharge",
+    "minimum_advance_days",
+})
+
+
+async def _push_ari_after_rate_change(
+    hotel_id: str, changed_fields: list[str]
+) -> None:
+    # Hotels without an active Channex connection should be silent no-ops
+    # (per the VAY-391 "no Channel Manager connected" edge case).
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn.get("is_active"):
+        return
     try:
         await push_ari_for_hotel(hotel_id)
     except Exception:
         logger.exception(
-            "Channex ARI push after daily_rates change failed for hotel %s",
+            "Channex ARI push after rate change (%s) failed for hotel %s",
+            ",".join(changed_fields),
             hotel_id,
         )
 
