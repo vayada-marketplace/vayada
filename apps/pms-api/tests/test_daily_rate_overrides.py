@@ -83,11 +83,14 @@ def test_channex_push_uses_daily_override():
     assert entry["rate"] == 1_210_000
 
 
-def test_patch_room_types_triggers_channex_push_when_daily_rates_change():
-    """The bug surfaced because admin_room_types.update_room_type only
-    scheduled an ARI push for cancellation/meal-plan fields. Updating
-    only daily_rates must also enqueue a push so OTAs see the new rate
-    without waiting for an unrelated change to trigger sync.
+def _run_update_room_type_capture_pushes(
+    payload_kwargs: dict,
+    *,
+    connection_active: bool = True,
+):
+    """Drive admin_room_types.update_room_type with the given update payload
+    and report which hotel_ids ended up in push_ari_for_hotel. Used by the
+    auto-sync trigger tests below.
     """
     import asyncio
     from unittest.mock import AsyncMock, patch
@@ -99,12 +102,14 @@ def test_patch_room_types_triggers_channex_push_when_daily_rates_change():
         "hotel_id": "h-1",
         "name": "Studio with Private Pool",
     }
-    updated_room = {**existing, "daily_rates": {"2026-05-07": 1_100_000}}
+    updated_room = {**existing, **{k: v for k, v in payload_kwargs.items()}}
 
-    pushed = []
+    pushed: list[str] = []
 
     async def fake_push_ari(hotel_id):
         pushed.append(hotel_id)
+
+    conn = {"is_active": connection_active} if connection_active is not None else None
 
     async def run():
         with (
@@ -131,17 +136,74 @@ def test_patch_room_types_triggers_channex_push_when_daily_rates_change():
             ),
             patch.object(admin_room_types, "_room_to_admin", lambda r: r),
             patch.object(admin_room_types, "push_ari_for_hotel", fake_push_ari),
+            patch.object(
+                admin_room_types.ChannexConnectionRepository,
+                "get_by_hotel_id",
+                AsyncMock(return_value=conn),
+            ),
         ):
-            payload = admin_room_types.RoomTypeUpdate(daily_rates={"2026-05-07": 1_100_000})
+            payload = admin_room_types.RoomTypeUpdate(**payload_kwargs)
             await admin_room_types.update_room_type(
                 room_type_id="rt-1",
                 data=payload,
                 user_id="u-1",
             )
-            # _push_ari_for_daily_rate_change is fired via asyncio.create_task,
-            # so yield once for the loop to drain it before assertion.
+            # The push is fired via asyncio.create_task; yield to the loop
+            # so the task drains before the test reads `pushed`.
+            await asyncio.sleep(0)
             await asyncio.sleep(0)
 
     asyncio.run(run())
+    return pushed
 
+
+def test_patch_room_types_triggers_channex_push_when_daily_rates_change():
+    """The bug surfaced because admin_room_types.update_room_type only
+    scheduled an ARI push for cancellation/meal-plan fields. Updating
+    only daily_rates must also enqueue a push so OTAs see the new rate
+    without waiting for an unrelated change to trigger sync.
+    """
+    pushed = _run_update_room_type_capture_pushes(
+        {"daily_rates": {"2026-05-07": 1_100_000}},
+    )
     assert pushed == ["h-1"]
+
+
+def test_patch_room_types_triggers_channex_push_for_seasons():
+    # VAY-391: editing season rates must also flow to OTAs without the
+    # user having to click "Sync Availability & Rates" manually.
+    pushed = _run_update_room_type_capture_pushes(
+        {"seasons": [{"name": "High", "from": "07-01", "to": "08-31", "rate": "2000000"}]},
+    )
+    assert pushed == ["h-1"]
+
+
+def test_patch_room_types_triggers_channex_push_for_operating_periods():
+    pushed = _run_update_room_type_capture_pushes(
+        {"operating_periods": [{"from": "2026-06-01", "to": "2026-09-30"}]},
+    )
+    assert pushed == ["h-1"]
+
+
+def test_patch_room_types_triggers_channex_push_for_weekend_surcharge():
+    pushed = _run_update_room_type_capture_pushes({"weekend_surcharge": "+15%"})
+    assert pushed == ["h-1"]
+
+
+def test_patch_room_types_skips_channex_push_for_cosmetic_fields():
+    # Renaming the room type or rewriting its description must NOT fire an
+    # ARI push — OTAs don't need a re-send for those.
+    pushed = _run_update_room_type_capture_pushes(
+        {"name": "Garden Suite Renamed", "description": "Updated copy."},
+    )
+    assert pushed == []
+
+
+def test_patch_room_types_silent_skip_when_channex_disconnected():
+    # Hotels without an active Channex connection must save without a
+    # push attempt and without surfacing any error (VAY-391 edge case).
+    pushed = _run_update_room_type_capture_pushes(
+        {"daily_rates": {"2026-05-07": 1_100_000}},
+        connection_active=False,
+    )
+    assert pushed == []
