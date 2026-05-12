@@ -25,8 +25,20 @@ class BookingHotelRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def get_by_previous_slug(slug: str) -> Optional[dict]:
+        """Look up a hotel by a slug it used before being renamed. Callers
+        use this to issue a 301 to the canonical slug instead of 404ing
+        links shared on the old subdomain."""
+        row = await Database.fetchrow(
+            "SELECT * FROM booking_hotels WHERE $1 = ANY(previous_slugs)", slug,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def get_by_custom_domain(domain: str) -> Optional[dict]:
-        row = await Database.fetchrow("SELECT * FROM booking_hotels WHERE custom_domain = $1", domain)
+        row = await Database.fetchrow(
+            "SELECT * FROM booking_hotels WHERE custom_domain = lower($1)", domain,
+        )
         return dict(row) if row else None
 
     @staticmethod
