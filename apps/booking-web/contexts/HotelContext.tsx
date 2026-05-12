@@ -52,17 +52,20 @@ const HotelContext = createContext<HotelContextValue>({
   refetchRooms: async () => {},
 })
 
-// Resolve the active hotel slug. In production this is fixed at build time
-// via NEXT_PUBLIC_HOTEL_SLUG (one frontend deployment per hotel, usually on
-// a dedicated domain/subdomain). For local development we let the slug be
-// overridden at runtime so a single dev container can serve any hotel:
+// Resolve the active hotel slug. In production the server layout has
+// already resolved it from the request hostname and passes it down via
+// the `slug` prop. For local development we let the slug be overridden
+// at runtime so a single dev container can serve any hotel:
 //   1. `?slug=<name>` query param (also persisted to localStorage)
 //   2. `dev-hotel-slug` localStorage key
 //   3. NEXT_PUBLIC_HOTEL_SLUG env var
-//   4. hardcoded fallback
+//
+// VAY-394: no longer falls back to a hardcoded `hotel-alpenrose` — when
+// no slug can be resolved we return `null` so the provider can render
+// a clear error instead of fetching a dev seed slug that 404s in prod.
 const DEV_SLUG_STORAGE_KEY = 'dev-hotel-slug'
 
-function resolveSlug(slugProp?: string): string {
+function resolveSlug(slugProp?: string): string | null {
   if (slugProp) return slugProp
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search)
@@ -76,19 +79,15 @@ function resolveSlug(slugProp?: string): string {
       if (stored) return stored
     } catch {}
   }
-  return process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
+  return process.env.NEXT_PUBLIC_HOTEL_SLUG || null
 }
 
 export function HotelProvider({ children, locale = 'en', slug: slugProp }: { children: ReactNode; locale?: string; slug?: string }) {
-  // Initial state uses the server-safe fallback so SSR and client
-  // hydration match. On the client, the effect below immediately
-  // resolves the real slug from ?slug=/localStorage and blocks the
-  // data fetch until that resolution has completed — otherwise the
-  // first render would fetch the wrong hotel, race with the second
-  // fetch, and produce mixed state.
-  const [slug, setSlug] = useState<string>(
-    () => slugProp || process.env.NEXT_PUBLIC_HOTEL_SLUG || 'hotel-alpenrose'
-  )
+  // Server render passes the resolved slug; we hold it as `null`
+  // until the client effect either confirms it or runs the dev-mode
+  // fallback (?slug=/localStorage). Keeping the initial state stable
+  // between SSR and hydration avoids a flash of the wrong hotel.
+  const [slug, setSlug] = useState<string | null>(() => slugProp || null)
   // Server render skips the fetch; client sets this to true after
   // resolving the slug so the fetch effect fires exactly once with
   // the correct value.
@@ -106,6 +105,13 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
 
   useEffect(() => {
     if (!slugResolved) return
+    if (!slug) {
+      // No slug to fetch — render the empty error UI below. Stop
+      // showing the loading spinner so the user sees a real message.
+      setLoading(false)
+      setError('No property is configured for this URL.')
+      return
+    }
     setLoading(true)
     Promise.all([
       hotelService.getHotel(slug, locale),
@@ -117,6 +123,25 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
         setRooms(roomsData)
         setAddons(addonsData)
         setLoading(false)
+        // VAY-394: API returned a different canonical slug than we
+        // requested — the property was renamed and we landed via its
+        // old subdomain. Redirect the browser to the canonical
+        // subdomain so address-bar copy/share uses the new name.
+        if (
+          typeof window !== 'undefined'
+          && hotelData?.slug
+          && hotelData.slug !== slug
+        ) {
+          const host = window.location.hostname
+          if (host.endsWith('.booking.vayada.com')) {
+            const parts = host.split('.')
+            if (parts[0] === slug) {
+              parts[0] = hotelData.slug
+              const url = `${window.location.protocol}//${parts.join('.')}${window.location.pathname}${window.location.search}${window.location.hash}`
+              window.location.replace(url)
+            }
+          }
+        }
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load hotel data')
@@ -127,6 +152,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
   const refetchRooms = async (checkIn?: string, checkOut?: string, adults?: number) => {
     setRoomsLoading(true)
     try {
+      if (!slug) return
       const roomsData = await hotelService.getRooms(slug, checkIn, checkOut, adults)
       setRooms(roomsData)
     } catch (err) {
@@ -233,7 +259,7 @@ export function HotelProvider({ children, locale = 'en', slug: slugProp }: { chi
   }
 
   return (
-    <HotelContext.Provider value={{ hotel, rooms, addons, loading, roomsLoading, error, locale, slug, refetchRooms }}>
+    <HotelContext.Provider value={{ hotel, rooms, addons, loading, roomsLoading, error, locale, slug: slug ?? '', refetchRooms }}>
       {children}
     </HotelContext.Provider>
   )
