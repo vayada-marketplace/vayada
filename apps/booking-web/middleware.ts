@@ -14,7 +14,10 @@ function isKnownSubdomain(hostname: string): boolean {
 export default async function middleware(request: NextRequest) {
   const response = intlMiddleware(request)
 
-  const hostname = request.headers.get('host') || ''
+  // Hostnames are case-insensitive per RFC 1035 §2.3.3 but the backend
+  // lookup keys are stored lowercased — normalize here so a stray
+  // uppercase Host header still resolves.
+  const hostname = (request.headers.get('host') || '').toLowerCase()
   const parts = hostname.split('.')
 
   let slug: string | null = null
