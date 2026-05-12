@@ -3,6 +3,7 @@ from datetime import date
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.dependencies import require_internal_key
@@ -45,9 +46,18 @@ class ResolveDomainResponse(BaseModel):
 @router.get("/{slug}", response_model=HotelResponse)
 async def get_hotel(slug: str, lang: str = "en"):
     hotel = await get_hotel_by_slug(slug, locale=lang)
-    if not hotel:
-        raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
-    return hotel
+    if hotel:
+        return hotel
+    # VAY-394: caller may be using a slug the property used before being
+    # renamed. Redirect to the canonical so old confirmation-email links
+    # and shared URLs keep working.
+    renamed = await BookingHotelRepository.get_by_previous_slug(slug)
+    if renamed:
+        return RedirectResponse(
+            url=f"/api/hotels/{renamed['slug']}?lang={lang}",
+            status_code=301,
+        )
+    raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
 
 
 @router.get("/{slug}/addons", response_model=List[AddonResponse])
@@ -140,8 +150,13 @@ async def exchange_rates(base: str = Query(default="EUR")):
 
 @resolve_router.get("/resolve-domain", response_model=ResolveDomainResponse)
 async def resolve_domain(domain: str = Query(...)):
-    """Resolve a custom domain to the hotel slug."""
-    hotel = await BookingHotelRepository.get_by_custom_domain(domain)
+    """Resolve a custom domain to the hotel slug.
+
+    Hostnames are case-insensitive per RFC 1035 §2.3.3, and custom_domain
+    is stored lowercased on write — normalize the incoming host before
+    the lookup so a stray uppercase ``Host`` header still resolves.
+    """
+    hotel = await BookingHotelRepository.get_by_custom_domain(domain.strip().lower())
     if not hotel:
         raise HTTPException(status_code=404, detail="No hotel found for this domain")
     return ResolveDomainResponse(slug=hotel["slug"])

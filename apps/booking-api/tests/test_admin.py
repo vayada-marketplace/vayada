@@ -141,6 +141,64 @@ class TestPropertySettings:
         # Other fields should remain unchanged
         assert body["reservation_email"] == "hotel@test.com"
 
+    async def test_rename_rotates_slug_and_records_history(self, client, hotel_with_property):
+        """VAY-394: renaming a property rewrites its slug to match the new name
+        and appends the previous slug to previous_slugs so confirmation-email
+        links served via the old subdomain still resolve."""
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        user = hotel_with_property["user"]
+        # Pin the starting slug so the assertions don't depend on the
+        # fixture's random slug generator.
+        await Database.execute(
+            "UPDATE booking_hotels SET name = 'Villa Sava', slug = 'villasava', previous_slugs = '{}' WHERE id = $1",
+            hotel["id"],
+        )
+
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={"property_name": "Tiga Lombok"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["property_name"] == "Tiga Lombok"
+        assert body["slug"] == "tigalombok"
+
+        row = await Database.fetchrow(
+            "SELECT slug, previous_slugs FROM booking_hotels WHERE id = $1",
+            hotel["id"],
+        )
+        assert row["slug"] == "tigalombok"
+        assert "villasava" in row["previous_slugs"]
+
+    async def test_rename_to_same_slug_is_noop(self, client, hotel_with_property):
+        """A name edit that slugifies to the existing slug (e.g. casing-only)
+        must not append the current slug to previous_slugs or churn the URL."""
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        user = hotel_with_property["user"]
+        await Database.execute(
+            "UPDATE booking_hotels SET name = 'Tiga Lombok', slug = 'tigalombok', previous_slugs = '{}' WHERE id = $1",
+            hotel["id"],
+        )
+
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={"property_name": "TIGA LOMBOK"},
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["slug"] == "tigalombok"
+
+        row = await Database.fetchrow(
+            "SELECT previous_slugs FROM booking_hotels WHERE id = $1",
+            hotel["id"],
+        )
+        assert list(row["previous_slugs"]) == []
+
     async def test_patch_currency_persists(self, client, hotel_with_property):
         """Currency change must survive a round-trip (PATCH then GET)."""
         user = hotel_with_property["user"]

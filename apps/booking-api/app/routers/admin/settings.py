@@ -193,22 +193,28 @@ def _api_to_db_value(api_value, db_column: str):
     return hotel_default(db_column)
 
 
-async def _resolve_unique_slug(name: str, user_id: str) -> str:
-    """Pick a slug for a new booking_hotels row, disambiguating when the
+async def _resolve_unique_slug(name: str, user_id: str, *, exclude_hotel_id: str | None = None) -> str:
+    """Pick a slug for a booking_hotels row, disambiguating when the
     derived slug is already taken so two users can launch hotels with
     the same display name. Tries: bare slug → `{slug}-{user_id[:8]}` →
     `{slug}-{user_id[:8]}-{random}`. The random tier covers the same
     user creating two hotels with identical names.
+
+    ``exclude_hotel_id`` lets the rename path skip the uniqueness check
+    when the bare slug is already held by the hotel being renamed
+    (e.g. case-only name change) — otherwise we'd suffix unnecessarily.
 
     A race between get_by_slug and the eventual INSERT is still possible;
     the caller handles that by catching UniqueViolationError and retrying
     with a random suffix.
     """
     base = slugify(name) if name else f"hotel-{user_id[:8]}"
-    if not await BookingHotelRepository.get_by_slug(base):
+    existing = await BookingHotelRepository.get_by_slug(base)
+    if not existing or (exclude_hotel_id and str(existing["id"]) == exclude_hotel_id):
         return base
     suffixed = f"{base}-{user_id[:8]}"
-    if not await BookingHotelRepository.get_by_slug(suffixed):
+    existing = await BookingHotelRepository.get_by_slug(suffixed)
+    if not existing or (exclude_hotel_id and str(existing["id"]) == exclude_hotel_id):
         return suffixed
     return f"{suffixed}-{secrets.token_hex(3)}"
 
@@ -382,6 +388,13 @@ async def update_property_settings(
 
         schedule_pending_plan_switch(updates, date.today())
 
+        # VAY-394: when the property name changes, regenerate the URL slug
+        # so subdomains and the Preview button track the new name. The old
+        # slug is appended to previous_slugs so GET /api/hotels/{old_slug}
+        # can 301 to the canonical, keeping confirmation-email and shared
+        # links working.
+        await _maybe_rotate_slug_on_rename(hotel, updates, user_id)
+
         if updates:
             try:
                 result = await BookingHotelRepository.partial_update(str(hotel["id"]), updates)
@@ -401,5 +414,32 @@ async def update_property_settings(
         result = await _create_hotel_from_settings(data, user_id)
 
     return await _hotel_to_property_settings(result)
+
+
+async def _maybe_rotate_slug_on_rename(
+    hotel: dict, updates: dict, user_id: str,
+) -> None:
+    """If ``updates`` includes a name change that produces a different slug,
+    mutate ``updates`` in place to also rewrite ``slug`` and append the
+    current slug onto ``previous_slugs``. Idempotent — no-op when the new
+    name slugifies to the existing slug.
+    """
+    new_name = updates.get("name")
+    if not new_name:
+        return
+    current_slug = hotel.get("slug") or ""
+    desired_base = slugify(new_name) if new_name else ""
+    if not desired_base or desired_base == current_slug:
+        return
+    hotel_id = str(hotel["id"])
+    new_slug = await _resolve_unique_slug(new_name, user_id, exclude_hotel_id=hotel_id)
+    if new_slug == current_slug:
+        return
+    updates["slug"] = new_slug
+    if current_slug:
+        prev = list(hotel.get("previous_slugs") or [])
+        if current_slug not in prev:
+            prev.append(current_slug)
+        updates["previous_slugs"] = prev
 
 
