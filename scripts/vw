@@ -5,9 +5,36 @@ set -euo pipefail
 
 MAIN_REPO="/Users/flamurmaliqi/git/vayada"
 WORKTREE_PARENT="/Users/flamurmaliqi/git"
-VW_AGENT_CMD="${VW_AGENT_CMD:-claude --permission-mode auto}"
-VW_AGENT_NAME="${VW_AGENT_NAME:-${VW_AGENT_CMD%% *}}"
+VW_CLAUDE_AGENT_CMD="${VW_CLAUDE_AGENT_CMD:-claude --permission-mode auto}"
+VW_CODEX_AGENT_CMD="${VW_CODEX_AGENT_CMD:-codex}"
+VW_CODEX_WARP_EMAIL="${VW_CODEX_WARP_EMAIL:-flamur.maliqi@nomerra.com}"
+VW_WARP_SQLITE_PATH="${VW_WARP_SQLITE_PATH:-$HOME/Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite}"
 VW_TERMINAL_APP="${VW_TERMINAL_APP:-Warp}"
+
+detect_warp_email() {
+  if [ -n "${VW_WARP_EMAIL:-}" ]; then
+    printf "%s" "$VW_WARP_EMAIL"
+    return 0
+  fi
+
+  if command -v sqlite3 >/dev/null 2>&1 && [ -r "$VW_WARP_SQLITE_PATH" ]; then
+    sqlite3 "$VW_WARP_SQLITE_PATH" \
+      "SELECT email FROM current_user_information LIMIT 1;" 2>/dev/null | head -n1
+  fi
+}
+
+default_agent_cmd() {
+  local warp_email
+  warp_email="$(detect_warp_email)"
+  if [ "$warp_email" = "$VW_CODEX_WARP_EMAIL" ]; then
+    printf "%s" "$VW_CODEX_AGENT_CMD"
+  else
+    printf "%s" "$VW_CLAUDE_AGENT_CMD"
+  fi
+}
+
+VW_AGENT_CMD="${VW_AGENT_CMD:-$(default_agent_cmd)}"
+VW_AGENT_NAME="${VW_AGENT_NAME:-${VW_AGENT_CMD%% *}}"
 
 agent_auto_disabled() {
   [ "${VW_NO_AUTO_AGENT:-${VW_NO_AUTO_CLAUDE:-0}}" = "1" ]
@@ -93,10 +120,17 @@ vw — vayada worktree helper
 Agent environment:
   VW_AGENT_CMD                  Agent command to launch with the prompt appended.
                                 Use {prompt} to place the prompt manually.
-                                Default: claude --permission-mode auto
+                                Default: Codex when Warp is logged in as
+                                flamur.maliqi@nomerra.com, otherwise Claude.
                                 Example: VW_AGENT_CMD=codex vw new VAY-123
   VW_AGENT_NAME                 Display name for log output. Default: first word
                                 of VW_AGENT_CMD.
+  VW_CODEX_WARP_EMAIL           Warp email that should default to Codex.
+  VW_CODEX_AGENT_CMD            Codex command. Default: codex.
+  VW_CLAUDE_AGENT_CMD           Claude command. Default:
+                                claude --permission-mode auto.
+  VW_WARP_EMAIL                 Override detected Warp email for testing.
+  VW_WARP_SQLITE_PATH           Override Warp account database path.
   VW_TERMINAL_APP               macOS terminal app to open. Default: Warp.
   VW_NO_AUTO_AGENT=1            Disable automatic agent launch on failures.
                                 VW_NO_AUTO_CLAUDE=1 is still supported.

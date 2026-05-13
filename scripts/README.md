@@ -29,11 +29,16 @@ you're ready to ship one or more worktrees.
 Agent launch is configurable through environment variables:
 
 ```sh
-# Default behavior, kept for compatibility
+# Default behavior:
+# - Codex when Warp is logged in as flamur.maliqi@nomerra.com
+# - Claude otherwise
 vw new VAY-295
 
-# Launch Codex instead of Claude Code
+# Force Codex regardless of Warp account
 VW_AGENT_CMD=codex VW_AGENT_NAME=Codex vw new VAY-295
+
+# Force Claude regardless of Warp account
+VW_AGENT_CMD='claude --permission-mode auto' VW_AGENT_NAME=Claude vw new VAY-295
 
 # Put the prompt in a specific position if your agent command needs it
 VW_AGENT_CMD='codex exec {prompt}' VW_AGENT_NAME=Codex vw new VAY-295
@@ -46,8 +51,13 @@ Defaults:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VW_AGENT_CMD` | `claude --permission-mode auto` | Command run with the generated prompt appended as the final argument. Include `{prompt}` to place the prompt manually. |
+| `VW_AGENT_CMD` | auto-detected | Command run with the generated prompt appended as the final argument. Include `{prompt}` to place the prompt manually. If unset, `vw` uses Codex for `VW_CODEX_WARP_EMAIL`, otherwise Claude. |
 | `VW_AGENT_NAME` | first word of `VW_AGENT_CMD` | Label used in `vw` log output. |
+| `VW_CODEX_WARP_EMAIL` | `flamur.maliqi@nomerra.com` | Warp account email that should default to Codex. |
+| `VW_CODEX_AGENT_CMD` | `codex` | Codex command used by auto-detection. |
+| `VW_CLAUDE_AGENT_CMD` | `claude --permission-mode auto` | Claude command used by auto-detection. |
+| `VW_WARP_EMAIL` | unset | Override detected Warp email, mainly for testing. |
+| `VW_WARP_SQLITE_PATH` | Warp stable SQLite path | Override Warp account database path. |
 | `VW_TERMINAL_APP` | `Warp` | macOS terminal app opened via AppleScript. |
 | `VW_NO_AUTO_AGENT` | unset | Set to `1` to disable automatic agent launch during failure recovery. Legacy `VW_NO_AUTO_CLAUDE=1` still works. |
 
