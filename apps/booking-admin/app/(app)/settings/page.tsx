@@ -350,12 +350,12 @@ export default function SettingsPage() {
     setFeedback(null)
     try {
       const connectedDomain = domainInput.trim().toLowerCase()
-      await customDomainService.connect(connectedDomain)
+      const result = await customDomainService.connect(connectedDomain)
       setDomainStatus({
         configured: true,
-        domain: connectedDomain,
-        status: 'pending',
-        ssl_status: 'initializing',
+        domain: result.domain || connectedDomain,
+        status: result.status,
+        ssl_status: result.ssl_status,
       })
       setDomainInput('')
       setFeedback({ type: 'success', message: t('settings.feedback.domainConnected') })
