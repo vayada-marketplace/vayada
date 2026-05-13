@@ -5,6 +5,53 @@ set -euo pipefail
 
 MAIN_REPO="/Users/flamurmaliqi/git/vayada"
 WORKTREE_PARENT="/Users/flamurmaliqi/git"
+VW_AGENT_CMD="${VW_AGENT_CMD:-claude --permission-mode auto}"
+VW_AGENT_NAME="${VW_AGENT_NAME:-${VW_AGENT_CMD%% *}}"
+VW_TERMINAL_APP="${VW_TERMINAL_APP:-Warp}"
+
+agent_auto_disabled() {
+  [ "${VW_NO_AUTO_AGENT:-${VW_NO_AUTO_CLAUDE:-0}}" = "1" ]
+}
+
+agent_launch_command() {
+  local worktree="$1"
+  local prompt="$2"
+  local quoted_worktree quoted_prompt agent_cmd
+  printf -v quoted_worktree "%q" "$worktree"
+  printf -v quoted_prompt "%q" "$prompt"
+  if [[ "$VW_AGENT_CMD" == *"{prompt}"* ]]; then
+    agent_cmd="${VW_AGENT_CMD//\{prompt\}/$quoted_prompt}"
+  else
+    agent_cmd="$VW_AGENT_CMD $quoted_prompt"
+  fi
+  printf "cd %s && %s" "$quoted_worktree" "$agent_cmd"
+}
+
+applescript_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf "%s" "$value"
+}
+
+open_agent_tab() {
+  local worktree="$1"
+  local prompt="$2"
+  local command
+  command="$(agent_launch_command "$worktree" "$prompt")"
+  command="$(applescript_escape "$command")"
+
+  /usr/bin/osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "$VW_TERMINAL_APP" to activate
+delay 0.4
+tell application "System Events"
+    keystroke "t" using command down
+    delay 0.5
+    keystroke "$command"
+    keystroke return
+end tell
+APPLESCRIPT
+}
 
 normalize_ticket() {
   # Pure digits → prefix with VAY-. Otherwise pass through unchanged.
@@ -21,7 +68,7 @@ vw — vayada worktree helper
 
   vw new <TICKET> [--install]   Create worktree on branch <TICKET> off main,
                                 init submodules, copy .env files, open a new
-                                Warp tab running Claude Code on the ticket.
+                                Warp tab running the configured agent.
                                 --install also runs deps install in submodules.
 
   vw done <TICKET>              Remove the worktree and delete the local branch.
@@ -42,6 +89,17 @@ vw — vayada worktree helper
                                 push, bump submodule pointers in the parent, and
                                 push the parent branch to origin/main. Then run
                                 ship-ready to clean up.
+
+Agent environment:
+  VW_AGENT_CMD                  Agent command to launch with the prompt appended.
+                                Use {prompt} to place the prompt manually.
+                                Default: claude --permission-mode auto
+                                Example: VW_AGENT_CMD=codex vw new VAY-123
+  VW_AGENT_NAME                 Display name for log output. Default: first word
+                                of VW_AGENT_CMD.
+  VW_TERMINAL_APP               macOS terminal app to open. Default: Warp.
+  VW_NO_AUTO_AGENT=1            Disable automatic agent launch on failures.
+                                VW_NO_AUTO_CLAUDE=1 is still supported.
 HELP
 }
 
@@ -111,7 +169,7 @@ cmd_new() {
     done < <(find "$worktree" -maxdepth 4 -name "requirements.txt" -not -path "*/node_modules/*" 2>/dev/null)
   fi
 
-  echo "→ Opening new Warp tab"
+  echo "→ Opening new $VW_TERMINAL_APP tab with $VW_AGENT_NAME"
   local prompt="You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in two phases:
 
 PHASE 1 — PLAN. Use the linear MCP server to fetch ticket $ticket, then move the ticket to \"In Progress\" via the linear MCP server. Propose a concise implementation plan and wait for my approval.
@@ -128,19 +186,7 @@ In the parent worktree:
 
 Stop after committing. Report the local commit SHAs and wait."
 
-  local as_prompt="${prompt//\\/\\\\}"
-  as_prompt="${as_prompt//\"/\\\"}"
-
-  /usr/bin/osascript <<APPLESCRIPT
-tell application "Warp" to activate
-delay 0.4
-tell application "System Events"
-    keystroke "t" using command down
-    delay 0.5
-    keystroke "cd $worktree && claude --permission-mode auto '$as_prompt'"
-    keystroke return
-end tell
-APPLESCRIPT
+  open_agent_tab "$worktree" "$prompt"
 
   echo "✓ Worktree ready: $worktree"
 }
@@ -203,7 +249,7 @@ cmd_sync() {
       echo "→ Pulling main repo (rebase --autostash)"
       if ! git -C "$MAIN_REPO" -c rebase.autostash=true pull --rebase "$remote" main --quiet; then
         echo "   pull --rebase failed — resolve manually in $MAIN_REPO"
-        launch_claude_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate (likely a local commit, dirty state, or submodule pointer conflict) and resolve so the main repo can fast-forward to $remote/main."
+        launch_agent_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate (likely a local commit, dirty state, or submodule pointer conflict) and resolve so the main repo can fast-forward to $remote/main."
       fi
     fi
 
@@ -232,7 +278,7 @@ cmd_sync() {
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main" >/dev/null 2>&1; then
       echo "   rebase failed — leaving clean state"
       echo "   resolve manually in $wt, or run: vw done $wt_branch"
-      launch_claude_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. The worktree was reset to a clean pre-rebase state by rebase --abort. Investigate why the rebase fails (likely submodule pointer divergence) and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
+      launch_agent_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. The worktree was reset to a clean pre-rebase state by rebase --abort. Investigate why the rebase fails (likely submodule pointer divergence) and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
       continue
     fi
 
@@ -380,32 +426,28 @@ rebase_with_submodule_autoresolve() {
   return 1
 }
 
-# When set by cmd_ship_all, launch_claude_to_resolve appends to this queue
-# instead of opening a Warp tab per failure, so flush_claude_queue can dispatch
-# all failures into a single Claude session at the end of the run.
-CLAUDE_QUEUE_WORKTREES=()
-CLAUDE_QUEUE_CONTEXTS=()
+# When set by cmd_ship_all, launch_agent_to_resolve appends to this queue
+# instead of opening a terminal tab per failure, so flush_agent_queue can
+# dispatch all failures into a single agent session at the end of the run.
+AGENT_QUEUE_WORKTREES=()
+AGENT_QUEUE_CONTEXTS=()
 
-# Open a new Warp tab cd'd into $worktree running Claude, with a prompt
+# Open a new terminal tab cd'd into $worktree running the configured agent, with a prompt
 # describing the $context of the failure so it can investigate and fix it.
 # Best-effort: silently no-ops if the worktree is gone or osascript fails
-# (e.g. when running headless / not on macOS / Warp not installed).
-launch_claude_to_resolve() {
+# (e.g. when running headless / not on macOS / terminal app not installed).
+launch_agent_to_resolve() {
   local worktree="$1"
   local context="$2"
 
   [ -d "$worktree" ] || return 0
-  [ "${VW_NO_AUTO_CLAUDE:-0}" = "1" ] && return 0
+  agent_auto_disabled && return 0
 
-  if [ "${VW_BATCH_CLAUDE:-0}" = "1" ]; then
-    CLAUDE_QUEUE_WORKTREES+=("$worktree")
-    CLAUDE_QUEUE_CONTEXTS+=("$context")
+  if [ "${VW_BATCH_AGENT:-${VW_BATCH_CLAUDE:-0}}" = "1" ]; then
+    AGENT_QUEUE_WORKTREES+=("$worktree")
+    AGENT_QUEUE_CONTEXTS+=("$context")
     return 0
   fi
-
-  # Strip apostrophes — the keystroke wraps the prompt in single quotes,
-  # so an apostrophe inside would terminate the shell string.
-  context="${context//\'/}"
 
   local prompt="You are in a git worktree at $worktree. An automated vw workflow just failed:
 
@@ -418,29 +460,21 @@ Investigate (git status, git log, submodule state, and $MAIN_REPO state) and fix
 
 After the worktree is clean and the rebase or merge is finished, re-run vw ship-all (or vw sync) from $MAIN_REPO if more work still needs shipping. Otherwise report what you did and stop."
 
-  local as_prompt="${prompt//\\/\\\\}"
-  as_prompt="${as_prompt//\"/\\\"}"
-
-  echo "  → launching Claude in new Warp tab to resolve"
-
-  /usr/bin/osascript <<APPLESCRIPT 2>/dev/null || true
-tell application "Warp" to activate
-delay 0.4
-tell application "System Events"
-    keystroke "t" using command down
-    delay 0.5
-    keystroke "cd $worktree && claude --permission-mode auto '$as_prompt'"
-    keystroke return
-end tell
-APPLESCRIPT
+  echo "  → launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve"
+  open_agent_tab "$worktree" "$prompt"
 }
 
-# Dispatch all queued failures into a single Claude session in $MAIN_REPO.
-# No-op if the queue is empty or VW_NO_AUTO_CLAUDE is set.
-flush_claude_queue() {
-  local count=${#CLAUDE_QUEUE_WORKTREES[@]}
+# Backward-compatible name for old call sites or shell users.
+launch_claude_to_resolve() {
+  launch_agent_to_resolve "$@"
+}
+
+# Dispatch all queued failures into a single agent session in $MAIN_REPO.
+# No-op if the queue is empty or auto agent launching is disabled.
+flush_agent_queue() {
+  local count=${#AGENT_QUEUE_WORKTREES[@]}
   [ "$count" -eq 0 ] && return 0
-  [ "${VW_NO_AUTO_CLAUDE:-0}" = "1" ] && return 0
+  agent_auto_disabled && return 0
 
   local prompt="You are at $MAIN_REPO. An automated vw ship-all run produced $count failure(s) that need manual resolution. Each failure below is independent — work through them one by one, cd-ing into the worktree listed for that entry.
 
@@ -448,8 +482,8 @@ flush_claude_queue() {
   local i n wt ctx
   for ((i=0; i<count; i++)); do
     n=$((i+1))
-    wt="${CLAUDE_QUEUE_WORKTREES[i]}"
-    ctx="${CLAUDE_QUEUE_CONTEXTS[i]}"
+    wt="${AGENT_QUEUE_WORKTREES[i]}"
+    ctx="${AGENT_QUEUE_CONTEXTS[i]}"
     prompt+="── Failure $n of $count ──
 Worktree: $wt
 $ctx
@@ -464,26 +498,16 @@ $ctx
 
 After every worktree is clean and its rebase or merge is finished, run vw ship-all again from $MAIN_REPO to ship anything that still needs shipping. Otherwise report what you did and stop."
 
-  # Strip apostrophes — keystroke wraps the prompt in single quotes.
-  prompt="${prompt//\'/}"
-  local as_prompt="${prompt//\\/\\\\}"
-  as_prompt="${as_prompt//\"/\\\"}"
+  echo "  → launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve $count failure(s)"
+  open_agent_tab "$MAIN_REPO" "$prompt"
 
-  echo "  → launching Claude in new Warp tab to resolve $count failure(s)"
+  AGENT_QUEUE_WORKTREES=()
+  AGENT_QUEUE_CONTEXTS=()
+}
 
-  /usr/bin/osascript <<APPLESCRIPT 2>/dev/null || true
-tell application "Warp" to activate
-delay 0.4
-tell application "System Events"
-    keystroke "t" using command down
-    delay 0.5
-    keystroke "cd $MAIN_REPO && claude --permission-mode auto '$as_prompt'"
-    keystroke return
-end tell
-APPLESCRIPT
-
-  CLAUDE_QUEUE_WORKTREES=()
-  CLAUDE_QUEUE_CONTEXTS=()
+# Backward-compatible name for old call sites or shell users.
+flush_claude_queue() {
+  flush_agent_queue "$@"
 }
 
 ship_submodule() {
@@ -558,7 +582,7 @@ ship_worktree() {
   if ! git -C "$wt" merge-base --is-ancestor "$remote/main" "$ticket" 2>/dev/null; then
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main"; then
       echo "  ✗ parent rebase failed — resolve manually in $wt"
-      launch_claude_to_resolve "$wt" "Parent worktree rebase of $ticket onto $remote/main failed during vw ship-all. Submodule pointer conflicts could not be auto-resolved. Submodule branches for this ticket were already pushed before the parent rebase was attempted, so the underlying submodule work is preserved on its remote main."
+      launch_agent_to_resolve "$wt" "Parent worktree rebase of $ticket onto $remote/main failed during vw ship-all. Submodule pointer conflicts could not be auto-resolved. Submodule branches for this ticket were already pushed before the parent rebase was attempted, so the underlying submodule work is preserved on its remote main."
       return 1
     fi
   fi
@@ -580,8 +604,8 @@ cmd_ship_all() {
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
   [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
 
-  # Queue conflict prompts; flush_claude_queue dispatches them as one session.
-  export VW_BATCH_CLAUDE=1
+  # Queue conflict prompts; flush_agent_queue dispatches them as one session.
+  export VW_BATCH_AGENT=1
 
   echo "→ Fetching $remote/main"
   git fetch "$remote" main --quiet
@@ -615,7 +639,7 @@ cmd_ship_all() {
   echo
   echo "→ Shipped: $shipped, failed: $failed"
 
-  flush_claude_queue
+  flush_agent_queue
 
   if [ "$shipped" -gt 0 ]; then
     echo

@@ -7,24 +7,49 @@ Helper scripts for the Vayada monorepo.
 Bash helper for running multiple Linear tickets in parallel via git worktrees.
 Each ticket gets its own worktree at `~/git/vayada-<TICKET>` on a branch named
 after the ticket, with submodules initialized and `.env` files copied from the
-main repo. A new Warp tab opens running Claude Code with a 2-phase prompt
+main repo. A new Warp tab opens running the configured agent with a 2-phase prompt
 (plan → implement & commit). Merging into `main` and pushing is done later
 by `vw ship-all`, not by the agent.
 
 | Command | What it does |
 | --- | --- |
-| `vw new <TICKET> [--install]` | Create worktree on branch `<TICKET>` off `main`, init submodules, copy `.env` files, and open a Warp tab running Claude Code on the ticket. `--install` also runs `npm install` / `pip install` in submodules. Bare numbers are auto-prefixed (`vw new 295` → `VAY-295`). |
+| `vw new <TICKET> [--install]` | Create worktree on branch `<TICKET>` off `main`, init submodules, copy `.env` files, and open a Warp tab running the configured agent on the ticket. `--install` also runs `npm install` / `pip install` in submodules. Bare numbers are auto-prefixed (`vw new 295` → `VAY-295`). |
 | `vw done <TICKET>` | Move the Linear ticket to **In Review**, deinit submodules, remove the worktree, and delete the local branch. |
 | `vw list` (or `vw ls`) | List all active worktrees (`git worktree list`). |
 | `vw sync` | Fetch `origin/main`, fast-forward the main repo, rebase every worktree branch on `origin/main`, and re-init submodules in all worktrees (main repo included). Skips worktrees already merged or in a dirty state. |
 | `vw ship-all` | Ship every worktree sequentially: commit any uncommitted submodule work on a feature branch, merge each submodule's feature branch into its `main` and push, bump submodule pointers in the parent, and push the parent branch to `origin/main`. Runs `ship-ready` at the end. |
 | `vw ship-ready` | Scan all worktrees; for every branch already in `origin/main`, run `vw done`. Runs `vw sync` at the end. |
 
-The Claude Code prompt baked into `vw new` tells the agent to commit
+The prompt baked into `vw new` tells the agent to commit
 everything locally — feature branch + commits inside each touched submodule,
 plus a "Bump submodules" commit in the parent worktree — and then stop. No
 merge to main, no push, no PRs. Run `vw ship-all` from the main repo when
 you're ready to ship one or more worktrees.
+
+Agent launch is configurable through environment variables:
+
+```sh
+# Default behavior, kept for compatibility
+vw new VAY-295
+
+# Launch Codex instead of Claude Code
+VW_AGENT_CMD=codex VW_AGENT_NAME=Codex vw new VAY-295
+
+# Put the prompt in a specific position if your agent command needs it
+VW_AGENT_CMD='codex exec {prompt}' VW_AGENT_NAME=Codex vw new VAY-295
+
+# Disable automatic agent launch for sync/ship failure recovery
+VW_NO_AUTO_AGENT=1 vw ship-all
+```
+
+Defaults:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VW_AGENT_CMD` | `claude --permission-mode auto` | Command run with the generated prompt appended as the final argument. Include `{prompt}` to place the prompt manually. |
+| `VW_AGENT_NAME` | first word of `VW_AGENT_CMD` | Label used in `vw` log output. |
+| `VW_TERMINAL_APP` | `Warp` | macOS terminal app opened via AppleScript. |
+| `VW_NO_AUTO_AGENT` | unset | Set to `1` to disable automatic agent launch during failure recovery. Legacy `VW_NO_AUTO_CLAUDE=1` still works. |
 
 ## `run_migration.sh`
 
