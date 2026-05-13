@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { RoomTypeCreate, RoomTypeUpdate, MealPlan, MealPlanCode, PartialRefundTier } from '@/services/rooms'
@@ -148,6 +148,120 @@ function sortSeasonsChronologically<T extends { from: string }>(arr: T[]): T[] {
     if (!b.from) return -1
     return a.from.localeCompare(b.from)
   })
+}
+
+const LOW_PRICE_WARNING_RATIO = 0.5
+const HIGH_PRICE_WARNING_RATIO = 3
+
+type PriceWarningKind = 'low' | 'high'
+type PriceWarningField = 'season' | 'daily'
+type PriceWarning = {
+  id: string
+  field: PriceWarningField
+  kind: PriceWarningKind
+  label: string
+  value: number
+  baseline: number
+  suggestedValue?: number
+  signature: string
+}
+
+const parsePositivePrice = (value: string | number | undefined | null): number | null => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const median = (values: number[]): number | null => {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 1) return sorted[middle]
+  return (sorted[middle - 1] + sorted[middle]) / 2
+}
+
+const getPriceWarning = ({
+  id,
+  field,
+  label,
+  value,
+  baseline,
+}: {
+  id: string
+  field: PriceWarningField
+  label: string
+  value: number
+  baseline: number
+}): PriceWarning | null => {
+  if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0 || baseline <= 0) return null
+  const ratio = value / baseline
+  const roundedBaseline = Math.round(baseline)
+  if (ratio < LOW_PRICE_WARNING_RATIO) {
+    const timesTen = value * 10
+    const suggestedValue = timesTen >= baseline * LOW_PRICE_WARNING_RATIO && timesTen <= baseline * HIGH_PRICE_WARNING_RATIO
+      ? timesTen
+      : roundedBaseline
+    return {
+      id,
+      field,
+      kind: 'low',
+      label,
+      value,
+      baseline: roundedBaseline,
+      suggestedValue: Math.round(suggestedValue),
+      signature: `${id}:low:${Math.round(value)}:${roundedBaseline}`,
+    }
+  }
+  if (ratio > HIGH_PRICE_WARNING_RATIO) {
+    return {
+      id,
+      field,
+      kind: 'high',
+      label,
+      value,
+      baseline: roundedBaseline,
+      signature: `${id}:high:${Math.round(value)}:${roundedBaseline}`,
+    }
+  }
+  return null
+}
+
+function PriceWarningMessage({
+  warning,
+  currency,
+  onDismiss,
+}: {
+  warning: PriceWarning
+  currency: string
+  onDismiss: () => void
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] leading-snug text-amber-800">
+      <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-200 text-[10px] font-bold text-amber-800">!</span>
+      <p className="min-w-0 flex-1">
+        <span className="font-semibold">{warning.label}: </span>
+        {warning.kind === 'low'
+          ? (
+            <>
+              This price is much lower than your other rates ({formatCurrency(warning.baseline, currency)} usual rate). Did you mean to enter {formatCurrency(warning.suggestedValue ?? warning.baseline, currency)}?
+            </>
+          )
+          : (
+            <>
+              This price is much higher than your other rates ({formatCurrency(warning.baseline, currency)} usual rate). Are you sure?
+            </>
+          )
+        }
+      </p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 rounded p-0.5 text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+        aria-label={`Dismiss ${warning.label} price warning`}
+      >
+        <XMarkIcon className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
 }
 
 function PartialRefundTiersEditor({
@@ -397,6 +511,9 @@ export default function RoomTypeForm({
   submitLabel = 'Save',
   cancelHref = '/rooms',
 }: RoomTypeFormProps) {
+  const formRef = useRef<HTMLFormElement | null>(null)
+  const skipPriceWarningConfirmRef = useRef(false)
+  const previousCurrencyRef = useRef(form.currency || 'EUR')
   const [activeTab, setActiveTab] = useState<RoomTab>('details')
   const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0))
   const [amenityInput, setAmenityInput] = useState('')
@@ -457,6 +574,9 @@ export default function RoomTypeForm({
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {})
   const [editingDay, setEditingDay] = useState<string | null>(null)
   const [editingDayValue, setEditingDayValue] = useState('')
+  const [touchedPriceWarnings, setTouchedPriceWarnings] = useState<Record<string, boolean>>({})
+  const [dismissedPriceWarnings, setDismissedPriceWarnings] = useState<Record<string, string>>({})
+  const [confirmUnusualPricesOpen, setConfirmUnusualPricesOpen] = useState(false)
   const benefits: string[] = form.benefits || []
   const [category, setCategory] = useState(form.category || '')
   const [bedrooms, setBedrooms] = useState(form.bedrooms ?? 1)
@@ -527,6 +647,23 @@ export default function RoomTypeForm({
     onChange(updated)
   }
 
+  const markPriceWarningTouched = (id: string) => {
+    setTouchedPriceWarnings(prev => prev[id] ? prev : { ...prev, [id]: true })
+  }
+
+  const dismissPriceWarning = (warning: PriceWarning) => {
+    setDismissedPriceWarnings(prev => ({ ...prev, [warning.id]: warning.signature }))
+  }
+
+  useEffect(() => {
+    const currency = form.currency || 'EUR'
+    if (previousCurrencyRef.current === currency) return
+    previousCurrencyRef.current = currency
+    setTouchedPriceWarnings({})
+    setDismissedPriceWarnings({})
+    setConfirmUnusualPricesOpen(false)
+  }, [form.currency])
+
   const MEAL_PLAN_OPTIONS: { code: MealPlanCode; label: string }[] = [
     { code: 1, label: 'Breakfast included' },
     { code: 3, label: 'Half board' },
@@ -560,6 +697,80 @@ export default function RoomTypeForm({
 
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]
+  const currency = form.currency || 'EUR'
+  const weekendSurchargePercent = parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) || 0
+
+  const mmddInRange = (mmdd: string, from: string, to: string): boolean => {
+    if (!from || !to) return false
+    if (from > to) return mmdd >= from || mmdd <= to
+    return mmdd >= from && mmdd <= to
+  }
+
+  const getSeasonForMmdd = (mmdd: string) => {
+    for (const season of seasons) {
+      if (season.from && season.to && mmddInRange(mmdd, season.from, season.to)) return season
+    }
+    return null
+  }
+
+  const getUnderlyingRateForDate = (dateStr: string): number | null => {
+    const season = getSeasonForMmdd(dateStr.slice(5))
+    const baseRate = parsePositivePrice(season?.rate)
+    if (baseRate === null) return null
+    const date = new Date(`${dateStr}T00:00:00`)
+    const dow = date.getDay()
+    const isWeekend = dow === 5 || dow === 6
+    return isWeekend && weekendSurchargePercent > 0
+      ? Math.round(baseRate * (1 + weekendSurchargePercent / 100))
+      : baseRate
+  }
+
+  const priceWarnings = (() => {
+    const warnings: PriceWarning[] = []
+    const configuredSeasonRates = seasons
+      .map((season, idx) => ({ idx, season, rate: parsePositivePrice(season.rate) }))
+      .filter(({ season, rate }) => {
+        const closed = [season.name, season.tier].some(value => value?.trim().toLowerCase() === 'closed')
+        return !closed && rate !== null
+      }) as { idx: number; season: typeof seasons[number]; rate: number }[]
+
+    for (const { idx, season, rate } of configuredSeasonRates) {
+      const comparisonRates = configuredSeasonRates
+        .filter(other => other.idx !== idx)
+        .map(other => other.rate)
+      const baseline = median(comparisonRates)
+      if (baseline === null) continue
+      const warning = getPriceWarning({
+        id: `season:${idx}`,
+        field: 'season',
+        label: season.name || `Season ${idx + 1}`,
+        value: rate,
+        baseline,
+      })
+      if (warning) warnings.push(warning)
+    }
+
+    for (const [dateStr, value] of Object.entries(dailyRates)) {
+      const overrideRate = parsePositivePrice(value)
+      const baseline = getUnderlyingRateForDate(dateStr)
+      if (overrideRate === null || baseline === null) continue
+      const warning = getPriceWarning({
+        id: `daily:${dateStr}`,
+        field: 'daily',
+        label: dateStr,
+        value: overrideRate,
+        baseline,
+      })
+      if (warning) warnings.push(warning)
+    }
+
+    return warnings
+  })()
+
+  const activePriceWarnings = priceWarnings.filter(warning => dismissedPriceWarnings[warning.id] !== warning.signature)
+  const visiblePriceWarnings = activePriceWarnings.filter(warning => touchedPriceWarnings[warning.id])
+  const visiblePriceWarningById = new Map(visiblePriceWarnings.map(warning => [warning.id, warning]))
+  const visibleDailyPriceWarnings = visiblePriceWarnings.filter(warning => warning.field === 'daily')
 
   const getYearPercent = (mmdd: string): number => {
     if (!mmdd) return 0
@@ -665,8 +876,29 @@ export default function RoomTypeForm({
     Peak: 'bg-red-800',
   }
 
+  const handleSubmit = (e: React.FormEvent) => {
+    if (skipPriceWarningConfirmRef.current) {
+      skipPriceWarningConfirmRef.current = false
+      setConfirmUnusualPricesOpen(false)
+      onSubmit(e)
+      return
+    }
+
+    if (activePriceWarnings.length > 0) {
+      e.preventDefault()
+      setTouchedPriceWarnings(prev => activePriceWarnings.reduce<Record<string, boolean>>((next, warning) => {
+        next[warning.id] = true
+        return next
+      }, { ...prev }))
+      setConfirmUnusualPricesOpen(true)
+      return
+    }
+
+    onSubmit(e)
+  }
+
   return (
-    <form onSubmit={onSubmit}>
+    <form ref={formRef} onSubmit={handleSubmit}>
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
           {error}
@@ -1297,6 +1529,7 @@ export default function RoomTypeForm({
                           const maxOcc = form.maxOccupancy ?? 2
                           const hasOccRates = Object.values(season.occupancyRates || {}).some(v => v !== '' && v !== undefined)
                           const isOccExpanded = expandedOccupancy[idx] || false
+                          const seasonPriceWarning = visiblePriceWarningById.get(`season:${idx}`)
                           return (
                             <React.Fragment key={idx}>
                               <tr className="border-b border-gray-50">
@@ -1312,19 +1545,31 @@ export default function RoomTypeForm({
                                   </div>
                                 </td>
                                 <td className="px-4 py-2.5">
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-gray-400">{getCurrencySymbol(form.currency || 'EUR')}</span>
-                                    <input
-                                      type="number"
-                                      value={season.rate}
-                                      onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
-                                      className={`w-16 px-2 py-1 bg-gray-50 border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${!season.rate || Number(season.rate) <= 0 ? 'border-red-400' : 'border-gray-200'}`}
-                                      placeholder="0"
-                                      min="1"
-                                      required
-                                    />
-                                    {(!season.rate || Number(season.rate) <= 0) && (
-                                      <span className="text-[10px] text-red-500">Required</span>
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-gray-400">{getCurrencySymbol(currency)}</span>
+                                      <input
+                                        type="number"
+                                        value={season.rate}
+                                        onChange={(e) => { const u = [...seasons]; u[idx] = { ...u[idx], rate: e.target.value }; setSeasons(u) }}
+                                        onBlur={() => markPriceWarningTouched(`season:${idx}`)}
+                                        className={`w-16 px-2 py-1 bg-gray-50 border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${!season.rate || Number(season.rate) <= 0 ? 'border-red-400' : seasonPriceWarning ? 'border-amber-400 bg-amber-50/50' : 'border-gray-200'}`}
+                                        placeholder="0"
+                                        min="1"
+                                        required
+                                      />
+                                      {(!season.rate || Number(season.rate) <= 0) && (
+                                        <span className="text-[10px] text-red-500">Required</span>
+                                      )}
+                                    </div>
+                                    {seasonPriceWarning && (
+                                      <div className="max-w-[320px]">
+                                        <PriceWarningMessage
+                                          warning={seasonPriceWarning}
+                                          currency={currency}
+                                          onDismiss={() => dismissPriceWarning(seasonPriceWarning)}
+                                        />
+                                      </div>
                                     )}
                                   </div>
                                 </td>
@@ -1857,7 +2102,6 @@ export default function RoomTypeForm({
                     // Monday = 0, Sunday = 6
                     let startDow = firstDay.getDay() - 1
                     if (startDow < 0) startDow = 6
-                    const surchargeNum = parseInt(weekendSurcharge.replace(/[^0-9]/g, '')) || 0
 
                     const cells: React.ReactNode[] = []
                     // Empty cells for days before the 1st
@@ -1872,7 +2116,7 @@ export default function RoomTypeForm({
                       const season = getSeasonForDate(day)
                       let rate = season ? (parseFloat(season.rate) || 0) : 0
                       if (isWeekend && rate > 0) {
-                        rate = Math.round(rate * (1 + surchargeNum / 100))
+                        rate = Math.round(rate * (1 + weekendSurchargePercent / 100))
                       }
 
                       // Use local-date components, not toISOString — for users east of
@@ -1886,11 +2130,12 @@ export default function RoomTypeForm({
                       const seasonBgHex: Record<string, string> = { 'Low': '#dcfce7', 'Mid': '#fef9c3', 'High': '#fee2e2', 'Peak': '#fca5a5' }
                       const cellBg = !inOp ? '#f9fafb' : hasDailyOverride ? '#fefce8' : inGap ? '#fef2f2' : isWeekend && season ? '#fffbeb' : season ? (seasonBgHex[season.tier] || '#f9fafb') : '#ffffff'
                       const isEditing = editingDay === dateStr
+                      const dailyPriceWarning = visiblePriceWarningById.get(`daily:${dateStr}`)
 
                       cells.push(
                         <div
                           key={day}
-                          className={`h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border cursor-pointer ${!inOp ? 'opacity-40 border-gray-100' : hasDailyOverride ? 'border-amber-300 ring-1 ring-amber-200' : inGap ? 'border-red-200' : 'border-gray-100 hover:border-primary-300'}`}
+                          className={`relative h-10 rounded-md flex flex-col items-center justify-center text-center transition-colors border cursor-pointer ${!inOp ? 'opacity-40 border-gray-100' : dailyPriceWarning ? 'border-amber-500 ring-1 ring-amber-300' : hasDailyOverride ? 'border-amber-300 ring-1 ring-amber-200' : inGap ? 'border-red-200' : 'border-gray-100 hover:border-primary-300'}`}
                           style={{ backgroundColor: cellBg }}
                           title={hasDailyOverride ? `Daily override: ${formatCurrency(dailyRates[dateStr], form.currency || 'EUR')} (click to edit, right-click to remove)` : inGap ? 'No season — click to set a daily rate' : 'Click to set a daily rate override'}
                           onClick={() => {
@@ -1917,6 +2162,7 @@ export default function RoomTypeForm({
                                 const val = parseFloat(editingDayValue)
                                 if (val > 0) {
                                   setDailyRates({ ...dailyRates, [dateStr]: val })
+                                  markPriceWarningTouched(`daily:${dateStr}`)
                                 } else {
                                   const next = { ...dailyRates }
                                   delete next[dateStr]
@@ -1934,6 +2180,9 @@ export default function RoomTypeForm({
                           ) : (
                             <>
                               <span className={`text-[10px] font-medium ${inGap ? 'text-red-600' : isWeekend ? 'text-orange-600' : 'text-gray-700'}`}>{day}</span>
+                              {dailyPriceWarning && (
+                                <span className="absolute right-1 top-0.5 text-[9px] font-bold text-amber-600">!</span>
+                              )}
                               {inOp && displayRate > 0 && (
                                 <span className={`text-[8px] font-semibold ${hasDailyOverride ? 'text-amber-600' : isWeekend ? 'text-orange-600' : 'text-emerald-600'}`}>
                                   {formatCompactPrice(displayRate, form.currency || 'EUR')}
@@ -1957,6 +2206,18 @@ export default function RoomTypeForm({
                 <p className="text-[9px] text-gray-400">Click a date to set a daily price override. Right-click an override to remove it.</p>
                 {Object.keys(dailyRates).length > 0 && (
                   <p className="text-[9px] text-amber-600 font-medium mt-0.5">{Object.keys(dailyRates).length} daily override{Object.keys(dailyRates).length !== 1 ? 's' : ''} set</p>
+                )}
+                {visibleDailyPriceWarnings.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {visibleDailyPriceWarnings.map(warning => (
+                      <PriceWarningMessage
+                        key={warning.id}
+                        warning={warning}
+                        currency={currency}
+                        onDismiss={() => dismissPriceWarning(warning)}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -2355,6 +2616,46 @@ export default function RoomTypeForm({
           {saving ? 'Saving...' : submitLabel}
         </button>
       </div>
+
+      {confirmUnusualPricesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+            <h3 className="text-[13px] font-semibold text-gray-900">Some prices look unusual</h3>
+            <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+              Some prices are unusually high or low. Save anyway?
+            </p>
+            <div className="mt-3 max-h-40 space-y-1.5 overflow-y-auto">
+              {activePriceWarnings.slice(0, 4).map(warning => (
+                <p key={warning.id} className="text-[10px] text-amber-700">
+                  <span className="font-semibold">{warning.label}</span>: {formatCurrency(warning.value, currency)} vs {formatCurrency(warning.baseline, currency)} usual rate
+                </p>
+              ))}
+              {activePriceWarnings.length > 4 && (
+                <p className="text-[10px] text-gray-400">+{activePriceWarnings.length - 4} more warning{activePriceWarnings.length - 4 === 1 ? '' : 's'}</p>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmUnusualPricesOpen(false)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-[11px] font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  skipPriceWarningConfirmRef.current = true
+                  formRef.current?.requestSubmit()
+                }}
+                className="rounded-lg bg-primary-600 px-3 py-2 text-[11px] font-medium text-white hover:bg-primary-700"
+              >
+                Save anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   )
 }
