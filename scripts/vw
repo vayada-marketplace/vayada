@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vw — vayada worktree helper
+# vw - vayada worktree helper
 # Subcommands: new, done, list, sync
 set -euo pipefail
 
@@ -80,8 +80,38 @@ end tell
 APPLESCRIPT
 }
 
+ticket_prompt() {
+  local ticket="$1"
+  cat <<PROMPT
+You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in two phases:
+
+PHASE 1 - PLAN. Use the linear MCP server to fetch ticket $ticket, then move the ticket to "In Progress" via the linear MCP server. Propose a concise implementation plan and wait for my approval.
+
+PHASE 2 - IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist. Then commit everything locally - do NOT merge to main, do NOT push, do NOT open PRs. \`vw ship-all\` will run the merge-to-main + push dance later.
+
+For each submodule with changes:
+  1. Create or checkout a feature branch named $ticket inside the submodule.
+  2. Commit with a descriptive message (what changed and why, not just "ship").
+
+In the parent worktree:
+  3. git add the bumped submodule paths.
+  4. git commit -m "Bump <submodule>: <summary> ($ticket)" with a real summary.
+
+Stop after committing. Report the local commit SHAs and wait.
+PROMPT
+}
+
+launch_ticket_agent() {
+  local ticket="$1"
+  local worktree="$WORKTREE_PARENT/vayada-$ticket"
+  [ -d "$worktree" ] || { echo "ERR No worktree at $worktree"; exit 1; }
+
+  echo "-> Opening new $VW_TERMINAL_APP tab with $VW_AGENT_NAME"
+  open_agent_tab "$worktree" "$(ticket_prompt "$ticket")"
+}
+
 normalize_ticket() {
-  # Pure digits → prefix with VAY-. Otherwise pass through unchanged.
+  # Pure digits -> prefix with VAY-. Otherwise pass through unchanged.
   if [[ "$1" =~ ^[0-9]+$ ]]; then
     echo "VAY-$1"
   else
@@ -91,12 +121,15 @@ normalize_ticket() {
 
 usage() {
   cat <<HELP
-vw — vayada worktree helper
+vw - vayada worktree helper
 
   vw new <TICKET> [--install]   Create worktree on branch <TICKET> off main,
                                 init submodules, copy .env files, open a new
                                 Warp tab running the configured agent.
                                 --install also runs deps install in submodules.
+
+  vw launch <TICKET>            Open the configured agent in an existing
+                                worktree with the standard ticket prompt.
 
   vw done <TICKET>              Remove the worktree and delete the local branch.
 
@@ -156,7 +189,7 @@ cmd_new() {
   local branch="$ticket"
 
   if [ -e "$worktree" ]; then
-    echo "✗ Worktree already exists: $worktree"
+    echo "ERR Worktree already exists: $worktree"
     exit 1
   fi
 
@@ -164,17 +197,17 @@ cmd_new() {
 
   local remote
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
-  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+  [ -z "$remote" ] && { echo "ERR No git remote configured on $MAIN_REPO"; exit 1; }
 
-  echo "→ Creating worktree at $worktree on branch $branch (off $remote/main)"
+  echo "-> Creating worktree at $worktree on branch $branch (off $remote/main)"
   git fetch "$remote" main --quiet
   git worktree add -b "$branch" "$worktree" "$remote/main"
 
-  echo "→ Initializing submodules"
+  echo "-> Initializing submodules"
   cd "$worktree"
   git submodule update --init --recursive --quiet
 
-  echo "→ Copying .env files from main repo"
+  echo "-> Copying .env files from main repo"
   while IFS= read -r src; do
     local rel="${src#$MAIN_REPO/}"
     local dst="$worktree/$rel"
@@ -189,7 +222,7 @@ cmd_new() {
               2>/dev/null)
 
   if [ "$do_install" -eq 1 ]; then
-    echo "→ Installing deps in submodules (this may take a while)"
+    echo "-> Installing deps in submodules (this may take a while)"
     while IFS= read -r pkg; do
       local dir="$(dirname "$pkg")"
       echo "   npm install in ${dir#$worktree/}"
@@ -203,26 +236,16 @@ cmd_new() {
     done < <(find "$worktree" -maxdepth 4 -name "requirements.txt" -not -path "*/node_modules/*" 2>/dev/null)
   fi
 
-  echo "→ Opening new $VW_TERMINAL_APP tab with $VW_AGENT_NAME"
-  local prompt="You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in two phases:
+  launch_ticket_agent "$ticket"
 
-PHASE 1 — PLAN. Use the linear MCP server to fetch ticket $ticket, then move the ticket to \"In Progress\" via the linear MCP server. Propose a concise implementation plan and wait for my approval.
+  echo "OK Worktree ready: $worktree"
+}
 
-PHASE 2 — IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist. Then commit everything locally — do NOT merge to main, do NOT push, do NOT open PRs. \`vw ship-all\` will run the merge-to-main + push dance later.
-
-For each submodule with changes:
-  1. Create or checkout a feature branch named $ticket inside the submodule.
-  2. Commit with a descriptive message (what changed and why, not just \"ship\").
-
-In the parent worktree:
-  3. git add the bumped submodule paths.
-  4. git commit -m \"Bump <submodule>: <summary> ($ticket)\" with a real summary.
-
-Stop after committing. Report the local commit SHAs and wait."
-
-  open_agent_tab "$worktree" "$prompt"
-
-  echo "✓ Worktree ready: $worktree"
+cmd_launch() {
+  local ticket="${1:-}"
+  [ -z "$ticket" ] && { echo "Usage: vw launch <TICKET|number>"; exit 1; }
+  ticket="$(normalize_ticket "$ticket")"
+  launch_ticket_agent "$ticket"
 }
 
 cmd_done() {
@@ -234,22 +257,22 @@ cmd_done() {
 
   cd "$MAIN_REPO"
   if [ ! -e "$worktree" ]; then
-    echo "✗ No worktree at $worktree"
+    echo "ERR No worktree at $worktree"
     exit 1
   fi
 
-  echo "→ Deinitializing submodules in worktree"
+  echo "-> Deinitializing submodules in worktree"
   ( cd "$worktree" && git submodule deinit --all -f --quiet ) || true
 
-  echo "→ Removing worktree $worktree"
+  echo "-> Removing worktree $worktree"
   git worktree remove --force "$worktree"
 
   if git show-ref --verify --quiet "refs/heads/$ticket"; then
-    echo "→ Deleting branch $ticket"
+    echo "-> Deleting branch $ticket"
     git branch -D "$ticket"
   fi
 
-  echo "✓ Done"
+  echo "OK Done"
 }
 
 cmd_list() {
@@ -262,9 +285,9 @@ cmd_sync() {
 
   local remote
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
-  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+  [ -z "$remote" ] && { echo "ERR No git remote configured on $MAIN_REPO"; exit 1; }
 
-  echo "→ Fetching $remote/main"
+  echo "-> Fetching $remote/main"
   git fetch "$remote" main --quiet
 
   # Sync the main repo too: ship-all pushes from worktrees advance
@@ -273,22 +296,22 @@ cmd_sync() {
   local main_branch
   main_branch="$(git -C "$MAIN_REPO" branch --show-current)"
   if [ "$main_branch" != "main" ]; then
-    echo "→ Skipping main repo ($main_branch checked out, not main)"
+    echo "-> Skipping main repo ($main_branch checked out, not main)"
   else
     # Snap submodules to currently-recorded SHAs first so autostash doesn't
     # re-apply stale pointers on top of the new parent commit.
     git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null || true
 
     if ! git -C "$MAIN_REPO" merge-base --is-ancestor "$remote/main" main 2>/dev/null; then
-      echo "→ Pulling main repo (rebase --autostash)"
+      echo "-> Pulling main repo (rebase --autostash)"
       if ! git -C "$MAIN_REPO" -c rebase.autostash=true pull --rebase "$remote" main --quiet; then
-        echo "   pull --rebase failed — resolve manually in $MAIN_REPO"
+        echo "   pull --rebase failed - resolve manually in $MAIN_REPO"
         launch_agent_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate (likely a local commit, dirty state, or submodule pointer conflict) and resolve so the main repo can fast-forward to $remote/main."
       fi
     fi
 
     if ! git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null; then
-      echo "   submodule update failed in main repo — resolve manually"
+      echo "   submodule update failed in main repo - resolve manually"
     fi
   fi
 
@@ -299,29 +322,29 @@ cmd_sync() {
     wt_branch="$(git -C "$wt" branch --show-current)"
 
     if [ -z "$wt_branch" ]; then
-      echo "→ Skipping $wt (detached HEAD or mid-rebase)"
+      echo "-> Skipping $wt (detached HEAD or mid-rebase)"
       continue
     fi
 
     if git merge-base --is-ancestor "$wt_branch" "$remote/main" 2>/dev/null; then
-      echo "→ Skipping $wt ($wt_branch already in $remote/main)"
+      echo "-> Skipping $wt ($wt_branch already in $remote/main)"
       continue
     fi
 
-    echo "→ Syncing $wt ($wt_branch)"
+    echo "-> Syncing $wt ($wt_branch)"
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main" >/dev/null 2>&1; then
-      echo "   rebase failed — leaving clean state"
+      echo "   rebase failed - leaving clean state"
       echo "   resolve manually in $wt, or run: vw done $wt_branch"
       launch_agent_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. The worktree was reset to a clean pre-rebase state by rebase --abort. Investigate why the rebase fails (likely submodule pointer divergence) and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
       continue
     fi
 
     if ! git -C "$wt" submodule update --init --recursive --quiet 2>/dev/null; then
-      echo "   submodule update failed (likely dirty submodule) — resolve in $wt"
+      echo "   submodule update failed (likely dirty submodule) - resolve in $wt"
     fi
   done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
 
-  echo "✓ Synced"
+  echo "OK Synced"
 }
 
 cmd_ship_ready() {
@@ -329,9 +352,9 @@ cmd_ship_ready() {
 
   local remote
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
-  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+  [ -z "$remote" ] && { echo "ERR No git remote configured on $MAIN_REPO"; exit 1; }
 
-  echo "→ Fetching $remote/main"
+  echo "-> Fetching $remote/main"
   git fetch "$remote" main --quiet
 
   local cleaned=0
@@ -341,25 +364,25 @@ cmd_ship_ready() {
     local wt_branch
     wt_branch="$(git -C "$wt" branch --show-current)"
     if [ -z "$wt_branch" ]; then
-      echo "→ Skipping $wt (detached HEAD)"
+      echo "-> Skipping $wt (detached HEAD)"
       continue
     fi
 
     if ! git merge-base --is-ancestor "$wt_branch" "$remote/main" 2>/dev/null; then
-      echo "→ Skipping $wt_branch (not yet in $remote/main)"
+      echo "-> Skipping $wt_branch (not yet in $remote/main)"
       continue
     fi
 
     if [ -n "$(git -C "$wt" status --porcelain)" ]; then
-      echo "→ Skipping $wt_branch (uncommitted changes — finish or revert first)"
+      echo "-> Skipping $wt_branch (uncommitted changes - finish or revert first)"
       continue
     fi
 
-    echo "→ Cleaning up $wt_branch"
+    echo "-> Cleaning up $wt_branch"
     if cmd_done "$wt_branch"; then
       cleaned=$((cleaned + 1))
     else
-      echo "   ✗ vw done failed for $wt_branch — leaving in place"
+      echo "   ERR vw done failed for $wt_branch - leaving in place"
     fi
   done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
 
@@ -367,13 +390,13 @@ cmd_ship_ready() {
     echo
     cmd_sync
   else
-    echo "✓ Nothing ready to clean up"
+    echo "OK Nothing ready to clean up"
   fi
 }
 
 # Try to auto-resolve submodule pointer conflicts in the index. For each
 # conflicted submodule, pick a SHA that is a descendant of both the ours and
-# theirs sides — first via direct ancestor relation, then via the submodule's
+# theirs sides - first via direct ancestor relation, then via the submodule's
 # remote/main (which contains the just-shipped merge commit).
 # Returns 0 only when zero conflicts remain in the index.
 auto_resolve_submodule_conflicts() {
@@ -494,7 +517,7 @@ Investigate (git status, git log, submodule state, and $MAIN_REPO state) and fix
 
 After the worktree is clean and the rebase or merge is finished, re-run vw ship-all (or vw sync) from $MAIN_REPO if more work still needs shipping. Otherwise report what you did and stop."
 
-  echo "  → launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve"
+  echo "  -> launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve"
   open_agent_tab "$worktree" "$prompt"
 }
 
@@ -510,7 +533,7 @@ flush_agent_queue() {
   [ "$count" -eq 0 ] && return 0
   agent_auto_disabled && return 0
 
-  local prompt="You are at $MAIN_REPO. An automated vw ship-all run produced $count failure(s) that need manual resolution. Each failure below is independent — work through them one by one, cd-ing into the worktree listed for that entry.
+  local prompt="You are at $MAIN_REPO. An automated vw ship-all run produced $count failure(s) that need manual resolution. Each failure below is independent - work through them one by one, cd-ing into the worktree listed for that entry.
 
 "
   local i n wt ctx
@@ -518,7 +541,7 @@ flush_agent_queue() {
     n=$((i+1))
     wt="${AGENT_QUEUE_WORKTREES[i]}"
     ctx="${AGENT_QUEUE_CONTEXTS[i]}"
-    prompt+="── Failure $n of $count ──
+    prompt+="-- Failure $n of $count --
 Worktree: $wt
 $ctx
 
@@ -532,7 +555,7 @@ $ctx
 
 After every worktree is clean and its rebase or merge is finished, run vw ship-all again from $MAIN_REPO to ship anything that still needs shipping. Otherwise report what you did and stop."
 
-  echo "  → launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve $count failure(s)"
+  echo "  -> launching $VW_AGENT_NAME in new $VW_TERMINAL_APP tab to resolve $count failure(s)"
   open_agent_tab "$MAIN_REPO" "$prompt"
 
   AGENT_QUEUE_WORKTREES=()
@@ -556,7 +579,7 @@ ship_submodule() {
     return 0
   fi
 
-  echo "  → ${subdir##*/}"
+  echo "  -> ${subdir##*/}"
 
   if [ -z "$branch" ] || [ "$branch" = "main" ]; then
     git -C "$subdir" checkout -b "$ticket" --quiet 2>/dev/null \
@@ -571,7 +594,7 @@ ship_submodule() {
 
   local sub_remote
   sub_remote="$(git -C "$subdir" config branch.main.remote 2>/dev/null || git -C "$subdir" remote | head -n1)"
-  [ -z "$sub_remote" ] && { echo "    ✗ no remote"; return 1; }
+  [ -z "$sub_remote" ] && { echo "    ERR no remote"; return 1; }
 
   git -C "$subdir" fetch "$sub_remote" main --quiet
 
@@ -584,15 +607,15 @@ ship_submodule() {
   git -C "$subdir" merge --ff-only "$sub_remote/main" --quiet 2>/dev/null || true
   if ! git -C "$subdir" merge --no-ff "$branch" -m "Merge $branch into main" --quiet; then
     git -C "$subdir" merge --abort 2>/dev/null || true
-    echo "    ✗ merge conflict"
+    echo "    ERR merge conflict"
     return 1
   fi
   if ! git -C "$subdir" push "$sub_remote" main --quiet; then
-    echo "    ✗ push failed"
+    echo "    ERR push failed"
     return 1
   fi
 
-  echo "    ✓ pushed"
+  echo "    OK pushed"
 }
 
 ship_worktree() {
@@ -615,7 +638,7 @@ ship_worktree() {
   # the just-shipped submodule main contains both, take that merge SHA.
   if ! git -C "$wt" merge-base --is-ancestor "$remote/main" "$ticket" 2>/dev/null; then
     if ! rebase_with_submodule_autoresolve "$wt" "$remote/main"; then
-      echo "  ✗ parent rebase failed — resolve manually in $wt"
+      echo "  ERR parent rebase failed - resolve manually in $wt"
       launch_agent_to_resolve "$wt" "Parent worktree rebase of $ticket onto $remote/main failed during vw ship-all. Submodule pointer conflicts could not be auto-resolved. Submodule branches for this ticket were already pushed before the parent rebase was attempted, so the underlying submodule work is preserved on its remote main."
       return 1
     fi
@@ -627,7 +650,7 @@ ship_worktree() {
   # reports the submodule as modified and ship-ready refuses to clean up.
   git -C "$wt" submodule update --init --recursive --quiet 2>/dev/null || true
 
-  echo "  → pushing $ticket → $remote/main"
+  echo "  -> pushing $ticket -> $remote/main"
   git -C "$wt" push "$remote" "$ticket:main" --quiet || return 1
 }
 
@@ -636,12 +659,12 @@ cmd_ship_all() {
 
   local remote
   remote="$(git config branch.main.remote 2>/dev/null || git remote | head -n1)"
-  [ -z "$remote" ] && { echo "✗ No git remote configured on $MAIN_REPO"; exit 1; }
+  [ -z "$remote" ] && { echo "ERR No git remote configured on $MAIN_REPO"; exit 1; }
 
   # Queue conflict prompts; flush_agent_queue dispatches them as one session.
   export VW_BATCH_AGENT=1
 
-  echo "→ Fetching $remote/main"
+  echo "-> Fetching $remote/main"
   git fetch "$remote" main --quiet
 
   local shipped=0 failed=0
@@ -651,27 +674,27 @@ cmd_ship_all() {
     local wt_branch
     wt_branch="$(git -C "$wt" branch --show-current)"
     if [ -z "$wt_branch" ]; then
-      echo "→ Skipping $wt (detached HEAD)"
+      echo "-> Skipping $wt (detached HEAD)"
       continue
     fi
 
     if git merge-base --is-ancestor "$wt_branch" "$remote/main" 2>/dev/null; then
-      echo "→ Skipping $wt_branch (already in $remote/main)"
+      echo "-> Skipping $wt_branch (already in $remote/main)"
       continue
     fi
 
     echo
-    echo "═══ Shipping $wt_branch ═══"
+    echo "=== Shipping $wt_branch ==="
     if ship_worktree "$wt" "$wt_branch" "$remote"; then
       shipped=$((shipped + 1))
     else
       failed=$((failed + 1))
-      echo "✗ Failed to ship $wt_branch — leaving in place"
+      echo "ERR Failed to ship $wt_branch - leaving in place"
     fi
   done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
 
   echo
-  echo "→ Shipped: $shipped, failed: $failed"
+  echo "-> Shipped: $shipped, failed: $failed"
 
   flush_agent_queue
 
@@ -683,6 +706,7 @@ cmd_ship_all() {
 
 case "${1:-}" in
   new)  shift; cmd_new "$@" ;;
+  launch) shift; cmd_launch "$@" ;;
   done) shift; cmd_done "$@" ;;
   list|ls) shift; cmd_list "$@" ;;
   sync) shift; cmd_sync "$@" ;;

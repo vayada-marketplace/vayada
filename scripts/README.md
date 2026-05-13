@@ -14,6 +14,7 @@ by `vw ship-all`, not by the agent.
 | Command | What it does |
 | --- | --- |
 | `vw new <TICKET> [--install]` | Create worktree on branch `<TICKET>` off `main`, init submodules, copy `.env` files, and open a Warp tab running the configured agent on the ticket. `--install` also runs `npm install` / `pip install` in submodules. Bare numbers are auto-prefixed (`vw new 295` → `VAY-295`). |
+| `vw launch <TICKET>` | Re-open the configured agent in an existing worktree with the standard ticket prompt. Useful if the initial terminal/agent launch failed after `vw new` created the worktree. |
 | `vw done <TICKET>` | Move the Linear ticket to **In Review**, deinit submodules, remove the worktree, and delete the local branch. |
 | `vw list` (or `vw ls`) | List all active worktrees (`git worktree list`). |
 | `vw sync` | Fetch `origin/main`, fast-forward the main repo, rebase every worktree branch on `origin/main`, and re-init submodules in all worktrees (main repo included). Skips worktrees already merged or in a dirty state. |
