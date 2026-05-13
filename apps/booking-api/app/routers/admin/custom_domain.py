@@ -19,6 +19,14 @@ _DOMAIN_RE = re.compile(
 )
 
 
+def _status_response(domain: str, cf_status: dict | None) -> dict:
+    return {
+        "domain": domain,
+        "status": cf_status.get("status", "pending") if cf_status else "pending",
+        "ssl_status": cf_status.get("ssl_status", "initializing") if cf_status else "initializing",
+    }
+
+
 @router.post("/settings/custom-domain")
 async def connect_custom_domain(
     data: dict,
@@ -37,16 +45,25 @@ async def connect_custom_domain(
     # If already connected to this hotel, just return current status
     if existing and str(existing["id"]) == str(hotel["id"]):
         cf_status = await cloudflare_service.get_hostname_status(domain)
-        return {
-            "domain": domain,
-            "status": cf_status.get("status", "pending") if cf_status else "pending",
-            "ssl_status": cf_status.get("ssl_status", "initializing") if cf_status else "initializing",
-        }
+        return _status_response(domain, cf_status)
+
+    # Cloudflare may still have a hostname from a previous failed/stale local
+    # disconnect even when our DB says the domain is unassigned. In that case,
+    # adopt the existing Cloudflare hostname for this hotel instead of failing
+    # with "already registered" while the UI shows no connected domain.
+    cf_status = await cloudflare_service.get_hostname_status(domain)
+    if cf_status:
+        await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": domain})
+        return _status_response(domain, cf_status)
 
     # Register with Cloudflare
     try:
         cf_result = await cloudflare_service.create_custom_hostname(domain)
     except ValueError as e:
+        cf_status = await cloudflare_service.get_hostname_status(domain)
+        if cf_status:
+            await BookingHotelRepository.partial_update(hotel["id"], {"custom_domain": domain})
+            return _status_response(domain, cf_status)
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error("Cloudflare create failed for %s: %s", domain, e)

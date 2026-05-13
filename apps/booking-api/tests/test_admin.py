@@ -370,6 +370,79 @@ class TestDesignSettings:
         assert "No hotel found" in resp.json()["detail"]
 
 
+class TestCustomDomainSettings:
+    async def test_connect_adopts_existing_cloudflare_hostname(self):
+        from app.routers.admin.custom_domain import connect_custom_domain
+
+        domain = "booking.example.com"
+        hotel = {"id": "hotel-1"}
+
+        with patch(
+            "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
+            new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
+        ) as mock_update, patch(
+            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value={"status": "active", "ssl_status": "active"}),
+        ), patch(
+            "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
+            new=AsyncMock(),
+        ) as mock_create:
+            resp = await connect_custom_domain(
+                {"domain": domain},
+                user_id="user-1",
+                hotel=hotel,
+            )
+
+        assert resp == {
+            "domain": domain,
+            "status": "active",
+            "ssl_status": "active",
+        }
+        mock_update.assert_awaited_once_with("hotel-1", {"custom_domain": domain})
+        mock_create.assert_not_awaited()
+
+    async def test_connect_adopts_hostname_when_create_reports_existing(self):
+        from app.routers.admin.custom_domain import connect_custom_domain
+
+        domain = "booking-race.example.com"
+        hotel = {"id": "hotel-1"}
+
+        with patch(
+            "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
+            new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
+        ) as mock_update, patch(
+            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+            new=AsyncMock(
+                side_effect=[
+                    None,
+                    {"status": "pending", "ssl_status": "initializing"},
+                ]
+            ),
+        ), patch(
+            "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
+            new=AsyncMock(side_effect=ValueError("This domain is already registered.")),
+        ) as mock_create:
+            resp = await connect_custom_domain(
+                {"domain": domain},
+                user_id="user-1",
+                hotel=hotel,
+            )
+
+        assert resp == {
+            "domain": domain,
+            "status": "pending",
+            "ssl_status": "initializing",
+        }
+        mock_update.assert_awaited_once_with("hotel-1", {"custom_domain": domain})
+        mock_create.assert_awaited_once_with(domain)
+
+
 class TestDeleteHotel:
     async def test_delete_owned_hotel(self, client, hotel_with_property):
         user = hotel_with_property["user"]
