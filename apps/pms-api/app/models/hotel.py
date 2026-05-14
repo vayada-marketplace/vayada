@@ -79,6 +79,18 @@ class GuestFormSettingsUpdate(BaseModel):
     guest_count_enabled: Optional[bool] = None
 
 
+class CalendarSettingsResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    auto_rearrange_enabled: bool = True
+
+
+class CalendarSettingsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    auto_rearrange_enabled: bool
+
+
 class SetupStatusResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 

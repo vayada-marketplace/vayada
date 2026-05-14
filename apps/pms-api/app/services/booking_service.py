@@ -28,6 +28,12 @@ from app.services.room_type_service import resolve_last_minute_discount
 from app.services.channex.ari_push import push_availability_for_room_type
 from app.services.channex.orchestrator import push_ari_for_booking
 from app.services.channex.outbound import handle_vayada_cancellation as channex_handle_cancellation
+from app.services.room_assignment import (
+    apply_moves_atomic,
+    record_auto_rearrange,
+    resolve_assignment,
+    try_place_unassigned_after_cancellation,
+)
 from app.services.email_service import (
     send_booking_request_notification,
     send_guest_booking_requested,
@@ -108,7 +114,12 @@ async def _assign_room_unit(
     room_type_id: str, check_in: date, check_out: date
 ) -> Optional[str]:
     """Pick the lowest-numbered available room unit for the stay window.
-    Returns the room id, or None if every unit is booked."""
+    Returns the room id, or None if every unit is booked.
+
+    Direct-fit only — does not rearrange existing bookings. Callers that
+    want the auto-rearrange behavior should use `resolve_assignment`
+    instead, which respects the hotel's `auto_rearrange_enabled` toggle.
+    """
     row = await Database.fetchrow(
         """
         SELECT r.id FROM rooms r
@@ -129,6 +140,8 @@ async def _assign_room_unit(
         room_type_id, check_in, check_out,
     )
     return str(row["id"]) if row else None
+
+
 
 
 async def _fetch_hotel_addons(slug: str) -> list[dict]:
@@ -636,16 +649,36 @@ async def materialize_draft(
     # Last-mile race: by the time we materialize, another booking may
     # have taken the room (legitimate or not). Prefer assigning a unit,
     # fall back to leaving room_id NULL — host can reassign manually.
-    room_id = await _assign_room_unit(
+    # VAY-397: if no direct fit and the hotel has auto-rearrange on,
+    # `resolve_assignment` returns a packing that moves existing future
+    # bookings to free a slot.
+    room_id, rearrange_moves = await resolve_assignment(
+        booking_data["hotel_id"],
         booking_data["room_type_id"],
         booking_data["check_in"],
         booking_data["check_out"],
     )
+    if rearrange_moves:
+        # Apply moves before INSERT so the target room is genuinely free
+        # at insert time — keeps the bookings table free of any transient
+        # double-assignment between INSERT and move-apply.
+        await apply_moves_atomic(rearrange_moves)
     if room_id:
         booking_data["room_id"] = room_id
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
+
+    if rearrange_moves:
+        await record_auto_rearrange(
+            hotel_id=booking_data["hotel_id"],
+            moves=rearrange_moves,
+            triggered_by_booking_id=booking_id,
+            triggered_by_guest_name=(
+                f"{booking_data.get('guest_first_name', '')} "
+                f"{booking_data.get('guest_last_name', '')}"
+            ).strip() or "guest",
+        )
 
     await PaymentRepository.create(
         booking_id=booking_id,
@@ -957,12 +990,28 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "last_minute_discount_percent": pricing.last_minute_discount_pct,
         "last_minute_discount_amount": pricing.last_minute_discount_amount,
     }
-    room_id = await _assign_room_unit(data.room_type_id, data.check_in, data.check_out)
+    # VAY-397: same auto-rearrange path as the draft-materialize flow.
+    room_id, rearrange_moves = await resolve_assignment(
+        hotel_id, data.room_type_id, data.check_in, data.check_out
+    )
+    if rearrange_moves:
+        await apply_moves_atomic(rearrange_moves)
     if room_id:
         booking_data["room_id"] = room_id
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
+
+    if rearrange_moves:
+        await record_auto_rearrange(
+            hotel_id=hotel_id,
+            moves=rearrange_moves,
+            triggered_by_booking_id=booking_id,
+            triggered_by_guest_name=(
+                f"{data.guest_first_name} {data.guest_last_name}".strip()
+                or "guest"
+            ),
+        )
 
     if pricing.promo_code:
         await _increment_promo_use(slug, pricing.promo_code)
@@ -1172,6 +1221,25 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
     return updated
 
 
+def _schedule_unassigned_sweep(booking: dict) -> None:
+    """Fire-and-forget the auto-place sweep after a cancellation.
+
+    Only meaningful when the cancelled booking had a room — a previously
+    Unassigned booking that just cancelled didn't free any slot. The sweep
+    itself is a no-op when the hotel has the toggle off (VAY-397).
+    """
+    if not booking or not booking.get("room_id"):
+        return
+    asyncio.create_task(
+        try_place_unassigned_after_cancellation(
+            str(booking["hotel_id"]),
+            str(booking["room_type_id"]),
+            booking["check_in"],
+            booking["check_out"],
+        )
+    )
+
+
 async def host_accept_booking(booking_id: str, user_id: str) -> dict:
     """Host accepts a pending booking — captures payment if card."""
     hotel_id = await _get_hotel_id_for_user(user_id)
@@ -1231,6 +1299,7 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
     # Sync cancellation and availability to Channex (fire-and-forget)
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
 
     return updated
 
@@ -1279,6 +1348,7 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     # Sync cancellation and availability to Channex (fire-and-forget)
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
 
     return updated
 
@@ -1442,6 +1512,7 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     # Sync cancellation and availability to Channex (fire-and-forget)
     asyncio.create_task(channex_handle_cancellation(booking_id))
     asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
 
     return updated
 
@@ -1482,6 +1553,7 @@ async def expire_booking(booking_id: str) -> None:
     asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
     if hotel:
         asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
+    _schedule_unassigned_sweep(booking)
 
 
 async def lookup_booking(

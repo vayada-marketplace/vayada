@@ -27,6 +27,12 @@ from app.services import channex_service
 from app.services.email_service import send_host_ota_booking_imported
 
 from app.services.channex.ari_push import push_availability_for_room_type
+from app.services.room_assignment import (
+    apply_moves_atomic,
+    record_auto_rearrange,
+    resolve_assignment,
+    try_place_unassigned_after_cancellation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,39 +125,6 @@ async def _resolve_room_type(
         return None
 
     return room_type_id, room_type
-
-
-async def _pick_available_room(
-    room_type_id: str, check_in: date, check_out: date, exclude_room_ids: list[str]
-) -> str | None:
-    """Pick the lowest-numbered available room of a type for the given window.
-
-    ``exclude_room_ids`` lets a single import call assign different physical
-    rooms to multiple bookings of the same room type without re-picking the
-    same one (the new sibling bookings aren't committed yet, so the SQL
-    overlap filter doesn't see them)."""
-    available_room = await Database.fetchrow(
-        """
-        SELECT r.id FROM rooms r
-        WHERE r.room_type_id = $1
-          AND r.status = 'available'
-          AND ($4::uuid[] IS NULL OR NOT (r.id = ANY($4::uuid[])))
-          AND r.id NOT IN (
-            SELECT b.room_id FROM bookings b
-            WHERE b.room_id IS NOT NULL
-              AND b.status IN ('pending', 'confirmed')
-              AND b.check_in < $3
-              AND b.check_out > $2
-          )
-        ORDER BY r.sort_order,
-                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
-                 r.room_number
-        LIMIT 1
-        """,
-        room_type_id, check_in, check_out,
-        exclude_room_ids if exclude_room_ids else None,
-    )
-    return str(available_room["id"]) if available_room else None
 
 
 def _split_amount(
@@ -253,7 +226,6 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     top_occupancy = attrs.get("occupancy", {}) or {}
 
     created_booking_ids: list[str] = []
-    assigned_room_ids: list[str] = []
     affected_room_types: set[str] = set()
 
     for index, room in enumerate(rooms):
@@ -297,17 +269,31 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
             "payment_status": "pay_at_property",
         }
 
-        room_id = await _pick_available_room(
-            room_type_id, check_in, check_out, assigned_room_ids
+        # VAY-397: same auto-rearrange path direct + admin bookings use. The
+        # solver sees siblings created earlier in this loop because each
+        # iteration commits its booking before the next runs.
+        room_id, rearrange_moves = await resolve_assignment(
+            hotel_id, room_type_id, check_in, check_out
         )
+        if rearrange_moves:
+            await apply_moves_atomic(rearrange_moves)
         if room_id:
             booking_data["room_id"] = room_id
-            assigned_room_ids.append(room_id)
 
         booking_row = await BookingRepository.create(booking_data)
         booking_id = str(booking_row["id"])
         created_booking_ids.append(booking_id)
         affected_room_types.add(room_type_id)
+
+        if rearrange_moves:
+            await record_auto_rearrange(
+                hotel_id=hotel_id,
+                moves=rearrange_moves,
+                triggered_by_booking_id=booking_id,
+                triggered_by_guest_name=(
+                    f"{first_name} {last_name}".strip() or "guest"
+                ),
+            )
 
         await ChannexBookingMappingRepository.create(
             hotel_id=hotel_id,
@@ -365,6 +351,15 @@ async def _cancel_linked_bookings(
             start_date=booking["check_in"],
             end_date=booking["check_out"],
         ))
+        # VAY-397: OTA cancellations are the biggest source of overnight
+        # freed slots — sweep for any unassigned booking that can take them.
+        if booking.get("room_id"):
+            asyncio.create_task(try_place_unassigned_after_cancellation(
+                hotel_id,
+                str(booking["room_type_id"]),
+                booking["check_in"],
+                booking["check_out"],
+            ))
         if not notified:
             asyncio.create_task(_maybe_notify_ota_booking(
                 hotel_id, booking_id, event="cancelled",

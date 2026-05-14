@@ -195,3 +195,24 @@ class HotelRepository:
             f"UPDATE hotels SET {set_clauses} WHERE id = ${len(values)}",
             *values,
         )
+
+    @staticmethod
+    async def get_auto_rearrange_enabled(hotel_id: str) -> bool:
+        """Whether the calendar auto-rearrange solver runs for this hotel.
+
+        Defaults TRUE for any row that doesn't have the column yet (covers
+        a brief window after the migration but before container restart);
+        the column itself defaults TRUE so new hotels are opted in.
+        """
+        val = await Database.fetchval(
+            "SELECT auto_rearrange_enabled FROM hotels WHERE id = $1",
+            hotel_id,
+        )
+        return True if val is None else bool(val)
+
+    @staticmethod
+    async def set_auto_rearrange_enabled(hotel_id: str, enabled: bool) -> None:
+        await Database.execute(
+            "UPDATE hotels SET auto_rearrange_enabled = $2 WHERE id = $1",
+            hotel_id, enabled,
+        )

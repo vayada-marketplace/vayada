@@ -245,6 +245,29 @@ class RoomRepository:
         return renamed
 
     @staticmethod
+    async def list_for_room_type(room_type_id: str) -> List[dict]:
+        """List active rooms of a type with the sort key the calendar uses.
+
+        Returned rows carry id and sort_order so the auto-rearrange solver
+        (VAY-397) can pick rooms in the same order the calendar displays
+        them — picking the lowest-numbered free room first stays consistent
+        with the legacy direct-fit `_assign_room_unit` query.
+        """
+        rows = await Database.fetch(
+            """
+            SELECT id, sort_order
+            FROM rooms
+            WHERE room_type_id = $1
+              AND status = 'available'
+            ORDER BY sort_order,
+                     (COALESCE(NULLIF(regexp_replace(room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                     room_number
+            """,
+            room_type_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def get_by_id(room_id: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """
