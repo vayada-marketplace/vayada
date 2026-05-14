@@ -162,9 +162,11 @@ async def test_import_proceeds_when_hotels_match():
         new_callable=AsyncMock,
         return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
     ), patch(
-        "app.services.channex.inbound.Database.fetchrow",
+        # Auto-rearrange path: stub to "no fit, no moves" so we land on the
+        # same behavior the legacy `Database.fetchrow=None` stub produced.
+        "app.services.channex.inbound.resolve_assignment",
         new_callable=AsyncMock,
-        return_value=None,  # no available room → skip room_id assignment
+        return_value=(None, []),
     ), patch(
         "app.services.channex.inbound.BookingRepository.create",
         new=create_mock,

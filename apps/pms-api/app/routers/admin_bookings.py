@@ -22,6 +22,7 @@ from app.services.booking_change_service import (
 )
 from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
 from app.services.channex_sync_service import push_availability_for_room_type
+from app.services.room_assignment import try_place_unassigned_after_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +262,17 @@ async def update_booking_status(
         asyncio.create_task(
             send_guest_cancellation(updated["guest_email"], updated)
         )
+        # VAY-397: cancellation may have freed a slot that an unassigned
+        # booking can take. Fire-and-forget so the admin doesn't wait.
+        if booking.get("room_id"):
+            asyncio.create_task(
+                try_place_unassigned_after_cancellation(
+                    hotel_id,
+                    str(booking["room_type_id"]),
+                    booking["check_in"],
+                    booking["check_out"],
+                )
+            )
 
     return _booking_to_admin(updated)
 

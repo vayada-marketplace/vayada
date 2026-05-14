@@ -318,6 +318,87 @@ class BookingRepository:
         )
 
     @staticmethod
+    async def apply_room_moves(moves: List[tuple]) -> None:
+        """Atomically reassign N bookings' room_ids in a single statement.
+
+        `moves` is a list of (booking_id, new_room_id) pairs. Used by the
+        auto-rearrange solver (VAY-397) to apply the full set of moves it
+        plans as one indivisible update — no partial application can leave
+        the calendar in a double-booked state.
+        """
+        if not moves:
+            return
+        booking_ids = [m[0] for m in moves]
+        new_room_ids = [m[1] for m in moves]
+        await Database.execute(
+            """
+            UPDATE bookings AS b
+            SET room_id = m.new_room_id::uuid,
+                updated_at = now()
+            FROM unnest($1::uuid[], $2::uuid[]) AS m(booking_id, new_room_id)
+            WHERE b.id = m.booking_id
+            """,
+            booking_ids,
+            new_room_ids,
+        )
+
+    @staticmethod
+    async def list_movable_for_room_type(
+        room_type_id: str,
+        window_start,
+        window_end,
+    ) -> List[dict]:
+        """Bookings of one room type whose stay window overlaps [start, end).
+
+        Returns id, room_id, check_in, check_out, status. Used by the
+        auto-rearrange solver to build its input set. Caller decides which
+        rows are movable (typically: status='confirmed'/'pending' and stay
+        hasn't started yet).
+        """
+        rows = await Database.fetch(
+            """
+            SELECT id, room_id, check_in, check_out, status
+            FROM bookings
+            WHERE room_type_id = $1
+              AND status IN ('pending', 'confirmed')
+              AND check_in < $3
+              AND check_out > $2
+            """,
+            room_type_id,
+            window_start,
+            window_end,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def list_unassigned_for_room_type(
+        room_type_id: str,
+        window_start,
+        window_end,
+    ) -> List[dict]:
+        """Unassigned (room_id IS NULL) bookings of one room type whose stay
+        window overlaps [start, end). Used by the cancellation-triggered
+        auto-place sweep (VAY-397) to find candidates to re-place into a
+        freshly-freed slot.
+        """
+        rows = await Database.fetch(
+            """
+            SELECT id, check_in, check_out
+            FROM bookings
+            WHERE room_type_id = $1
+              AND room_id IS NULL
+              AND status IN ('pending', 'confirmed')
+              AND check_in < $3
+              AND check_out > $2
+            ORDER BY check_in
+            """,
+            room_type_id,
+            window_start,
+            window_end,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
     async def update_status(booking_id: str, new_status: str) -> Optional[dict]:
         row = await Database.fetchrow(
             """

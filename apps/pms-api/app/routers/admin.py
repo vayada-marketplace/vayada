@@ -17,6 +17,8 @@ from app.models.hotel import (
     HotelBenefitsResponse,
     GuestFormSettingsResponse,
     GuestFormSettingsUpdate,
+    CalendarSettingsResponse,
+    CalendarSettingsUpdate,
     SetupStatusResponse,
 )
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
@@ -327,4 +329,29 @@ async def update_guest_form_settings(
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
         guest_count_enabled=row["guest_count_enabled"],
+    )
+
+
+# ── Calendar Settings ────────────────────────────────────────────
+
+
+@router.get("/calendar-settings", response_model=CalendarSettingsResponse)
+async def get_calendar_settings(user_id: str = Depends(require_hotel_admin)):
+    """Per-hotel calendar settings — currently just the VAY-397 toggle."""
+    hotel_id = await get_hotel_id(user_id)
+    enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
+    return CalendarSettingsResponse(auto_rearrange_enabled=enabled)
+
+
+@router.patch("/calendar-settings", response_model=CalendarSettingsResponse)
+async def update_calendar_settings(
+    data: CalendarSettingsUpdate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    await HotelRepository.set_auto_rearrange_enabled(
+        hotel_id, data.auto_rearrange_enabled
+    )
+    return CalendarSettingsResponse(
+        auto_rearrange_enabled=data.auto_rearrange_enabled
     )

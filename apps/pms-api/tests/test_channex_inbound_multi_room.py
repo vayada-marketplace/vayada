@@ -74,9 +74,12 @@ async def test_two_rooms_same_type_create_two_bookings():
         new_callable=AsyncMock,
         return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
     ), patch(
-        "app.services.channex.inbound.Database.fetchrow",
+        # No available physical room and no rearrange possible — skip room_id
+        # assignment. The legacy stub was `Database.fetchrow=None`; the new
+        # auto-rearrange path goes through `resolve_assignment` instead.
+        "app.services.channex.inbound.resolve_assignment",
         new_callable=AsyncMock,
-        return_value=None,  # no available physical room — skip room_id assignment
+        return_value=(None, []),
     ), patch(
         "app.services.channex.inbound.BookingRepository.create",
         new=fake_create,
@@ -135,9 +138,9 @@ async def test_two_rooms_different_types_resolve_each_independently():
         "app.services.channex.inbound.RoomTypeRepository.get_by_id",
         new=fake_get_room_type,
     ), patch(
-        "app.services.channex.inbound.Database.fetchrow",
+        "app.services.channex.inbound.resolve_assignment",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=(None, []),
     ), patch(
         "app.services.channex.inbound.BookingRepository.create",
         new=fake_create,
@@ -174,9 +177,9 @@ async def test_single_room_booking_unchanged_regression_guard():
         new_callable=AsyncMock,
         return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
     ), patch(
-        "app.services.channex.inbound.Database.fetchrow",
+        "app.services.channex.inbound.resolve_assignment",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=(None, []),
     ), patch(
         "app.services.channex.inbound.BookingRepository.create",
         new=create_mock,
@@ -335,9 +338,9 @@ async def test_per_room_amount_used_when_present():
         new_callable=AsyncMock,
         return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
     ), patch(
-        "app.services.channex.inbound.Database.fetchrow",
+        "app.services.channex.inbound.resolve_assignment",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=(None, []),
     ), patch(
         "app.services.channex.inbound.BookingRepository.create",
         new=fake_create,
