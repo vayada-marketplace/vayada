@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     PMS_API_URL: str = Field("https://pms-api.vayada.com", description="PMS backend URL for proxying image uploads")
     PMS_DATABASE_URL: str = Field(default="", description="PMS PostgreSQL connection string (for dashboard stats)")
 
+    # Lodgify integration (VAY-398): base URL is overridable so tests
+    # can point the httpx client at a mock server without monkey-patching.
+    LODGIFY_API_BASE_URL: str = Field("https://api.lodgify.com", description="Lodgify v2 API base URL")
+    LODGIFY_API_TIMEOUT: float = Field(15.0, description="Per-request timeout in seconds for Lodgify HTTP calls")
+
     # Frontend URL (for reset password links)
     FRONTEND_URL: str = Field("http://localhost:3003", description="Frontend URL for reset password links")
 
