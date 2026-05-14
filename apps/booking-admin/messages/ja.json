@@ -387,6 +387,7 @@
   "settings.tabs.notifications": "通知",
   "settings.tabs.security": "セキュリティ",
   "settings.tabs.billing": "請求",
+  "settings.tabs.integrations": "連携",
   "settings.feedback.saveSuccess": "設定を保存しました",
   "settings.feedback.saveError": "設定の保存に失敗しました",
   "settings.property.propertyInfo": "物件情報",

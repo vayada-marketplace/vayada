@@ -387,6 +387,7 @@
   "settings.tabs.notifications": "Benachrichtigungen",
   "settings.tabs.security": "Sicherheit",
   "settings.tabs.billing": "Abrechnung",
+  "settings.tabs.integrations": "Integrationen",
   "settings.feedback.saveSuccess": "Einstellungen erfolgreich gespeichert",
   "settings.feedback.saveError": "Einstellungen konnten nicht gespeichert werden",
   "settings.property.propertyInfo": "Unterkunftsinformationen",
