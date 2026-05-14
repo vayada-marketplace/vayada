@@ -189,6 +189,10 @@ export default function SettingsPage() {
   const [instantBook, setInstantBook] = useState(false)
   const [savingInstantBook, setSavingInstantBook] = useState(false)
 
+  // Calendar — VAY-397 auto-rearrange toggle
+  const [autoRearrange, setAutoRearrange] = useState(true)
+  const [savingAutoRearrange, setSavingAutoRearrange] = useState(false)
+
   useEffect(() => {
     bookingsService.getPaymentSettings()
       .then((res) => {
@@ -222,6 +226,10 @@ export default function SettingsPage() {
         if (h.longitude != null) setLongitude(String(h.longitude))
         setInstantBook(Boolean(h.instant_book))
       })
+      .catch(() => {})
+
+    pmsClient.get<{ autoRearrangeEnabled: boolean }>('/admin/calendar-settings')
+      .then((s) => setAutoRearrange(Boolean(s.autoRearrangeEnabled)))
       .catch(() => {})
   }, [])
 
@@ -300,6 +308,29 @@ export default function SettingsPage() {
       setError(humanizeApiError(err, 'Couldn’t save property details. Please try again, or contact support if the issue persists.'))
     } finally {
       setSavingProperty(false)
+    }
+  }
+
+  const toggleAutoRearrange = async (next: boolean) => {
+    setSavingAutoRearrange(true)
+    setError('')
+    setSuccess('')
+    const previous = autoRearrange
+    setAutoRearrange(next)
+    try {
+      await pmsClient.patch('/admin/calendar-settings', {
+        autoRearrangeEnabled: next,
+      })
+      setSuccess(
+        next
+          ? 'Auto-rearrange enabled — new bookings will shuffle existing reservations when needed'
+          : 'Auto-rearrange disabled — bookings that don’t fit will go to Unassigned'
+      )
+    } catch (err: any) {
+      setAutoRearrange(previous)
+      setError(humanizeApiError(err, 'Couldn’t update auto-rearrange setting. Please try again.'))
+    } finally {
+      setSavingAutoRearrange(false)
     }
   }
 
@@ -517,6 +548,42 @@ export default function SettingsPage() {
               <span
                 className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
                   instantBook ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Calendar — auto-rearrange (VAY-397) */}
+        <div id="calendar" className={sectionClass('calendar')}>
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Calendar</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            How new bookings are placed on the calendar when no single room fits the dates.
+          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-900">
+                Auto-rearrange room assignments
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {autoRearrange
+                  ? 'On — when a new booking doesn’t fit any single room, the system shuffles future bookings between same-type rooms to free a slot. Checked-in and checked-out guests are never moved. Every shuffle is logged.'
+                  : 'Off — when a new booking doesn’t fit any single room, it goes to the Unassigned row and you place it manually.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoRearrange}
+              disabled={savingAutoRearrange}
+              onClick={() => toggleAutoRearrange(!autoRearrange)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-50 ${
+                autoRearrange ? 'bg-primary-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                  autoRearrange ? 'translate-x-5' : 'translate-x-0.5'
                 }`}
               />
             </button>
