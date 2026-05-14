@@ -15,11 +15,12 @@ import {
 } from '@heroicons/react/24/outline'
 import { settingsService, customDomainService, type PropertySettings, type CustomDomainStatus } from '@/services/settings'
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from '@/components/ui'
+import { LodgifyIntegrationPanel } from '@/components/settings/LodgifyIntegrationPanel'
 import { useTranslation } from '@/lib/i18n'
 
 type Translate = (key: string, params?: Record<string, string | number>) => string
 
-type Tab = 'property' | 'booking' | 'notifications' | 'security' | 'billing'
+type Tab = 'property' | 'booking' | 'notifications' | 'security' | 'billing' | 'integrations'
 
 const STRIPE_COUNTRIES = [
   { c: 'AE', n: 'United Arab Emirates', f: '🇦🇪' }, { c: 'AR', n: 'Argentina', f: '🇦🇷' }, { c: 'AT', n: 'Austria', f: '🇦🇹' }, { c: 'AU', n: 'Australia', f: '🇦🇺' },
@@ -395,6 +396,7 @@ export default function SettingsPage() {
     { id: 'notifications' as const, label: t('settings.tabs.notifications'), icon: NotificationsIcon },
     { id: 'security' as const, label: t('settings.tabs.security'), icon: SecurityIcon },
     { id: 'billing' as const, label: t('settings.tabs.billing'), icon: BillingIcon },
+    { id: 'integrations' as const, label: t('settings.tabs.integrations'), icon: IntegrationsIcon },
   ]
 
   return (
@@ -1367,6 +1369,13 @@ export default function SettingsPage() {
           </div>}
         </div>
       )}
+
+      {/* Integrations tab — third-party PMS connections (VAY-398) */}
+      {activeTab === 'integrations' && (
+        <div className="mt-5">
+          <LodgifyIntegrationPanel />
+        </div>
+      )}
     </div>
   )
 }
@@ -1415,6 +1424,15 @@ function BillingIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="5" width="20" height="14" rx="2" />
       <path d="M2 10h20" />
+    </svg>
+  )
+}
+
+function IntegrationsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   )
 }
