@@ -4,6 +4,9 @@ fallback behaviour, and cross-hotel isolation.
 """
 import json
 import uuid
+from unittest.mock import AsyncMock, patch
+
+from app.database import Database
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
@@ -392,3 +395,57 @@ class TestDuplicatePropertyNames:
         assert resp_first.status_code == 201, resp_first.text
         assert resp_second.status_code == 201, resp_second.text
         assert resp_first.json()["slug"] != resp_second.json()["slug"]
+
+
+# ── Custom domain on the no-header fallback path (VAY-401) ───────────
+
+
+class TestCustomDomainNoHeaderFallback:
+    """Regression for VAY-401: a single-property owner whose admin UI
+    never sets X-Hotel-Id hits the fallback path in get_current_hotel.
+    That path must still return a full hotel record (incl. custom_domain),
+    otherwise the status endpoint reports "not configured" and remove
+    404s, leaving the property permanently stuck on the old domain."""
+
+    async def test_status_and_remove_without_x_hotel_id(self, client, cleanup_database):
+        user = await create_test_user()
+        uid = str(user["id"])
+        hotel = await create_test_booking_hotel(uid, name="Solo Villa")
+        domain = "www.villasoleagili.com"
+        await Database.execute(
+            "UPDATE booking_hotels SET custom_domain = $1 WHERE id = $2",
+            domain, hotel["id"],
+        )
+
+        cf_status = {"status": "active", "ssl_status": "active"}
+        with patch(
+            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value=cf_status),
+        ), patch(
+            "app.routers.admin.custom_domain.cloudflare_service.delete_custom_hostname",
+            new=AsyncMock(return_value=None),
+        ) as mock_delete:
+            # Status must reflect the configured domain even with no header.
+            status_resp = await client.get(
+                "/admin/settings/custom-domain/status",
+                headers=get_auth_headers(user["token"]),
+            )
+            assert status_resp.status_code == 200
+            body = status_resp.json()
+            assert body["configured"] is True
+            assert body["domain"] == domain
+
+            # Remove must actually clear the mapping, not 404.
+            del_resp = await client.delete(
+                "/admin/settings/custom-domain",
+                headers=get_auth_headers(user["token"]),
+            )
+            assert del_resp.status_code == 200, del_resp.text
+            assert del_resp.json() == {"removed": domain}
+            mock_delete.assert_awaited_once_with(domain)
+
+        # DB mapping is gone; subsequent status reports not configured.
+        cleared = await Database.fetchval(
+            "SELECT custom_domain FROM booking_hotels WHERE id = $1", hotel["id"],
+        )
+        assert cleared is None

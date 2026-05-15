@@ -160,7 +160,13 @@ async def get_current_hotel(
         return hotel
 
     hotels = await BookingHotelRepository.list_by_user_id(user_id)
-    return hotels[0] if hotels else None
+    if not hotels:
+        return None
+    # Refetch the full record. list_by_user_id only selects a handful of
+    # columns, so returning hotels[0] directly would hand downstream
+    # endpoints a hotel dict missing fields like custom_domain — making
+    # the header and no-header paths behave inconsistently (VAY-401).
+    return await BookingHotelRepository.get_by_id(str(hotels[0]["id"]))
 
 
 async def require_current_hotel(
