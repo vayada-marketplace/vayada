@@ -32,6 +32,7 @@ from app.services.room_assignment import (
     apply_moves_atomic,
     record_auto_rearrange,
     resolve_assignment,
+    resolve_room_assignments,
     try_place_unassigned_after_cancellation,
 )
 from app.services.email_service import (
@@ -77,6 +78,7 @@ def _booking_to_response(booking: dict) -> BookingResponse:
         adults=booking["adults"],
         children=booking["children"],
         nightly_rate=float(booking["nightly_rate"]),
+        number_of_rooms=int(booking.get("number_of_rooms") or 1),
         total_amount=float(booking["total_amount"]),
         addon_total=float(booking.get("addon_total") or 0),
         currency=booking["currency"],
@@ -652,11 +654,14 @@ async def materialize_draft(
     # VAY-397: if no direct fit and the hotel has auto-rearrange on,
     # `resolve_assignment` returns a packing that moves existing future
     # bookings to free a slot.
-    room_id, rearrange_moves = await resolve_assignment(
+    # VAY-403: a card multi-room booking must claim one physical room per
+    # booked room here too, otherwise only the first is blocked.
+    room_id, extra_room_ids, rearrange_moves = await resolve_room_assignments(
         booking_data["hotel_id"],
         booking_data["room_type_id"],
         booking_data["check_in"],
         booking_data["check_out"],
+        int(booking_data.get("number_of_rooms") or 1),
     )
     if rearrange_moves:
         # Apply moves before INSERT so the target room is genuinely free
@@ -665,6 +670,8 @@ async def materialize_draft(
         await apply_moves_atomic(rearrange_moves)
     if room_id:
         booking_data["room_id"] = room_id
+    if extra_room_ids:
+        booking_data["extra_room_ids"] = extra_room_ids
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])
@@ -991,13 +998,17 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "last_minute_discount_amount": pricing.last_minute_discount_amount,
     }
     # VAY-397: same auto-rearrange path as the draft-materialize flow.
-    room_id, rearrange_moves = await resolve_assignment(
-        hotel_id, data.room_type_id, data.check_in, data.check_out
+    # VAY-403: assign one physical room per booked room, not just one.
+    room_id, extra_room_ids, rearrange_moves = await resolve_room_assignments(
+        hotel_id, data.room_type_id, data.check_in, data.check_out,
+        data.number_of_rooms,
     )
     if rearrange_moves:
         await apply_moves_atomic(rearrange_moves)
     if room_id:
         booking_data["room_id"] = room_id
+    if extra_room_ids:
+        booking_data["extra_room_ids"] = extra_room_ids
 
     booking_row = await BookingRepository.create(booking_data)
     booking_id = str(booking_row["id"])

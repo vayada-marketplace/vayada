@@ -139,14 +139,19 @@ class RoomTypeRepository:
     async def count_booked(
         room_type_id: str, check_in: date, check_out: date
     ) -> int:
-        """Count overlapping non-cancelled bookings for a room type.
+        """Sum the rooms held by overlapping non-cancelled bookings.
+
+        VAY-403: a multi-room booking (number_of_rooms > 1) consumes that
+        many physical rooms of inventory, not one. Summing number_of_rooms
+        instead of counting rows is what stops the second room of a 2-room
+        booking from staying open for sale (silent double-booking).
 
         Excludes pending bookings with unpaid payment older than 30 min
         (abandoned or failed payment attempts).
         """
         count = await Database.fetchval(
             """
-            SELECT COUNT(*) FROM bookings
+            SELECT COALESCE(SUM(COALESCE(number_of_rooms, 1)), 0) FROM bookings
             WHERE room_type_id = $1
               AND status IN ('pending', 'confirmed')
               AND check_in < $3

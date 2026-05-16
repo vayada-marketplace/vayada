@@ -60,13 +60,13 @@ class BookingRepository:
                 addon_dates,
                 promo_code, promo_discount,
                 last_minute_discount_percent, last_minute_discount_amount,
-                guest_country
+                guest_country, number_of_rooms
             ) VALUES (
                 COALESCE($37::uuid, uuid_generate_v4()),
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34, $35, $36
+                $31, $32, $33, $34, $35, $36, $38
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -106,8 +106,22 @@ class BookingRepository:
             data.get("last_minute_discount_amount", 0),
             data.get("guest_country", ""),
             data.get("id"),
+            data.get("number_of_rooms", 1),
         )
-        return dict(row)
+        booking = dict(row)
+
+        # VAY-403: the FIRST room stays in bookings.room_id (position 0).
+        # Any additional rooms the guest paid for are recorded as extra
+        # slots so every one of them is blocked on the calendar and the
+        # second room can't be sold to someone else.
+        extra_room_ids = data.get("extra_room_ids") or []
+        if extra_room_ids:
+            from app.repositories.booking_room_repo import BookingRoomRepository
+
+            await BookingRoomRepository.set_extra_rooms(
+                str(booking["id"]), extra_room_ids
+            )
+        return booking
 
     @staticmethod
     async def get_by_id(booking_id: str) -> Optional[dict]:

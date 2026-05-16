@@ -8,6 +8,7 @@ from app.dependencies import require_hotel_admin
 from app.utils import get_hotel_id
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_room_repo import BookingRoomRepository
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
 from app.models.room import RoomCreate, RoomReorder, RoomUpdate, RoomResponse
@@ -170,6 +171,59 @@ async def get_calendar(
     bookings = await BookingRepository.list_by_hotel_in_range(hotel_id, start, end)
     blocks = await RoomBlockRepository.list_by_hotel_in_range(hotel_id, start, end)
 
+    # VAY-403: multi-room bookings occupy more than the primary room. Pull
+    # every booking's extra rooms in one batched query and emit an extra
+    # calendar entry per room so each one is blocked on the grid, not just
+    # the first. Entries share the booking id + reference so the frontend
+    # can render them as one linked reservation.
+    extra_rows = await BookingRoomRepository.list_extra_rooms_for_bookings(
+        [str(b["id"]) for b in bookings]
+    )
+    extras_by_booking: dict[str, list] = {}
+    for er in extra_rows:
+        extras_by_booking.setdefault(str(er["booking_id"]), []).append(er)
+
+    def _calendar_entries(b: dict) -> list[CalendarBooking]:
+        n_rooms = int(b.get("number_of_rooms") or 1)
+        entries = [
+            CalendarBooking(
+                id=str(b["id"]),
+                room_type_id=str(b["room_type_id"]),
+                room_name=b["room_name"],
+                guest_first_name=b["guest_first_name"],
+                guest_last_name=b["guest_last_name"],
+                check_in=str(b["check_in"]),
+                check_out=str(b["check_out"]),
+                status=b["status"],
+                room_id=str(b["room_id"]) if b.get("room_id") else None,
+                room_number=b.get("room_number"),
+                channel=b.get("channel", "direct") or "direct",
+                booking_reference=b["booking_reference"],
+                number_of_rooms=n_rooms,
+                room_position=0,
+            )
+        ]
+        for er in extras_by_booking.get(str(b["id"]), []):
+            entries.append(
+                CalendarBooking(
+                    id=str(b["id"]),
+                    room_type_id=str(b["room_type_id"]),
+                    room_name=b["room_name"],
+                    guest_first_name=b["guest_first_name"],
+                    guest_last_name=b["guest_last_name"],
+                    check_in=str(b["check_in"]),
+                    check_out=str(b["check_out"]),
+                    status=b["status"],
+                    room_id=str(er["room_id"]),
+                    room_number=er.get("room_number"),
+                    channel=b.get("channel", "direct") or "direct",
+                    booking_reference=b["booking_reference"],
+                    number_of_rooms=n_rooms,
+                    room_position=er["position"],
+                )
+            )
+        return entries
+
     return CalendarResponse(
         room_types=[
             CalendarRoomType(
@@ -195,21 +249,9 @@ async def get_calendar(
             for r in rooms
         ],
         bookings=[
-            CalendarBooking(
-                id=str(b["id"]),
-                room_type_id=str(b["room_type_id"]),
-                room_name=b["room_name"],
-                guest_first_name=b["guest_first_name"],
-                guest_last_name=b["guest_last_name"],
-                check_in=str(b["check_in"]),
-                check_out=str(b["check_out"]),
-                status=b["status"],
-                room_id=str(b["room_id"]) if b.get("room_id") else None,
-                room_number=b.get("room_number"),
-                channel=b.get("channel", "direct") or "direct",
-                booking_reference=b["booking_reference"],
-            )
+            entry
             for b in bookings
+            for entry in _calendar_entries(b)
         ],
         blocks=[
             CalendarBlock(
