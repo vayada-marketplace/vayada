@@ -1,3 +1,9 @@
+import { APP_BASE_URL } from '@/lib/constants/routes'
+
+// Signup lives in the app (app.vayada.com), not on this marketing site.
+const SIGNUP_HOTEL = `${APP_BASE_URL}/signup?type=hotel`
+const SIGNUP_CREATOR = `${APP_BASE_URL}/signup?type=creator`
+
 export const siteConfig = {
   name: 'vayada',
   description: 'A transparent marketplace connecting hotels with verified travel influencers for authentic collaborations.',
@@ -18,11 +24,11 @@ export const siteConfig = {
     cta: {
       hotel: {
         text: "I'm a Hotel",
-        href: '/signup?type=hotel',
+        href: SIGNUP_HOTEL,
       },
       creator: {
         text: "I'm a Creator",
-        href: '/signup?type=creator',
+        href: SIGNUP_CREATOR,
       },
     },
   },
@@ -31,13 +37,13 @@ export const siteConfig = {
     links: {
       hotels: [
         { label: 'How It Works', href: '#hotels' },
-        { label: 'Sign Up', href: '/signup?type=hotel' },
+        { label: 'Sign Up', href: SIGNUP_HOTEL },
         { label: 'Benefits', href: '/pricing' },
       ],
       creators: [
         { label: 'How It Works', href: '#creators' },
-        { label: 'Sign Up', href: '/signup?type=creator' },
-        { label: 'Benefits', href: '/creators/benefits' },
+        { label: 'Sign Up', href: SIGNUP_CREATOR },
+        { label: 'Benefits', href: '/creator-benefits' },
       ],
       company: [
         { label: 'About', href: '/about' },
