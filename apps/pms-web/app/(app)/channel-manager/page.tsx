@@ -30,8 +30,8 @@ export default function ChannelManagerPage() {
   const [iframeUrl, setIframeUrl] = useState<string | null>(null)
   const [loadingIframe, setLoadingIframe] = useState(false)
 
-  // Channel pricing markups
-  const [bookingComMarkup, setBookingComMarkup] = useState('0')
+  // Channel pricing markups. Booking.com markup is configured in the Channex
+  // UI (not here) — see VAY-408 — so only Airbnb is editable.
   const [airbnbMarkup, setAirbnbMarkup] = useState('0')
   const [savingMarkups, setSavingMarkups] = useState(false)
 
@@ -72,9 +72,7 @@ export default function ChannelManagerPage() {
   const loadMarkups = async () => {
     try {
       const { markups } = await channexService.getMarkups()
-      const bdc = markups.find((m) => m.channel === 'booking_com')
       const abb = markups.find((m) => m.channel === 'airbnb')
-      setBookingComMarkup(bdc ? String(bdc.markupPct) : '0')
       setAirbnbMarkup(abb ? String(abb.markupPct) : '0')
     } catch {
       // ignore — card still renders with defaults
@@ -85,8 +83,11 @@ export default function ChannelManagerPage() {
     setSavingMarkups(true)
     setError('')
     try {
+      // Booking.com markup is managed in the Channex UI (VAY-408). Force the
+      // Vayada-side value to 0 on save so we never double-apply a markup on
+      // top of what the host already configured in Channex.
       const payload: ChannelMarkup[] = [
-        { channel: 'booking_com', markupPct: Number(bookingComMarkup) || 0 },
+        { channel: 'booking_com', markupPct: 0 },
         { channel: 'airbnb', markupPct: Number(airbnbMarkup) || 0 },
       ]
       await channexService.updateMarkups(payload)
@@ -356,40 +357,21 @@ export default function ChannelManagerPage() {
             <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
               <h2 className="text-sm font-semibold text-gray-900 mb-1">{t('channels.pricingTitle')}</h2>
               <p className="text-sm text-gray-600 mb-4">{t('channels.pricingDescription')}</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    {t('channels.bookingComMarkup')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="-50"
-                      max="200"
-                      value={bookingComMarkup}
-                      onChange={(e) => setBookingComMarkup(e.target.value)}
-                      className="w-full pr-8 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    {t('channels.airbnbMarkup')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="-50"
-                      max="200"
-                      value={airbnbMarkup}
-                      onChange={(e) => setAirbnbMarkup(e.target.value)}
-                      className="w-full pr-8 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
-                  </div>
+              <div className="mb-4 max-w-xs">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  {t('channels.airbnbMarkup')}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="-50"
+                    max="200"
+                    value={airbnbMarkup}
+                    onChange={(e) => setAirbnbMarkup(e.target.value)}
+                    className="w-full pr-8 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
                 </div>
               </div>
               <p className="text-xs text-gray-500 mb-4">{t('channels.markupHint')}</p>

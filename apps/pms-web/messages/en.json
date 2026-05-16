@@ -531,7 +531,6 @@
   "channels.disableConfirm": "Disable the channel manager? This will stop all OTA syncing.",
   "channels.pricingTitle": "Channel Pricing",
   "channels.pricingDescription": "Add a markup to OTA prices to absorb commission. Direct prices stay unchanged.",
-  "channels.bookingComMarkup": "Booking.com markup",
   "channels.airbnbMarkup": "Airbnb markup",
   "channels.markupHint": "Percent added on top of your base price",
   "channels.savePricing": "Save",
