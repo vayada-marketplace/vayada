@@ -19,7 +19,7 @@ from app.services.notifications import (
     get_party_email_and_name,
     send_email_background,
     notify_vayada_team,
-    notify_marketplace_admin,
+    notify_marketplace_admin_sync,
 )
 from app.email_service import (
     create_collaboration_request_email_html,
@@ -258,7 +258,9 @@ async def create_collaboration(
             initiator_type=request.initiator_type,
             why_great_fit=request.why_great_fit,
         )
-        notify_marketplace_admin("New collaboration request", admin_html)
+        # Awaited (not fire-and-forget): the internal admin notification must
+        # survive an ECS redeploy mid-request — see VAY-241. Non-fatal.
+        await notify_marketplace_admin_sync("New collaboration request", admin_html)
 
         joined_row = {
             **collaboration,
@@ -430,7 +432,7 @@ async def respond_to_collaboration_request(
                 "Hotel accepted collaboration request"
                 if accepted else "Hotel declined collaboration request"
             )
-            notify_marketplace_admin(admin_subject, admin_html)
+            await notify_marketplace_admin_sync(admin_subject, admin_html)
 
         plat_delivs_resp = await get_collaboration_deliverables(collaboration_id)
         return CollaborationResponse.from_db_row(
