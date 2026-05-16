@@ -32,6 +32,11 @@ export interface CalendarBooking {
   roomNumber: string | null
   channel: string
   bookingReference: string
+  // VAY-403: a multi-room booking returns one entry per assigned room,
+  // all sharing id + bookingReference. numberOfRooms is the booked
+  // quantity; roomPosition is 0 for the primary room, 1..N-1 for extras.
+  numberOfRooms: number
+  roomPosition: number
 }
 
 export interface CalendarBlock {

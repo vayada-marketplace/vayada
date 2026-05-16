@@ -255,6 +255,11 @@ export default function ReservationsPage() {
                     ) : (
                       <span className="truncate">{b.roomName}</span>
                     )}
+                    {b.numberOfRooms > 1 && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-semibold">
+                        ×{b.numberOfRooms} rooms
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -372,6 +377,11 @@ export default function ReservationsPage() {
                         </>
                       ) : (
                         b.roomName
+                      )}
+                      {b.numberOfRooms > 1 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 text-[11px] font-semibold">
+                          ×{b.numberOfRooms}
+                        </span>
                       )}
                     </td>
 
