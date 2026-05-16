@@ -25,3 +25,6 @@
 [submodule "affiliate/vayada-affiliate-dashboard"]
 	path = affiliate/vayada-affiliate-dashboard
 	url = https://github.com/FlamurMaliqi/vayada-affiliate-dashboard.git
+[submodule "marketing/vayada-landing"]
+	path = marketing/vayada-landing
+	url = https://github.com/FlamurMaliqi/vayada-landing.git

@@ -1,7 +1,7 @@
 # vayada — agent guide
 
 Hospitality platform: a **Creator Marketplace**, a **Booking Engine**, and a **PMS**,
-sharing a central auth DB. This repo is a **thin parent of 9 git submodules** — almost
+sharing a central auth DB. This repo is a **thin parent of 10 git submodules** — almost
 all code lives in submodules; the parent only pins submodule SHAs + holds
 `docker-compose.yml`, `infra/` (Terraform), `scripts/` (seeds), and `auth-db/`.
 
@@ -21,6 +21,22 @@ is the operational/agent layer the README doesn't cover.
 | `pms/vayada-pms-backend` | FastAPI | 8002 |
 | `pms/vayada-pms-frontend` | Next.js 14 | 3004 |
 | `affiliate/vayada-affiliate-dashboard` | Next.js 14 | — |
+| `marketing/vayada-landing` | Next.js 14 | 3006 |
+
+`marketing/vayada-landing` is the **public marketing/landing site**, split out of
+`vayada-creator-marketplace-frontend`. The marketplace frontend is now the
+authenticated app only; its `/` redirects to `/login`. The marketing pages
+(home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`,
+`/pricing`, about/contact/benefits, legal) live in `vayada-landing`;
+`/hotel-creator-network` there fetches live creators/hotels from the
+marketplace API cross-origin. `/choose-product` stays in the marketplace
+frontend (auth-flow router off `/login`). The public chrome (`Navigation`/
+`Footer`/`LandingFooter`) is intentionally duplicated in both repos because
+app pages (`/hotels/[id]`, `/choose-product`, `/creators`, `/properties`)
+still use it. Deferred to a domain cutover: infra (ECR `vayada-landing` +
+service + DNS), domain topology, the app-root redirect target, the marketing
+`Navigation` links (still point at moved routes), and contact/HCN CORS on the
+marketplace backend.
 
 ## Per-stack commands (run inside the submodule, not the parent)
 

@@ -281,6 +281,7 @@ The auth database (`auth-db/`) provides centralized user management for all serv
    | Application               | URL                        |
    |---------------------------|----------------------------|
    | Marketplace Frontend      | http://localhost:3000       |
+   | Marketing / Landing       | http://localhost:3006       |
    | Marketplace Admin         | http://localhost:3001       |
    | Booking Engine Frontend   | http://localhost:3002       |
    | Booking Engine Admin      | http://localhost:3003       |
@@ -296,7 +297,8 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 
 | Service                       | Port  | Description                          |
 |-------------------------------|-------|--------------------------------------|
-| Marketplace Frontend          | 3000  | Public marketplace site              |
+| Marketplace Frontend          | 3000  | Authenticated creator marketplace app |
+| Marketing / Landing           | 3006  | Public marketing site (vayada-landing) |
 | Marketplace Admin             | 3001  | vayada admin dashboard               |
 | Booking Frontend              | 3002  | Guest-facing booking site            |
 | Booking Admin                 | 3003  | Hotel admin dashboard                |
@@ -378,6 +380,7 @@ Key environment variables are configured in `docker-compose.yml` and service `.e
 | `vayada-creator-marketplace-backend`                 | `marketplace/vayada-creator-marketplace-backend`        |
 | `vayada-creator-marketplace-frontend`                | `marketplace/vayada-creator-marketplace-frontend`       |
 | `vayada-creator-marketplace-frontend-admin`          | `marketplace/vayada-creator-marketplace-frontend-admin` |
+| `vayada-landing`                                     | `marketing/vayada-landing`                              |
 
 ```bash
 # Initialize and pull all submodules

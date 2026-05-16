@@ -16,6 +16,7 @@
 #   3003  Booking engine admin frontend
 #   3004  PMS frontend
 #   3005  Affiliate dashboard frontend
+#   3006  Marketing / landing site
 #   8000  Marketplace backend API
 #   8001  Booking engine backend API
 #   8002  PMS backend API
@@ -293,6 +294,27 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     volumes:
       - ./marketplace/vayada-creator-marketplace-frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - marketplace-backend
+    restart: unless-stopped
+    networks:
+      - vayada-network
+
+  marketing-landing:
+    build:
+      context: ./marketing/vayada-landing
+      dockerfile: Dockerfile.dev
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+    container_name: vayada-marketing-landing
+    ports:
+      - "3006:3006"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./marketing/vayada-landing:/app
       - /app/node_modules
       - /app/.next
     depends_on:
