@@ -170,18 +170,33 @@ export default function MonthView({
                           ))}
                           {dayBookings.map((b) => {
                             const channelColor = getChannelBarColor(b.channel)
+                            // VAY-403: a multi-room booking spans several room
+                            // rows. Tag every bar with its reference + a ×N
+                            // count so staff read them as ONE reservation
+                            // (which room of N is shown via roomPosition).
+                            const isMultiRoom = b.numberOfRooms > 1
+                            const multiRoomTitle = isMultiRoom
+                              ? `\n${b.bookingReference} · room ${b.roomPosition + 1} of ${b.numberOfRooms}`
+                              : ''
                             return (
                               <button
-                                key={`booking-${b.id}-${day.toISOString()}`}
+                                key={`booking-${b.id}-${b.roomId ?? 'na'}-${day.toISOString()}`}
                                 type="button"
                                 onClick={() => onSelectBooking(b.id)}
-                                title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`}
-                                className={`w-full flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium text-white ${channelColor} hover:brightness-110 transition-all truncate`}
+                                title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
+                                className={`w-full flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-medium text-white ${channelColor} hover:brightness-110 transition-all truncate ${
+                                  isMultiRoom ? 'ring-1 ring-inset ring-white/50' : ''
+                                }`}
                               >
                                 <span className="w-3.5 h-3.5 rounded-full bg-white/25 flex items-center justify-center text-[8px] font-bold flex-shrink-0">
                                   {getInitials(b.guestFirstName, b.guestLastName)}
                                 </span>
                                 <span className="truncate">{b.guestFirstName} {b.guestLastName}</span>
+                                {isMultiRoom && (
+                                  <span className="ml-auto pl-1 text-[8px] font-bold opacity-90 flex-shrink-0">
+                                    ×{b.numberOfRooms}
+                                  </span>
+                                )}
                               </button>
                             )
                           })}

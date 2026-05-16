@@ -846,19 +846,31 @@ export default function CalendarPage() {
                         const style = getBarStyle(b.checkIn, b.checkOut)
                         if (!style) return null
                         const channelColor = getChannelBarColor(b.channel)
+                        // VAY-403: multi-room reservation spans several rows.
+                        const isMultiRoom = b.numberOfRooms > 1
+                        const multiRoomTitle = isMultiRoom
+                          ? `\n${b.bookingReference} · room ${b.roomPosition + 1} of ${b.numberOfRooms}`
+                          : ''
                         return (
                           <div
-                            key={b.id}
+                            key={`${b.id}-${b.roomId ?? 'na'}`}
                             data-bar="booking"
-                            className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5`}
+                            className={`absolute top-1.5 h-8 rounded-md px-2 text-[11px] font-medium leading-8 truncate cursor-pointer z-[1] text-white ${channelColor} hover:brightness-110 transition-all flex items-center gap-1.5 ${
+                              isMultiRoom ? 'ring-1 ring-inset ring-white/50' : ''
+                            }`}
                             style={style}
-                            title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}`}
+                            title={`${b.guestFirstName} ${b.guestLastName} (${b.status})\n${b.checkIn} → ${b.checkOut}\nChannel: ${b.channel}${multiRoomTitle}`}
                             onClick={() => setSelectedBookingId(b.id)}
                           >
                             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
                               {getInitials(b.guestFirstName, b.guestLastName)}
                             </span>
                             <span className="truncate">{`${b.guestFirstName} ${b.guestLastName}`.trim()}</span>
+                            {isMultiRoom && (
+                              <span className="ml-auto pl-1 text-[9px] font-bold opacity-90 flex-shrink-0">
+                                ×{b.numberOfRooms}
+                              </span>
+                            )}
                           </div>
                         )
                       })}

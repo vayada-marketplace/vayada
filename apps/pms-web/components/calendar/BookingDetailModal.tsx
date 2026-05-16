@@ -910,16 +910,38 @@ export default function BookingDetailModal({
             <div className="bg-gray-50 rounded-lg p-4 mb-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-900">{booking.roomName}</p>
-                  {booking.roomNumber ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 mt-1">
-                      #{booking.roomNumber}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 mt-1">
-                      Unassigned
-                    </span>
-                  )}
+                  <p className="text-sm font-medium text-gray-900">
+                    {booking.numberOfRooms > 1 && `${booking.numberOfRooms}× `}
+                    {booking.roomName}
+                  </p>
+                  {/* VAY-403: list every assigned room, not just the first.
+                      A multi-room booking with fewer assigned rooms than its
+                      quantity flags the unassigned remainder for staff. */}
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {booking.assignedRooms.length > 0 ? (
+                      booking.assignedRooms
+                        .slice()
+                        .sort((a, b) => a.position - b.position)
+                        .map((r) => (
+                          <span
+                            key={`${r.position}-${r.roomId}`}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700"
+                          >
+                            #{r.roomNumber}
+                          </span>
+                        ))
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                        Unassigned
+                      </span>
+                    )}
+                    {booking.assignedRooms.length > 0 &&
+                      booking.assignedRooms.length < booking.numberOfRooms && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                          {booking.numberOfRooms - booking.assignedRooms.length} unassigned
+                        </span>
+                      )}
+                  </div>
                 </div>
                 <div className="text-right text-sm text-gray-600">
                   <p>{booking.nights} night{booking.nights !== 1 ? 's' : ''}</p>
@@ -997,6 +1019,7 @@ export default function BookingDetailModal({
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">
                     {formatCurrency(booking.nightlyRate, booking.currency)} x {booking.nights} night{booking.nights !== 1 ? 's' : ''}
+                    {booking.numberOfRooms > 1 && ` x ${booking.numberOfRooms} rooms`}
                   </span>
                   <span className="font-medium text-gray-900">
                     {formatCurrency(booking.totalAmount, booking.currency)}

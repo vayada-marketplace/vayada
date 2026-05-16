@@ -1,6 +1,12 @@
 import { pmsClient } from '../api/pmsClient'
 import { buildQueryString } from '@/lib/utils/queryString'
 
+export interface AssignedRoom {
+  roomId: string | null
+  roomNumber: string | null
+  position: number
+}
+
 export interface Booking {
   id: string
   bookingReference: string
@@ -18,11 +24,15 @@ export interface Booking {
   adults: number
   children: number
   nightlyRate: number
+  numberOfRooms: number
   totalAmount: number
   currency: string
   status: 'pending' | 'confirmed' | 'cancelled' | 'expired'
   roomId: string | null
   roomNumber: string | null
+  // VAY-403: every physical room the booking occupies — the primary
+  // (position 0) plus any extra rooms of a multi-room reservation.
+  assignedRooms: AssignedRoom[]
   channel: string
   paymentMethod: string | null
   paymentStatus: string | null
