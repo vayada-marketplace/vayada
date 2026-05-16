@@ -120,7 +120,10 @@ locals {
       health_check   = "/health"
       log_group      = "/ecs/vayada-marketplace-backend"
       environment = [
-        { name = "CORS_ORIGINS", value = "https://admin.vayada.com,https://vayada.com" },
+        # vayada.com = marketing site (contact form + /hotel-creator-network
+        # live-data fetch); app.vayada.com = the creator marketplace app.
+        # Both also match CORS_ORIGIN_REGEX below; listed explicitly for clarity.
+        { name = "CORS_ORIGINS", value = "https://admin.vayada.com,https://vayada.com,https://app.vayada.com" },
         { name = "CORS_ORIGIN_REGEX", value = "https://(.*\\.)?vayada\\.com" },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "S3_BUCKET_NAME", value = "vayada-uploads-prod" },
