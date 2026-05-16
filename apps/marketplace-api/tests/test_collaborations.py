@@ -1,6 +1,9 @@
 """
 Tests for collaboration management endpoints.
 """
+import logging
+from unittest.mock import patch, AsyncMock
+
 import pytest
 from httpx import AsyncClient
 from datetime import date, timedelta
@@ -707,3 +710,143 @@ class TestCollaborationNotFound:
         )
 
         assert response.status_code == 404
+
+
+ADMIN_EMAIL = "p.paetzold@vayada.com"
+
+
+class TestMarketplaceAdminNotifications:
+    """VAY-241: the p.paetzold admin notification must actually be delivered.
+
+    These guard against the regression where the admin notification was
+    fire-and-forget and silently dropped (GC / worker teardown on redeploy /
+    send_email returning False), so a real collab request came in with no
+    notification.
+    """
+
+    async def test_admin_notified_on_collaboration_create(
+        self, client: AsyncClient, test_creator_verified, test_hotel_verified,
+        mock_send_email
+    ):
+        """An influencer creating a request notifies the marketplace admin."""
+        listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
+
+        response = await client.post(
+            "/collaborations",
+            json={
+                "initiator_type": "creator",
+                "listing_id": listing_id,
+                "collaboration_type": "Free Stay",
+                "why_great_fit": "Great fit for amazing content!",
+                "free_stay_min_nights": 3,
+                "free_stay_max_nights": 5,
+                "travel_date_from": str(date.today() + timedelta(days=30)),
+                "travel_date_to": str(date.today() + timedelta(days=35)),
+                "platform_deliverables": [
+                    {
+                        "platform": "Instagram",
+                        "deliverables": [
+                            {"type": "Reel", "quantity": 2, "status": "pending"}
+                        ]
+                    }
+                ],
+                "consent": True
+            },
+            headers=get_auth_headers(test_creator_verified["token"])
+        )
+
+        assert response.status_code == 201
+        admin_mails = [
+            m for m in mock_send_email
+            if m["to"] == ADMIN_EMAIL
+            and m["subject"] == "[Marketplace] New collaboration request"
+        ]
+        assert len(admin_mails) == 1, (
+            f"expected one admin notification, got {mock_send_email}"
+        )
+
+    async def test_admin_notified_on_hotel_response(
+        self, client: AsyncClient, test_collaboration, mock_send_email
+    ):
+        """A hotel accepting a creator-initiated request notifies the admin."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        response = await client.post(
+            f"/collaborations/{collab_id}/respond",
+            json={"status": "accepted", "response_message": "Let's do it!"},
+            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+        )
+
+        assert response.status_code == 200
+        admin_mails = [
+            m for m in mock_send_email
+            if m["to"] == ADMIN_EMAIL
+            and m["subject"] == "[Marketplace] Hotel accepted collaboration request"
+        ]
+        assert len(admin_mails) == 1, (
+            f"expected one admin notification, got {mock_send_email}"
+        )
+
+    async def test_admin_notification_failure_does_not_break_create(
+        self, client: AsyncClient, test_creator_verified, test_hotel_verified,
+        caplog
+    ):
+        """A failed admin send is logged loudly but never 500s the request."""
+        listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
+
+        # send_email returns False (e.g. EMAIL_ENABLED off / SMTP misconfig).
+        with patch(
+            "app.services.notifications.send_email",
+            new=AsyncMock(return_value=False),
+        ), caplog.at_level(logging.ERROR, logger="app.services.notifications"):
+            response = await client.post(
+                "/collaborations",
+                json={
+                    "initiator_type": "creator",
+                    "listing_id": listing_id,
+                    "collaboration_type": "Free Stay",
+                    "why_great_fit": "Great fit for amazing content!",
+                    "free_stay_min_nights": 3,
+                    "free_stay_max_nights": 5,
+                    "travel_date_from": str(date.today() + timedelta(days=30)),
+                    "travel_date_to": str(date.today() + timedelta(days=35)),
+                    "platform_deliverables": [
+                        {
+                            "platform": "Instagram",
+                            "deliverables": [
+                                {"type": "Reel", "quantity": 2, "status": "pending"}
+                            ]
+                        }
+                    ],
+                    "consent": True
+                },
+                headers=get_auth_headers(test_creator_verified["token"])
+            )
+
+        assert response.status_code == 201
+        assert any(
+            "was NOT delivered" in r.message and ADMIN_EMAIL in r.message
+            for r in caplog.records
+        ), f"expected a loud failure log, got {[r.message for r in caplog.records]}"
+
+    async def test_admin_notification_exception_does_not_break_respond(
+        self, client: AsyncClient, test_collaboration, caplog
+    ):
+        """An exception in the admin send is swallowed + logged, not propagated."""
+        collab_id = str(test_collaboration["collaboration"]["id"])
+
+        with patch(
+            "app.services.notifications.send_email",
+            new=AsyncMock(side_effect=RuntimeError("smtp boom")),
+        ), caplog.at_level(logging.ERROR, logger="app.services.notifications"):
+            response = await client.post(
+                f"/collaborations/{collab_id}/respond",
+                json={"status": "declined", "response_message": "Not now"},
+                headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            )
+
+        assert response.status_code == 200
+        assert any(
+            "raised" in r.message and ADMIN_EMAIL in r.message
+            for r in caplog.records
+        ), f"expected a loud failure log, got {[r.message for r in caplog.records]}"

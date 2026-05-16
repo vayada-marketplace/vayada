@@ -47,6 +47,39 @@ def notify_marketplace_admin(subject: str, html_body: str) -> None:
     send_email_background(MARKETPLACE_ADMIN_EMAIL, f"[Marketplace] {subject}", html_body)
 
 
+async def notify_marketplace_admin_sync(subject: str, html_body: str) -> bool:
+    """Send the marketplace admin notification within the request lifecycle.
+
+    Unlike the fire-and-forget helpers, this awaits the SMTP send so the
+    delivery cannot be silently lost when the event loop / worker is torn
+    down on an ECS redeploy while a backgrounded task is still in flight —
+    the root cause of the recurring VAY-241 missed admin notifications.
+
+    Never raises: a failed *internal* notification must not break the
+    user-facing collaboration flow. Any failure is logged at ERROR with
+    enough context to diagnose (the silent-drop is what the previous fix
+    missed — send_email returning False was never surfaced).
+
+    Returns True only if the email was actually accepted for delivery.
+    """
+    full_subject = f"[Marketplace] {subject}"
+    try:
+        sent = await send_email(MARKETPLACE_ADMIN_EMAIL, full_subject, html_body)
+    except Exception as e:
+        logger.error(
+            f"Marketplace admin notification to {MARKETPLACE_ADMIN_EMAIL} "
+            f"raised {e!r} (subject={full_subject!r})"
+        )
+        return False
+    if not sent:
+        logger.error(
+            f"Marketplace admin notification to {MARKETPLACE_ADMIN_EMAIL} was "
+            f"NOT delivered (send_email returned False — check EMAIL_ENABLED / "
+            f"SMTP config) (subject={full_subject!r})"
+        )
+    return sent
+
+
 async def get_party_email_and_name(
     party: str,
     creator_id: Optional[str] = None,
