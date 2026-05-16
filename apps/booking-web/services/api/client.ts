@@ -41,13 +41,32 @@ class ApiClient {
   }
 }
 
-async function parse<T>(res: Response, method: string): Promise<T> {
+// Pull a human-readable string out of an error body. FastAPI returns
+// `{detail: "..."}` for raised HTTPExceptions but `{detail: [{loc,msg,...}]}`
+// for request-validation (422) errors — the list shape is why the old code
+// fell back to a raw "API error: POST 422".
+function messageFromDetail(detail: unknown): string | null {
+  if (!detail || typeof detail !== 'object' || !('detail' in detail)) return null
+  const d = (detail as { detail: unknown }).detail
+  if (typeof d === 'string') return d
+  if (Array.isArray(d)) {
+    const msgs = d
+      .map((e) => (e && typeof e === 'object' && 'msg' in e ? String((e as { msg: unknown }).msg) : ''))
+      .filter(Boolean)
+    if (msgs.length) return msgs.join('; ')
+  }
+  return null
+}
+
+async function parse<T>(res: Response, _method: string): Promise<T> {
   if (!res.ok) {
     let detail: unknown = null
     try { detail = await res.json() } catch {}
-    const message = (detail && typeof detail === 'object' && 'detail' in detail && typeof (detail as any).detail === 'string')
-      ? (detail as any).detail
-      : `API error: ${method} ${res.status} ${res.statusText}`
+    // Never surface a raw "API error: POST 422" to the user. Callers that
+    // render errors (e.g. the checkout payment step) classify on
+    // err.status / err.detail and map to friendly localized copy; this
+    // message is only the last-resort fallback.
+    const message = messageFromDetail(detail) || 'Something went wrong. Please try again.'
     throw new ApiError(message, res.status, detail)
   }
   return res.json()

@@ -16,6 +16,7 @@ import { useHotel, useRooms, useAddons, useSlug } from '@/contexts/HotelContext'
 import { formatDate } from '@/lib/utils'
 import { useCurrency } from '@/contexts/CurrencyContext'
 import { bookingService } from '@/services/api/booking'
+import { ApiError } from '@/services/api/client'
 import { getFreeCancellationDays } from '@/lib/constants/booking'
 import { usePricing } from '@/lib/hooks/usePricing'
 import { useBookingSteps } from '@/lib/hooks/useBookingSteps'
@@ -96,6 +97,9 @@ function PaymentPageContent() {
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // VAY-402: when the booking fails because the room is no longer available,
+  // show a recovery CTA back to the room list instead of a dead-end error.
+  const [soldOut, setSoldOut] = useState(false)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [pendingBooking, setPendingBooking] = useState<Booking | null>(null)
   // VAY-388: draft id returned for card payments — passed to
@@ -156,6 +160,7 @@ function PaymentPageContent() {
 
     setSubmitting(true)
     setError('')
+    setSoldOut(false)
 
     try {
       const result = await bookingService.create(slug, {
@@ -192,7 +197,33 @@ function PaymentPageContent() {
         router.push(`/booking/${booking.bookingReference}`)
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to create booking')
+      // VAY-402: never show the raw "API error: POST 422". Classify the
+      // failure and map it to friendly, localized copy.
+      const blob = err instanceof ApiError
+        ? `${err.message ?? ''} ${typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail ?? '')}`.toLowerCase()
+        : ''
+      const availabilityGone =
+        err instanceof ApiError &&
+        (err.status === 409 ||
+          ([400, 409, 422].includes(err.status) &&
+            /not enough rooms|no longer available|not available|sold ?out|availab/.test(blob)))
+
+      if (availabilityGone) {
+        setSoldOut(true)
+        setError(t('errorSoldOut'))
+      } else if (
+        err instanceof ApiError &&
+        err.status >= 400 && err.status < 500 && err.status !== 422 &&
+        err.detail && typeof err.detail === 'object' &&
+        typeof (err.detail as any).detail === 'string'
+      ) {
+        // Backend raised a specific, human-readable client error (e.g.
+        // "Pay at property is not enabled for this hotel"). Still friendlier
+        // than a status code — surface it as-is.
+        setError((err.detail as any).detail as string)
+      } else {
+        setError(t('errorGeneric'))
+      }
       setSubmitting(false)
     }
   }
@@ -260,7 +291,20 @@ function PaymentPageContent() {
 
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            {error}
+            <p>{error}</p>
+            {soldOut && (
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(
+                    `/?checkIn=${encodeURIComponent(checkIn)}&checkOut=${encodeURIComponent(checkOut)}&adults=${adultsParam}&children=${childrenParam}`
+                  )
+                }
+                className="mt-3 inline-flex items-center px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                {t('chooseAnotherRoom')}
+              </button>
+            )}
           </div>
         )}
 
