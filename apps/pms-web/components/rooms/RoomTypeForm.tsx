@@ -123,6 +123,11 @@ interface RoomTypeFormProps {
   success?: string
   submitLabel?: string
   cancelHref?: string
+  // 'create' keeps Total Rooms editable — its value seeds how many physical
+  // rooms get auto-created. 'edit' makes it a read-only mirror of the real
+  // room count (VAY-402): inventory changes go through the room list, and
+  // the backend derives total_rooms from COUNT(rooms) via a DB trigger.
+  mode?: 'create' | 'edit'
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -510,6 +515,7 @@ export default function RoomTypeForm({
   success,
   submitLabel = 'Save',
   cancelHref = '/rooms',
+  mode = 'create',
 }: RoomTypeFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null)
   const skipPriceWarningConfirmRef = useRef(false)
@@ -1121,28 +1127,52 @@ export default function RoomTypeForm({
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1.5">
-                <label className="text-[12px] font-semibold text-gray-900">Total Rooms <span className="text-red-500">*</span></label>
+                <label className="text-[12px] font-semibold text-gray-900">
+                  Total Rooms {mode === 'create' && <span className="text-red-500">*</span>}
+                </label>
               </div>
-              <input
-                type="number"
-                min={1}
-                value={totalRoomsInput}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setTotalRoomsInput(v)
-                  if (v !== '') {
-                    const n = Number(v)
-                    if (Number.isFinite(n) && n >= 1) updateForm({ totalRooms: n })
-                  }
-                }}
-                onBlur={() => {
-                  const n = clampNumberInput(totalRoomsInput, 1)
-                  setTotalRoomsInput(String(n))
-                  updateForm({ totalRooms: n })
-                }}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-              />
-              <p className="text-[10px] text-gray-400 mt-1 pl-3">Number of units available for this room type</p>
+              {mode === 'edit' ? (
+                <>
+                  {/* VAY-402: read-only — total_rooms is derived from the
+                      actual room count. Editing it freely used to let the
+                      booking engine show rooms that don't exist and fail the
+                      guest at the payment step. */}
+                  <div
+                    className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-[12px] text-gray-500 cursor-not-allowed select-none"
+                    aria-readonly="true"
+                  >
+                    {form.totalRooms ?? 0} (auto-calculated)
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1 pl-3">
+                    Always matches the rooms in this room type. Add or remove rooms in the room list to change it.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    min={1}
+                    value={totalRoomsInput}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setTotalRoomsInput(v)
+                      if (v !== '') {
+                        const n = Number(v)
+                        if (Number.isFinite(n) && n >= 1) updateForm({ totalRooms: n })
+                      }
+                    }}
+                    onBlur={() => {
+                      const n = clampNumberInput(totalRoomsInput, 1)
+                      setTotalRoomsInput(String(n))
+                      updateForm({ totalRooms: n })
+                    }}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1 pl-3">
+                    Number of rooms to create now. Afterwards this updates automatically as you add or remove rooms.
+                  </p>
+                </>
+              )}
             </div>
           </div>
 

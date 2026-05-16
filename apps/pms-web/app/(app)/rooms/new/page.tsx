@@ -136,6 +136,7 @@ export default function NewRoomPage() {
         error={error}
         submitLabel="Create Room Type"
         cancelHref="/rooms"
+        mode="create"
       />
     </div>
   )
