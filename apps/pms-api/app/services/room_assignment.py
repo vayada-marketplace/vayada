@@ -369,6 +369,64 @@ async def resolve_assignment(
     return result.target_room_id, result.moves
 
 
+async def resolve_room_assignments(
+    hotel_id: str,
+    room_type_id: str,
+    check_in: date,
+    check_out: date,
+    count: int,
+) -> tuple[Optional[str], list[str], list[Move]]:
+    """Pick the physical rooms for a booking of `count` rooms (VAY-403).
+
+    Returns (primary_room_id, extra_room_ids, moves_to_apply):
+      - primary_room_id  -> bookings.room_id (None if nothing is free)
+      - extra_room_ids   -> booking_rooms positions 1..N-1
+      - moves_to_apply   -> auto-rearrange moves, single-room path only
+
+    count <= 1 is byte-for-byte the legacy single-room path
+    (`resolve_assignment`), so auto-rearrange and every existing single-room
+    behavior is unchanged. count > 1 does a deterministic direct fit: take
+    the first `count` rooms (calendar sort order) free across the whole stay,
+    skipping rooms already held by an overlapping booking. The availability
+    check in create_booking_request already proved `count` units are free, so
+    a direct fit normally lands all of them; if a last-mile race grabbed one,
+    we assign what's free and leave the remainder unassigned (it surfaces in
+    the Unassigned row / flagged in the detail panel) rather than silently
+    dropping the room. Multi-room intentionally does not auto-rearrange —
+    shuffling other guests to free several rooms at once is out of scope and
+    far riskier than leaving a room unassigned for staff to place.
+    """
+    if count <= 1:
+        room_id, moves = await resolve_assignment(
+            hotel_id, room_type_id, check_in, check_out
+        )
+        return room_id, [], moves
+
+    from app.repositories.room_repo import RoomRepository
+    from app.repositories.booking_room_repo import BookingRoomRepository
+
+    rooms = await RoomRepository.list_for_room_type(room_type_id)
+    if not rooms:
+        return None, [], []
+
+    occupied = await BookingRoomRepository.occupied_room_ids_for_room_type(
+        room_type_id, check_in, check_out
+    )
+
+    chosen: list[str] = []
+    for r in rooms:
+        rid = str(r["id"])
+        if rid in occupied:
+            continue
+        chosen.append(rid)
+        if len(chosen) == count:
+            break
+
+    if not chosen:
+        return None, [], []
+    return chosen[0], chosen[1:], []
+
+
 async def apply_moves_atomic(moves: list[Move]) -> None:
     """Apply the solver's moves in one indivisible SQL update.
 

@@ -46,6 +46,12 @@ class CalendarBooking(_CamelModel):
     room_number: Optional[str] = None
     channel: str = "direct"
     booking_reference: str
+    # VAY-403: a multi-room booking emits one entry per assigned room so
+    # every room is blocked. number_of_rooms is the booked quantity;
+    # room_position is 0 for the primary room and 1..N-1 for the extras —
+    # the frontend groups entries sharing an id/reference as one reservation.
+    number_of_rooms: int = 1
+    room_position: int = 0
 
 
 class CalendarBlock(_CamelModel):

@@ -69,9 +69,15 @@ def _booking_details_html(booking: dict) -> str:
     if addon_names:
         addons_list = ", ".join(addon_names)
         addons_html = f'\n    <p class="detail"><strong>Add-ons:</strong> {addons_list}</p>'
+    # VAY-403: a multi-room booking must read "2× Two-Bedroom Pool Villa",
+    # not a bare singular, so the guest/host see how many rooms are booked.
+    rooms = int(booking.get("number_of_rooms") or 1)
+    accommodation = (
+        f"{rooms}× {booking['room_name']}" if rooms > 1 else booking["room_name"]
+    )
     return f"""
     <p class="detail"><strong>Reference:</strong> {booking['booking_reference']}</p>
-    <p class="detail"><strong>Accommodation:</strong> {booking['room_name']}</p>
+    <p class="detail"><strong>Accommodation:</strong> {accommodation}</p>
     <p class="detail"><strong>Check-in:</strong> {booking['check_in']}</p>
     <p class="detail"><strong>Check-out:</strong> {booking['check_out']}</p>
     <p class="detail"><strong>Guests:</strong> {booking['adults']} adults, {booking['children']} children</p>{addons_html}

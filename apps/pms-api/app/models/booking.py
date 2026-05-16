@@ -83,6 +83,17 @@ class AdminBookingCreate(BaseModel):
     channel: str = "direct"
 
 
+class AssignedRoom(BaseModel):
+    """One physical room a booking occupies. position 0 is the primary room
+    (bookings.room_id); 1..N-1 are the extra rooms of a multi-room booking
+    (VAY-403)."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    room_id: Optional[str] = None
+    room_number: Optional[str] = None
+    position: int = 0
+
+
 class BookingAdminResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -110,6 +121,10 @@ class BookingAdminResponse(BaseModel):
     status: str
     room_id: Optional[str] = None
     room_number: Optional[str] = None
+    # Full ordered room list incl. the primary at position 0. For a
+    # single-room booking this is just the primary; for a multi-room
+    # booking it is every physical room the guest paid for (VAY-403).
+    assigned_rooms: List[AssignedRoom] = []
     channel: str = "direct"
     payment_method: Optional[str] = None
     payment_status: Optional[str] = None
@@ -189,6 +204,10 @@ class BookingRoomAssign(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     room_id: str
+    # VAY-403: which of a multi-room booking's rooms to move. Omitted (or
+    # equal to the primary) moves the primary room exactly as before;
+    # otherwise the matching extra room is reassigned independently.
+    from_room_id: Optional[str] = None
 
 
 class BookingRoomSwap(BaseModel):

@@ -12,7 +12,8 @@ from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.payout_repo import PayoutRepository
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign, BookingRoomSwap
+from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign, BookingRoomSwap, AssignedRoom
+from app.repositories.booking_room_repo import BookingRoomRepository
 from app.models.payment import PayoutResponse
 from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
 from app.services.booking_service import host_accept_booking, host_reject_booking
@@ -29,12 +30,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-bookings"])
 
 
-def _booking_to_admin(b: dict) -> BookingAdminResponse:
+def _booking_to_admin(
+    b: dict, extra_rooms: Optional[list] = None
+) -> BookingAdminResponse:
     ci = b["check_in"]
     co = b["check_out"]
     nights = (co - ci).days
     room_id = b.get("room_id")
     deadline = b.get("host_response_deadline")
+
+    # Full assigned-room list: primary (position 0) + any extras (VAY-403).
+    assigned_rooms: list[AssignedRoom] = []
+    if room_id:
+        assigned_rooms.append(
+            AssignedRoom(
+                room_id=str(room_id),
+                room_number=b.get("room_number"),
+                position=0,
+            )
+        )
+    for er in extra_rooms or []:
+        assigned_rooms.append(
+            AssignedRoom(
+                room_id=str(er["room_id"]),
+                room_number=er.get("room_number"),
+                position=er["position"],
+            )
+        )
     pf = b.get("platform_fee_amount")
     ac = b.get("affiliate_commission_amount")
     pp = b.get("property_payout_amount")
@@ -55,11 +77,13 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
         adults=b["adults"],
         children=b["children"],
         nightly_rate=float(b["nightly_rate"]),
+        number_of_rooms=int(b.get("number_of_rooms") or 1),
         total_amount=float(b["total_amount"]),
         currency=b["currency"],
         status=b["status"],
         room_id=str(room_id) if room_id else None,
         room_number=b.get("room_number"),
+        assigned_rooms=assigned_rooms,
         channel=b.get("channel", "direct"),
         payment_method=b.get("payment_method"),
         payment_status=b.get("payment_status"),
@@ -75,6 +99,15 @@ def _booking_to_admin(b: dict) -> BookingAdminResponse:
         created_at=b["created_at"].isoformat(),
         updated_at=b["updated_at"].isoformat(),
     )
+
+
+async def _admin_response(b: dict) -> BookingAdminResponse:
+    """_booking_to_admin enriched with the booking's extra rooms so the
+    detail panel / single-booking responses list every assigned room of a
+    multi-room booking (VAY-403). Single-room bookings have no extras, so
+    this is one cheap indexed lookup that returns nothing extra."""
+    extras = await BookingRoomRepository.list_extra_rooms(str(b["id"]))
+    return _booking_to_admin(b, extras)
 
 
 # ── Bookings ────────────────────────────────────────────────────────
@@ -157,7 +190,7 @@ async def create_admin_booking(
             send_guest_admin_booking_confirmed(full_booking["guest_email"], full_booking)
         )
 
-    return _booking_to_admin(full_booking)
+    return await _admin_response(full_booking)
 
 
 @router.get("/bookings")
@@ -173,8 +206,22 @@ async def list_bookings(
         hotel_id, status=status, search=search, limit=limit, offset=offset
     )
     total = await BookingRepository.count_by_hotel_id(hotel_id, status=status)
+
+    # One batched lookup of extra rooms for the whole page so a multi-room
+    # reservation shows its real room count in the list (VAY-403), without
+    # an N+1 over every row.
+    extras_by_booking: dict[str, list] = {}
+    extra_rows = await BookingRoomRepository.list_extra_rooms_for_bookings(
+        [str(b["id"]) for b in bookings]
+    )
+    for er in extra_rows:
+        extras_by_booking.setdefault(str(er["booking_id"]), []).append(er)
+
     return {
-        "bookings": [_booking_to_admin(b) for b in bookings],
+        "bookings": [
+            _booking_to_admin(b, extras_by_booking.get(str(b["id"])))
+            for b in bookings
+        ],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -190,7 +237,7 @@ async def get_booking(
     booking = await BookingRepository.get_by_id(booking_id)
     if not booking or str(booking["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Booking not found")
-    return _booking_to_admin(booking)
+    return await _admin_response(booking)
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingAdminResponse)
@@ -223,7 +270,7 @@ async def update_booking_details(
             )
         )
 
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 @router.patch("/bookings/{booking_id}/status", response_model=BookingAdminResponse)
@@ -274,7 +321,7 @@ async def update_booking_status(
                 )
             )
 
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 # ── Room Assignment ───────────────────────────────────────────────
@@ -313,7 +360,7 @@ async def assign_room_to_booking(
 
     await BookingRepository.assign_room(booking_id, data.room_id)
     updated = await BookingRepository.get_by_id(booking_id)
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 @router.patch("/bookings/{booking_id}/move-room", response_model=BookingAdminResponse)
@@ -333,8 +380,21 @@ async def move_booking_to_room(
             detail="Cancelled bookings cannot be moved",
         )
 
-    current_room_id = str(booking["room_id"]) if booking.get("room_id") else None
-    if current_room_id == data.room_id:
+    # VAY-403: a multi-room booking has a primary room (bookings.room_id)
+    # plus extra rooms (booking_rooms). The caller says which one to move
+    # via from_room_id; omitting it moves the primary, exactly as before.
+    primary_room_id = str(booking["room_id"]) if booking.get("room_id") else None
+    extras = await BookingRoomRepository.list_extra_rooms(booking_id)
+    extra_room_ids = {str(er["room_id"]) for er in extras}
+    own_room_ids = ({primary_room_id} if primary_room_id else set()) | extra_room_ids
+
+    from_room_id = data.from_room_id or primary_room_id
+    if from_room_id and from_room_id not in own_room_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="from_room_id is not one of this booking's rooms",
+        )
+    if from_room_id == data.room_id:
         raise HTTPException(
             status_code=400,
             detail="Booking is already assigned to this room",
@@ -349,25 +409,29 @@ async def move_booking_to_room(
             detail="Room does not belong to the same room type as the booking",
         )
 
-    available = await BookingRepository.is_room_available(
-        data.room_id,
-        booking["check_in"],
-        booking["check_out"],
-        exclude_booking_id=booking_id,
+    # Target must be free of every OTHER booking's rooms (primary + extras),
+    # and must not collide with another room this same booking already holds.
+    occupied = await BookingRoomRepository.occupied_room_ids_for_room_type(
+        str(booking["room_type_id"]), booking["check_in"], booking["check_out"]
     )
-    if not available:
+    if data.room_id in (occupied - own_room_ids) or data.room_id in own_room_ids:
         raise HTTPException(
             status_code=409,
             detail="Room is not available for the booking dates",
         )
 
-    await BookingRepository.assign_room(booking_id, data.room_id)
+    if from_room_id == primary_room_id:
+        await BookingRepository.assign_room(booking_id, data.room_id)
+    else:
+        await BookingRoomRepository.reassign_extra_room(
+            booking_id, from_room_id, data.room_id
+        )
     await BookingEventRepository.record(
         booking_id=booking_id,
         hotel_id=hotel_id,
         event_type="room_moved",
         payload={
-            "from_room_id": current_room_id,
+            "from_room_id": from_room_id,
             "to_room_id": data.room_id,
         },
         actor_user_id=user_id,
@@ -383,7 +447,7 @@ async def move_booking_to_room(
     )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 @router.patch("/bookings/{booking_id}/unassign-room", response_model=BookingAdminResponse)
@@ -434,7 +498,7 @@ async def unassign_booking_room(
     )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 @router.patch("/bookings/{booking_id}/swap-room", response_model=BookingAdminResponse)
@@ -592,7 +656,7 @@ async def swap_booking_rooms(
     )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 # ── Accept / Reject (new payment flow) ────────────────────────────
@@ -607,7 +671,7 @@ async def accept_booking(
         updated = await host_accept_booking(booking_id, user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 class RejectBookingRequest(BaseModel):
@@ -623,7 +687,7 @@ async def reject_booking(
         updated = await host_reject_booking(booking_id, user_id, reason=body.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _booking_to_admin(updated)
+    return await _admin_response(updated)
 
 
 # ── Change requests (VAY-379) ─────────────────────────────────────
