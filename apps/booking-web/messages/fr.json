@@ -204,7 +204,10 @@
     "continueToPayment": "Continuer vers le paiement",
     "xenditTitle": "QRIS / E-Wallet / Virement bancaire",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay ou virement bancaire indonésien via Xendit",
-    "xenditExplanation": "Vous serez redirigé vers une page de paiement sécurisée où vous pourrez payer avec QRIS, OVO, DANA, ShopeePay, GoPay ou par virement bancaire. L'hôte examinera votre réservation une fois le paiement confirmé."
+    "xenditExplanation": "Vous serez redirigé vers une page de paiement sécurisée où vous pourrez payer avec QRIS, OVO, DANA, ShopeePay, GoPay ou par virement bancaire. L'hôte examinera votre réservation une fois le paiement confirmé.",
+    "errorSoldOut": "Malheureusement, cette chambre vient d'être complète. Veuillez choisir une autre chambre ou d'autres dates.",
+    "errorGeneric": "Une erreur s'est produite lors de la création de votre réservation. Veuillez réessayer ou choisir une autre chambre.",
+    "chooseAnotherRoom": "Choisir une autre chambre"
   },
   "myBooking": {
     "title": "Ma réservation",

@@ -204,7 +204,10 @@
     "continueToPayment": "Lanjutkan ke Pembayaran",
     "xenditTitle": "QRIS / E-Wallet / Transfer Bank",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay, atau transfer bank Indonesia via Xendit",
-    "xenditExplanation": "Anda akan diarahkan ke halaman pembayaran aman tempat Anda dapat membayar dengan QRIS, OVO, DANA, ShopeePay, GoPay, atau transfer bank. Tuan rumah akan meninjau pemesanan Anda setelah pembayaran dikonfirmasi."
+    "xenditExplanation": "Anda akan diarahkan ke halaman pembayaran aman tempat Anda dapat membayar dengan QRIS, OVO, DANA, ShopeePay, GoPay, atau transfer bank. Tuan rumah akan meninjau pemesanan Anda setelah pembayaran dikonfirmasi.",
+    "errorSoldOut": "Sayangnya kamar ini baru saja terjual habis. Silakan pilih kamar lain atau tanggal yang berbeda.",
+    "errorGeneric": "Terjadi kesalahan saat membuat pemesanan Anda. Silakan coba lagi, atau pilih kamar lain.",
+    "chooseAnotherRoom": "Pilih kamar lain"
   },
   "myBooking": {
     "title": "Pemesanan Saya",
