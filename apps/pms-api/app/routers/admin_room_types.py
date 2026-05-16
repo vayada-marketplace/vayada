@@ -219,6 +219,12 @@ async def update_room_type(
         raise HTTPException(status_code=404, detail="Room type not found")
 
     updates = data.model_dump(exclude_unset=True)
+    # VAY-402: total_rooms is a derived mirror of COUNT(rooms), maintained by
+    # the trg_sync_room_type_total_rooms trigger (migration 074). Inventory
+    # changes go through Add Room / delete in the room list, never a direct
+    # write here — a stale or hand-crafted payload must not be able to inflate
+    # availability past the number of physical rooms that exist.
+    updates.pop("total_rooms", None)
     if "monthly_rates" in updates and updates["monthly_rates"] is not None:
         updates["monthly_rates"] = {
             k: {kk: vv for kk, vv in v.items() if vv is not None}
