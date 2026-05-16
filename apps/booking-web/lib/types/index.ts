@@ -98,6 +98,9 @@ export interface Booking {
   adults: number
   children: number
   nightlyRate: number
+  // VAY-403: rooms booked in this reservation. Optional for backward
+  // compatibility with cached/legacy booking shapes; treat missing as 1.
+  numberOfRooms?: number
   totalAmount: number
   addonTotal?: number
   currency: string

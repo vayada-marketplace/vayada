@@ -232,7 +232,12 @@ export default function MyBookingPage() {
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t('room')}</span>
-                <span className="font-medium text-gray-900 text-sm">{booking.roomName}</span>
+                <span className="font-medium text-gray-900 text-sm">
+                  {booking.numberOfRooms && booking.numberOfRooms > 1
+                    ? `${booking.numberOfRooms}× `
+                    : ''}
+                  {booking.roomName}
+                </span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t('checkIn')}</span>

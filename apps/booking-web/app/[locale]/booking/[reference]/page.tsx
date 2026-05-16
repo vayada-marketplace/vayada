@@ -278,7 +278,11 @@ export default function BookingConfirmationPage({
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t('room')}</span>
-                <span className="font-medium text-gray-900">{booking?.roomName || '—'}</span>
+                <span className="font-medium text-gray-900">
+                  {booking
+                    ? `${booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ''}${booking.roomName}`
+                    : '—'}
+                </span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t('checkIn')}</span>
