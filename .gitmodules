@@ -9,13 +9,13 @@
 	url = https://github.com/FlamurMaliqi/vayada-booking-engine-frontend-admin.git
 [submodule "marketplace/vayada-creator-marketplace-backend"]
 	path = marketplace/vayada-creator-marketplace-backend
-	url = https://github.com/FlamurMaliqi/vayada-creator-marketplace-backend.git
+	url = https://github.com/FlamurMaliqi/vayada-marketplace-backend.git
 [submodule "marketplace/vayada-creator-marketplace-frontend"]
 	path = marketplace/vayada-creator-marketplace-frontend
-	url = https://github.com/FlamurMaliqi/vayada-creator-marketplace-frontend.git
+	url = https://github.com/FlamurMaliqi/vayada-marketplace-frontend.git
 [submodule "marketplace/vayada-creator-marketplace-frontend-admin"]
 	path = marketplace/vayada-creator-marketplace-frontend-admin
-	url = https://github.com/FlamurMaliqi/vayada-creator-marketplace-frontend-admin.git
+	url = https://github.com/FlamurMaliqi/vayada-marketplace-frontend-admin.git
 [submodule "pms/vayada-pms-backend"]
 	path = pms/vayada-pms-backend
 	url = https://github.com/FlamurMaliqi/vayada-pms-backend.git
