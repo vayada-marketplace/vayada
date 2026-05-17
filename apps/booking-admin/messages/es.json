@@ -120,6 +120,8 @@
   "layout.sidebar.switchApp": "Cambiar aplicación",
   "layout.sidebar.propertyManager": "Property Manager",
   "layout.sidebar.propertyManagerDescription": "Operaciones e inventario",
+  "layout.sidebar.creatorMarketplace": "Mercado Vayada",
+  "layout.sidebar.creatorMarketplaceDescription": "Creadores y colaboraciones",
   "layout.sidebar.dashboard": "Panel",
   "layout.sidebar.affiliates": "Afiliados",
   "layout.sidebar.designStudio": "Design Studio",

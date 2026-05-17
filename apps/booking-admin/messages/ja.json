@@ -120,6 +120,8 @@
   "layout.sidebar.switchApp": "アプリを切り替え",
   "layout.sidebar.propertyManager": "Property Manager",
   "layout.sidebar.propertyManagerDescription": "運営と在庫管理",
+  "layout.sidebar.creatorMarketplace": "Vayada マーケットプレイス",
+  "layout.sidebar.creatorMarketplaceDescription": "クリエイター・コラボレーション",
   "layout.sidebar.dashboard": "ダッシュボード",
   "layout.sidebar.affiliates": "アフィリエイト",
   "layout.sidebar.designStudio": "Design Studio",
