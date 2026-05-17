@@ -15,6 +15,7 @@ import { messagingService } from '@/services/messaging'
 const UNREAD_POLL_MS = 60_000
 
 const BOOKING_ADMIN_URL = process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || 'https://admin.booking.vayada.com'
+const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || 'https://app.vayada.com'
 
 function buildHandoffUrl(baseUrl: string): string {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
@@ -145,6 +146,24 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.bookingEngine')}</p>
                 <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.bookingEngineDescription')}</p>
+              </div>
+            </a>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); window.location.href = buildHandoffUrl(MARKETPLACE_URL) }}
+              className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors"
+            >
+              <div className="w-7 h-7 bg-violet-600 rounded-md flex items-center justify-center shrink-0">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-gray-900 leading-tight">{t('layout.sidebar.creatorMarketplace')}</p>
+                <p className="text-[10px] text-gray-500 leading-tight">{t('layout.sidebar.creatorMarketplaceDescription')}</p>
               </div>
             </a>
             <button

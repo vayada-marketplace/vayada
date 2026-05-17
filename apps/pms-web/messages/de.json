@@ -5,6 +5,8 @@
   "layout.header.language": "Sprache",
   "layout.header.currency": "Währung",
   "layout.sidebar.propertyManagerDescription": "Betrieb & Inventar",
+  "layout.sidebar.creatorMarketplace": "Vayada Marktplatz",
+  "layout.sidebar.creatorMarketplaceDescription": "Creator & Kooperationen",
   "layout.sidebar.bookingEngineDescription": "Direktbuchungen & Umsatz",
   "common.save": "Speichern",
   "common.saving": "Speichern...",
