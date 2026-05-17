@@ -37,6 +37,37 @@ const getPlatformColor = (name: string) => {
   }
 }
 
+type DemoCountry = { country: string; percentage: number }
+type DemoAgeGroup = { ageRange: string; percentage: number }
+type DemoGender = { male: number; female: number }
+
+// Backend may persist placeholder zeros / empty rows for analytics a creator
+// never filled in. Treat those as "no data" so we never render a misleading
+// "0%" — only real values survive (VAY-407).
+const cleanCountries = (raw: DemoCountry[] | null | undefined): DemoCountry[] =>
+  (raw ?? [])
+    .map((c) => ({
+      country: typeof c?.country === 'string' ? c.country.trim() : '',
+      percentage: Number(c?.percentage) || 0,
+    }))
+    .filter((c) => c.country !== '' && c.percentage > 0)
+
+const cleanAgeGroups = (raw: DemoAgeGroup[] | null | undefined): DemoAgeGroup[] =>
+  (raw ?? [])
+    .map((a) => ({
+      ageRange: typeof a?.ageRange === 'string' ? a.ageRange.trim() : '',
+      percentage: Number(a?.percentage) || 0,
+    }))
+    .filter((a) => a.ageRange !== '' && a.ageRange !== 'null')
+
+const cleanGenderSplit = (raw: DemoGender | null | undefined): DemoGender | null => {
+  if (!raw) return null
+  const male = Number(raw.male) || 0
+  const female = Number(raw.female) || 0
+  // 0% male AND 0% female is impossible for a real audience — it's a placeholder.
+  return male > 0 || female > 0 ? { male, female } : null
+}
+
 export function MarketplaceCreatorModal({
   isOpen,
   onClose,
@@ -123,7 +154,13 @@ export function MarketplaceCreatorModal({
         <div>
           <h4 className="font-semibold text-gray-900 mb-3">Social Media Platforms</h4>
           <div className="space-y-4">
-            {creator.platforms.map((platform) => (
+            {creator.platforms.map((platform) => {
+              const countries = cleanCountries(platform.top_countries)
+              const ageGroups = cleanAgeGroups(platform.top_age_groups)
+              const genderSplit = cleanGenderSplit(platform.gender_split)
+              const hasDemographics =
+                countries.length > 0 || ageGroups.length > 0 || !!genderSplit
+              return (
               <div key={platform.id} className="p-4 border rounded-lg">
                 <div className="flex items-center justify-between mb-3">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${getPlatformColor(platform.name)}`}>
@@ -144,56 +181,65 @@ export function MarketplaceCreatorModal({
                 </div>
 
                 {/* Demographics */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t">
-                  {/* Top Countries */}
-                  {platform.top_countries && platform.top_countries.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase mb-2">Top Countries</p>
-                      <div className="space-y-1">
-                        {platform.top_countries.slice(0, 3).map((country, idx) => (
-                          <div key={idx} className="flex justify-between text-sm">
-                            <span className="text-gray-700">{country.country}</span>
-                            <span className="text-gray-500">{country.percentage}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Age Groups */}
-                  {platform.top_age_groups && platform.top_age_groups.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase mb-2">Age Groups</p>
-                      <div className="space-y-1">
-                        {platform.top_age_groups.slice(0, 3).map((group, idx) => (
-                          <div key={idx} className="flex justify-between text-sm">
-                            <span className="text-gray-700">{group.ageRange}</span>
-                            <span className="text-gray-500">{group.percentage}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Gender Split */}
-                  {platform.gender_split && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase mb-2">Gender Split</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-700">Male</span>
-                          <span className="text-gray-500">{platform.gender_split.male}%</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-700">Female</span>
-                          <span className="text-gray-500">{platform.gender_split.female}%</span>
+                {hasDemographics ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t">
+                    {/* Top Countries */}
+                    {countries.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase mb-2">Top Countries</p>
+                        <div className="space-y-1">
+                          {countries.slice(0, 3).map((country, idx) => (
+                            <div key={idx} className="flex justify-between text-sm">
+                              <span className="text-gray-700">{country.country}</span>
+                              <span className="text-gray-500">{country.percentage}%</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+
+                    {/* Age Groups */}
+                    {ageGroups.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase mb-2">Age Groups</p>
+                        <div className="space-y-1">
+                          {ageGroups.slice(0, 3).map((group, idx) => (
+                            <div key={idx} className="flex justify-between text-sm">
+                              <span className="text-gray-700">{group.ageRange}</span>
+                              {group.percentage > 0 && (
+                                <span className="text-gray-500">{group.percentage}%</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Gender Split */}
+                    {genderSplit && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase mb-2">Gender Split</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-700">Male</span>
+                            <span className="text-gray-500">{genderSplit.male}%</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-700">Female</span>
+                            <span className="text-gray-500">{genderSplit.female}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic pt-3 border-t">
+                    No audience insights available yet.
+                  </p>
+                )}
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
