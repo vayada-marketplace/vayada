@@ -176,10 +176,32 @@ export default function NewBookingModal({
   }
 
   return (
-    <Modal onClose={onClose} maxWidth="lg">
+    <Modal
+      onClose={onClose}
+      maxWidth="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="new-booking-form"
+            disabled={submitting}
+            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {submitting ? 'Creating...' : 'Create Booking'}
+          </button>
+        </div>
+      }
+    >
         <h2 className="text-lg font-bold text-gray-900 mb-4">New Booking</h2>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form id="new-booking-form" onSubmit={handleSubmit} className="space-y-4">
           {/* Room */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Room <span className="text-red-500">*</span></label>
@@ -365,24 +387,6 @@ export default function NewBookingModal({
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {submitting ? 'Creating...' : 'Create Booking'}
-            </button>
-          </div>
         </form>
     </Modal>
   )
