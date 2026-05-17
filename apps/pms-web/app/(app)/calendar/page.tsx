@@ -76,6 +76,9 @@ export default function CalendarPage() {
   const [showNewBookingModal, setShowNewBookingModal] = useState(false)
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null)
+  // Mobile-only: the day tapped in MobileCalendar before opening BlockModal,
+  // used to default the block's start date (desktop uses `prefill` instead).
+  const [mobileBlockDate, setMobileBlockDate] = useState<string | null>(null)
   const [connectedChannelKeys, setConnectedChannelKeys] = useState<Set<string> | null>(null)
   const [showDatePicker, setShowDatePicker] = useState(false)
 
@@ -283,7 +286,17 @@ export default function CalendarPage() {
     await calendarService.createRoomBlock(blockData)
     setShowBlockModal(false)
     setPrefill(null)
+    setMobileBlockDate(null)
     fetchData()
+  }
+
+  // Mobile: tapping "Block" on a day opens the shared BlockModal with the
+  // tapped day as the default start date (no room pre-selected — the user
+  // picks rooms in the modal, matching desktop's room/multi-room selector).
+  const handleMobileBlockRoom = (dateStr: string) => {
+    setPrefill(null)
+    setMobileBlockDate(dateStr)
+    setShowBlockModal(true)
   }
 
   const handleUpdateBlock = async (updates: {
@@ -471,8 +484,12 @@ export default function CalendarPage() {
         ) : (
           <MobileCalendar
             bookings={allBookings}
+            blocks={data?.blocks || []}
+            roomTypes={data?.roomTypes || []}
             onSelectBooking={(id) => setSelectedBookingId(id)}
             onNewBooking={() => setShowNewBookingModal(true)}
+            onBlockRoom={handleMobileBlockRoom}
+            onSelectBlock={(bl) => setSelectedBlock(bl)}
           />
         )}
       </div>
@@ -997,13 +1014,20 @@ export default function CalendarPage() {
         <BlockModal
           roomTypes={data.roomTypes}
           rooms={data.rooms}
+          bookings={data.bookings}
           onSubmit={handleCreateBlock}
           onClose={() => {
             setShowBlockModal(false)
             setPrefill(null)
+            setMobileBlockDate(null)
           }}
-          initialStartDate={prefill?.startDate}
-          initialEndDate={prefill?.endDate}
+          initialStartDate={prefill?.startDate ?? mobileBlockDate ?? undefined}
+          initialEndDate={
+            prefill?.endDate ??
+            (mobileBlockDate
+              ? format(addDays(parseISO(mobileBlockDate), 1), 'yyyy-MM-dd')
+              : undefined)
+          }
           initialRoomTypeId={
             prefill ? data.rooms.find((r) => r.id === prefill.roomId)?.roomTypeId : undefined
           }
