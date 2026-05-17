@@ -3,6 +3,7 @@
 import { Fragment, RefObject, useState } from 'react'
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline'
 import { getCurrencySymbol } from '@/lib/utils'
+import { parseBookingAmenities } from '@/lib/parseBookingAmenities'
 
 export type MealPlanCode = 1 | 3 | 4 | 9
 export interface MealPlan {
@@ -516,6 +517,14 @@ export default function RoomsStep({
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>(['Internet & Tech'])
   const [customAmenityInputs, setCustomAmenityInputs] = useState<Record<string, string>>({})
   const [customAmenitiesByCategory, setCustomAmenitiesByCategory] = useState<Record<string, string[]>>({})
+  const [bookingImportOpen, setBookingImportOpen] = useState(false)
+  const [bookingImportText, setBookingImportText] = useState('')
+  const [bookingImportResult, setBookingImportResult] = useState<{
+    matchedCount: number
+    addedCount: number
+    fuzzy: { original: string; amenity: string }[]
+    unmatched: string[]
+  } | null>(null)
   const [previewMonth, setPreviewMonth] = useState(() => new Date())
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({})
 
@@ -1899,6 +1908,160 @@ export default function RoomsStep({
               </div>
               <p className="text-[10px] text-gray-400">What&apos;s included — guests see these after clicking &quot;View Details&quot;. Group by category for easy scanning.</p>
 
+              {/* Booking.com paste-import helper */}
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => setBookingImportOpen(o => !o)}
+                  className="w-full flex items-center justify-between text-left"
+                >
+                  <span className="text-[11px] font-semibold text-gray-700">Paste amenities from Booking.com</span>
+                  <ChevronDownIcon className={`w-3.5 h-3.5 text-gray-400 transition-transform ${bookingImportOpen ? '' : '-rotate-90'}`} />
+                </button>
+                {bookingImportOpen && (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-[10px] text-gray-500">
+                      Copy the amenities list from a Booking.com listing and paste it here. We&apos;ll match each item to the right category — close-but-different names are fuzzy-matched and flagged for review. Unmatched items can be added as custom amenities, mapped to an existing one, or ignored.
+                    </p>
+                    <textarea
+                      value={bookingImportText}
+                      onChange={(e) => setBookingImportText(e.target.value)}
+                      rows={5}
+                      placeholder="Free WiFi&#10;Flat-screen TV&#10;Air conditioning&#10;Safety deposit box&#10;..."
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 font-mono"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!bookingImportText.trim()}
+                        onClick={() => {
+                          const result = parseBookingAmenities(bookingImportText, AMENITY_CATEGORIES)
+                          const before = room.amenities.length
+                          const merged = Array.from(new Set([...room.amenities, ...result.matched.map(m => m.amenity)]))
+                          updateRoom({ amenities: merged })
+                          const touched = Array.from(new Set(result.matched.map(m => m.category)))
+                          setExpandedAmenityCategories(prev => Array.from(new Set([...prev, ...touched])))
+                          setBookingImportResult({
+                            matchedCount: result.matched.length,
+                            addedCount: merged.length - before,
+                            fuzzy: result.matched.filter(m => m.source === 'fuzzy').map(m => ({ original: m.original, amenity: m.amenity })),
+                            unmatched: result.unmatched,
+                          })
+                        }}
+                        className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[11px] font-medium rounded-lg transition-colors"
+                      >
+                        Parse &amp; add
+                      </button>
+                      {(bookingImportText || bookingImportResult) && (
+                        <button
+                          type="button"
+                          onClick={() => { setBookingImportText(''); setBookingImportResult(null) }}
+                          className="px-2 py-1.5 text-[11px] text-gray-500 hover:text-gray-700"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {bookingImportResult && (
+                      <div className="space-y-2 text-[11px]">
+                        {bookingImportResult.matchedCount === 0 ? (
+                          <p className="text-amber-700 font-medium">No amenities matched — map the items below to an existing amenity, add them as custom, or ignore them.</p>
+                        ) : (
+                          <p className="text-gray-700">
+                            Matched <span className="font-semibold text-primary-700">{bookingImportResult.matchedCount}</span> amenit{bookingImportResult.matchedCount === 1 ? 'y' : 'ies'}
+                            {bookingImportResult.addedCount !== bookingImportResult.matchedCount && (
+                              <> &middot; <span className="font-semibold">{bookingImportResult.addedCount}</span> newly added</>
+                            )}
+                            {bookingImportResult.fuzzy.length > 0 && (
+                              <> &middot; <span className="font-semibold text-blue-700">{bookingImportResult.fuzzy.length}</span> fuzzy</>
+                            )}
+                            {bookingImportResult.unmatched.length > 0 && (
+                              <> &middot; <span className="font-semibold text-amber-700">{bookingImportResult.unmatched.length}</span> unmatched</>
+                            )}
+                          </p>
+                        )}
+
+                        {bookingImportResult.fuzzy.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-gray-500 mb-1">Fuzzy matches — review and remove any wrong guesses.</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {bookingImportResult.fuzzy.map(f => {
+                                const stillSelected = room.amenities.includes(f.amenity)
+                                return (
+                                  <span key={f.original + f.amenity} className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border ${stillSelected ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200 line-through'}`}>
+                                    <span className="opacity-70">{f.original}</span>
+                                    <span aria-hidden>&asymp;</span>
+                                    {f.amenity}
+                                    {stillSelected && (
+                                      <button type="button" onClick={() => updateRoom({ amenities: room.amenities.filter(a => a !== f.amenity) })} className="text-blue-400 hover:text-blue-600">
+                                        <XMarkIcon className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {bookingImportResult.unmatched.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-gray-500 mb-1">Add as a custom amenity, map to an existing one, or ignore.</p>
+                            <div className="space-y-1.5">
+                              {bookingImportResult.unmatched.map((label) => {
+                                const dropLabel = () => setBookingImportResult(r => r ? { ...r, unmatched: r.unmatched.filter(u => u !== label) } : r)
+                                return (
+                                  <div key={label} className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[11px] text-gray-700 font-medium">{label}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const fallbackCategory = AMENITY_CATEGORIES[AMENITY_CATEGORIES.length - 1].name
+                                        if (!room.amenities.some(a => a.toLowerCase() === label.toLowerCase())) {
+                                          updateRoom({ amenities: [...room.amenities, label] })
+                                          setCustomAmenitiesByCategory(prev => ({ ...prev, [fallbackCategory]: [...(prev[fallbackCategory] || []), label] }))
+                                          setExpandedAmenityCategories(prev => Array.from(new Set([...prev, fallbackCategory])))
+                                        }
+                                        dropLabel()
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
+                                    >
+                                      <PlusIcon className="w-3 h-3" /> Custom
+                                    </button>
+                                    <select
+                                      defaultValue=""
+                                      onChange={(e) => {
+                                        const amenity = e.target.value
+                                        if (!amenity) return
+                                        const cat = AMENITY_CATEGORIES.find(c => c.items.includes(amenity))
+                                        updateRoom({ amenities: Array.from(new Set([...room.amenities, amenity])) })
+                                        if (cat) setExpandedAmenityCategories(prev => Array.from(new Set([...prev, cat.name])))
+                                        dropLabel()
+                                      }}
+                                      className="px-2 py-0.5 text-[11px] bg-white border border-gray-200 rounded-full text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    >
+                                      <option value="">Map to&hellip;</option>
+                                      {AMENITY_CATEGORIES.map(c => (
+                                        <optgroup key={c.name} label={c.name}>
+                                          {c.items.map(it => <option key={it} value={it}>{it}</option>)}
+                                        </optgroup>
+                                      ))}
+                                    </select>
+                                    <button type="button" onClick={dropLabel} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700">
+                                      Ignore
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1">
                 {AMENITY_CATEGORIES.map((cat) => {
                   const selectedCount = cat.items.filter((item) => room.amenities.includes(item)).length
@@ -2025,6 +2188,26 @@ export default function RoomsStep({
                   )
                 })}
               </div>
+
+              {/* Custom / mapped amenities not assigned to any category */}
+              {(() => {
+                const allPredefined = AMENITY_CATEGORIES.flatMap(c => c.items)
+                const allCustomTracked = Object.values(customAmenitiesByCategory).flat()
+                const untracked = room.amenities.filter(a => !allPredefined.includes(a) && !allCustomTracked.includes(a))
+                if (untracked.length === 0) return null
+                return (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {untracked.map(a => (
+                      <span key={a} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 text-[11px] font-medium rounded-full border border-primary-200">
+                        {a}
+                        <button type="button" onClick={() => updateRoom({ amenities: room.amenities.filter(x => x !== a) })} className="text-primary-400 hover:text-primary-600">
+                          <XMarkIcon className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )
+              })()}
 
               <p className="text-[10px] text-gray-400">{room.amenities.length} amenities selected &middot; Shown as &quot;View Full Amenities ({room.amenities.length})&quot; in the room detail modal</p>
             </div>
