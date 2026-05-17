@@ -5,6 +5,8 @@
   "layout.header.language": "Langue",
   "layout.header.currency": "Devise",
   "layout.sidebar.propertyManagerDescription": "Operations & Inventaire",
+  "layout.sidebar.creatorMarketplace": "Place de marche Vayada",
+  "layout.sidebar.creatorMarketplaceDescription": "Createurs & collaborations",
   "layout.sidebar.bookingEngineDescription": "Reservations directes & revenus",
   "common.save": "Enregistrer",
   "common.saving": "Enregistrement...",
