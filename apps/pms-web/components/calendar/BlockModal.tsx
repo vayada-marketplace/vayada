@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { CalendarRoom, CalendarRoomType } from '@/services/calendar'
+import { useEffect, useMemo, useState } from 'react'
+import { CalendarBooking, CalendarRoom, CalendarRoomType } from '@/services/calendar'
 import Modal from '@/components/Modal'
 
 // Returns the YYYY-MM-DD string one day after the given YYYY-MM-DD string.
@@ -19,6 +19,7 @@ function addOneDay(date: string): string {
 interface BlockModalProps {
   roomTypes: CalendarRoomType[]
   rooms: CalendarRoom[]
+  bookings: CalendarBooking[]
   onSubmit: (data: {
     roomTypeId: string
     roomIds: string[]
@@ -36,6 +37,7 @@ interface BlockModalProps {
 export default function BlockModal({
   roomTypes,
   rooms,
+  bookings,
   onSubmit,
   onClose,
   initialRoomTypeId,
@@ -52,11 +54,32 @@ export default function BlockModal({
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [confirmOverlap, setConfirmOverlap] = useState(false)
 
   const roomsForType = useMemo(
     () => rooms.filter((r) => r.roomTypeId === roomTypeId),
     [rooms, roomTypeId]
   )
+
+  // Bookings assigned to a selected room whose stay overlaps the block range.
+  // Both ranges are half-open [start, end): they overlap iff start < otherEnd
+  // && otherStart < end. ISO YYYY-MM-DD strings compare correctly as strings.
+  const overlappingBookings = useMemo(() => {
+    if (!startDate || !endDate || selectedRoomIds.length === 0) return []
+    return bookings.filter(
+      (b) =>
+        b.roomId != null &&
+        selectedRoomIds.includes(b.roomId) &&
+        b.checkIn < endDate &&
+        b.checkOut > startDate
+    )
+  }, [bookings, startDate, endDate, selectedRoomIds])
+
+  // Re-arm the warning whenever the range or room selection changes, so a user
+  // who edits the dates after seeing it can't skip a fresh overlap.
+  useEffect(() => {
+    setConfirmOverlap(false)
+  }, [startDate, endDate, selectedRoomIds])
 
   const allSelected =
     roomsForType.length > 0 && selectedRoomIds.length === roomsForType.length
@@ -97,6 +120,11 @@ export default function BlockModal({
     }
     if (selectedRoomIds.length === 0) {
       setError('Please select at least one room to block')
+      return
+    }
+    // Don't silently block over a booking — make the user confirm once.
+    if (overlappingBookings.length > 0 && !confirmOverlap) {
+      setConfirmOverlap(true)
       return
     }
 
@@ -226,6 +254,24 @@ export default function BlockModal({
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
+        {confirmOverlap && overlappingBookings.length > 0 && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <p className="font-medium">This block overlaps existing bookings:</p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5">
+              {overlappingBookings.slice(0, 5).map((b) => (
+                <li key={`${b.id}-${b.roomId}`}>
+                  {b.guestFirstName} {b.guestLastName}
+                  {b.roomNumber ? ` · #${b.roomNumber}` : ''} · {b.checkIn} → {b.checkOut}
+                </li>
+              ))}
+              {overlappingBookings.length > 5 && (
+                <li>+{overlappingBookings.length - 5} more</li>
+              )}
+            </ul>
+            <p className="mt-1.5">Continue anyway?</p>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex justify-end gap-2 pt-2">
           <button
@@ -240,7 +286,11 @@ export default function BlockModal({
             disabled={submitting || selectedRoomIds.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
           >
-            {submitting ? 'Blocking...' : 'Block Rooms'}
+            {submitting
+              ? 'Blocking...'
+              : confirmOverlap && overlappingBookings.length > 0
+                ? 'Block anyway'
+                : 'Block Rooms'}
           </button>
         </div>
       </form>
