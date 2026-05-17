@@ -532,6 +532,7 @@ export default function RoomTypeForm({
   const [bookingImportResult, setBookingImportResult] = useState<{
     matchedCount: number
     addedCount: number
+    fuzzy: { original: string; amenity: string }[]
     unmatched: string[]
   } | null>(null)
   const [beds, setBeds] = useState<{ type: string; count: number }[]>(() => parseBedType(form.bedType || ''))
@@ -2401,6 +2402,7 @@ export default function RoomTypeForm({
                         setBookingImportResult({
                           matchedCount: result.matched.length,
                           addedCount: merged.length - before,
+                          fuzzy: result.matched.filter(m => m.source === 'fuzzy').map(m => ({ original: m.original, amenity: m.amenity })),
                           unmatched: result.unmatched,
                         })
                       }}
@@ -2422,48 +2424,95 @@ export default function RoomTypeForm({
                     )}
                   </div>
                   {bookingImportResult && (
-                    <div className="space-y-1.5 text-[11px]">
-                      <p className="text-gray-700">
-                        Matched <span className="font-semibold text-primary-700">{bookingImportResult.matchedCount}</span> amenity{bookingImportResult.matchedCount === 1 ? '' : 'ies'}
-                        {bookingImportResult.addedCount !== bookingImportResult.matchedCount && (
-                          <> · <span className="font-semibold">{bookingImportResult.addedCount}</span> newly added</>
-                        )}
-                        {bookingImportResult.unmatched.length > 0 && (
-                          <> · <span className="font-semibold text-amber-700">{bookingImportResult.unmatched.length}</span> unmatched</>
-                        )}
-                      </p>
+                    <div className="space-y-2 text-[11px]">
+                      {bookingImportResult.matchedCount === 0 ? (
+                        <p className="text-amber-700 font-medium">No amenities matched — map the items below to an existing amenity, add them as custom, or ignore them.</p>
+                      ) : (
+                        <p className="text-gray-700">
+                          Matched <span className="font-semibold text-primary-700">{bookingImportResult.matchedCount}</span> amenit{bookingImportResult.matchedCount === 1 ? 'y' : 'ies'}
+                          {bookingImportResult.addedCount !== bookingImportResult.matchedCount && (
+                            <> &middot; <span className="font-semibold">{bookingImportResult.addedCount}</span> newly added</>
+                          )}
+                          {bookingImportResult.fuzzy.length > 0 && (
+                            <> &middot; <span className="font-semibold text-blue-700">{bookingImportResult.fuzzy.length}</span> fuzzy</>
+                          )}
+                          {bookingImportResult.unmatched.length > 0 && (
+                            <> &middot; <span className="font-semibold text-amber-700">{bookingImportResult.unmatched.length}</span> unmatched</>
+                          )}
+                        </p>
+                      )}
+
+                      {bookingImportResult.fuzzy.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-gray-500 mb-1">Fuzzy matches — review and remove any wrong guesses.</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {bookingImportResult.fuzzy.map(f => {
+                              const stillSelected = (form.amenities || []).includes(f.amenity)
+                              return (
+                                <span key={f.original + f.amenity} className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border ${stillSelected ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200 line-through'}`}>
+                                  <span className="opacity-70">{f.original}</span>
+                                  <span aria-hidden>&asymp;</span>
+                                  {f.amenity}
+                                  {stillSelected && (
+                                    <button type="button" onClick={() => updateForm({ amenities: (form.amenities || []).filter(a => a !== f.amenity) })} className="text-blue-400 hover:text-blue-600">
+                                      <XMarkIcon className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {bookingImportResult.unmatched.length > 0 && (
                         <div>
-                          <p className="text-[10px] text-gray-500 mb-1">
-                            Click an item to add it as a custom amenity, or ignore it.
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
+                          <p className="text-[10px] text-gray-500 mb-1">Add as a custom amenity, map to an existing one, or ignore.</p>
+                          <div className="space-y-1.5">
                             {bookingImportResult.unmatched.map((label) => {
                               const amenities = form.amenities || []
-                              const alreadyAdded = amenities.some(a => a.toLowerCase() === label.toLowerCase())
+                              const dropLabel = () => setBookingImportResult(r => r ? { ...r, unmatched: r.unmatched.filter(u => u !== label) } : r)
                               return (
-                                <button
-                                  key={label}
-                                  type="button"
-                                  disabled={alreadyAdded}
-                                  onClick={() => {
-                                    if (alreadyAdded) return
-                                    const fallbackCategory = AMENITY_CATEGORIES[AMENITY_CATEGORIES.length - 1].name
-                                    updateForm({ amenities: [...amenities, label] })
-                                    setCustomAmenitiesByCategory(prev => ({
-                                      ...prev,
-                                      [fallbackCategory]: [...(prev[fallbackCategory] || []), label],
-                                    }))
-                                  }}
-                                  className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors ${
-                                    alreadyAdded
-                                      ? 'bg-primary-50 text-primary-700 border-primary-200 cursor-default'
-                                      : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50'
-                                  }`}
-                                >
-                                  {alreadyAdded ? <CheckIcon className="w-3 h-3" /> : <PlusIcon className="w-3 h-3" />}
-                                  {label}
-                                </button>
+                                <div key={label} className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[11px] text-gray-700 font-medium">{label}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const fallbackCategory = AMENITY_CATEGORIES[AMENITY_CATEGORIES.length - 1].name
+                                      if (!amenities.some(a => a.toLowerCase() === label.toLowerCase())) {
+                                        updateForm({ amenities: [...amenities, label] })
+                                        setCustomAmenitiesByCategory(prev => ({ ...prev, [fallbackCategory]: [...(prev[fallbackCategory] || []), label] }))
+                                        setExpandedAmenityCategories(prev => Array.from(new Set([...prev, fallbackCategory])))
+                                      }
+                                      dropLabel()
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
+                                  >
+                                    <PlusIcon className="w-3 h-3" /> Custom
+                                  </button>
+                                  <select
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      const amenity = e.target.value
+                                      if (!amenity) return
+                                      const cat = AMENITY_CATEGORIES.find(c => c.items.includes(amenity))
+                                      updateForm({ amenities: Array.from(new Set([...amenities, amenity])) })
+                                      if (cat) setExpandedAmenityCategories(prev => Array.from(new Set([...prev, cat.name])))
+                                      dropLabel()
+                                    }}
+                                    className="px-2 py-0.5 text-[11px] bg-white border border-gray-200 rounded-full text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                  >
+                                    <option value="">Map to&hellip;</option>
+                                    {AMENITY_CATEGORIES.map(c => (
+                                      <optgroup key={c.name} label={c.name}>
+                                        {c.items.map(it => <option key={it} value={it}>{it}</option>)}
+                                      </optgroup>
+                                    ))}
+                                  </select>
+                                  <button type="button" onClick={dropLabel} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700">
+                                    Ignore
+                                  </button>
+                                </div>
                               )
                             })}
                           </div>
