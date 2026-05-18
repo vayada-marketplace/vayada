@@ -98,6 +98,33 @@ class TestCreateBooking:
         )
         assert resp.status_code == 400
 
+    async def test_create_booking_rejects_invalid_guest_mix(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(
+            str(hotel["id"]),
+            max_occupancy=3,
+            max_adults=2,
+            max_children=1,
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Test",
+                "guestLastName": "User",
+                "guestEmail": "test@example.com",
+                "guestPhone": "+1234",
+                "checkIn": "2026-08-10",
+                "checkOut": "2026-08-15",
+                "adults": 3,
+                "children": 0,
+            },
+        )
+        assert resp.status_code == 400
+        assert "occupancy limits" in resp.json()["detail"]
+
     async def test_create_booking_checkout_before_checkin(self, client, hotel_with_rooms):
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]

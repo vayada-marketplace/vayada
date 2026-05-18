@@ -32,7 +32,7 @@ class RoomTypeRepository:
             """
             INSERT INTO room_types (
                 hotel_id, name, category, description, short_description,
-                max_occupancy, bedrooms, bathrooms, size,
+                max_occupancy, max_adults, max_children, bedrooms, bathrooms, size,
                 base_rate, non_refundable_rate, currency,
                 amenities, images, bed_type, features, benefits,
                 total_rooms, is_active, sort_order, monthly_rates, daily_rates,
@@ -47,13 +47,13 @@ class RoomTypeRepository:
                 partial_refund_tiers,
                 meal_plans
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12,
-                $13::jsonb, $14::jsonb, $15, $16::jsonb, $17::jsonb,
-                $18, $19, $20, $21::jsonb, $22::jsonb,
-                $23::jsonb, $24::jsonb, $25, $26, $27, $28,
-                $29, $30::jsonb, $31, $32::jsonb, $33,
-                $34, $35, $36, $37::jsonb, $38::jsonb
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                $12, $13, $14,
+                $15::jsonb, $16::jsonb, $17, $18::jsonb, $19::jsonb,
+                $20, $21, $22, $23::jsonb, $24::jsonb,
+                $25::jsonb, $26::jsonb, $27, $28, $29, $30,
+                $31, $32::jsonb, $33, $34::jsonb, $35,
+                $36, $37, $38, $39::jsonb, $40::jsonb
             ) RETURNING *
             """,
             hotel_id,
@@ -62,6 +62,8 @@ class RoomTypeRepository:
             data.get("description", ""),
             data.get("short_description", ""),
             data.get("max_occupancy", 2),
+            data.get("max_adults"),
+            data.get("max_children"),
             data.get("bedrooms", 1),
             data.get("bathrooms", 1),
             data.get("size", 0),

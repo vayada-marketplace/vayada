@@ -23,6 +23,7 @@ from app.models.booking import BookingCreate, BookingResponse
 from app.services import stripe_service, xendit_service
 from app.services.availability_service import compute_stay_pricing, remaining_for_stay
 from app.services.currency_service import get_exchange_rate
+from app.services.occupancy import room_allows_guest_mix
 from app.services.payout_service import calculate_split, fetch_billing_config, schedule_payouts
 from app.services.room_type_service import resolve_last_minute_discount
 from app.services.channex.ari_push import push_availability_for_room_type
@@ -865,6 +866,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError("Room type not found")
     if not room["is_active"]:
         raise ValueError("Room type is not available")
+    if not room_allows_guest_mix(room, data.adults, data.children):
+        raise ValueError("Guest mix exceeds this room's occupancy limits")
 
     # ── Validate stay window (availability, nights, min-stay, advance) ──
     available = await remaining_for_stay(

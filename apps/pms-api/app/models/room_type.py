@@ -248,6 +248,8 @@ class RoomTypeCreate(BaseModel):
     description: str = ""
     short_description: str = ""
     max_occupancy: int = 2
+    max_adults: Optional[int] = None
+    max_children: Optional[int] = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int = 0
@@ -286,6 +288,20 @@ class RoomTypeCreate(BaseModel):
     def validate_size(cls, v: int) -> int:
         if v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("max_adults")
+    @classmethod
+    def validate_max_adults(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("max_adults must be at least 1")
+        return v
+
+    @field_validator("max_children")
+    @classmethod
+    def validate_max_children(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError("max_children must be at least 0")
         return v
 
     @field_validator("meal_plans")
@@ -346,6 +362,8 @@ class RoomTypeUpdate(BaseModel):
     description: Optional[str] = None
     short_description: Optional[str] = None
     max_occupancy: Optional[int] = None
+    max_adults: Optional[int] = None
+    max_children: Optional[int] = None
     bedrooms: Optional[int] = None
     bathrooms: Optional[int] = None
     size: Optional[int] = None
@@ -384,6 +402,20 @@ class RoomTypeUpdate(BaseModel):
     def validate_size(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
+        return v
+
+    @field_validator("max_adults")
+    @classmethod
+    def validate_max_adults(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("max_adults must be at least 1")
+        return v
+
+    @field_validator("max_children")
+    @classmethod
+    def validate_max_children(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError("max_children must be at least 0")
         return v
 
     @field_validator("flexible_cancellation_type")
@@ -457,6 +489,8 @@ class RoomTypeResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
+    max_adults: Optional[int] = None
+    max_children: Optional[int] = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int
@@ -491,6 +525,8 @@ class RoomTypeAdminResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
+    max_adults: Optional[int] = None
+    max_children: Optional[int] = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int
