@@ -55,6 +55,8 @@ export interface RoomType {
   description: string
   shortDescription: string
   maxOccupancy: number
+  maxAdults?: number | null
+  maxChildren?: number | null
   size: number
   baseRate: number
   nonRefundableRate: number | null
