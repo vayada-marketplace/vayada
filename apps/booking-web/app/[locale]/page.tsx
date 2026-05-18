@@ -134,7 +134,7 @@ function HomePageContent() {
   useEffect(() => {
     if (!roomsLoading && rooms.length > 0 && !initialFetchDone) {
       setInitialFetchDone(true)
-      refetchRooms(checkIn, checkOut, adults)
+      refetchRooms(checkIn, checkOut, adults, children)
     }
   }, [roomsLoading, rooms.length])
 
@@ -152,7 +152,7 @@ function HomePageContent() {
       setCommittedCheckOut(checkOut)
       setCommittedAdults(adults)
       setCommittedChildren(children)
-      refetchRooms(checkIn, checkOut, adults)
+      refetchRooms(checkIn, checkOut, adults, children)
     }, 300)
     return () => clearTimeout(handle)
   }, [checkIn, checkOut, adults, children])
@@ -427,7 +427,7 @@ function HomePageContent() {
               setCommittedChildren(children)
               setSearching(true)
               roomsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
-              await refetchRooms(checkIn, checkOut, adults)
+              await refetchRooms(checkIn, checkOut, adults, children)
               setSearching(false)
             }}
             disabled={searching || roomsRefetching}

@@ -50,7 +50,8 @@ function BookPageContent() {
   // Ensure rooms have date-resolved rates (in case of direct navigation)
   useEffect(() => {
     const a = parseInt(searchParams.get('adults') || '2')
-    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, a)
+    const c = parseInt(searchParams.get('children') || '0')
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, a, c)
   }, [])
   const adultsParam = parseInt(searchParams.get('adults') || '2')
   const childrenParam = parseInt(searchParams.get('children') || '0')

@@ -41,6 +41,7 @@ function PaymentPageContent() {
   const checkOut = searchParams.get('checkOut') || ''
 
   const adultsParam = parseInt(searchParams.get('adults') || '2')
+  const childrenParam = parseInt(searchParams.get('children') || '0')
 
   // Ensure rooms have date-resolved rates on mount. URL search params stay
   // stable for the lifetime of this page (a checkIn/checkOut change comes
@@ -49,9 +50,8 @@ function PaymentPageContent() {
   // by HotelContext and would re-fire on every render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam)
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam)
   }, [])
-  const childrenParam = parseInt(searchParams.get('children') || '0')
   const roomsParam = parseInt(searchParams.get('rooms') || '1')
   const { steps: STEPS, currentStep } = useBookingSteps('payment')
 

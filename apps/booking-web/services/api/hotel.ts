@@ -18,11 +18,12 @@ export const hotelService = {
     }
   },
 
-  async getRooms(slug: string, checkIn?: string, checkOut?: string, adults?: number): Promise<RoomType[]> {
+  async getRooms(slug: string, checkIn?: string, checkOut?: string, adults?: number, children?: number): Promise<RoomType[]> {
     const params = new URLSearchParams()
     if (checkIn) params.set('check_in', checkIn)
     if (checkOut) params.set('check_out', checkOut)
     if (adults) params.set('adults', String(adults))
+    if (children !== undefined) params.set('children', String(children))
     const qs = params.toString()
     return pms.get<RoomType[]>(`/api/hotels/${slug}/rooms${qs ? `?${qs}` : ''}`)
   },
