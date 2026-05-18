@@ -7,6 +7,7 @@ from app.database import Database
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.availability_service import remaining_for_stay
 from app.models.room_type import RoomTypeResponse
+from app.services.occupancy import room_allows_guest_mix
 from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ async def get_rooms_for_guest(
     check_in: Optional[date] = None,
     check_out: Optional[date] = None,
     adults: Optional[int] = None,
+    children: Optional[int] = None,
 ) -> List[RoomTypeResponse]:
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
@@ -73,6 +75,9 @@ async def get_rooms_for_guest(
     result = []
 
     for room in rooms:
+        if not room_allows_guest_mix(room, adults, children):
+            continue
+
         # Skip rooms that require more advance notice than available
         min_advance = room.get("minimum_advance_days") or 0
         if check_in and min_advance > 0:
@@ -143,6 +148,8 @@ async def get_rooms_for_guest(
                 description=room["description"],
                 short_description=room["short_description"],
                 max_occupancy=room["max_occupancy"],
+                max_adults=room.get("max_adults"),
+                max_children=room.get("max_children"),
                 bedrooms=room.get("bedrooms", 1),
                 bathrooms=room.get("bathrooms", 1),
                 size=room["size"],

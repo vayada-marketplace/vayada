@@ -28,6 +28,40 @@ class TestPublicRooms:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    async def test_guest_mix_filters_room_occupancy_limits(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(
+            str(hotel["id"]),
+            name="Family Room",
+            max_occupancy=3,
+            max_adults=2,
+            max_children=1,
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=2&children=1")
+        assert resp.status_code == 200
+        assert [room["name"] for room in resp.json()] == ["Family Room"]
+        assert resp.json()[0]["maxAdults"] == 2
+        assert resp.json()[0]["maxChildren"] == 1
+
+        too_many_adults = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=3&children=0")
+        assert too_many_adults.status_code == 200
+        assert too_many_adults.json() == []
+
+        too_many_children = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=1&children=2")
+        assert too_many_children.status_code == 200
+        assert too_many_children.json() == []
+
+    async def test_unconfigured_adult_child_limits_fall_back_to_total_occupancy(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(str(hotel["id"]), name="Legacy Room", max_occupancy=3)
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=3&children=0")
+        assert resp.status_code == 200
+        assert [room["name"] for room in resp.json()] == ["Legacy Room"]
+
     async def test_inactive_rooms_hidden(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))

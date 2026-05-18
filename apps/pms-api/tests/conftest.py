@@ -317,6 +317,9 @@ async def create_test_room_type(
     name: str = "Deluxe Suite",
     base_rate: float = 150.0,
     total_rooms: int = 5,
+    max_occupancy: int = 2,
+    max_adults: Optional[int] = None,
+    max_children: Optional[int] = None,
     is_active: bool = True,
     non_refundable_rate: Optional[float] = None,
     non_refundable_enabled: bool = False,
@@ -328,17 +331,17 @@ async def create_test_room_type(
         """
         INSERT INTO room_types (
             hotel_id, name, description, short_description,
-            max_occupancy, size, base_rate, non_refundable_rate, currency,
+            max_occupancy, max_adults, max_children, size, base_rate, non_refundable_rate, currency,
             amenities, images, bed_type, features,
             total_rooms, is_active, sort_order, non_refundable_enabled
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9,
-            $10::jsonb, $11::jsonb, $12, $13::jsonb,
-            $14, $15, $16, $17
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+            $12::jsonb, $13::jsonb, $14, $15::jsonb,
+            $16, $17, $18, $19
         ) RETURNING *
         """,
         hotel_id, name, "A spacious suite", "Spacious and comfortable",
-        2, 45, base_rate, non_refundable_rate, "EUR",
+        max_occupancy, max_adults, max_children, 45, base_rate, non_refundable_rate, "EUR",
         json.dumps(["WiFi", "Minibar"]), json.dumps([]), "King",
         json.dumps(["Mountain View"]),
         total_rooms, is_active, 0, non_refundable_enabled,
