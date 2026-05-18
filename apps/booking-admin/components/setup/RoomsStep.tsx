@@ -21,6 +21,8 @@ export interface RoomType {
   name: string
   beds: { type: string; count: number }[]
   maxOccupancy: number
+  maxAdults: number | null
+  maxChildren: number | null
   bedrooms: number
   bathrooms: number
   roomSize: string
@@ -316,6 +318,8 @@ export const createEmptyRoom = (): RoomType => ({
   name: '',
   beds: [{ type: 'King Bed', count: 1 }],
   maxOccupancy: 2,
+  maxAdults: null,
+  maxChildren: null,
   bedrooms: 1,
   bathrooms: 1,
   roomSize: '',
@@ -752,21 +756,50 @@ export default function RoomsStep({
               </button>
             </div>
 
-            {/* Max Occupancy */}
+            {/* Occupancy */}
             <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <label className="text-[12px] font-semibold text-gray-900">
-                  Max Occupancy <span className="text-red-500">*</span>
-                </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <label className="text-[12px] font-semibold text-gray-900">
+                      Total max occupancy <span className="text-red-500">*</span>
+                    </label>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={room.maxOccupancy}
+                    onChange={(e) => updateRoom({ maxOccupancy: Math.max(1, Number(e.target.value)) })}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <label className="text-[12px] font-semibold text-gray-900">Max adults</label>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="Any"
+                    value={room.maxAdults ?? ''}
+                    onChange={(e) => updateRoom({ maxAdults: e.target.value === '' ? null : Math.max(1, Number(e.target.value)) })}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <label className="text-[12px] font-semibold text-gray-900">Max children</label>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Any"
+                    value={room.maxChildren ?? ''}
+                    onChange={(e) => updateRoom({ maxChildren: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                  />
+                </div>
               </div>
-              <input
-                type="number"
-                min={1}
-                value={room.maxOccupancy}
-                onChange={(e) => updateRoom({ maxOccupancy: Math.max(1, Number(e.target.value)) })}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-              />
-              <p className="text-[10px] text-gray-400 mt-1">Shows as &quot;Up to X guests&quot; on room card</p>
             </div>
 
             {/* Bedrooms, Bathrooms, Room Size, Total Rooms */}
