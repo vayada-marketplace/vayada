@@ -6,7 +6,10 @@ set -euo pipefail
 MAIN_REPO="/Users/flamurmaliqi/git/vayada"
 WORKTREE_PARENT="/Users/flamurmaliqi/git"
 VW_CLAUDE_AGENT_CMD="${VW_CLAUDE_AGENT_CMD:-claude --permission-mode auto}"
-VW_CODEX_AGENT_CMD="${VW_CODEX_AGENT_CMD:-codex}"
+VW_CODEX_HOME="${VW_CODEX_HOME:-$HOME/.codex-vayada}"
+VW_CODEX_LINEAR_EMAIL="${VW_CODEX_LINEAR_EMAIL:-f.maliqi@vayada.com}"
+printf -v VW_CODEX_HOME_QUOTED "%q" "$VW_CODEX_HOME"
+VW_CODEX_AGENT_CMD="${VW_CODEX_AGENT_CMD:-codex-personal}"
 VW_CODEX_WARP_EMAIL="${VW_CODEX_WARP_EMAIL:-flamur.maliqi@nomerra.com}"
 VW_WARP_SQLITE_PATH="${VW_WARP_SQLITE_PATH:-$HOME/Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite}"
 VW_TERMINAL_APP="${VW_TERMINAL_APP:-Warp}"
@@ -34,22 +37,113 @@ default_agent_cmd() {
 }
 
 VW_AGENT_CMD="${VW_AGENT_CMD:-$(default_agent_cmd)}"
-VW_AGENT_NAME="${VW_AGENT_NAME:-${VW_AGENT_CMD%% *}}"
+
+default_agent_name() {
+  case "$VW_AGENT_CMD" in
+    *codex*) printf "Codex" ;;
+    *claude*) printf "Claude" ;;
+    *) printf "%s" "${VW_AGENT_CMD%% *}" ;;
+  esac
+}
+
+VW_AGENT_NAME="${VW_AGENT_NAME:-$(default_agent_name)}"
 
 agent_auto_disabled() {
   [ "${VW_NO_AUTO_AGENT:-${VW_NO_AUTO_CLAUDE:-0}}" = "1" ]
 }
 
+is_codex_agent() {
+  [[ "$VW_AGENT_CMD" == *codex* ]]
+}
+
+uses_codex_personal_alias() {
+  [[ "$(normalize_codex_agent_cmd "$VW_AGENT_CMD")" == codex-personal* ]]
+}
+
+normalize_codex_agent_cmd() {
+  local cmd="$1"
+  case "$cmd" in
+    codex) printf "codex-personal" ;;
+    codex\ *) printf "codex-personal%s" "${cmd#codex}" ;;
+    *) printf "%s" "$cmd" ;;
+  esac
+}
+
+ensure_codex_feature_flags() {
+  local config="$1"
+  grep -q '^rmcp_client[[:space:]]*=' "$config" 2>/dev/null && return 0
+
+  local tmp="$config.tmp.$$"
+  awk '
+    BEGIN { inserted = 0 }
+    /^\[features\][[:space:]]*$/ {
+      print
+      if (!inserted) {
+        print "rmcp_client = true"
+        print "experimental_use_rmcp_client = true"
+        inserted = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!inserted) {
+        print ""
+        print "[features]"
+        print "rmcp_client = true"
+        print "experimental_use_rmcp_client = true"
+      }
+    }
+  ' "$config" > "$tmp" && mv "$tmp" "$config"
+}
+
+prepare_codex_home() {
+  is_codex_agent || return 0
+  uses_codex_personal_alias && return 0
+  [ -n "$VW_CODEX_HOME" ] || return 0
+
+  mkdir -p "$VW_CODEX_HOME"
+
+  if [ ! -e "$VW_CODEX_HOME/auth.json" ] && [ -r "$HOME/.codex/auth.json" ]; then
+    ln -s "$HOME/.codex/auth.json" "$VW_CODEX_HOME/auth.json" 2>/dev/null \
+      || cp "$HOME/.codex/auth.json" "$VW_CODEX_HOME/auth.json"
+  fi
+
+  if [ ! -e "$VW_CODEX_HOME/config.toml" ]; then
+    if [ -r "$HOME/.codex/config.toml" ]; then
+      cp "$HOME/.codex/config.toml" "$VW_CODEX_HOME/config.toml"
+    else
+      touch "$VW_CODEX_HOME/config.toml"
+    fi
+  fi
+
+  if ! grep -q '^\[mcp_servers\.linear\]' "$VW_CODEX_HOME/config.toml" 2>/dev/null; then
+    cat >> "$VW_CODEX_HOME/config.toml" <<'EOF'
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
+EOF
+  fi
+
+  ensure_codex_feature_flags "$VW_CODEX_HOME/config.toml"
+}
+
 agent_launch_command() {
   local worktree="$1"
   local prompt="$2"
-  local quoted_worktree quoted_prompt agent_cmd
+  local quoted_worktree quoted_prompt configured_agent_cmd agent_cmd
   printf -v quoted_worktree "%q" "$worktree"
   printf -v quoted_prompt "%q" "$prompt"
-  if [[ "$VW_AGENT_CMD" == *"{prompt}"* ]]; then
-    agent_cmd="${VW_AGENT_CMD//\{prompt\}/$quoted_prompt}"
+
+  configured_agent_cmd="$(normalize_codex_agent_cmd "$VW_AGENT_CMD")"
+  if is_codex_agent && [[ "$configured_agent_cmd" != codex-personal* ]] && [[ "$configured_agent_cmd" != *CODEX_HOME=* ]]; then
+    configured_agent_cmd="env CODEX_HOME=$VW_CODEX_HOME_QUOTED $configured_agent_cmd"
+  fi
+
+  if [[ "$configured_agent_cmd" == *"{prompt}"* ]]; then
+    agent_cmd="${configured_agent_cmd//\{prompt\}/$quoted_prompt}"
   else
-    agent_cmd="$VW_AGENT_CMD $quoted_prompt"
+    agent_cmd="$configured_agent_cmd $quoted_prompt"
   fi
   printf "cd %s && %s" "$quoted_worktree" "$agent_cmd"
 }
@@ -65,6 +159,7 @@ open_agent_tab() {
   local worktree="$1"
   local prompt="$2"
   local command
+  prepare_codex_home
   command="$(agent_launch_command "$worktree" "$prompt")"
   command="$(applescript_escape "$command")"
 
@@ -85,7 +180,7 @@ ticket_prompt() {
   cat <<PROMPT
 You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Work in two phases:
 
-PHASE 1 - PLAN. Use the linear MCP server to fetch ticket $ticket, then move the ticket to "In Progress" via the linear MCP server. Propose a concise implementation plan and wait for my approval.
+PHASE 1 - PLAN. Use the linear MCP server as $VW_CODEX_LINEAR_EMAIL to fetch ticket $ticket, then move the ticket to "In Progress" via the linear MCP server. First verify the Linear MCP "me" account is $VW_CODEX_LINEAR_EMAIL; if it is not, stop and ask me to run \`vw linear-login\`. Propose a concise implementation plan and wait for my approval.
 
 PHASE 2 - IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist. Then commit everything locally - do NOT merge to main, do NOT push, do NOT open PRs. \`vw ship-all\` will run the merge-to-main + push dance later.
 
@@ -131,6 +226,9 @@ vw - vayada worktree helper
   vw launch <TICKET>            Open the configured agent in an existing
                                 worktree with the standard ticket prompt.
 
+  vw linear-login               Authenticate the isolated Vayada Codex home
+                                against Linear as f.maliqi@vayada.com.
+
   vw done <TICKET>              Remove the worktree and delete the local branch.
 
   vw list                       Show all active worktrees.
@@ -155,11 +253,16 @@ Agent environment:
                                 Use {prompt} to place the prompt manually.
                                 Default: Codex when Warp is logged in as
                                 flamur.maliqi@nomerra.com, otherwise Claude.
-                                Example: VW_AGENT_CMD=codex vw new VAY-123
-  VW_AGENT_NAME                 Display name for log output. Default: first word
-                                of VW_AGENT_CMD.
+                                Example: VW_AGENT_CMD=codex-personal vw new VAY-123
+  VW_AGENT_NAME                 Display name for log output. Default: inferred
+                                from VW_AGENT_CMD.
   VW_CODEX_WARP_EMAIL           Warp email that should default to Codex.
-  VW_CODEX_AGENT_CMD            Codex command. Default: codex.
+  VW_CODEX_AGENT_CMD            Codex command. Default:
+                                codex-personal.
+  VW_CODEX_HOME                 Isolated Codex home used only when launching
+                                the raw codex binary. Default: ~/.codex-vayada.
+  VW_CODEX_LINEAR_EMAIL         Linear account expected by vw Codex prompts.
+                                Default: f.maliqi@vayada.com.
   VW_CLAUDE_AGENT_CMD           Claude command. Default:
                                 claude --permission-mode auto.
   VW_WARP_EMAIL                 Override detected Warp email for testing.
@@ -246,6 +349,13 @@ cmd_launch() {
   [ -z "$ticket" ] && { echo "Usage: vw launch <TICKET|number>"; exit 1; }
   ticket="$(normalize_ticket "$ticket")"
   launch_ticket_agent "$ticket"
+}
+
+cmd_linear_login() {
+  local login_shell="${SHELL:-/bin/zsh}"
+  echo "-> Authenticating Linear for codex-personal"
+  echo "   Sign in as $VW_CODEX_LINEAR_EMAIL in the browser prompt."
+  "$login_shell" -lic "codex-personal mcp login linear"
 }
 
 cmd_done() {
@@ -707,6 +817,7 @@ cmd_ship_all() {
 case "${1:-}" in
   new)  shift; cmd_new "$@" ;;
   launch) shift; cmd_launch "$@" ;;
+  linear-login) shift; cmd_linear_login "$@" ;;
   done) shift; cmd_done "$@" ;;
   list|ls) shift; cmd_list "$@" ;;
   sync) shift; cmd_sync "$@" ;;

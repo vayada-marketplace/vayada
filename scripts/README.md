@@ -32,17 +32,21 @@ Agent launch is configurable through environment variables:
 ```sh
 # Default behavior:
 # - Codex when Warp is logged in as flamur.maliqi@nomerra.com
+# - Codex launches through the codex-personal shell alias
 # - Claude otherwise
 vw new VAY-295
 
+# One-time setup for the Vayada Linear account used by vw Codex sessions
+vw linear-login
+
 # Force Codex regardless of Warp account
-VW_AGENT_CMD=codex VW_AGENT_NAME=Codex vw new VAY-295
+VW_AGENT_CMD=codex-personal VW_AGENT_NAME=Codex vw new VAY-295
 
 # Force Claude regardless of Warp account
 VW_AGENT_CMD='claude --permission-mode auto' VW_AGENT_NAME=Claude vw new VAY-295
 
 # Put the prompt in a specific position if your agent command needs it
-VW_AGENT_CMD='codex exec {prompt}' VW_AGENT_NAME=Codex vw new VAY-295
+VW_AGENT_CMD='codex-personal exec {prompt}' VW_AGENT_NAME=Codex vw new VAY-295
 
 # Disable automatic agent launch for sync/ship failure recovery
 VW_NO_AUTO_AGENT=1 vw ship-all
@@ -53,9 +57,11 @@ Defaults:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VW_AGENT_CMD` | auto-detected | Command run with the generated prompt appended as the final argument. Include `{prompt}` to place the prompt manually. If unset, `vw` uses Codex for `VW_CODEX_WARP_EMAIL`, otherwise Claude. |
-| `VW_AGENT_NAME` | first word of `VW_AGENT_CMD` | Label used in `vw` log output. |
+| `VW_AGENT_NAME` | inferred from `VW_AGENT_CMD` | Label used in `vw` log output. |
 | `VW_CODEX_WARP_EMAIL` | `flamur.maliqi@nomerra.com` | Warp account email that should default to Codex. |
-| `VW_CODEX_AGENT_CMD` | `codex` | Codex command used by auto-detection. |
+| `VW_CODEX_AGENT_CMD` | `codex-personal` | Codex command used by auto-detection. |
+| `VW_CODEX_HOME` | `~/.codex-vayada` | Isolated Codex home used only when launching the raw `codex` binary instead of the `codex-personal` alias. |
+| `VW_CODEX_LINEAR_EMAIL` | `f.maliqi@vayada.com` | Linear account the generated `vw` prompt requires before touching tickets. |
 | `VW_CLAUDE_AGENT_CMD` | `claude --permission-mode auto` | Claude command used by auto-detection. |
 | `VW_WARP_EMAIL` | unset | Override detected Warp email, mainly for testing. |
 | `VW_WARP_SQLITE_PATH` | Warp stable SQLite path | Override Warp account database path. |
