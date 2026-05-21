@@ -30,8 +30,8 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/affiliate-dashboard/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./apps/affiliate-dashboard/public
 
 USER nextjs
 
@@ -40,4 +40,4 @@ EXPOSE 3005
 ENV PORT=3005
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["node", "apps/affiliate-dashboard/server.js"]

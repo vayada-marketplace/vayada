@@ -35,7 +35,7 @@ RUN adduser --system --uid 1001 nextjs
 
 # Copy necessary files from standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/marketplace-admin/.next/static
 # Public assets are not bundled into the standalone output; copy them explicitly if they exist
 # (Admin frontend doesn't have a public directory, so this is optional)
 
@@ -46,4 +46,4 @@ EXPOSE 3001
 ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["node", "apps/marketplace-admin/server.js"]
