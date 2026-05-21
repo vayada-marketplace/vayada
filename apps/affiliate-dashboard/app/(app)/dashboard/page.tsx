@@ -1,0 +1,130 @@
+'use client'
+
+import useSWR from 'swr'
+import Navbar from '@/components/Navbar'
+import StatsCard from '@/components/StatsCard'
+import PropertyCard from '@/components/PropertyCard'
+import EarningsChart from '@/components/EarningsChart'
+import PayoutHistory from '@/components/PayoutHistory'
+import RecentActivity from '@/components/RecentActivity'
+import PerformanceTips from '@/components/PerformanceTips'
+import { authService } from '@/services/auth'
+import { affiliateLink } from '@/services/constants/site'
+import type { DashboardStats, PropertiesResponse } from '@/services/types'
+
+const PROPERTY_COLORS = ['#0f766e', '#1e3a5f', '#6b21a8', '#b45309', '#be123c', '#047857']
+
+export default function DashboardPage() {
+  const { data: stats, error: statsError } = useSWR<DashboardStats>('/affiliate/dashboard')
+  const { data: propertiesData, error: propertiesError } = useSWR<PropertiesResponse>('/affiliate/properties')
+
+  const userName = authService.getUserName()
+  const userInitials = authService.getUserInitials()
+
+  if (statsError || propertiesError) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-red-600 text-sm">Failed to load dashboard data.</div>
+      </div>
+    )
+  }
+
+  if (!stats || !propertiesData) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-gray-500 text-sm">Loading dashboard...</div>
+      </div>
+    )
+  }
+
+  const properties = propertiesData.properties
+  const avgPerBooking = stats.totalBookings > 0
+    ? Math.round(stats.totalEarned / stats.totalBookings)
+    : 0
+
+  return (
+    <div className="min-h-screen bg-slate-100">
+      <Navbar userName={userName} userInitials={userInitials} />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Greeting */}
+        <div className="mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            Hey {userName.split(' ')[0]}
+          </h1>
+          <p className="text-muted mt-1">
+            You&apos;re an affiliate at {stats.propertyCount} propert{stats.propertyCount === 1 ? 'y' : 'ies'}
+          </p>
+        </div>
+
+        {/* Stats overview */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatsCard
+            label="Total Earned"
+            value={`$${stats.totalEarned.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            subtitle={`Across ${stats.propertyCount} properties`}
+          />
+          <StatsCard
+            label="Bookings Referred"
+            value={stats.totalBookings.toString()}
+            subtitle={`Avg $${avgPerBooking} per booking`}
+          />
+          <StatsCard
+            label="Link Clicks"
+            value={stats.totalClicks.toString()}
+            subtitle={`${stats.conversionRate}% conversion rate`}
+          />
+          <StatsCard
+            label="Outstanding Balance"
+            value={`$${stats.outstandingBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            subtitle="Across all properties"
+            highlight
+          />
+        </div>
+
+        {/* Property cards */}
+        {properties.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Your Properties</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {properties.map((property, i) => (
+                <PropertyCard
+                  key={property.affiliateId}
+                  name={property.hotelName}
+                  commission={property.commissionPct}
+                  status={property.status === 'approved' ? 'active' : 'pending'}
+                  affiliateLink={affiliateLink(property.hotelSlug, property.referralCode)}
+                  bookings={property.bookingCount}
+                  outstanding={property.totalCommission}
+                  clicks={property.clickCount}
+                  color={PROPERTY_COLORS[i % PROPERTY_COLORS.length]}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Charts + Activity row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-8">
+          <EarningsChart />
+          <RecentActivity />
+        </div>
+
+        {/* Payouts + Tips row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <PayoutHistory />
+          <PerformanceTips />
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-200 bg-white mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-sm text-muted text-center sm:text-left">
+            &copy; 2026 vayada. All rights reserved.
+          </p>
+        </div>
+      </footer>
+    </div>
+  )
+}
