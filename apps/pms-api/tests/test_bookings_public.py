@@ -30,6 +30,12 @@ class TestCreateBooking:
         }
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
+        from app.database import Database
+
+        await Database.execute(
+            "UPDATE room_types SET max_occupancy = 3, max_children = 1 WHERE id = $1",
+            str(room["id"]),
+        )
         await create_test_payment_settings(
             str(hotel["id"]),
             stripe_connect_account_id="acct_test_123",
@@ -69,7 +75,6 @@ class TestCreateBooking:
 
         # And critically: no booking row exists yet, so inventory is not
         # blocked beyond the soft-hold the draft provides.
-        from app.database import Database
         booking_count = await Database.fetchval(
             "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1",
             str(hotel["id"]),
