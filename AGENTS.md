@@ -78,9 +78,10 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 ## Linear workflow
 
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
-- Ticket → **In Review** when the agent believes implementation is complete and is handing off for human QA.
-- Shipping/merging does **not** auto-transition any status.
-- The user owns **In Review → Done** after QA passes.
+- Ticket → **Done** when implementation is complete (default close-out — the agent owns the full lifecycle).
+- Ticket → **In Review** (optional) only when the agent wants explicit human review before closing — risky change, subjective acceptance criteria, low confidence.
+- Shipping/merging does **not** auto-transition any status. Move to `Done` because implementation is finished, not because code landed in `main`.
+- If QA later finds an issue, the human reopens the ticket (back to `In Progress`) or opens a follow-up.
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
 

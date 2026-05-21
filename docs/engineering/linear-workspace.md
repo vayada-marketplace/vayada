@@ -55,8 +55,8 @@ Rule of thumb: if an issue touches several areas equally, pick the most affected
 | `Backlog` | Identified work; not actively scheduled. |
 | `Todo` | Scheduled / ready to be picked up next. |
 | `In Progress` | Implementation has started (agent or human). |
-| `In Review` | Implementation done; awaiting human QA. |
-| `Done` | QA passed; the work is shipped (or accepted, for non-code tickets). |
+| `In Review` | Optional: implementation done but implementer wants explicit human review before closing. Skippable when the implementer is confident. |
+| `Done` | Work is complete and shipped (or accepted, for non-code tickets). Reopened to `In Progress` if QA later finds an issue. |
 | `Canceled` | Won't do — leave a comment explaining why. |
 | `Duplicate` | Dupe of another issue — link the canonical ticket in a comment. |
 
@@ -64,8 +64,10 @@ Transitions worth noting:
 
 - `Backlog` → `Todo`: when you commit to doing it in the near term.
 - `Todo` → `In Progress`: when implementation actually begins.
-- `In Progress` → `In Review`: when the implementer believes the work is complete and needs QA. Shipping/merging does **not** auto-transition; the implementer moves it.
-- `In Review` → `Done`: only the human reviewer moves a ticket to Done.
+- `In Progress` → `Done`: default close-out — when the implementer (agent or human) considers the work complete.
+- `In Progress` → `In Review`: optional intermediate handoff when the implementer wants explicit human review before the ticket is marked done.
+- `In Review` → `Done`: either the implementer (after addressing review feedback) or the reviewer moves it.
+- `Done` → `In Progress`: human reopens if QA finds an issue.
 - Any → `Canceled` / `Duplicate`: leave a comment.
 
 ## Priority
@@ -139,10 +141,14 @@ When an agent (Codex, Claude Code, etc.) is working on a ticket:
 
 - **Status changes the agent makes:**
   - `Backlog` / `Todo` → `In Progress` when implementation begins.
-  - `In Progress` → `In Review` when the agent believes implementation is complete and is handing off for human QA. The agent is the implementer of record for tickets it works on, so this transition is its responsibility — not the user's.
+  - `In Progress` → `Done` when the agent considers the work complete (all acceptance criteria met, validation run, code shipped). This is the default close-out — the agent owns the full lifecycle.
+  - `In Progress` → `In Review` (optional) when the agent wants explicit human review *before* closing — e.g., the change is risky, the acceptance criteria are subjective, or the agent is not confident the work is correct.
+  - `In Review` → `Done` if the agent later confirms the work is complete (e.g., after fixing review feedback).
 - **Status changes the agent does NOT make:**
-  - `In Review` → `Done` — only the human reviewer moves to Done, after QA passes.
-  - Shipping/merging never auto-transitions any status. Move to `In Review` because implementation is finished, not because code landed in `main`.
+  - Shipping/merging never auto-transitions any status. Move to `Done` because implementation is finished, not because code landed in `main`.
+  - Don't move someone else's ticket through statuses unless you're picking up the work yourself.
+
+If QA later finds an issue with a `Done` ticket, the human reopens it (back to `In Progress`) or opens a follow-up ticket — closing `Done` is a default, not a guarantee.
 - **Comments:**
   - Add a comment when the agent records a decision, investigation result, or non-obvious choice.
   - Do NOT add routine progress comments ("commit made", "tests passing") — those signals live in git history.
