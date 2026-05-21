@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@vayada/marketplace-shared": "*",
     "clsx": "^2.0.0",
     "countries-list": "^3.2.2",
     "emoji-picker-react": "^4.9.2",

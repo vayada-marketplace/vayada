@@ -47,13 +47,7 @@
     "serialize-javascript": "$serialize-javascript"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,cjs}": [
-      "prettier --write"
-    ],
-    "apps/**/*.{js,jsx,ts,tsx,mjs,cjs}": [
-      "eslint --fix --no-warn-ignored"
-    ],
-    "*.{json,md,mdx,yml,yaml,css}": [
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,md,mdx,yml,yaml,css}": [
       "prettier --write"
     ],
     "*.py": [

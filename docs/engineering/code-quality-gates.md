@@ -91,12 +91,14 @@ That issue lives downstream of cleanup work, not before it.
 
 Local hooks run automatically on commit and push. They are advisory: CI is still the authoritative gate.
 
-| Hook         | What runs                                                                                                                     | When it fires      |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `pre-commit` | `lint-staged` — Prettier + ESLint --fix on touched JS/TS, Prettier on MD/YAML/CSS/JSON, Ruff check + format on touched Python | Every `git commit` |
-| `pre-push`   | `npm run typecheck` across workspaces                                                                                         | Every `git push`   |
+| Hook         | What runs                                                                                         | When it fires      |
+| ------------ | ------------------------------------------------------------------------------------------------- | ------------------ |
+| `pre-commit` | `lint-staged` — Prettier on touched JS/TS/JSON/MD/YAML/CSS; Ruff check + format on touched Python | Every `git commit` |
+| `pre-push`   | `npm run typecheck` across workspaces                                                             | Every `git push`   |
 
 Both hooks operate on touched files only (or `--if-present` workspaces), so baseline drift is **not** a blocker for unrelated commits.
+
+ESLint is **not** in lint-staged. ESLint 9's config discovery starts at CWD, not at the file location, and our per-app `eslint.config.mjs` files aren't found when ESLint is invoked from the repo root. The proper fix is to consolidate ESLint config at the repo root with `files:` globs scoping rules to `apps/**`; until that lands, ESLint runs in `npm run lint` (per-app) and in each app's Next.js build during CI — which already catches the failures pre-commit would have.
 
 ### Install
 

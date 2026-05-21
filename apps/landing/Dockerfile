@@ -1,26 +1,23 @@
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
+# Monorepo-aware Dockerfile.
+# Build context is the repo root (workflow sets context: .).
+# Workspace package @vayada/marketplace-shared is resolved from packages/.
+
+# Stage 1: Builder
+FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
-RUN npm ci
-
-# Stage 2: Builder
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Accept build argument for API URL
+RUN npm ci
+
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
-# Build the application
+WORKDIR /app/apps/landing
 RUN npm run build
 
-# Stage 3: Runner
+# Stage 2: Runner — Next.js standalone output
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -29,15 +26,9 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files from standalone build
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/landing/.next/static
-# Public assets are not bundled into the standalone output; copy them explicitly
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./apps/landing/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/landing/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/landing/.next/static ./apps/landing/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/landing/public ./apps/landing/public
 
 USER nextjs
 
@@ -46,4 +37,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; fi; if [ -f app/server.js ]; then exec node app/server.js; fi; exec node apps/landing/server.js"]
+CMD ["node", "apps/landing/server.js"]

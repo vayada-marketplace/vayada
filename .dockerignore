@@ -1,0 +1,41 @@
+# Dependencies & lockfiles
+**/node_modules
+**/.npm
+**/.pnpm-store
+
+# Build artifacts
+**/.next
+**/out
+**/build
+**/dist
+**/.turbo
+**/.docusaurus
+
+# Local env (never bake secrets into images)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# VCS / IDE / OS
+.git
+.github
+.husky
+.claude
+.vscode
+.idea
+.DS_Store
+
+# Tests / coverage
+**/coverage
+**/.nyc_output
+
+# Terraform
+infra/.terraform
+**/terraform.tfvars
+**/*.tfplan
+
+# Docs site build output
+docs/build
+
+# Logs
+**/*.log
