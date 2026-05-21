@@ -1,3 +1,4 @@
+const path = require('path')
 const createNextIntlPlugin = require('next-intl/plugin')
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
@@ -6,6 +7,9 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  turbopack: {
+    root: path.join(__dirname, '../..'),
+  },
   images: {
     remotePatterns: [
       {

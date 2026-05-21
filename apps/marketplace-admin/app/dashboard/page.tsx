@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { usersService } from '@/services/api'
@@ -49,7 +49,7 @@ function setScrollTop(target: HTMLElement | Window, top: number): void {
   }
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [users, setUsers] = useState<User[]>([])
@@ -620,5 +620,13 @@ export default function DashboardPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="p-6" />}>
+      <DashboardContent />
+    </Suspense>
   )
 }

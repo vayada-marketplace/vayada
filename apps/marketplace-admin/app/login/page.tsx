@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { authService } from '@/services/auth'
 import { ApiErrorResponse } from '@/services/api/client'
 import LoginForm from '@/components/auth/LoginForm'
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -82,5 +82,13 @@ export default function LoginPage() {
         />
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LoginContent />
+    </Suspense>
   )
 }

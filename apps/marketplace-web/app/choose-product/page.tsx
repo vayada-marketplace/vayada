@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowRightIcon,
@@ -43,7 +43,7 @@ const PRODUCTS: ProductCard[] = [
   },
 ]
 
-export default function ChooseProductPage() {
+function ChooseProductContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   // Keep the chooser hidden until we've decided whether to auto-skip, so a
@@ -167,5 +167,13 @@ export default function ChooseProductPage() {
 
       <LandingFooter />
     </main>
+  )
+}
+
+export default function ChooseProductPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-white text-ink" />}>
+      <ChooseProductContent />
+    </Suspense>
   )
 }

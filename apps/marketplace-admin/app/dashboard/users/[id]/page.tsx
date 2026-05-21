@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
@@ -32,7 +32,7 @@ const COUNTRIES = [
   'United States', 'Vietnam'
 ].sort()
 
-export default function UserDetailPage() {
+function UserDetailContent() {
   const router = useRouter()
   const params = useParams()
   const searchParams = useSearchParams()
@@ -3154,5 +3154,13 @@ export default function UserDetailPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function UserDetailPage() {
+  return (
+    <Suspense fallback={<div className="p-6" />}>
+      <UserDetailContent />
+    </Suspense>
   )
 }

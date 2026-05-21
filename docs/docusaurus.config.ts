@@ -7,10 +7,6 @@ const config: Config = {
   tagline: 'Internal documentation for the vayada team',
   favicon: 'img/favicon.ico',
 
-  future: {
-    v4: true,
-  },
-
   url: 'https://docs.vayada.com',
   baseUrl: '/',
 

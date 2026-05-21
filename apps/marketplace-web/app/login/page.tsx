@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ROUTES, STORAGE_KEYS } from '@/lib/constants'
@@ -11,7 +11,7 @@ import type { UserType } from '@/lib/types'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import LoginForm from '@/components/auth/LoginForm'
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -136,5 +136,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex" />}>
+      <LoginContent />
+    </Suspense>
   )
 }

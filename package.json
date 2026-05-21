@@ -36,5 +36,15 @@
     "lint:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run lint",
     "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
     "lint:pms-web": "npm --workspace vayada-pms-frontend run lint"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "serialize-javascript": "$serialize-javascript"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
+    "postcss": "^8.5.10",
+    "serialize-javascript": "^7.0.5"
   }
 }
