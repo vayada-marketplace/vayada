@@ -61,10 +61,12 @@ The repo uses **npm workspaces** because the imported apps already use npm `pack
 
 Before claiming a change is complete:
 
-- **Backend (FastAPI)** — run `python -m pytest` in the affected app.
+- **Backend (FastAPI)** — run `python -m pytest` in the affected app. `ruff check <changed-paths>` for new code.
 - **Frontend (Next.js)** — run `npm run build` (and `npm run lint` if the change is non-trivial). The dev server is not enough — Next builds catch type/import errors the dev server misses.
 - **Cross-app or workspace changes** — also run root `npm run build` / `npm run typecheck` to confirm no workspace consumer broke.
 - **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness.
+
+Formatting (Prettier for JS/TS/MD/YAML/CSS, Ruff for Python) is wired up but **not enforced** across the existing codebase yet. Touched files should be clean; pre-existing drift is acceptable. Full operating model: [`docs/engineering/code-quality-gates.md`](docs/engineering/code-quality-gates.md).
 
 If a check cannot be run locally (env, secrets, infra), say so explicitly rather than claiming success.
 

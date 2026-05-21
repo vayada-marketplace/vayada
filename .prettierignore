@@ -1,0 +1,28 @@
+# Dependencies & lockfiles
+node_modules
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build artifacts
+.next
+out
+build
+dist
+.turbo
+.docusaurus
+
+# Generated
+**/migrations/**
+**/.terraform/**
+**/*.tfplan
+infra/.terraform/**
+
+# Tests / coverage
+coverage
+
+# Python (formatted by Ruff)
+**/*.py
+
+# Other tool-managed
+.git

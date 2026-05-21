@@ -21,6 +21,10 @@
     "build": "npm --workspaces --if-present run build",
     "lint": "npm --workspaces --if-present run lint",
     "typecheck": "npm --workspaces --if-present run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:python": "ruff check .",
+    "format:python": "ruff format .",
     "build:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run build",
     "build:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run build",
     "build:booking-web": "npm --workspace vayada-booking-engine-frontend run build",
@@ -45,6 +49,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
     "postcss": "^8.5.10",
+    "prettier": "^3.5.3",
     "serialize-javascript": "^7.0.5"
   }
 }

@@ -1,0 +1,41 @@
+# Root tool config for Python apps.
+# Each app under apps/*-api uses its own requirements.txt and pytest setup;
+# this file holds shared Ruff lint/format config so the same rules apply
+# across marketplace-api, booking-api, and pms-api.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+# Apply to the three FastAPI apps; ignore migrations and test fixtures.
+include = ["apps/*-api/**/*.py", "auth-db/scripts/**/*.py", "scripts/**/*.py"]
+extend-exclude = [
+  "**/migrations/**",
+  "**/__pycache__/**",
+  "**/.venv/**",
+  "**/venv/**",
+]
+
+[tool.ruff.lint]
+# Conservative baseline — focus on real bugs, not style nits.
+# E   = pycodestyle errors
+# F   = pyflakes (undefined names, unused imports)
+# I   = isort (import sorting)
+# UP  = pyupgrade (modernize syntax for target-version)
+# B   = flake8-bugbear (likely bugs)
+select = ["E", "F", "I", "UP", "B"]
+
+# Things to leave warnings-only or skip until a dedicated cleanup ratchet.
+ignore = [
+  "E501",  # line-too-long — Ruff format handles wrapping; rest is acceptable noise
+  "B008",  # function call in default arg — FastAPI uses Depends() this way
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["E", "F401", "F811"]  # tests use fixtures and re-import freely
+"**/conftest.py" = ["F401", "F811"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
