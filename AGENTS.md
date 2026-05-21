@@ -78,8 +78,9 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 ## Linear workflow
 
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
-- Shipping does **not** touch Linear.
-- The user moves **In Progress → In Review** manually after their own QA.
+- Ticket → **In Review** when the agent believes implementation is complete and is handing off for human QA.
+- Shipping/merging does **not** auto-transition any status.
+- The user owns **In Review → Done** after QA passes.
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
 

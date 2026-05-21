@@ -139,10 +139,10 @@ When an agent (Codex, Claude Code, etc.) is working on a ticket:
 
 - **Status changes the agent makes:**
   - `Backlog` / `Todo` → `In Progress` when implementation begins.
+  - `In Progress` → `In Review` when the agent believes implementation is complete and is handing off for human QA. The agent is the implementer of record for tickets it works on, so this transition is its responsibility — not the user's.
 - **Status changes the agent does NOT make:**
-  - `In Progress` → `In Review` — the human implementer decides when QA-ready.
-  - `In Review` → `Done` — only the human reviewer moves to Done.
-  - Shipping/merging never auto-transitions.
+  - `In Review` → `Done` — only the human reviewer moves to Done, after QA passes.
+  - Shipping/merging never auto-transitions any status. Move to `In Review` because implementation is finished, not because code landed in `main`.
 - **Comments:**
   - Add a comment when the agent records a decision, investigation result, or non-obvious choice.
   - Do NOT add routine progress comments ("commit made", "tests passing") — those signals live in git history.
