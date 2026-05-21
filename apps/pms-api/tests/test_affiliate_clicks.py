@@ -1,16 +1,17 @@
 """
 Tests for affiliate click tracking — public click endpoint + admin stats.
 """
-from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_affiliate,
-    create_test_room_type,
-    create_test_booking,
-    get_auth_headers,
-)
+
 from app.database import Database
 
+from tests.conftest import (
+    create_test_affiliate,
+    create_test_booking,
+    create_test_hotel,
+    create_test_room_type,
+    create_test_user,
+    get_auth_headers,
+)
 
 # ── Public click endpoint ───────────────────────────────────────
 
@@ -208,11 +209,13 @@ class TestAdminAffiliateClickStats:
 
         # Create 1 booking attributed to this affiliate
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
         )
         await Database.execute(
             "UPDATE bookings SET affiliate_id = $1 WHERE id = $2",
-            aff["id"], booking["id"],
+            aff["id"],
+            booking["id"],
         )
 
         resp = await client.get(
@@ -260,11 +263,13 @@ class TestAdminAffiliateClickStats:
 
         # Create a booking attributed to affiliate (but no clicks)
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
         )
         await Database.execute(
             "UPDATE bookings SET affiliate_id = $1 WHERE id = $2",
-            aff["id"], booking["id"],
+            aff["id"],
+            booking["id"],
         )
 
         resp = await client.get(

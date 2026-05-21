@@ -2,20 +2,19 @@
 
 These are the outbound writes that publish vayada inventory + rates +
 rules to Channex (which fans them out to OTAs)."""
+
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Optional
 
-from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.channex_mapping_repo import (
-    ChannexConnectionRepository,
-    ChannexRoomTypeMappingRepository,
-    ChannexRatePlanMappingRepository,
     ChannexChannelMarkupRepository,
+    ChannexConnectionRepository,
+    ChannexRatePlanMappingRepository,
+    ChannexRoomTypeMappingRepository,
 )
+from app.repositories.room_type_repo import RoomTypeRepository
 from app.services import channex_service
-
 from app.services.channex._common import SYNC_HORIZON_DAYS, _count_local_blocks
 from app.utils import parse_jsonb
 
@@ -28,8 +27,8 @@ logger = logging.getLogger(__name__)
 async def push_availability_for_room_type(
     hotel_id: str,
     room_type_id: str,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> None:
     """Calculate and push availability for a room type to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -68,13 +67,15 @@ async def push_availability_for_room_type(
 
         if prev_available is not None and available != prev_available:
             # Flush previous batch
-            values.append({
-                "property_id": channex_property_id,
-                "room_type_id": channex_room_type_id,
-                "date_from": batch_start.isoformat(),
-                "date_to": (current - timedelta(days=1)).isoformat(),
-                "availability": prev_available,
-            })
+            values.append(
+                {
+                    "property_id": channex_property_id,
+                    "room_type_id": channex_room_type_id,
+                    "date_from": batch_start.isoformat(),
+                    "date_to": (current - timedelta(days=1)).isoformat(),
+                    "availability": prev_available,
+                }
+            )
             batch_start = current
 
         prev_available = available
@@ -82,13 +83,15 @@ async def push_availability_for_room_type(
 
     # Flush last batch
     if prev_available is not None:
-        values.append({
-            "property_id": channex_property_id,
-            "room_type_id": channex_room_type_id,
-            "date_from": batch_start.isoformat(),
-            "date_to": (current - timedelta(days=1)).isoformat(),
-            "availability": prev_available,
-        })
+        values.append(
+            {
+                "property_id": channex_property_id,
+                "room_type_id": channex_room_type_id,
+                "date_from": batch_start.isoformat(),
+                "date_to": (current - timedelta(days=1)).isoformat(),
+                "availability": prev_available,
+            }
+        )
 
     if not values:
         return
@@ -97,12 +100,14 @@ async def push_availability_for_room_type(
         await channex_service.push_availability(api_key, values)
         logger.info(
             "Pushed availability for room type %s (%d ranges)",
-            room_type_id, len(values),
+            room_type_id,
+            len(values),
         )
     except Exception as e:
         logger.error(
             "Failed to push availability for room type %s: %s",
-            room_type_id, e,
+            room_type_id,
+            e,
         )
 
 
@@ -223,9 +228,9 @@ async def push_restrictions_for_rate_plan(
     channex_rate_plan_id: str,
     plan_name: str = "standard",
     channel: str = "direct",
-    markup_pct: Optional[Decimal] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    markup_pct: Decimal | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     meal_plan_code: int = 0,
 ) -> None:
     """Calculate and push rates + restrictions for a single rate plan to Channex."""
@@ -256,25 +261,33 @@ async def push_restrictions_for_rate_plan(
     prev_restr = None
 
     while current <= end_date:
-        restr = _build_restriction_entry(
-            room_type, current, plan_name, markup_pct, meal_plan_code
-        )
+        restr = _build_restriction_entry(room_type, current, plan_name, markup_pct, meal_plan_code)
 
         if prev_restr is not None and not _restrictions_equal(prev_restr, restr):
-            values.append(_restriction_to_value(
-                prev_restr, channex_property_id, channex_rate_plan_id,
-                batch_start, current - timedelta(days=1),
-            ))
+            values.append(
+                _restriction_to_value(
+                    prev_restr,
+                    channex_property_id,
+                    channex_rate_plan_id,
+                    batch_start,
+                    current - timedelta(days=1),
+                )
+            )
             batch_start = current
 
         prev_restr = restr
         current = current + timedelta(days=1)
 
     if prev_restr is not None:
-        values.append(_restriction_to_value(
-            prev_restr, channex_property_id, channex_rate_plan_id,
-            batch_start, current - timedelta(days=1),
-        ))
+        values.append(
+            _restriction_to_value(
+                prev_restr,
+                channex_property_id,
+                channex_rate_plan_id,
+                batch_start,
+                current - timedelta(days=1),
+            )
+        )
 
     if not values:
         return
@@ -288,21 +301,30 @@ async def push_restrictions_for_rate_plan(
             "channex_ari_push room_type=%s channex_rate_plan=%s channel=%s "
             "plan=%s meal_plan_code=%d markup_pct=%s date_from=%s date_to=%s "
             "rate=%s",
-            room_type_id, channex_rate_plan_id, channel, plan_name,
-            meal_plan_code, markup_pct,
-            v["date_from"], v["date_to"], v["rate"],
+            room_type_id,
+            channex_rate_plan_id,
+            channel,
+            plan_name,
+            meal_plan_code,
+            markup_pct,
+            v["date_from"],
+            v["date_to"],
+            v["rate"],
         )
 
     try:
         await channex_service.push_restrictions(api_key, values)
         logger.info(
             "Pushed restrictions for room type %s rate plan %s (%d ranges)",
-            room_type_id, channex_rate_plan_id, len(values),
+            room_type_id,
+            channex_rate_plan_id,
+            len(values),
         )
     except Exception as e:
         logger.error(
             "Failed to push restrictions for room type %s: %s",
-            room_type_id, e,
+            room_type_id,
+            e,
         )
 
 
@@ -317,10 +339,11 @@ async def push_restrictions_for_rate_plan(
 # the channel iframe rather than the rate-plan API. We skip Airbnb mappings
 # here; hosts continue to manage Airbnb's policy through the iframe.
 
+
 def _build_cancellation_policy(
     room_type: dict,
     channel: str,
-) -> Optional[List[dict]]:
+) -> list[dict] | None:
     """Build Channex cancellation_policies entries for a flexible rate plan.
 
     Returns a list of policy entries, or None if the channel can't accept a
@@ -390,21 +413,28 @@ async def push_cancellation_policy_for_room_type(
             logger.info(
                 "Skipping cancellation policy push for room type %s on %s "
                 "(channel uses preset policies)",
-                room_type_id, channel,
+                room_type_id,
+                channel,
             )
             continue
 
         rate_plan_id = str(rp["channex_rate_plan_id"])
         try:
             await channex_service.update_rate_plan_cancellation_policy(
-                api_key, rate_plan_id, policies=policies,
+                api_key,
+                rate_plan_id,
+                policies=policies,
             )
             logger.info(
                 "Pushed cancellation policy for room type %s rate plan %s (%s)",
-                room_type_id, rate_plan_id, channel,
+                room_type_id,
+                rate_plan_id,
+                channel,
             )
         except Exception as e:
             logger.error(
                 "Failed to push cancellation policy for room type %s rate plan %s: %s",
-                room_type_id, rate_plan_id, e,
+                room_type_id,
+                rate_plan_id,
+                e,
             )

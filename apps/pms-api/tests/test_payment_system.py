@@ -2,22 +2,24 @@
 Tests for the payment system: Stripe integration, host approval flow,
 payment settings, cancellation policies, and payouts.
 """
+
+from datetime import UTC, date, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from datetime import date, datetime, timedelta, timezone
-from unittest.mock import patch, AsyncMock, MagicMock
-from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
-    create_test_booking,
-    create_test_booking_with_payment,
-    create_test_payment_settings,
-    create_test_cancellation_policy,
-    create_test_affiliate,
-    get_auth_headers,
-)
 from app.database import Database
 
+from tests.conftest import (
+    create_test_affiliate,
+    create_test_booking,
+    create_test_booking_with_payment,
+    create_test_cancellation_policy,
+    create_test_hotel,
+    create_test_payment_settings,
+    create_test_room_type,
+    create_test_user,
+    get_auth_headers,
+)
 
 # ── Mock Stripe responses ────────────────────────────────────────
 
@@ -43,9 +45,15 @@ def mock_create_refund(pi_id, amount=None):
 
 
 STRIPE_MOCKS = {
-    "app.services.stripe_service.create_payment_intent": AsyncMock(side_effect=mock_create_payment_intent),
-    "app.services.stripe_service.capture_payment_intent": AsyncMock(side_effect=mock_capture_payment_intent),
-    "app.services.stripe_service.cancel_payment_intent": AsyncMock(side_effect=mock_cancel_payment_intent),
+    "app.services.stripe_service.create_payment_intent": AsyncMock(
+        side_effect=mock_create_payment_intent
+    ),
+    "app.services.stripe_service.capture_payment_intent": AsyncMock(
+        side_effect=mock_capture_payment_intent
+    ),
+    "app.services.stripe_service.cancel_payment_intent": AsyncMock(
+        side_effect=mock_cancel_payment_intent
+    ),
     "app.services.stripe_service.create_refund": AsyncMock(side_effect=mock_create_refund),
 }
 
@@ -71,7 +79,9 @@ class TestCreateBookingRequest:
             stripe_connect_onboarded=True,
         )
 
-        with patch("app.services.stripe_service.create_payment_intent", new_callable=AsyncMock) as mock_pi:
+        with patch(
+            "app.services.stripe_service.create_payment_intent", new_callable=AsyncMock
+        ) as mock_pi:
             mock_pi.return_value = {
                 "id": "pi_test_card",
                 "client_secret": "pi_test_card_secret_xyz",
@@ -132,9 +142,12 @@ class TestCreateBookingRequest:
         assert body["clientSecret"] is None
         assert body["booking"]["status"] == "pending"
 
-    async def test_booking_rejected_when_method_not_allowed_for_rate(self, client, cleanup_database):
+    async def test_booking_rejected_when_method_not_allowed_for_rate(
+        self, client, cleanup_database
+    ):
         """Rate-level rate_payment_methods list must gate booking creation."""
         import json as _json
+
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
@@ -167,6 +180,7 @@ class TestCreateBookingRequest:
     async def test_booking_allowed_when_method_in_rate_list(self, client, cleanup_database):
         """An allowed method for the selected rate should go through."""
         import json as _json
+
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
@@ -288,15 +302,22 @@ class TestConfirmAuthorization:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="card", payment_status="unpaid",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="card",
+            payment_status="unpaid",
         )
 
         # Insert a payment record
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_auth", "pending",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_auth",
+            "pending",
         )
 
         resp = await client.post(
@@ -313,8 +334,10 @@ class TestConfirmAuthorization:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            status="confirmed", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            status="confirmed",
+            payment_status="captured",
         )
 
         resp = await client.post(
@@ -363,9 +386,7 @@ class TestCardPaymentDraft:
         assert resp.status_code == 200, resp.text
         return resp.json()
 
-    async def test_card_request_creates_draft_not_booking(
-        self, client, hotel_with_rooms
-    ):
+    async def test_card_request_creates_draft_not_booking(self, client, hotel_with_rooms):
         """No booking row should exist at the end of POST /bookings — only
         a draft. Inventory comes from the soft hold, not a pending row."""
         body = await self._create_card_draft(
@@ -385,7 +406,7 @@ class TestCardPaymentDraft:
         )
         assert draft is not None
         assert draft["stripe_payment_intent_id"] == "pi_draft_test"
-        assert draft["expires_at"] > datetime.now(timezone.utc)
+        assert draft["expires_at"] > datetime.now(UTC)
 
     async def test_draft_holds_inventory(self, client, cleanup_database):
         """A second guest can't book the same date range while a draft is
@@ -397,9 +418,7 @@ class TestCardPaymentDraft:
         await self._create_card_draft(client, hotel, room, pi_id="pi_first")
 
         # Second guest tries to book — the draft must block them.
-        await create_test_payment_settings(
-            str(hotel["id"]), pay_at_property_enabled=True
-        )
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
             json={
@@ -427,14 +446,11 @@ class TestCardPaymentDraft:
 
         # Force-expire the draft (no time machine in tests).
         await Database.execute(
-            "UPDATE booking_drafts SET expires_at = NOW() - INTERVAL '1 minute' "
-            "WHERE id = $1",
+            "UPDATE booking_drafts SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
             body["draftId"],
         )
 
-        await create_test_payment_settings(
-            str(hotel["id"]), pay_at_property_enabled=True
-        )
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
             json={
@@ -551,9 +567,7 @@ class TestCardPaymentDraft:
             pi_id="pi_webhook_materialize",
         )
 
-        with patch(
-            "app.services.stripe_service.construct_webhook_event"
-        ) as mock_construct:
+        with patch("app.services.stripe_service.construct_webhook_event") as mock_construct:
             mock_construct.return_value = {
                 "type": "payment_intent.amount_capturable_updated",
                 "data": {"object": {"id": "pi_webhook_materialize"}},
@@ -578,9 +592,7 @@ class TestCardPaymentDraft:
         assert draft_row is not None
         assert draft_row["materialized_booking_id"] == booking_row["id"]
 
-    async def test_webhook_payment_failed_drops_draft(
-        self, client, hotel_with_rooms
-    ):
+    async def test_webhook_payment_failed_drops_draft(self, client, hotel_with_rooms):
         """A failed PaymentIntent must release the soft hold; no booking
         row is ever created in this branch."""
         body = await self._create_card_draft(
@@ -590,9 +602,7 @@ class TestCardPaymentDraft:
             pi_id="pi_failed",
         )
 
-        with patch(
-            "app.services.stripe_service.construct_webhook_event"
-        ) as mock_construct:
+        with patch("app.services.stripe_service.construct_webhook_event") as mock_construct:
             mock_construct.return_value = {
                 "type": "payment_intent.payment_failed",
                 "data": {"object": {"id": "pi_failed"}},
@@ -627,16 +637,25 @@ class TestHostAcceptReject:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="card", payment_status="authorized",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="card",
+            payment_status="authorized",
         )
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_capture", "authorized",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_capture",
+            "authorized",
         )
 
-        with patch("app.services.stripe_service.capture_payment_intent", new_callable=AsyncMock) as mock_capture:
+        with patch(
+            "app.services.stripe_service.capture_payment_intent", new_callable=AsyncMock
+        ) as mock_capture:
             mock_capture.return_value = {"id": "pi_test_capture", "status": "succeeded"}
 
             resp = await client.post(
@@ -658,8 +677,10 @@ class TestHostAcceptReject:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="pay_at_property", payment_status="pay_at_property",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="pay_at_property",
+            payment_status="pay_at_property",
         )
 
         resp = await client.post(
@@ -676,16 +697,25 @@ class TestHostAcceptReject:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="card", payment_status="authorized",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="card",
+            payment_status="authorized",
         )
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_reject", "authorized",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_reject",
+            "authorized",
         )
 
-        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+        with patch(
+            "app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock
+        ) as mock_cancel:
             mock_cancel.return_value = {"id": "pi_test_reject", "status": "canceled"}
 
             resp = await client.post(
@@ -704,8 +734,10 @@ class TestHostAcceptReject:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            status="confirmed", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            status="confirmed",
+            payment_status="captured",
         )
 
         resp = await client.post(
@@ -720,7 +752,8 @@ class TestHostAcceptReject:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
         )
 
         resp = await client.post(f"/admin/bookings/{booking['id']}/reject")
@@ -739,17 +772,26 @@ class TestGuestWithdraw:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="card", payment_status="authorized",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="card",
+            payment_status="authorized",
             guest_email="withdraw@test.com",
         )
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_withdraw", "authorized",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_withdraw",
+            "authorized",
         )
 
-        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+        with patch(
+            "app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock
+        ) as mock_cancel:
             mock_cancel.return_value = {"id": "pi_test_withdraw", "status": "canceled"}
 
             resp = await client.post(
@@ -767,7 +809,8 @@ class TestGuestWithdraw:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             guest_email="correct@test.com",
         )
 
@@ -783,8 +826,10 @@ class TestGuestWithdraw:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            status="confirmed", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            status="confirmed",
+            payment_status="captured",
             guest_email="guest@test.com",
         )
 
@@ -810,18 +855,29 @@ class TestGuestCancellation:
 
         # Check-in far away (30 days) → full refund
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-09-01", check_out="2026-09-05",
-            status="confirmed", payment_method="card", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-09-01",
+            check_out="2026-09-05",
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
             guest_email="cancel@test.com",
         )
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_refund", "captured",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_refund",
+            "captured",
         )
 
-        with patch("app.services.stripe_service.create_refund", new_callable=AsyncMock) as mock_refund:
+        with patch(
+            "app.services.stripe_service.create_refund", new_callable=AsyncMock
+        ) as mock_refund:
             mock_refund.return_value = {"id": "re_test", "status": "succeeded", "amount": 60000}
 
             resp = await client.post(
@@ -839,7 +895,8 @@ class TestGuestCancellation:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             guest_email="cancel@test.com",
         )
 
@@ -849,9 +906,7 @@ class TestGuestCancellation:
         )
         assert resp.status_code == 400
 
-    async def test_cancel_preview_partial_refund_within_window(
-        self, client, cleanup_database
-    ):
+    async def test_cancel_preview_partial_refund_within_window(self, client, cleanup_database):
         """Room with partial-refund cancellation type returns the configured
         percentage when guest cancels at least N days before check-in."""
         user = await create_test_user()
@@ -867,9 +922,13 @@ class TestGuestCancellation:
         check_in = (date.today() + timedelta(days=35)).isoformat()
         check_out = (date.today() + timedelta(days=39)).isoformat()
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            check_in=check_in, check_out=check_out,
-            status="confirmed", payment_method="card", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
             guest_email="partial@test.com",
         )
 
@@ -882,17 +941,13 @@ class TestGuestCancellation:
         assert body["refundPercentage"] == 50
         assert body["refundAmount"] == 300.0  # 50% of 4 nights × €150
 
-    async def test_cancel_preview_partial_refund_after_window(
-        self, client, cleanup_database
-    ):
+    async def test_cancel_preview_partial_refund_after_window(self, client, cleanup_database):
         """Cancellation after the window returns 0 refund regardless of
         the hotel-wide free_cancellation_days policy."""
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        await create_test_cancellation_policy(
-            str(hotel["id"]), free_cancellation_days=7
-        )
+        await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=7)
         await Database.execute(
             "UPDATE room_types SET flexible_cancellation_type = 'partial_refund', "
             "partial_refund_cancel_window_days = 30, partial_refund_amount_percent = 50 "
@@ -903,9 +958,13 @@ class TestGuestCancellation:
         check_in = (date.today() + timedelta(days=20)).isoformat()
         check_out = (date.today() + timedelta(days=24)).isoformat()
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            check_in=check_in, check_out=check_out,
-            status="confirmed", payment_method="card", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
             guest_email="partial@test.com",
         )
 
@@ -918,23 +977,23 @@ class TestGuestCancellation:
         assert body["refundPercentage"] == 0
         assert body["refundAmount"] == 0
 
-    async def test_cancel_preview_free_cancellation_unchanged(
-        self, client, cleanup_database
-    ):
+    async def test_cancel_preview_free_cancellation_unchanged(self, client, cleanup_database):
         """Default free-cancellation rooms still use the hotel-wide policy."""
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        await create_test_cancellation_policy(
-            str(hotel["id"]), free_cancellation_days=7
-        )
+        await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=7)
 
         check_in = (date.today() + timedelta(days=14)).isoformat()
         check_out = (date.today() + timedelta(days=18)).isoformat()
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            check_in=check_in, check_out=check_out,
-            status="confirmed", payment_method="card", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
             guest_email="free@test.com",
         )
 
@@ -960,9 +1019,11 @@ class TestBookingStatus:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             guest_email="poll@test.com",
-            payment_method="card", payment_status="authorized",
+            payment_method="card",
+            payment_status="authorized",
         )
 
         resp = await client.get(
@@ -999,9 +1060,7 @@ class TestPaymentSettingsPublic:
         """Returns defaults when no settings configured."""
         hotel = hotel_with_rooms["hotel"]
 
-        resp = await client.get(
-            f"/api/hotels/{hotel['slug']}/payment-settings"
-        )
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
         assert resp.status_code == 200
         body = resp.json()
         assert body["payAtPropertyEnabled"] is False
@@ -1014,9 +1073,7 @@ class TestPaymentSettingsPublic:
         await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
         await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=14)
 
-        resp = await client.get(
-            f"/api/hotels/{hotel['slug']}/payment-settings"
-        )
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
         assert resp.status_code == 200
         body = resp.json()
         assert body["payAtPropertyEnabled"] is True
@@ -1158,7 +1215,8 @@ class TestPaymentSettingsAdmin:
                 0, 0, 0
             )
             """,
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
         )
         booking_id = await Database.fetchval(
             "SELECT id FROM bookings WHERE booking_reference = 'VAY-USD145'"
@@ -1173,12 +1231,15 @@ class TestPaymentSettingsAdmin:
 
         # Patch the booking-engine currency lookup (USD before the change)
         # and the FX call so the test stays hermetic.
-        with patch(
-            "app.routers.admin_payments._get_booking_engine_currency",
-            new=AsyncMock(return_value="USD"),
-        ), patch(
-            "app.routers.admin_payments.get_exchange_rate",
-            new=AsyncMock(return_value=16000.0),
+        with (
+            patch(
+                "app.routers.admin_payments._get_booking_engine_currency",
+                new=AsyncMock(return_value="USD"),
+            ),
+            patch(
+                "app.routers.admin_payments.get_exchange_rate",
+                new=AsyncMock(return_value=16000.0),
+            ),
         ):
             resp = await client.patch(
                 "/admin/payment-settings",
@@ -1225,15 +1286,19 @@ class TestPaymentSettingsAdmin:
                 1, 0, 1500000.00, 1500000.00, 'IDR', 'confirmed'
             )
             """,
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
         )
 
-        with patch(
-            "app.routers.admin_payments._get_booking_engine_currency",
-            new=AsyncMock(return_value="USD"),
-        ), patch(
-            "app.routers.admin_payments.get_exchange_rate",
-            new=AsyncMock(return_value=16000.0),
+        with (
+            patch(
+                "app.routers.admin_payments._get_booking_engine_currency",
+                new=AsyncMock(return_value="USD"),
+            ),
+            patch(
+                "app.routers.admin_payments.get_exchange_rate",
+                new=AsyncMock(return_value=16000.0),
+            ),
         ):
             resp = await client.patch(
                 "/admin/payment-settings",
@@ -1359,7 +1424,7 @@ class TestPayoutService:
     async def test_commission_plan_direct_no_affiliate(self, init_database):
         result = self._call(plan="commission")
         assert result == {
-            "platform_fee": 20.0,   # 2% BE fee
+            "platform_fee": 20.0,  # 2% BE fee
             "affiliate_commission": 0.0,
             "property_payout": 980.0,
         }
@@ -1367,7 +1432,7 @@ class TestPayoutService:
     async def test_commission_plan_ota_no_affiliate(self, init_database):
         result = self._call(plan="commission", channel="airbnb")
         assert result == {
-            "platform_fee": 30.0,   # 3% channel-manager fee
+            "platform_fee": 30.0,  # 3% channel-manager fee
             "affiliate_commission": 0.0,
             "property_payout": 970.0,
         }
@@ -1407,7 +1472,7 @@ class TestPayoutService:
             effective_affiliate_commission_pct=10.0,
         )
         assert result == {
-            "platform_fee": 20.0,     # 2% BE only; affiliate fee doesn't stack
+            "platform_fee": 20.0,  # 2% BE only; affiliate fee doesn't stack
             "affiliate_commission": 100.0,  # 10% of 1000, not clamped
             "property_payout": 880.0,
         }
@@ -1467,7 +1532,8 @@ class TestFetchBillingConfig:
     async def test_no_booking_db_url_returns_defaults(self, init_database):
         """Test/dev path: no booking_db configured → defaults."""
         from app.services.payout_service import (
-            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+            DEFAULT_BILLING_CONFIG,
+            fetch_billing_config,
         )
 
         with patch("app.services.payout_service.app_settings") as mock_settings:
@@ -1481,13 +1547,18 @@ class TestFetchBillingConfig:
     async def test_missing_row_logs_error_and_returns_defaults(self, init_database):
         """A missing booking_hotels row is logged at error level (data-integrity issue)."""
         from app.services.payout_service import (
-            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+            DEFAULT_BILLING_CONFIG,
+            fetch_billing_config,
         )
 
-        with patch("app.services.payout_service.app_settings") as mock_settings, \
-             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
-                   new=AsyncMock(return_value=None)), \
-             patch("app.services.payout_service.logger") as mock_logger:
+        with (
+            patch("app.services.payout_service.app_settings") as mock_settings,
+            patch(
+                "app.services.payout_service.BookingEngineDatabase.fetchrow",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("app.services.payout_service.logger") as mock_logger,
+        ):
             mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
             result = await fetch_billing_config("missing-hotel-id")
 
@@ -1498,13 +1569,18 @@ class TestFetchBillingConfig:
     async def test_query_exception_logs_error_and_returns_defaults(self, init_database):
         """A cross-DB exception is logged at error level and falls back safely."""
         from app.services.payout_service import (
-            DEFAULT_BILLING_CONFIG, fetch_billing_config,
+            DEFAULT_BILLING_CONFIG,
+            fetch_billing_config,
         )
 
-        with patch("app.services.payout_service.app_settings") as mock_settings, \
-             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
-                   new=AsyncMock(side_effect=RuntimeError("connection refused"))), \
-             patch("app.services.payout_service.logger") as mock_logger:
+        with (
+            patch("app.services.payout_service.app_settings") as mock_settings,
+            patch(
+                "app.services.payout_service.BookingEngineDatabase.fetchrow",
+                new=AsyncMock(side_effect=RuntimeError("connection refused")),
+            ),
+            patch("app.services.payout_service.logger") as mock_logger,
+        ):
             mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
             result = await fetch_billing_config("hotel-with-broken-conn")
 
@@ -1521,9 +1597,13 @@ class TestFetchBillingConfig:
             "channel_manager_fee_pct": 0.00,
             "affiliate_platform_fee_pct": 2.00,
         }
-        with patch("app.services.payout_service.app_settings") as mock_settings, \
-             patch("app.services.payout_service.BookingEngineDatabase.fetchrow",
-                   new=AsyncMock(return_value=row)):
+        with (
+            patch("app.services.payout_service.app_settings") as mock_settings,
+            patch(
+                "app.services.payout_service.BookingEngineDatabase.fetchrow",
+                new=AsyncMock(return_value=row),
+            ),
+        ):
             mock_settings.BOOKING_ENGINE_DATABASE_URL = "postgres://test"
             result = await fetch_billing_config("hotel-id")
 
@@ -1550,19 +1630,28 @@ class TestExpireBooking:
         room = await create_test_room_type(str(hotel["id"]))
 
         # Booking with deadline in the past
-        expired_deadline = datetime.now(timezone.utc) - timedelta(hours=1)
+        expired_deadline = datetime.now(UTC) - timedelta(hours=1)
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            payment_method="card", payment_status="authorized",
+            str(hotel["id"]),
+            str(room["id"]),
+            payment_method="card",
+            payment_status="authorized",
             host_response_deadline=expired_deadline,
         )
         await Database.execute(
             """INSERT INTO payments (booking_id, amount, currency, payment_method, stripe_payment_intent_id, status)
                VALUES ($1, $2, $3, $4, $5, $6)""",
-            str(booking["id"]), 600.0, "EUR", "card", "pi_test_expire", "authorized",
+            str(booking["id"]),
+            600.0,
+            "EUR",
+            "card",
+            "pi_test_expire",
+            "authorized",
         )
 
-        with patch("app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock) as mock_cancel:
+        with patch(
+            "app.services.stripe_service.cancel_payment_intent", new_callable=AsyncMock
+        ) as mock_cancel:
             mock_cancel.return_value = {"id": "pi_test_expire", "status": "canceled"}
             await expire_booking(str(booking["id"]))
 
@@ -1583,8 +1672,10 @@ class TestExpireBooking:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
-            status="confirmed", payment_status="captured",
+            str(hotel["id"]),
+            str(room["id"]),
+            status="confirmed",
+            payment_status="captured",
         )
 
         await expire_booking(str(booking["id"]))

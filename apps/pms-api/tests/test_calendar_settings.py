@@ -1,12 +1,12 @@
 """GET/PATCH /admin/calendar-settings — auto-rearrange opt-out toggle."""
+
 from app.database import Database
+
 from tests.conftest import get_auth_headers
 
 
 async def _get(client, token):
-    return await client.get(
-        "/admin/calendar-settings", headers=get_auth_headers(token)
-    )
+    return await client.get("/admin/calendar-settings", headers=get_auth_headers(token))
 
 
 async def _patch(client, token, enabled: bool):
@@ -18,17 +18,13 @@ async def _patch(client, token, enabled: bool):
 
 
 class TestCalendarSettings:
-    async def test_default_is_enabled_for_new_hotel(
-        self, client, hotel_with_rooms
-    ):
+    async def test_default_is_enabled_for_new_hotel(self, client, hotel_with_rooms):
         token = hotel_with_rooms["user"]["token"]
         resp = await _get(client, token)
         assert resp.status_code == 200, resp.text
         assert resp.json()["autoRearrangeEnabled"] is True
 
-    async def test_patch_disables_then_reads_back(
-        self, client, hotel_with_rooms
-    ):
+    async def test_patch_disables_then_reads_back(self, client, hotel_with_rooms):
         token = hotel_with_rooms["user"]["token"]
         resp = await _patch(client, token, False)
         assert resp.status_code == 200, resp.text

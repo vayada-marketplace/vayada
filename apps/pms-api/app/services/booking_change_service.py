@@ -23,25 +23,25 @@ Concurrency:
   booking" at the DB level. Submitting while another is pending
   raises ``ValueError``.
 """
+
 import asyncio
 import json
 import logging
 from datetime import date
-from typing import Optional
 
 from app.database import Database
-from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
+from app.repositories.booking_repo import BookingRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services.availability_service import compute_stay_pricing, remaining_for_stay
+from app.services.availability_service import compute_stay_pricing
 from app.services.booking_service import _compute_addon_total
 from app.services.channex.ari_push import push_availability_for_room_type
 from app.services.channex.orchestrator import push_ari_for_booking
 from app.services.email_service import (
-    send_host_change_request,
-    send_guest_change_request_received,
     send_guest_change_request_approved,
     send_guest_change_request_declined,
+    send_guest_change_request_received,
+    send_host_change_request,
     send_host_change_request_decision,
 )
 
@@ -103,7 +103,10 @@ async def _compute_change_pricing(
     """
     nights = _nights(new_check_in, new_check_out)
     pricing = compute_stay_pricing(
-        room_type, new_check_in, new_check_out, booking.get("adults"),
+        room_type,
+        new_check_in,
+        new_check_out,
+        booking.get("adults"),
         booking.get("rate_type") or "flexible",
     )
     rooms = int(booking.get("number_of_rooms") or 1)
@@ -169,11 +172,16 @@ async def _validate_and_price_change(
     # window minus the rooms this booking already holds in the overlap.
     # We do that by counting bookings excluding ourselves.
     from app.repositories.room_type_repo import RoomTypeRepository as RTR
+
     booked_others = await RTR.count_booked(
-        str(booking["room_type_id"]), payload_check_in, payload_check_out,
+        str(booking["room_type_id"]),
+        payload_check_in,
+        payload_check_out,
     )
     blocked = await RTR.count_blocked(
-        str(booking["room_type_id"]), payload_check_in, payload_check_out,
+        str(booking["room_type_id"]),
+        payload_check_in,
+        payload_check_out,
     )
     # The current booking is itself counted in `booked_others` for the
     # overlap of new dates with old dates, so subtract its share when the
@@ -186,18 +194,27 @@ async def _validate_and_price_change(
     remaining = max(0, room_type["total_rooms"] - effective_booked - blocked)
     available = remaining >= rooms_needed
 
-    new_total, new_nightly_rate, new_addon_total, new_addon_names, nights = (
-        await _compute_change_pricing(
-            slug, booking, room_type,
-            payload_check_in, payload_check_out,
-            addon_ids, addon_quantities, addon_dates,
-        )
+    (
+        new_total,
+        new_nightly_rate,
+        new_addon_total,
+        new_addon_names,
+        nights,
+    ) = await _compute_change_pricing(
+        slug,
+        booking,
+        room_type,
+        payload_check_in,
+        payload_check_out,
+        addon_ids,
+        addon_quantities,
+        addon_dates,
     )
     old_total = float(booking["total_amount"])
     price_diff = round(new_total - old_total, 2)
 
     blocked_flag = False
-    block_reason: Optional[str] = None
+    block_reason: str | None = None
     if not available:
         blocked_flag = True
         block_reason = "The selected dates are not available for this room."
@@ -229,9 +246,7 @@ def _ensure_change_allowed(booking: dict) -> None:
         raise ValueError("Only confirmed bookings can be changed")
 
 
-async def _load_booking_for_guest(
-    slug: str, booking_id: str, guest_email: str
-) -> dict:
+async def _load_booking_for_guest(slug: str, booking_id: str, guest_email: str) -> dict:
     """Resolve a booking by id and verify it belongs to this hotel slug
     and the guest email matches. Raises ValueError on any mismatch."""
     booking = await BookingRepository.get_by_id(booking_id)
@@ -262,16 +277,19 @@ async def preview_change(
     _ensure_change_allowed(booking)
     pending = await BookingChangeRequestRepository.get_pending_for_booking(booking_id)
     preview = await _validate_and_price_change(
-        slug, booking, check_in, check_out,
-        addon_ids, addon_quantities, addon_dates,
+        slug,
+        booking,
+        check_in,
+        check_out,
+        addon_ids,
+        addon_quantities,
+        addon_dates,
     )
     if pending:
         # Surface the existing-pending state so the UI can hide the form
         # rather than letting the guest type into a dead form.
         preview["blocked"] = True
-        preview["block_reason"] = (
-            "A change request is already pending approval for this booking."
-        )
+        preview["block_reason"] = "A change request is already pending approval for this booking."
     return {
         "oldTotal": preview["old_total"],
         "newTotal": preview["new_total"],
@@ -298,22 +316,23 @@ async def submit_change(
     booking = await _load_booking_for_guest(slug, booking_id, guest_email)
     _ensure_change_allowed(booking)
     if await BookingChangeRequestRepository.get_pending_for_booking(booking_id):
-        raise ValueError(
-            "A change request is already pending approval for this booking."
-        )
+        raise ValueError("A change request is already pending approval for this booking.")
 
     preview = await _validate_and_price_change(
-        slug, booking, check_in, check_out,
-        addon_ids, addon_quantities, addon_dates,
+        slug,
+        booking,
+        check_in,
+        check_out,
+        addon_ids,
+        addon_quantities,
+        addon_dates,
     )
     if preview["blocked"]:
         raise ValueError(preview["block_reason"] or "Change not allowed")
 
     # Reject no-op changes — saves the host an email about a request
     # that doesn't actually change anything.
-    same_dates = (
-        check_in == booking["check_in"] and check_out == booking["check_out"]
-    )
+    same_dates = check_in == booking["check_in"] and check_out == booking["check_out"]
     old_addon_ids = sorted(_parse_json_field(booking.get("addon_ids"), []))
     new_addon_ids = sorted(addon_ids)
     same_addons = (
@@ -324,43 +343,39 @@ async def submit_change(
     if same_dates and same_addons:
         raise ValueError("No changes detected")
 
-    cr_row = await BookingChangeRequestRepository.create({
-        "booking_id": booking_id,
-        "old_check_in": booking["check_in"],
-        "old_check_out": booking["check_out"],
-        "old_addon_ids": _parse_json_field(booking.get("addon_ids"), []),
-        "old_addon_quantities": _parse_json_field(booking.get("addon_quantities"), {}),
-        "old_addon_dates": _parse_json_field(booking.get("addon_dates"), {}),
-        "old_total": float(booking["total_amount"]),
-        "requested_check_in": check_in,
-        "requested_check_out": check_out,
-        "requested_addon_ids": addon_ids,
-        "requested_addon_quantities": addon_quantities,
-        "requested_addon_dates": addon_dates,
-        "requested_nightly_rate": preview["new_nightly_rate"],
-        "requested_addon_total": preview["new_addon_total"],
-        "requested_addon_names": preview["new_addon_names"],
-        "new_total": preview["new_total"],
-        "price_difference": preview["price_difference"],
-        "currency": booking["currency"],
-    })
+    cr_row = await BookingChangeRequestRepository.create(
+        {
+            "booking_id": booking_id,
+            "old_check_in": booking["check_in"],
+            "old_check_out": booking["check_out"],
+            "old_addon_ids": _parse_json_field(booking.get("addon_ids"), []),
+            "old_addon_quantities": _parse_json_field(booking.get("addon_quantities"), {}),
+            "old_addon_dates": _parse_json_field(booking.get("addon_dates"), {}),
+            "old_total": float(booking["total_amount"]),
+            "requested_check_in": check_in,
+            "requested_check_out": check_out,
+            "requested_addon_ids": addon_ids,
+            "requested_addon_quantities": addon_quantities,
+            "requested_addon_dates": addon_dates,
+            "requested_nightly_rate": preview["new_nightly_rate"],
+            "requested_addon_total": preview["new_addon_total"],
+            "requested_addon_names": preview["new_addon_names"],
+            "new_total": preview["new_total"],
+            "price_difference": preview["price_difference"],
+            "currency": booking["currency"],
+        }
+    )
 
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(
-            send_host_change_request(hotel["contact_email"], booking, cr_row)
-        )
-    asyncio.create_task(
-        send_guest_change_request_received(booking["guest_email"], booking, cr_row)
-    )
+        asyncio.create_task(send_host_change_request(hotel["contact_email"], booking, cr_row))
+    asyncio.create_task(send_guest_change_request_received(booking["guest_email"], booking, cr_row))
     return cr_row
 
 
-async def get_change_request_for_guest(
-    slug: str, booking_id: str, guest_email: str
-) -> Optional[dict]:
+async def get_change_request_for_guest(slug: str, booking_id: str, guest_email: str) -> dict | None:
     """Return the latest change request for a booking the guest can see.
     None when none exists — the UI uses this to decide whether to render
     the 'Change request pending' badge."""
@@ -368,7 +383,7 @@ async def get_change_request_for_guest(
     return await BookingChangeRequestRepository.get_latest_for_booking(str(booking["id"]))
 
 
-async def approve_change(change_request_id: str, *, hotel_id: Optional[str] = None) -> dict:
+async def approve_change(change_request_id: str, *, hotel_id: str | None = None) -> dict:
     """Apply an approved change to the booking. ``hotel_id`` is optional
     — when supplied (admin path), we double-check ownership."""
     cr = await BookingChangeRequestRepository.get_by_id(change_request_id)
@@ -390,13 +405,16 @@ async def approve_change(change_request_id: str, *, hotel_id: Optional[str] = No
     room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
     if room_type:
         from app.repositories.room_type_repo import RoomTypeRepository as RTR
+
         booked_others = await RTR.count_booked(
             str(booking["room_type_id"]),
-            cr["requested_check_in"], cr["requested_check_out"],
+            cr["requested_check_in"],
+            cr["requested_check_out"],
         )
         blocked = await RTR.count_blocked(
             str(booking["room_type_id"]),
-            cr["requested_check_in"], cr["requested_check_out"],
+            cr["requested_check_in"],
+            cr["requested_check_out"],
         )
         rooms_needed = int(booking.get("number_of_rooms") or 1)
         overlap_start = max(booking["check_in"], cr["requested_check_in"])
@@ -411,9 +429,7 @@ async def approve_change(change_request_id: str, *, hotel_id: Optional[str] = No
             )
 
     requested_addon_ids = _parse_json_field(cr.get("requested_addon_ids"), [])
-    requested_addon_quantities = _parse_json_field(
-        cr.get("requested_addon_quantities"), {}
-    )
+    requested_addon_quantities = _parse_json_field(cr.get("requested_addon_quantities"), {})
     requested_addon_dates = _parse_json_field(cr.get("requested_addon_dates"), {})
     requested_addon_names = _parse_json_field(cr.get("requested_addon_names"), [])
 
@@ -439,13 +455,9 @@ async def approve_change(change_request_id: str, *, hotel_id: Optional[str] = No
         # is paid at property / on transfer / etc. Nothing more to do.
         pass
     elif price_diff > 0:
-        await BookingRepository.update_payment_status(
-            str(booking["id"]), "awaiting_top_up"
-        )
+        await BookingRepository.update_payment_status(str(booking["id"]), "awaiting_top_up")
 
-    cr_decided = await BookingChangeRequestRepository.mark_decided(
-        change_request_id, "approved"
-    )
+    cr_decided = await BookingChangeRequestRepository.mark_decided(change_request_id, "approved")
 
     refreshed = await BookingRepository.get_by_id(str(booking["id"]))
     asyncio.create_task(
@@ -472,9 +484,9 @@ async def approve_change(change_request_id: str, *, hotel_id: Optional[str] = No
 
 async def decline_change(
     change_request_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     *,
-    hotel_id: Optional[str] = None,
+    hotel_id: str | None = None,
 ) -> dict:
     """Decline a pending change request. Booking row stays untouched."""
     cr = await BookingChangeRequestRepository.get_by_id(change_request_id)
@@ -490,7 +502,9 @@ async def decline_change(
         raise ValueError("Booking does not belong to this hotel")
 
     cr_decided = await BookingChangeRequestRepository.mark_decided(
-        change_request_id, "declined", decline_reason=reason,
+        change_request_id,
+        "declined",
+        decline_reason=reason,
     )
 
     asyncio.create_task(

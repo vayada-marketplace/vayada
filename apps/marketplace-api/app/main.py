@@ -1,16 +1,35 @@
 """
 Main FastAPI application
 """
+
 import asyncio
 import logging
 import traceback
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from app.database import Database, AuthDatabase, PmsDatabase, check_database_connection
+
 from app.config import settings
-from app.routers import auth, creators, hotels, upload, admin, marketplace, collaborations, chat, contact, consent, gdpr, newsletter, trips, invite_codes, notifications
+from app.database import AuthDatabase, Database, PmsDatabase, check_database_connection
+from app.routers import (
+    admin,
+    auth,
+    chat,
+    collaborations,
+    consent,
+    contact,
+    creators,
+    gdpr,
+    hotels,
+    invite_codes,
+    marketplace,
+    newsletter,
+    notifications,
+    trips,
+    upload,
+)
 from app.services.newsletter_scheduler import run_forever as run_newsletter_scheduler
 
 logger = logging.getLogger(__name__)
@@ -50,7 +69,7 @@ app = FastAPI(
     description="vayada Creator Marketplace Backend API",
     version=settings.API_VERSION,
     lifespan=lifespan,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
 )
 
 # Configure CORS from environment variables
@@ -86,10 +105,7 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "vayada-api"
-    }
+    return {"status": "healthy", "service": "vayada-api"}
 
 
 @app.get("/health/db")
@@ -98,7 +114,7 @@ async def health_db():
     db_status = await check_database_connection()
     return {
         "status": "healthy" if db_status.get("connected") else "unhealthy",
-        "database": db_status
+        "database": db_status,
     }
 
 
@@ -118,4 +134,3 @@ app.include_router(newsletter.router)
 app.include_router(trips.router)
 app.include_router(invite_codes.router)
 app.include_router(notifications.router)
-

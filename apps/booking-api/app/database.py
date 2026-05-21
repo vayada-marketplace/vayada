@@ -1,10 +1,10 @@
 import asyncpg
-from typing import Optional
+
 from app.config import settings
 
 
 class BaseDatabase:
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
     _url: str = ""
 
     @classmethod
@@ -50,22 +50,22 @@ class BaseDatabase:
 
 
 class Database(BaseDatabase):
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
     _url = settings.DATABASE_URL
 
 
 class AuthDatabase(BaseDatabase):
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
     _url = settings.AUTH_DATABASE_URL
 
 
 class MarketplaceDatabase(BaseDatabase):
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
     _url = settings.MARKETPLACE_DATABASE_URL
 
 
 class PmsDatabase(BaseDatabase):
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
     _url = settings.PMS_DATABASE_URL
 
 

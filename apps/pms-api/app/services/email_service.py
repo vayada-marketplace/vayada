@@ -1,11 +1,11 @@
 import json
 import logging
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from urllib.parse import quote, urlparse
 
-from app.config import settings
 from app.channels import channel_label as _ota_channel_label  # re-exported for tests
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +72,14 @@ def _booking_details_html(booking: dict) -> str:
     # VAY-403: a multi-room booking must read "2× Two-Bedroom Pool Villa",
     # not a bare singular, so the guest/host see how many rooms are booked.
     rooms = int(booking.get("number_of_rooms") or 1)
-    accommodation = (
-        f"{rooms}× {booking['room_name']}" if rooms > 1 else booking["room_name"]
-    )
+    accommodation = f"{rooms}× {booking['room_name']}" if rooms > 1 else booking["room_name"]
     return f"""
-    <p class="detail"><strong>Reference:</strong> {booking['booking_reference']}</p>
+    <p class="detail"><strong>Reference:</strong> {booking["booking_reference"]}</p>
     <p class="detail"><strong>Accommodation:</strong> {accommodation}</p>
-    <p class="detail"><strong>Check-in:</strong> {booking['check_in']}</p>
-    <p class="detail"><strong>Check-out:</strong> {booking['check_out']}</p>
-    <p class="detail"><strong>Guests:</strong> {booking['adults']} adults, {booking['children']} children</p>{addons_html}
-    <p class="detail"><strong>Total:</strong> {booking['currency']} {booking['total_amount']}</p>
+    <p class="detail"><strong>Check-in:</strong> {booking["check_in"]}</p>
+    <p class="detail"><strong>Check-out:</strong> {booking["check_out"]}</p>
+    <p class="detail"><strong>Guests:</strong> {booking["adults"]} adults, {booking["children"]} children</p>{addons_html}
+    <p class="detail"><strong>Total:</strong> {booking["currency"]} {booking["total_amount"]}</p>
     """
 
 
@@ -118,7 +116,7 @@ async def send_guest_confirmation(guest_email: str, booking: dict):
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Great news — your booking at <strong>{booking['hotel_name']}</strong> has been confirmed by the hotel.</p>
+    <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been confirmed by the hotel.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -132,7 +130,7 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     subject = f"Booking Cancelled — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Cancelled</h2>
-    <p class="detail">Unfortunately, your booking at <strong>{booking['hotel_name']}</strong> has been cancelled.</p>
+    <p class="detail">Unfortunately, your booking at <strong>{booking["hotel_name"]}</strong> has been cancelled.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -177,7 +175,9 @@ def _render_request_status_email(booking: dict, status_event: str) -> tuple[str,
     """
     booking_id = booking.get("id", "")
     pms_link = f"https://pms.vayada.com/bookings/{booking_id}"
-    guest_name = f"{booking.get('guest_first_name', '')} {booking.get('guest_last_name', '')}".strip()
+    guest_name = (
+        f"{booking.get('guest_first_name', '')} {booking.get('guest_last_name', '')}".strip()
+    )
     ref = booking["booking_reference"]
     hotel_name = booking["hotel_name"]
 
@@ -240,7 +240,7 @@ def _render_request_status_email(booking: dict, status_event: str) -> tuple[str,
     <h2>{headline}</h2>
     <p class="detail"><strong>Hotel:</strong> {hotel_name}</p>
     <p class="detail"><strong>Guest:</strong> {guest_name}</p>
-    <p class="detail"><strong>Email:</strong> {booking['guest_email']}</p>
+    <p class="detail"><strong>Email:</strong> {booking["guest_email"]}</p>
     <p class="detail"><strong>Payment:</strong> {_payment_label(booking)}</p>
     {_booking_details_html(booking)}{trailing}"""
     return subject, _wrap_html(content)
@@ -271,7 +271,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>
-    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has been submitted successfully.</p>
+    <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
     <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -286,11 +286,15 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     """Notify guest that their booking has been accepted and payment captured."""
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     payment_method = booking.get("payment_method", "card")
-    payment_note = "Your card has been charged." if payment_method == "card" else "Please pay at the property upon arrival."
+    payment_note = (
+        "Your card has been charged."
+        if payment_method == "card"
+        else "Please pay at the property upon arrival."
+    )
 
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Great news — your booking at <strong>{booking['hotel_name']}</strong> has been accepted by the host.</p>
+    <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been accepted by the host.</p>
     <p class="detail">{payment_note}</p>
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -305,14 +309,19 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
 async def send_guest_booking_rejected(guest_email: str, booking: dict, reason: str | None = None):
     """Notify guest that their booking has been declined."""
     payment_method = booking.get("payment_method", "card")
-    refund_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    refund_note = (
+        "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    )
     from html import escape
-    reason_html = f"<p class='detail'><strong>Reason:</strong> {escape(reason)}</p>" if reason else ""
+
+    reason_html = (
+        f"<p class='detail'><strong>Reason:</strong> {escape(reason)}</p>" if reason else ""
+    )
 
     subject = f"Booking Request Declined — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Declined</h2>
-    <p class="detail">Unfortunately, your booking request at <strong>{booking['hotel_name']}</strong> was declined by the host.</p>
+    <p class="detail">Unfortunately, your booking request at <strong>{booking["hotel_name"]}</strong> was declined by the host.</p>
     {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
     {reason_html}
     <hr class="divider">
@@ -327,12 +336,14 @@ async def send_guest_booking_rejected(guest_email: str, booking: dict, reason: s
 async def send_guest_booking_expired(guest_email: str, booking: dict):
     """Notify guest that their booking request expired (host didn't respond)."""
     payment_method = booking.get("payment_method", "card")
-    refund_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    refund_note = (
+        "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    )
 
     subject = f"Booking Request Expired — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Expired</h2>
-    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has expired because the host did not respond within 24 hours.</p>
+    <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has expired because the host did not respond within 24 hours.</p>
     {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -355,9 +366,7 @@ async def send_host_booking_expired(hotel_email: str, booking: dict):
     await _send_to_host_and_ops(hotel_email, subject, html_body)
 
 
-async def send_host_booking_rejected(
-    hotel_email: str, booking: dict, reason: str | None = None
-):
+async def send_host_booking_rejected(hotel_email: str, booking: dict, reason: str | None = None):
     """Notify host (and ops) that they declined the booking request."""
     subject, html_body = _render_request_status_email(booking, "declined")
     await _send_to_host_and_ops(hotel_email, subject, html_body)
@@ -372,12 +381,14 @@ async def send_guest_cancellation_refund(
     elif refund_amount > 0:
         refund_text = f"A partial refund of <strong>{booking['currency']} {refund_amount:.2f}</strong> ({refund_pct:.0f}%) will be processed to your original payment method."
     else:
-        refund_text = "Based on the cancellation policy, no refund is applicable for this cancellation."
+        refund_text = (
+            "Based on the cancellation policy, no refund is applicable for this cancellation."
+        )
 
     subject = f"Booking Cancelled — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Cancelled</h2>
-    <p class="detail">Your booking at <strong>{booking['hotel_name']}</strong> has been cancelled.</p>
+    <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> has been cancelled.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -394,12 +405,14 @@ async def send_guest_cancellation_refund(
 async def send_guest_booking_withdrawn(guest_email: str, booking: dict):
     """Confirm to guest that they withdrew their booking request."""
     payment_method = booking.get("payment_method", "card")
-    release_note = "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    release_note = (
+        "Any authorization hold on your card has been released." if payment_method == "card" else ""
+    )
 
     subject = f"Booking Withdrawn — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Withdrawn</h2>
-    <p class="detail">Your booking request at <strong>{booking['hotel_name']}</strong> has been withdrawn.</p>
+    <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been withdrawn.</p>
     {"<p class='detail'>" + release_note + "</p>" if release_note else ""}
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -421,7 +434,7 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Your booking at <strong>{booking['hotel_name']}</strong> has been confirmed.</p>
+    <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> has been confirmed.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -432,7 +445,9 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
-async def send_affiliate_approved(affiliate_email: str, affiliate_name: str, hotel_name: str, referral_code: str):
+async def send_affiliate_approved(
+    affiliate_email: str, affiliate_name: str, hotel_name: str, referral_code: str
+):
     """Notify affiliate that they have been approved by the hotel."""
     subject = f"You're Approved — Start Referring Guests to {hotel_name}"
     content = f"""
@@ -476,8 +491,7 @@ async def send_hotel_new_affiliate_application(
     waiting for approval in the PMS dashboard."""
     subject = f"New Affiliate Application — {affiliate_name}"
     social_row = (
-        f"<p class=\"detail\"><strong>Channel:</strong> {social_media}</p>"
-        if social_media else ""
+        f'<p class="detail"><strong>Channel:</strong> {social_media}</p>' if social_media else ""
     )
     content = f"""
     <h2>New affiliate application</h2>
@@ -511,8 +525,7 @@ async def send_vayada_new_affiliate_application(
         return
     subject = f"New Affiliate Application — {hotel_name} — {affiliate_name}"
     social_row = (
-        f"<p class=\"detail\"><strong>Channel:</strong> {social_media}</p>"
-        if social_media else ""
+        f'<p class="detail"><strong>Channel:</strong> {social_media}</p>' if social_media else ""
     )
     content = f"""
     <h2>New affiliate application</h2>
@@ -530,7 +543,9 @@ async def send_vayada_new_affiliate_application(
     await _send_email(recipient, subject, _wrap_html(content))
 
 
-async def send_affiliate_invite(affiliate_email: str, affiliate_name: str, hotel_name: str, set_password_url: str):
+async def send_affiliate_invite(
+    affiliate_email: str, affiliate_name: str, hotel_name: str, set_password_url: str
+):
     """Send affiliate an invite email with a link to set their password and access the dashboard."""
     subject = f"Set Up Your Affiliate Dashboard — {hotel_name}"
     content = f"""
@@ -561,7 +576,7 @@ async def send_guest_payment_confirmed(
     subject = f"Payment Received — {booking['booking_reference']}"
     content = f"""
     <h2>Payment Received</h2>
-    <p class="detail">Your payment of <strong>{currency} {payment_amount:.2f}</strong> for your booking at <strong>{booking['hotel_name']}</strong> has been successfully processed.</p>
+    <p class="detail">Your payment of <strong>{currency} {payment_amount:.2f}</strong> for your booking at <strong>{booking["hotel_name"]}</strong> has been successfully processed.</p>
     <p class="detail"><strong>Payment Method:</strong> {method_label}</p>
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -614,8 +629,7 @@ async def send_host_ota_booking_imported(
 
     channel_label = _ota_channel_label(booking.get("channel"))
     guest_name = (
-        f"{booking.get('guest_first_name', '') or ''} "
-        f"{booking.get('guest_last_name', '') or ''}"
+        f"{booking.get('guest_first_name', '') or ''} {booking.get('guest_last_name', '') or ''}"
     ).strip() or "Guest"
 
     booking_id = booking.get("id", "")
@@ -638,9 +652,7 @@ async def send_host_ota_booking_imported(
     else:
         subject = f"New booking from {channel_label} — {guest_name}"
         heading = "New OTA Booking"
-        body_intro = (
-            f"A new booking has been imported from <strong>{channel_label}</strong>."
-        )
+        body_intro = f"A new booking has been imported from <strong>{channel_label}</strong>."
 
     content = f"""
     <h2>{heading}</h2>
@@ -693,8 +705,8 @@ def _change_diff_html(booking: dict, change_request: dict) -> str:
     new_addon_names = _format_addons_list(change_request.get("requested_addon_names"))
 
     return f"""
-    <p class="detail"><strong>Current dates:</strong> {change_request['old_check_in']} → {change_request['old_check_out']}</p>
-    <p class="detail"><strong>Requested dates:</strong> {change_request['requested_check_in']} → {change_request['requested_check_out']}</p>
+    <p class="detail"><strong>Current dates:</strong> {change_request["old_check_in"]} → {change_request["old_check_out"]}</p>
+    <p class="detail"><strong>Requested dates:</strong> {change_request["requested_check_in"]} → {change_request["requested_check_out"]}</p>
     <p class="detail"><strong>Requested add-ons:</strong> {new_addon_names}</p>
     <hr class="divider">
     <p class="detail"><strong>Old total:</strong> {currency} {old_total:.2f}</p>
@@ -711,9 +723,9 @@ async def send_host_change_request(hotel_email: str, booking: dict, change_reque
     subject = f"Booking Change Requested — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Change Requested</h2>
-    <p class="detail">The guest <strong>{booking.get('guest_first_name', '')} {booking.get('guest_last_name', '')}</strong> has requested a change to their booking at <strong>{booking['hotel_name']}</strong>.</p>
-    <p class="detail"><strong>Reference:</strong> {booking['booking_reference']}</p>
-    <p class="detail"><strong>Guest email:</strong> {booking['guest_email']}</p>
+    <p class="detail">The guest <strong>{booking.get("guest_first_name", "")} {booking.get("guest_last_name", "")}</strong> has requested a change to their booking at <strong>{booking["hotel_name"]}</strong>.</p>
+    <p class="detail"><strong>Reference:</strong> {booking["booking_reference"]}</p>
+    <p class="detail"><strong>Guest email:</strong> {booking["guest_email"]}</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
     <hr class="divider">
@@ -723,14 +735,12 @@ async def send_host_change_request(hotel_email: str, booking: dict, change_reque
     await _send_to_host_and_ops(hotel_email, subject, _wrap_html(content))
 
 
-async def send_guest_change_request_received(
-    guest_email: str, booking: dict, change_request: dict
-):
+async def send_guest_change_request_received(guest_email: str, booking: dict, change_request: dict):
     """Confirm to the guest that we received their change request."""
     subject = f"Change Request Received — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request Received</h2>
-    <p class="detail">We've received your change request for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    <p class="detail">We've received your change request for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
     <p class="detail">The host will review it shortly. We'll email you as soon as they respond.</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
@@ -741,9 +751,7 @@ async def send_guest_change_request_received(
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
-async def send_guest_change_request_approved(
-    guest_email: str, booking: dict, change_request: dict
-):
+async def send_guest_change_request_approved(guest_email: str, booking: dict, change_request: dict):
     """Tell the guest their change request was approved + apply to booking."""
     diff = change_request["price_difference"]
     if diff > 0:
@@ -753,39 +761,35 @@ async def send_guest_change_request_approved(
             f"payment using the same payment method as the original booking."
         )
     elif diff < 0:
-        payment_note = (
-            "Your booking total decreased. Any refund will be processed by the property."
-        )
+        payment_note = "Your booking total decreased. Any refund will be processed by the property."
     else:
         payment_note = ""
 
     subject = f"Change Request Approved — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request Approved</h2>
-    <p class="detail">Good news — the host approved your change for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    <p class="detail">Good news — the host approved your change for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
     <hr class="divider">
-    {f'<p class="detail">{payment_note}</p>' if payment_note else ''}
+    {f'<p class="detail">{payment_note}</p>' if payment_note else ""}
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
 
 
-async def send_guest_change_request_declined(
-    guest_email: str, booking: dict, change_request: dict
-):
+async def send_guest_change_request_declined(guest_email: str, booking: dict, change_request: dict):
     """Tell the guest their change request was declined; original booking unchanged."""
     from html import escape
+
     reason = change_request.get("decline_reason")
     reason_html = (
-        f"<p class='detail'><strong>Reason:</strong> {escape(str(reason))}</p>"
-        if reason else ""
+        f"<p class='detail'><strong>Reason:</strong> {escape(str(reason))}</p>" if reason else ""
     )
     subject = f"Change Request Declined — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request Declined</h2>
-    <p class="detail">The host declined your change request for booking <strong>{booking['booking_reference']}</strong> at <strong>{booking['hotel_name']}</strong>.</p>
+    <p class="detail">The host declined your change request for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
     {reason_html}
     <p class="detail">Your original booking remains unchanged.</p>
     <hr class="divider">
@@ -805,7 +809,7 @@ async def send_host_change_request_decision(
     subject = f"Change Request {label} — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request {label}</h2>
-    <p class="detail">The booking change for <strong>{booking['booking_reference']}</strong> has been recorded as <strong>{label.lower()}</strong>.</p>
+    <p class="detail">The booking change for <strong>{booking["booking_reference"]}</strong> has been recorded as <strong>{label.lower()}</strong>.</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
     <hr class="divider">

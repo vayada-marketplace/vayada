@@ -1,24 +1,23 @@
 import logging
 import secrets
-from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import AuthDatabase, Database
 from app.dependencies import require_hotel_admin
-from app.utils import get_hotel_id
-from app.repositories.affiliate_repo import AffiliateRepository
 from app.models.affiliate import (
     AffiliateAdminResponse,
-    AffiliateStatusUpdate,
     AffiliateCommissionUpdate,
+    AffiliateStatusUpdate,
     DefaultAffiliateCommissionResponse,
     DefaultAffiliateCommissionUpdate,
 )
 from app.models.payment import StripeConnectAccountRequest, XenditBankDetailsRequest
+from app.repositories.affiliate_repo import AffiliateRepository
 from app.services import stripe_service
 from app.services.email_service import send_affiliate_approved, send_affiliate_invite
-from app.database import Database, AuthDatabase
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +88,7 @@ async def update_default_affiliate_commission(
     user_id: str = Depends(require_hotel_admin),
 ):
     if data.default_commission_pct < 0 or data.default_commission_pct > 100:
-        raise HTTPException(
-            status_code=400, detail="Default commission must be between 0 and 100"
-        )
+        raise HTTPException(status_code=400, detail="Default commission must be between 0 and 100")
     hotel_id = await get_hotel_id(user_id)
     pct = await Database.fetchval(
         """
@@ -110,7 +107,7 @@ async def update_default_affiliate_commission(
 
 @router.get("/affiliates")
 async def list_affiliates(
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),
@@ -183,7 +180,9 @@ async def update_affiliate_status(
             # Create a password reset token so the affiliate can set their password
             reset_token = secrets.token_urlsafe(32)
             temp_password = secrets.token_urlsafe(24)
-            password_hash = bcrypt.hashpw(temp_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            password_hash = bcrypt.hashpw(temp_password.encode("utf-8"), bcrypt.gensalt()).decode(
+                "utf-8"
+            )
 
             new_user = await AuthDatabase.fetchrow(
                 """
@@ -243,9 +242,7 @@ async def update_affiliate_commission(
 ):
     """Set or clear the per-affiliate override. null reverts to the hotel default."""
     if data.commission_pct is not None and (data.commission_pct < 0 or data.commission_pct > 100):
-        raise HTTPException(
-            status_code=400, detail="Commission must be between 0 and 100"
-        )
+        raise HTTPException(status_code=400, detail="Commission must be between 0 and 100")
 
     hotel_id = await get_hotel_id(user_id)
     affiliate = await AffiliateRepository.get_by_id(affiliate_id)
@@ -271,10 +268,14 @@ async def create_affiliate_stripe_account(
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
     if affiliate["status"] != "approved":
-        raise HTTPException(status_code=400, detail="Affiliate must be approved before setting up Stripe")
+        raise HTTPException(
+            status_code=400, detail="Affiliate must be approved before setting up Stripe"
+        )
 
     if affiliate.get("stripe_connect_account_id"):
-        raise HTTPException(status_code=409, detail="Stripe account already exists for this affiliate")
+        raise HTTPException(
+            status_code=409, detail="Stripe account already exists for this affiliate"
+        )
 
     account = await stripe_service.create_connect_account(data.email, data.country)
     await AffiliateRepository.update_stripe_connect(affiliate_id, account["id"])
@@ -292,7 +293,9 @@ async def get_affiliate_stripe_onboarding_link(
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
     if not affiliate.get("stripe_connect_account_id"):
-        raise HTTPException(status_code=400, detail="No Stripe Connect account found for this affiliate")
+        raise HTTPException(
+            status_code=400, detail="No Stripe Connect account found for this affiliate"
+        )
 
     url = await stripe_service.create_connect_account_link(
         affiliate["stripe_connect_account_id"],
@@ -302,7 +305,9 @@ async def get_affiliate_stripe_onboarding_link(
     return {"url": url}
 
 
-@router.post("/affiliates/{affiliate_id}/xendit/bank-details", response_model=AffiliateAdminResponse)
+@router.post(
+    "/affiliates/{affiliate_id}/xendit/bank-details", response_model=AffiliateAdminResponse
+)
 async def save_affiliate_xendit_bank_details(
     affiliate_id: str,
     data: XenditBankDetailsRequest,
@@ -314,7 +319,9 @@ async def save_affiliate_xendit_bank_details(
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
     if affiliate["status"] != "approved":
-        raise HTTPException(status_code=400, detail="Affiliate must be approved before setting up Xendit")
+        raise HTTPException(
+            status_code=400, detail="Affiliate must be approved before setting up Xendit"
+        )
 
     await AffiliateRepository.update_xendit_details(
         affiliate_id, data.channel_code, data.account_number, data.account_holder_name

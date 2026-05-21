@@ -1,10 +1,7 @@
-from typing import Optional
-
-
 def room_allows_guest_mix(
     room: dict,
-    adults: Optional[int],
-    children: Optional[int],
+    adults: int | None,
+    children: int | None,
 ) -> bool:
     """Return whether a requested party fits the room's occupancy limits."""
     if adults is None and children is None:

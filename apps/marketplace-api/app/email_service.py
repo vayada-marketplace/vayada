@@ -2,38 +2,36 @@
 Email service for sending emails
 Supports SMTP and email service providers (SendGrid, AWS SES, etc.)
 """
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from typing import Optional
-from app.config import settings
+
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 async def send_email(
-    to_email: str,
-    subject: str,
-    html_body: str,
-    text_body: Optional[str] = None
+    to_email: str, subject: str, html_body: str, text_body: str | None = None
 ) -> bool:
     """
     Send an email
-    
+
     Args:
         to_email: Recipient email address
         subject: Email subject
         html_body: HTML email body
         text_body: Plain text email body (optional, auto-generated from HTML if not provided)
-    
+
     Returns:
         True if email sent successfully, False otherwise
     """
     if not settings.EMAIL_ENABLED:
         logger.warning(f"Email sending is disabled. Would send to {to_email}: {subject}")
         return False
-    
+
     try:
         if settings.EMAIL_SERVICE_PROVIDER == "smtp":
             return await _send_email_smtp(to_email, subject, html_body, text_body)
@@ -50,43 +48,44 @@ async def send_email(
 
 
 async def _send_email_smtp(
-    to_email: str,
-    subject: str,
-    html_body: str,
-    text_body: Optional[str] = None
+    to_email: str, subject: str, html_body: str, text_body: str | None = None
 ) -> bool:
     """Send email via SMTP"""
     if not settings.SMTP_HOST:
         logger.error("SMTP_HOST not configured")
         return False
-    
+
     try:
         # Create message
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
-        msg['To'] = to_email
-        
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
+        msg["To"] = to_email
+
         # Create plain text version if not provided
         if not text_body:
             # Simple HTML to text conversion (remove HTML tags)
             import re
-            text_body = re.sub(r'<[^>]+>', '', html_body)
-            text_body = text_body.replace('&nbsp;', ' ').strip()
-        
+
+            text_body = re.sub(r"<[^>]+>", "", html_body)
+            text_body = text_body.replace("&nbsp;", " ").strip()
+
         # Add both plain text and HTML versions
-        part1 = MIMEText(text_body, 'plain')
-        part2 = MIMEText(html_body, 'html')
-        
+        part1 = MIMEText(text_body, "plain")
+        part2 = MIMEText(html_body, "html")
+
         msg.attach(part1)
         msg.attach(part2)
-        
+
         # Two SMTP styles: implicit TLS on 465, STARTTLS on 587 (the SES path).
         if settings.SMTP_PORT == 465:
             import ssl
+
             context = ssl.create_default_context()
             context.minimum_version = ssl.TLSVersion.TLSv1_2
-            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, context=context) as server:
+            with smtplib.SMTP_SSL(
+                settings.SMTP_HOST, settings.SMTP_PORT, context=context
+            ) as server:
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.send_message(msg)
@@ -99,10 +98,10 @@ async def _send_email_smtp(
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
 
                 server.send_message(msg)
-        
+
         logger.info(f"Email sent successfully to {to_email}")
         return True
-        
+
     except smtplib.SMTPAuthenticationError as e:
         logger.error(f"SMTP authentication failed: {str(e)}")
         logger.error(f"  Host: {settings.SMTP_HOST}, Port: {settings.SMTP_PORT}")
@@ -115,61 +114,48 @@ async def _send_email_smtp(
 
 
 async def _send_email_sendgrid(
-    to_email: str,
-    subject: str,
-    html_body: str,
-    text_body: Optional[str] = None
+    to_email: str, subject: str, html_body: str, text_body: str | None = None
 ) -> bool:
     """Send email via SendGrid API"""
     try:
         import requests
-        
+
         if not settings.EMAIL_SERVICE_API_KEY:
             logger.error("EMAIL_SERVICE_API_KEY not configured for SendGrid")
             return False
-        
+
         # Create plain text version if not provided
         if not text_body:
             import re
-            text_body = re.sub(r'<[^>]+>', '', html_body)
-            text_body = text_body.replace('&nbsp;', ' ').strip()
-        
+
+            text_body = re.sub(r"<[^>]+>", "", html_body)
+            text_body = text_body.replace("&nbsp;", " ").strip()
+
         url = "https://api.sendgrid.com/v3/mail/send"
         headers = {
             "Authorization": f"Bearer {settings.EMAIL_SERVICE_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         data = {
-            "personalizations": [{
-                "to": [{"email": to_email}]
-            }],
-            "from": {
-                "email": settings.EMAIL_FROM_ADDRESS,
-                "name": settings.EMAIL_FROM_NAME
-            },
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": settings.EMAIL_FROM_ADDRESS, "name": settings.EMAIL_FROM_NAME},
             "subject": subject,
             "content": [
-                {
-                    "type": "text/plain",
-                    "value": text_body
-                },
-                {
-                    "type": "text/html",
-                    "value": html_body
-                }
-            ]
+                {"type": "text/plain", "value": text_body},
+                {"type": "text/html", "value": html_body},
+            ],
         }
-        
+
         response = requests.post(url, json=data, headers=headers)
-        
+
         if response.status_code == 202:
             logger.info(f"Email sent successfully to {to_email} via SendGrid")
             return True
         else:
             logger.error(f"SendGrid API error: {response.status_code} - {response.text}")
             return False
-            
+
     except ImportError:
         logger.error("requests library not installed. Install it to use SendGrid.")
         return False
@@ -179,51 +165,49 @@ async def _send_email_sendgrid(
 
 
 async def _send_email_ses(
-    to_email: str,
-    subject: str,
-    html_body: str,
-    text_body: Optional[str] = None
+    to_email: str, subject: str, html_body: str, text_body: str | None = None
 ) -> bool:
     """Send email via AWS SES"""
     try:
         import boto3
         from botocore.exceptions import ClientError
-        
+
         if not settings.EMAIL_SERVICE_API_KEY:
             logger.error("AWS credentials not configured for SES")
             return False
-        
+
         # Create plain text version if not provided
         if not text_body:
             import re
-            text_body = re.sub(r'<[^>]+>', '', html_body)
-            text_body = text_body.replace('&nbsp;', ' ').strip()
-        
+
+            text_body = re.sub(r"<[^>]+>", "", html_body)
+            text_body = text_body.replace("&nbsp;", " ").strip()
+
         # Initialize SES client
         # Note: EMAIL_SERVICE_API_KEY should contain AWS access key
         # You may need to configure AWS credentials differently
         ses_client = boto3.client(
-            'ses',
+            "ses",
             aws_access_key_id=settings.EMAIL_SERVICE_API_KEY,
             # aws_secret_access_key should be in a separate config
-            region_name='us-east-1'  # Adjust as needed
+            region_name="us-east-1",  # Adjust as needed
         )
-        
+
         response = ses_client.send_email(
             Source=f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>",
-            Destination={'ToAddresses': [to_email]},
+            Destination={"ToAddresses": [to_email]},
             Message={
-                'Subject': {'Data': subject, 'Charset': 'UTF-8'},
-                'Body': {
-                    'Text': {'Data': text_body, 'Charset': 'UTF-8'},
-                    'Html': {'Data': html_body, 'Charset': 'UTF-8'}
-                }
-            }
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {"Data": text_body, "Charset": "UTF-8"},
+                    "Html": {"Data": html_body, "Charset": "UTF-8"},
+                },
+            },
         )
-        
+
         logger.info(f"Email sent successfully to {to_email} via AWS SES")
         return True
-        
+
     except ImportError:
         logger.error("boto3 library not installed. Install it to use AWS SES.")
         return False
@@ -235,19 +219,19 @@ async def _send_email_ses(
         return False
 
 
-def create_email_verification_html(verification_code: str, user_name: Optional[str] = None) -> str:
+def create_email_verification_html(verification_code: str, user_name: str | None = None) -> str:
     """
     Create HTML email template for email verification code
-    
+
     Args:
         verification_code: 6-digit verification code
         user_name: Optional user name for personalization
-    
+
     Returns:
         HTML email body
     """
     name = user_name or "there"
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -285,25 +269,29 @@ def create_email_verification_html(verification_code: str, user_name: Optional[s
     </body>
     </html>
     """
-    
+
     return html
 
 
-def create_profile_completion_email_html(user_name: str, user_type: str, verification_link: Optional[str] = None) -> str:
+def create_profile_completion_email_html(
+    user_name: str, user_type: str, verification_link: str | None = None
+) -> str:
     """
     Create HTML email template for profile completion confirmation with email verification
-    
+
     Args:
         user_name: User's name
         user_type: 'creator' or 'hotel'
         verification_link: Optional email verification link (if provided, includes verification section)
-    
+
     Returns:
         HTML email body
     """
     profile_type = "Creator" if user_type == "creator" else "Hotel"
-    dashboard_link = f"{settings.FRONTEND_URL}/{'profile' if user_type == 'creator' else 'hotel/dashboard'}"
-    
+    dashboard_link = (
+        f"{settings.FRONTEND_URL}/{'profile' if user_type == 'creator' else 'hotel/dashboard'}"
+    )
+
     # Build verification section if link is provided
     verification_section = ""
     if verification_link:
@@ -317,7 +305,7 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
             </div>
             <p style="margin: 10px 0 20px 0; color: #999; font-size: 12px;">This link will expire in 48 hours.</p>
         """
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -345,7 +333,7 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
             <p>Our team will now review your profile and verify your information. Once approved, your profile will go live and you'll be able to:</p>
             
             <ul style="color: #666;">
-                <li>Connect with {('hotels' if user_type == 'creator' else 'creators')} on the platform</li>
+                <li>Connect with {("hotels" if user_type == "creator" else "creators")} on the platform</li>
                 <li>Start receiving collaboration opportunities</li>
                 <li>Build your presence on vayada</li>
             </ul>
@@ -370,7 +358,7 @@ def create_profile_completion_email_html(user_name: str, user_type: str, verific
     </body>
     </html>
     """
-    
+
     return html
 
 
@@ -465,7 +453,7 @@ def _collaboration_email_wrapper(title: str, content: str) -> str:
 def _collaboration_details_html(
     collaboration_type: str,
     listing_name: str,
-    listing_location: Optional[str] = None,
+    listing_location: str | None = None,
 ) -> str:
     """Render a small collaboration summary block."""
     location_line = f"<br><strong>Location:</strong> {listing_location}" if listing_location else ""
@@ -494,8 +482,8 @@ def create_collaboration_request_email_html(
     initiator_type: str,
     collaboration_type: str,
     listing_name: str,
-    listing_location: Optional[str] = None,
-    why_great_fit: Optional[str] = None,
+    listing_location: str | None = None,
+    why_great_fit: str | None = None,
 ) -> str:
     """Email sent to the recipient when a new collaboration request is created."""
     if initiator_type == "creator":
@@ -530,8 +518,8 @@ def create_collaboration_response_email_html(
     accepted: bool,
     collaboration_type: str,
     listing_name: str,
-    listing_location: Optional[str] = None,
-    response_message: Optional[str] = None,
+    listing_location: str | None = None,
+    response_message: str | None = None,
 ) -> str:
     """Email sent to the initiator when their request is accepted or declined."""
     if accepted:
@@ -567,7 +555,7 @@ def create_collaboration_counter_offer_email_html(
     collaboration_type: str,
     listing_name: str,
     changes_summary: str,
-    listing_location: Optional[str] = None,
+    listing_location: str | None = None,
 ) -> str:
     """Email sent when the other party suggests new terms."""
     title = "New Counter-Offer on Your Collaboration"
@@ -591,9 +579,9 @@ def create_collaboration_approved_email_html(
     other_party_name: str,
     collaboration_type: str,
     listing_name: str,
-    listing_location: Optional[str] = None,
+    listing_location: str | None = None,
     both_approved: bool = False,
-    affiliate_link: Optional[str] = None,
+    affiliate_link: str | None = None,
 ) -> str:
     """Email sent when a party approves the terms (and when both have approved)."""
     if both_approved:
@@ -631,14 +619,14 @@ def create_collaboration_approved_email_html(
 
 def create_admin_collaboration_request_email_html(
     creator_name: str,
-    creator_email: Optional[str],
+    creator_email: str | None,
     hotel_name: str,
-    hotel_email: Optional[str],
+    hotel_email: str | None,
     listing_name: str,
-    listing_location: Optional[str],
+    listing_location: str | None,
     collaboration_type: str,
     initiator_type: str,
-    why_great_fit: Optional[str] = None,
+    why_great_fit: str | None = None,
 ) -> str:
     """Internal admin notification: a new collaboration request was created."""
     title = "New Marketplace Collaboration Request"
@@ -668,14 +656,14 @@ def create_admin_collaboration_request_email_html(
 
 def create_admin_collaboration_response_email_html(
     creator_name: str,
-    creator_email: Optional[str],
+    creator_email: str | None,
     hotel_name: str,
-    hotel_email: Optional[str],
+    hotel_email: str | None,
     listing_name: str,
-    listing_location: Optional[str],
+    listing_location: str | None,
     collaboration_type: str,
     accepted: bool,
-    response_message: Optional[str] = None,
+    response_message: str | None = None,
 ) -> str:
     """Internal admin notification: a hotel accepted or rejected a collaboration request."""
     if accepted:
@@ -687,7 +675,9 @@ def create_admin_collaboration_response_email_html(
 
     message_section = ""
     if response_message:
-        message_section = f'<p style="color: #555;"><strong>Hotel message:</strong> "{response_message}"</p>'
+        message_section = (
+            f'<p style="color: #555;"><strong>Hotel message:</strong> "{response_message}"</p>'
+        )
 
     location_line = f"<br><strong>Location:</strong> {listing_location}" if listing_location else ""
     creator_email_line = f" &lt;{creator_email}&gt;" if creator_email else ""
@@ -712,8 +702,8 @@ def create_collaboration_cancelled_email_html(
     canceller_role: str,
     collaboration_type: str,
     listing_name: str,
-    listing_location: Optional[str] = None,
-    reason: Optional[str] = None,
+    listing_location: str | None = None,
+    reason: str | None = None,
 ) -> str:
     """Email sent when the other party cancels the collaboration."""
     title = "Collaboration Cancelled"
@@ -738,8 +728,8 @@ def _newsletter_item_html(
     name: str,
     location: str,
     description: str,
-    image_url: Optional[str] = None,
-    badge: Optional[str] = None,
+    image_url: str | None = None,
+    badge: str | None = None,
 ) -> str:
     """Render a single recommendation card inside a newsletter."""
     badge_html = ""
@@ -873,19 +863,19 @@ def create_newsletter_for_hotel_html(
     return _collaboration_email_wrapper("Your Weekly Creator Picks", content)
 
 
-def create_password_reset_email_html(reset_link: str, user_name: Optional[str] = None) -> str:
+def create_password_reset_email_html(reset_link: str, user_name: str | None = None) -> str:
     """
     Create HTML email template for password reset
-    
+
     Args:
         reset_link: Password reset link with token
         user_name: Optional user name for personalization
-    
+
     Returns:
         HTML email body
     """
     name = user_name or "there"
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -932,6 +922,5 @@ def create_password_reset_email_html(reset_link: str, user_name: Optional[str] =
     </body>
     </html>
     """
-    
-    return html
 
+    return html

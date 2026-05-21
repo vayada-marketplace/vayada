@@ -1,8 +1,8 @@
 """
 Repository for email_verification_codes and email_verification_tokens tables (AuthDatabase).
 """
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -10,12 +10,11 @@ from app.database import AuthDatabase
 
 
 class VerificationRepository:
-
     # ── email_verification_codes ──
 
     @staticmethod
     async def invalidate_codes_for_email(
-        email: str, *, conn: Optional[asyncpg.Connection] = None
+        email: str, *, conn: asyncpg.Connection | None = None
     ) -> None:
         query = """
             UPDATE email_verification_codes
@@ -33,9 +32,9 @@ class VerificationRepository:
         code: str,
         expires_in_minutes: int = 15,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
+        expires_at = datetime.now(UTC) + timedelta(minutes=expires_in_minutes)
         query = """
             INSERT INTO email_verification_codes (email, code, expires_at)
             VALUES ($1, $2, $3)
@@ -50,8 +49,8 @@ class VerificationRepository:
         email: str,
         code: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = """
             SELECT id, expires_at, used, created_at
             FROM email_verification_codes
@@ -69,9 +68,7 @@ class VerificationRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def mark_code_used(
-        code_id, *, conn: Optional[asyncpg.Connection] = None
-    ) -> None:
+    async def mark_code_used(code_id, *, conn: asyncpg.Connection | None = None) -> None:
         query = """
             UPDATE email_verification_codes
             SET used = true
@@ -86,7 +83,7 @@ class VerificationRepository:
 
     @staticmethod
     async def invalidate_tokens_for_user(
-        user_id: str, *, conn: Optional[asyncpg.Connection] = None
+        user_id: str, *, conn: asyncpg.Connection | None = None
     ) -> None:
         query = """
             UPDATE email_verification_tokens
@@ -104,9 +101,9 @@ class VerificationRepository:
         token: str,
         expires_in_hours: int = 48,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
         query = """
             INSERT INTO email_verification_tokens (user_id, token, expires_at)
             VALUES ($1, $2, $3)
@@ -117,9 +114,7 @@ class VerificationRepository:
             await AuthDatabase.execute(query, user_id, token, expires_at)
 
     @staticmethod
-    async def get_valid_token(
-        token: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> Optional[dict]:
+    async def get_valid_token(token: str, *, conn: asyncpg.Connection | None = None) -> dict | None:
         query = """
             SELECT evt.id, evt.user_id, evt.expires_at, evt.used, u.email, u.status
             FROM email_verification_tokens evt
@@ -133,9 +128,7 @@ class VerificationRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def mark_token_used(
-        token: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> bool:
+    async def mark_token_used(token: str, *, conn: asyncpg.Connection | None = None) -> bool:
         query = """
             UPDATE email_verification_tokens
             SET used = true

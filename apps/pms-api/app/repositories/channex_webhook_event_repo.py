@@ -1,15 +1,13 @@
 import json
-from typing import List, Optional
 
 from app.database import Database
 
 
 class ChannexWebhookEventRepository:
-
     @staticmethod
     async def insert(
         event_type: str,
-        property_id: Optional[str],
+        property_id: str | None,
         payload: dict,
     ) -> str:
         row = await Database.fetchrow(
@@ -25,7 +23,7 @@ class ChannexWebhookEventRepository:
         return str(row["id"])
 
     @staticmethod
-    async def mark_processed(event_id: str, ok: bool, error: Optional[str] = None) -> None:
+    async def mark_processed(event_id: str, ok: bool, error: str | None = None) -> None:
         await Database.execute(
             """
             UPDATE channex_webhook_events
@@ -38,7 +36,7 @@ class ChannexWebhookEventRepository:
         )
 
     @staticmethod
-    async def summary_since(hours: int) -> List[dict]:
+    async def summary_since(hours: int) -> list[dict]:
         """Counts grouped by event_type + processed_ok over the given window."""
         rows = await Database.fetch(
             """

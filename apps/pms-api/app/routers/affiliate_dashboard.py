@@ -1,20 +1,19 @@
 """
 Affiliate-facing dashboard routes — requires affiliate auth.
 """
-import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+import logging
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
+from app.database import AuthDatabase, Database
 from app.dependencies import require_affiliate
-from app.repositories.affiliate_repo import AffiliateRepository
 from app.repositories.affiliate_payout_settings_repo import (
     AffiliatePayoutSettingsRepository,
-    PAYOUT_COLUMNS,
 )
-from app.database import Database, AuthDatabase
+from app.repositories.affiliate_repo import AffiliateRepository
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +59,9 @@ class PropertyStats(BaseModel):
     bank_swift_bic: str = ""
     bank_name: str = ""
     bank_country: str = ""
-    xendit_channel_code: Optional[str] = None
-    xendit_account_number: Optional[str] = None
-    xendit_account_holder_name: Optional[str] = None
+    xendit_channel_code: str | None = None
+    xendit_account_number: str | None = None
+    xendit_account_holder_name: str | None = None
 
 
 class DashboardStats(BaseModel):
@@ -89,16 +88,16 @@ class PayoutEntry(BaseModel):
 class ProfileUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    payment_method: Optional[str] = None
-    paypal_email: Optional[str] = None
-    bank_iban: Optional[str] = None
-    bank_account_holder: Optional[str] = None
-    bank_swift_bic: Optional[str] = None
-    bank_name: Optional[str] = None
-    bank_country: Optional[str] = None
-    xendit_channel_code: Optional[str] = None
-    xendit_account_number: Optional[str] = None
-    xendit_account_holder_name: Optional[str] = None
+    payment_method: str | None = None
+    paypal_email: str | None = None
+    bank_iban: str | None = None
+    bank_account_holder: str | None = None
+    bank_swift_bic: str | None = None
+    bank_name: str | None = None
+    bank_country: str | None = None
+    xendit_channel_code: str | None = None
+    xendit_account_number: str | None = None
+    xendit_account_holder_name: str | None = None
 
 
 class PayoutSettings(BaseModel):
@@ -111,9 +110,9 @@ class PayoutSettings(BaseModel):
     bank_swift_bic: str
     bank_name: str
     bank_country: str
-    xendit_channel_code: Optional[str] = None
-    xendit_account_number: Optional[str] = None
-    xendit_account_holder_name: Optional[str] = None
+    xendit_channel_code: str | None = None
+    xendit_account_number: str | None = None
+    xendit_account_holder_name: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -158,9 +157,7 @@ def _build_property_stats(a: dict) -> PropertyStats:
 
 @router.get("/me")
 async def get_profile(user_id: str = Depends(require_affiliate)):
-    user = await AuthDatabase.fetchrow(
-        "SELECT id, email, name FROM users WHERE id = $1", user_id
-    )
+    user = await AuthDatabase.fetchrow("SELECT id, email, name FROM users WHERE id = $1", user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return AffiliateProfile(
@@ -246,7 +243,7 @@ async def get_earnings(
         return {"months": [], "currency": "EUR"}
 
     months = _PERIOD_MONTHS[period]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Walk back `months - 1` month boundaries so 6m = current + 5 prior = 6 buckets
     start_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     for _ in range(months - 1):
@@ -283,11 +280,13 @@ async def get_earnings(
     cursor = start_month
     for _ in range(months):
         key = cursor.strftime("%Y-%m")
-        result.append({
-            "month": key,
-            "label": cursor.strftime("%b"),
-            "earnings": round(by_month.get(key, 0.0), 2),
-        })
+        result.append(
+            {
+                "month": key,
+                "label": cursor.strftime("%b"),
+                "earnings": round(by_month.get(key, 0.0), 2),
+            }
+        )
         # Advance one month
         if cursor.month == 12:
             cursor = cursor.replace(year=cursor.year + 1, month=1)
@@ -348,19 +347,23 @@ async def get_activity(
 
     events: list[dict] = []
     for r in booking_rows:
-        events.append({
-            "type": "booking",
-            "ts": r["ts"].isoformat(),
-            "property": r["property"],
-            "count": 1,
-        })
+        events.append(
+            {
+                "type": "booking",
+                "ts": r["ts"].isoformat(),
+                "property": r["property"],
+                "count": 1,
+            }
+        )
     for r in click_rows:
-        events.append({
-            "type": "click",
-            "ts": r["ts"].isoformat(),
-            "property": r["property"],
-            "count": int(r["count"]),
-        })
+        events.append(
+            {
+                "type": "click",
+                "ts": r["ts"].isoformat(),
+                "property": r["property"],
+                "count": int(r["count"]),
+            }
+        )
 
     events.sort(key=lambda e: e["ts"], reverse=True)
     return {"activities": events[:limit]}
@@ -437,6 +440,7 @@ def _build_payout_updates(data: ProfileUpdate) -> dict:
         updates["bank_country"] = data.bank_country.upper()
     if data.xendit_channel_code is not None:
         from app.models.payment import VALID_XENDIT_CHANNEL_CODES
+
         if data.xendit_channel_code not in VALID_XENDIT_CHANNEL_CODES:
             raise HTTPException(status_code=400, detail="Invalid Xendit channel code")
         updates["xendit_channel_code"] = data.xendit_channel_code
@@ -464,7 +468,9 @@ async def _save_payout_settings(user_id: str, data: ProfileUpdate) -> dict:
     if updates.get("payment_method") == "xendit":
         final_code = updates.get("xendit_channel_code") or existing.get("xendit_channel_code")
         final_number = updates.get("xendit_account_number") or existing.get("xendit_account_number")
-        final_name = updates.get("xendit_account_holder_name") or existing.get("xendit_account_holder_name")
+        final_name = updates.get("xendit_account_holder_name") or existing.get(
+            "xendit_account_holder_name"
+        )
         if not final_code or not final_number or not final_name:
             raise HTTPException(status_code=400, detail="All Xendit bank details are required")
 
@@ -522,6 +528,7 @@ async def validate_affiliate_bank_account(
     """Validate a bank account via Xendit before saving."""
     from app.services import xendit_service
     from app.services.xendit_service import XenditError
+
     try:
         result = await xendit_service.validate_bank_account(
             channel_code=channel_code,

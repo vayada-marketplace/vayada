@@ -1,15 +1,13 @@
 """
 Repository for newsletter_preferences table (Business Database).
 """
-from typing import Optional, List
 
 from app.database import Database
 
 
 class NewsletterRepository:
-
     @staticmethod
-    async def get_by_user_id(user_id: str) -> Optional[dict]:
+    async def get_by_user_id(user_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM newsletter_preferences WHERE user_id = $1",
             user_id,
@@ -20,8 +18,8 @@ class NewsletterRepository:
     async def upsert(
         user_id: str,
         *,
-        enabled: Optional[bool] = None,
-        country_filter: Optional[List[str]] = None,
+        enabled: bool | None = None,
+        country_filter: list[str] | None = None,
         clear_country_filter: bool = False,
     ) -> dict:
         """Create or update newsletter preferences. Returns the row."""
@@ -37,7 +35,9 @@ class NewsletterRepository:
                 VALUES ($1, $2, $3)
                 RETURNING *
                 """,
-                user_id, e, cf,
+                user_id,
+                e,
+                cf,
             )
         else:
             sets = ["updated_at = NOW()"]
@@ -65,7 +65,5 @@ class NewsletterRepository:
     @staticmethod
     async def get_all_enabled() -> list:
         """Return all users with newsletter enabled."""
-        rows = await Database.fetch(
-            "SELECT * FROM newsletter_preferences WHERE enabled = TRUE"
-        )
+        rows = await Database.fetch("SELECT * FROM newsletter_preferences WHERE enabled = TRUE")
         return [dict(r) for r in rows]

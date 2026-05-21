@@ -1,20 +1,16 @@
 """
 File upload routes for room images
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
-from typing import List
+
 import logging
 
-from app.dependencies import require_hotel_admin
-from app.s3_service import upload_file_to_s3, generate_file_key
-from app.image_processing import (
-    validate_image,
-    process_image,
-    generate_thumbnail,
-    get_image_info
-)
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+
 from app.config import settings
+from app.dependencies import require_hotel_admin
+from app.image_processing import generate_thumbnail, get_image_info, process_image, validate_image
 from app.models.upload import ImageUploadResponse, MultipleImageUploadResponse
+from app.s3_service import generate_file_key, upload_file_to_s3
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +19,7 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 @router.post("/images", response_model=MultipleImageUploadResponse, status_code=201)
 async def upload_room_images(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     user_id: str = Depends(require_hotel_admin),
 ):
     """Upload multiple room images. Returns S3 URLs."""
@@ -57,8 +53,12 @@ async def upload_room_images(
             if settings.IMAGE_RESIZE_WIDTH > 0 or settings.IMAGE_RESIZE_HEIGHT > 0:
                 processed_content = process_image(
                     file_content,
-                    resize_width=settings.IMAGE_RESIZE_WIDTH if settings.IMAGE_RESIZE_WIDTH > 0 else None,
-                    resize_height=settings.IMAGE_RESIZE_HEIGHT if settings.IMAGE_RESIZE_HEIGHT > 0 else None,
+                    resize_width=settings.IMAGE_RESIZE_WIDTH
+                    if settings.IMAGE_RESIZE_WIDTH > 0
+                    else None,
+                    resize_height=settings.IMAGE_RESIZE_HEIGHT
+                    if settings.IMAGE_RESIZE_HEIGHT > 0
+                    else None,
                 )
                 image_info = get_image_info(processed_content)
 
@@ -66,7 +66,8 @@ async def upload_room_images(
 
             content_type = file.content_type or "image/jpeg"
             url = await upload_file_to_s3(
-                processed_content, file_key,
+                processed_content,
+                file_key,
                 content_type=content_type,
                 make_public=settings.S3_USE_PUBLIC_URLS,
             )
@@ -77,22 +78,25 @@ async def upload_room_images(
                     thumb = generate_thumbnail(file_content, size=settings.THUMBNAIL_SIZE)
                     thumb_key = file_key.replace(".", "_thumb.")
                     thumbnail_url = await upload_file_to_s3(
-                        thumb, thumb_key,
+                        thumb,
+                        thumb_key,
                         content_type="image/jpeg",
                         make_public=settings.S3_USE_PUBLIC_URLS,
                     )
                 except Exception as e:
                     logger.warning(f"Thumbnail failed for {file.filename}: {e}")
 
-            uploaded.append(ImageUploadResponse(
-                url=url,
-                thumbnail_url=thumbnail_url,
-                key=file_key,
-                width=image_info.get("width", 0),
-                height=image_info.get("height", 0),
-                size_bytes=image_info.get("size_bytes", len(processed_content)),
-                format=image_info.get("format", "JPEG"),
-            ))
+            uploaded.append(
+                ImageUploadResponse(
+                    url=url,
+                    thumbnail_url=thumbnail_url,
+                    key=file_key,
+                    width=image_info.get("width", 0),
+                    height=image_info.get("height", 0),
+                    size_bytes=image_info.get("size_bytes", len(processed_content)),
+                    format=image_info.get("format", "JPEG"),
+                )
+            )
 
         except Exception as e:
             logger.error(f"Error processing file {file.filename}: {e}")

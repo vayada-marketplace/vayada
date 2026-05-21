@@ -1,17 +1,16 @@
 """
 Repository for email_change_tokens table (AuthDatabase).
 """
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 from app.database import AuthDatabase
 
 
 class EmailChangeRepository:
-
     @staticmethod
     async def create(user_id: str, new_email: str, token: str, expires_in_hours: int = 1) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
         # Invalidate any existing unused tokens for this user
         await AuthDatabase.execute(
             "UPDATE email_change_tokens SET used = true WHERE user_id = $1 AND used = false",
@@ -19,11 +18,14 @@ class EmailChangeRepository:
         )
         await AuthDatabase.execute(
             "INSERT INTO email_change_tokens (user_id, new_email, token, expires_at) VALUES ($1, $2, $3, $4)",
-            user_id, new_email, token, expires_at,
+            user_id,
+            new_email,
+            token,
+            expires_at,
         )
 
     @staticmethod
-    async def get_valid_token(token: str) -> Optional[dict]:
+    async def get_valid_token(token: str) -> dict | None:
         query = """
             SELECT ect.id, ect.user_id, ect.new_email, ect.expires_at, ect.used, u.email, u.status
             FROM email_change_tokens ect

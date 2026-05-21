@@ -7,6 +7,7 @@ VAY-157 so that the canonical id used by both admin frontends
 where booking_hotels.id != pms.hotels.id silently returned [] for both
 the owner and the marketplace superadmin view.
 """
+
 from app.database import AuthDatabase, Database
 
 from tests.conftest import (
@@ -17,9 +18,7 @@ from tests.conftest import (
 
 
 async def _make_superadmin(user):
-    await AuthDatabase.execute(
-        "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
-    )
+    await AuthDatabase.execute("UPDATE users SET is_superadmin = true WHERE id = $1", user["id"])
 
 
 class TestGetBenefits:
@@ -43,9 +42,7 @@ class TestGetBenefits:
             "/admin/benefits",
             headers=get_auth_headers(user["token"]),
         )
-        assert resp.json() == {
-            "benefits": ["Welcome Drink on Arrival", "Daily Breakfast Included"]
-        }
+        assert resp.json() == {"benefits": ["Welcome Drink on Arrival", "Daily Breakfast Included"]}
 
     async def test_no_auth(self, client):
         resp = await client.get("/admin/benefits")
@@ -66,6 +63,7 @@ class TestUpdateBenefits:
             "SELECT benefits FROM booking_hotels WHERE id = $1", hotel["id"]
         )
         import json
+
         stored = row["benefits"]
         if isinstance(stored, str):
             stored = json.loads(stored)
@@ -135,9 +133,7 @@ class TestSuperadminAcrossOwners:
             },
         )
         assert resp.status_code == 200
-        assert resp.json() == {
-            "benefits": ["Welcome Drink on Arrival", "Daily Breakfast Included"]
-        }
+        assert resp.json() == {"benefits": ["Welcome Drink on Arrival", "Daily Breakfast Included"]}
 
     async def test_superadmin_writes_visible_to_owner(self, client, cleanup_database):
         owner = await create_test_user()

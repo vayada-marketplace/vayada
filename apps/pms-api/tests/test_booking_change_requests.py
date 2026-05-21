@@ -7,15 +7,17 @@ Covers:
 - approve mutates booking dates / total
 - decline leaves booking untouched
 """
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
     create_test_booking,
+    create_test_hotel,
     create_test_room,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -27,21 +29,34 @@ async def _make_confirmed_booking(check_in="2026-09-01", check_out="2026-09-05")
     await create_test_room(str(hotel["id"]), str(room["id"]), room_number="201")
     await create_test_room(str(hotel["id"]), str(room["id"]), room_number="202")
     booking = await create_test_booking(
-        str(hotel["id"]), str(room["id"]),
-        check_in=check_in, check_out=check_out,
+        str(hotel["id"]),
+        str(room["id"]),
+        check_in=check_in,
+        check_out=check_out,
         guest_email="changeguest@example.com",
-        nightly_rate=150.0, status="confirmed",
+        nightly_rate=150.0,
+        status="confirmed",
     )
     return user, hotel, room, booking
 
 
 @patch("app.services.booking_change_service.send_host_change_request", new_callable=AsyncMock)
-@patch("app.services.booking_change_service.send_guest_change_request_received", new_callable=AsyncMock)
-@patch("app.services.booking_change_service.push_availability_for_room_type", new_callable=AsyncMock)
+@patch(
+    "app.services.booking_change_service.send_guest_change_request_received", new_callable=AsyncMock
+)
+@patch(
+    "app.services.booking_change_service.push_availability_for_room_type", new_callable=AsyncMock
+)
 @patch("app.services.booking_change_service.push_ari_for_booking", new_callable=AsyncMock)
 class TestChangeRequestFlow:
     async def test_preview_returns_price_diff_for_extended_stay(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         _user, hotel, _room, booking = await _make_confirmed_booking()
 
@@ -66,9 +81,16 @@ class TestChangeRequestFlow:
         assert body["available"] is True
 
     async def test_preview_blocks_price_decrease_for_paid_booking(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         from app.database import Database
+
         _user, hotel, _room, booking = await _make_confirmed_booking()
         # Mark the booking as already paid (captured)
         await Database.execute(
@@ -95,7 +117,13 @@ class TestChangeRequestFlow:
         assert "already paid" in body["blockReason"].lower()
 
     async def test_submit_then_duplicate_blocked(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         _user, hotel, _room, booking = await _make_confirmed_booking()
         payload = {
@@ -124,9 +152,16 @@ class TestChangeRequestFlow:
         assert "pending" in resp2.json()["detail"].lower()
 
     async def test_approve_applies_change_to_booking(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         from app.database import Database
+
         user, hotel, _room, booking = await _make_confirmed_booking()
         # Submit a change request as the guest first.
         resp = await client.post(
@@ -143,12 +178,15 @@ class TestChangeRequestFlow:
         assert resp.status_code == 200, resp.text
 
         # Patch decision-side emails so they don't try to fire.
-        with patch(
-            "app.services.booking_change_service.send_guest_change_request_approved",
-            new_callable=AsyncMock,
-        ), patch(
-            "app.services.booking_change_service.send_host_change_request_decision",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "app.services.booking_change_service.send_guest_change_request_approved",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.booking_change_service.send_host_change_request_decision",
+                new_callable=AsyncMock,
+            ),
         ):
             approve_resp = await client.post(
                 f"/admin/bookings/{booking['id']}/change-request/approve",
@@ -168,9 +206,16 @@ class TestChangeRequestFlow:
         assert float(row["total_amount"]) == 1050.0
 
     async def test_decline_leaves_booking_untouched(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         from app.database import Database
+
         user, hotel, _room, booking = await _make_confirmed_booking()
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/change-request",
@@ -185,12 +230,15 @@ class TestChangeRequestFlow:
         )
         assert resp.status_code == 200
 
-        with patch(
-            "app.services.booking_change_service.send_guest_change_request_declined",
-            new_callable=AsyncMock,
-        ), patch(
-            "app.services.booking_change_service.send_host_change_request_decision",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "app.services.booking_change_service.send_guest_change_request_declined",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.booking_change_service.send_host_change_request_decision",
+                new_callable=AsyncMock,
+            ),
         ):
             decline_resp = await client.post(
                 f"/admin/bookings/{booking['id']}/change-request/decline",
@@ -211,14 +259,21 @@ class TestChangeRequestFlow:
         assert float(row["total_amount"]) == 600.0
 
     async def test_preview_rejects_pending_only_for_non_confirmed(
-        self, _ari, _push, _guest_email, _host_email, client, cleanup_database,
+        self,
+        _ari,
+        _push,
+        _guest_email,
+        _host_email,
+        client,
+        cleanup_database,
     ):
         # Pending booking — change requests are confirmed-only.
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             guest_email="pendingguest@example.com",
             status="pending",
         )

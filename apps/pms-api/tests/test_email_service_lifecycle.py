@@ -1,8 +1,8 @@
 """Unit tests for the host/ops booking-request lifecycle email renderer."""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.services import email_service
 from app.services.email_service import (
     _render_request_status_email,
@@ -13,7 +13,6 @@ from app.services.email_service import (
     send_host_booking_withdrawn,
     send_host_guest_cancelled,
 )
-
 
 BOOKING = {
     "id": "booking-uuid-1",
@@ -119,8 +118,10 @@ async def test_host_emails_cc_ops_recipients(sender, expected_headline):
     async def fake_send(to, subject, html_body):
         sent.append((to, subject, html_body))
 
-    with patch.object(email_service, "_send_email", side_effect=fake_send), \
-         patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"):
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"),
+    ):
         if sender is send_host_booking_rejected:
             await sender("host@example.com", BOOKING, reason="No availability")
         else:
@@ -145,8 +146,10 @@ async def test_no_duplicate_when_host_email_matches_ops_email():
     async def fake_send(to, subject, html_body):
         sent.append(to)
 
-    with patch.object(email_service, "_send_email", side_effect=fake_send), \
-         patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "host@example.com"):
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "host@example.com"),
+    ):
         await send_booking_request_notification("host@example.com", BOOKING)
 
     # host@example.com appears exactly once (deduplicated against ops list)
@@ -160,8 +163,10 @@ async def test_missing_hotel_email_still_sends_to_ops():
     async def fake_send(to, subject, html_body):
         sent.append(to)
 
-    with patch.object(email_service, "_send_email", side_effect=fake_send), \
-         patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"):
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"),
+    ):
         await send_booking_request_notification("", BOOKING)
 
     assert "" not in sent

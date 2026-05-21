@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.dependencies import require_current_hotel
-from app.repositories.promo_code_repo import PromoCodeRepository
 from app.models.promo_code import (
-    PromoCodeResponse,
     CreatePromoCodeRequest,
+    PromoCodeResponse,
     UpdatePromoCodeRequest,
 )
+from app.repositories.promo_code_repo import PromoCodeRepository
 
 router = APIRouter()
 
@@ -61,7 +62,15 @@ async def update_promo_code(
         raise HTTPException(status_code=404, detail="Promo code not found")
 
     updates = {}
-    for field in ("code", "discount_type", "discount_value", "valid_from", "valid_until", "is_active", "max_uses"):
+    for field in (
+        "code",
+        "discount_type",
+        "discount_value",
+        "valid_from",
+        "valid_until",
+        "is_active",
+        "max_uses",
+    ):
         value = getattr(data, field)
         if value is not None:
             if field == "code":

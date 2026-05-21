@@ -3,8 +3,10 @@
 Standalone GDPR migration script - doesn't rely on app config
 Usage: python scripts/run_gdpr_migrations.py <DATABASE_URL>
 """
-import sys
+
 import asyncio
+import sys
+
 import asyncpg
 
 MIGRATIONS = [
@@ -18,7 +20,6 @@ MIGRATIONS = [
     ADD COLUMN IF NOT EXISTS marketing_consent boolean DEFAULT false,
     ADD COLUMN IF NOT EXISTS marketing_consent_at timestamp with time zone;
     """,
-
     # Migration 025: Cookie consent table
     """
     CREATE TABLE IF NOT EXISTS public.cookie_consent (
@@ -35,7 +36,6 @@ MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_cookie_consent_visitor_id ON public.cookie_consent(visitor_id);",
     "CREATE INDEX IF NOT EXISTS idx_cookie_consent_user_id ON public.cookie_consent(user_id);",
-
     # Migration 026: Consent history table
     """
     CREATE TABLE IF NOT EXISTS public.consent_history (
@@ -52,7 +52,6 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_consent_history_user_id ON public.consent_history(user_id);",
     "CREATE INDEX IF NOT EXISTS idx_consent_history_consent_type ON public.consent_history(consent_type);",
     "CREATE INDEX IF NOT EXISTS idx_consent_history_created_at ON public.consent_history(created_at);",
-
     # Migration 026: GDPR requests table
     """
     CREATE TABLE IF NOT EXISTS public.gdpr_requests (
@@ -73,7 +72,6 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_gdpr_requests_user_id ON public.gdpr_requests(user_id);",
     "CREATE INDEX IF NOT EXISTS idx_gdpr_requests_status ON public.gdpr_requests(status);",
     "CREATE INDEX IF NOT EXISTS idx_gdpr_requests_download_token ON public.gdpr_requests(download_token);",
-
     # Migration 027: Backfill existing users
     """
     UPDATE public.users
@@ -91,10 +89,7 @@ async def run_migrations(database_url: str):
     print("🔗 Connecting to database...")
 
     try:
-        conn = await asyncio.wait_for(
-            asyncpg.connect(database_url, ssl='require'),
-            timeout=10
-        )
+        conn = await asyncio.wait_for(asyncpg.connect(database_url, ssl="require"), timeout=10)
         print("✅ Connected!\n")
 
         for i, sql in enumerate(MIGRATIONS, 1):
@@ -113,7 +108,7 @@ async def run_migrations(database_url: str):
         await conn.close()
         print("\n🎉 All GDPR migrations completed successfully!")
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         print("❌ Connection timed out - database not reachable from this network")
         print("   Your RDS security group likely blocks external connections.")
         print("   Options:")
@@ -132,7 +127,9 @@ async def run_migrations(database_url: str):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python scripts/run_gdpr_migrations.py <DATABASE_URL>")
-        print("Example: python scripts/run_gdpr_migrations.py 'postgresql://user:pass@host:5432/db'")
+        print(
+            "Example: python scripts/run_gdpr_migrations.py 'postgresql://user:pass@host:5432/db'"
+        )
         sys.exit(1)
 
     database_url = sys.argv[1]

@@ -1,7 +1,6 @@
 import asyncio
 import json as _json
 import logging
-from typing import Optional, List
 
 import httpx
 
@@ -9,7 +8,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[httpx.AsyncClient] = None
+_client: httpx.AsyncClient | None = None
 _throttle = asyncio.Semaphore(1)
 
 
@@ -50,7 +49,9 @@ def _summarize_channex_errors(path: str, body: dict | str) -> str:
 
     if isinstance(body, str):
         snippet = body.strip()[:200]
-        return f"Channex rejected {resource}: {snippet}" if snippet else f"Channex rejected {resource}"
+        return (
+            f"Channex rejected {resource}: {snippet}" if snippet else f"Channex rejected {resource}"
+        )
 
     errors = body.get("errors") if isinstance(body, dict) else None
 
@@ -71,11 +72,7 @@ def _summarize_channex_errors(path: str, body: dict | str) -> str:
             return f"Channex rejected {resource}: {'; '.join(parts)}"
 
     if isinstance(errors, list):
-        msgs = [
-            e.get("detail") or e.get("title") or str(e)
-            for e in errors
-            if e
-        ]
+        msgs = [e.get("detail") or e.get("title") or str(e) for e in errors if e]
         msgs = [m for m in msgs if m]
         if msgs:
             return f"Channex rejected {resource}: {'; '.join(msgs)}"
@@ -140,7 +137,10 @@ async def _request(
                 body = response.text
             logger.error(
                 "Channex %s %s -> %d: %s",
-                method, path, response.status_code, body,
+                method,
+                path,
+                response.status_code,
+                body,
             )
             raise ChannexAPIError(
                 method=method,
@@ -154,6 +154,7 @@ async def _request(
 
 
 # ── Connection test ──────────────────────────────────────────────────
+
 
 async def test_connection(api_key: str) -> bool:
     """Verify an API key is valid by listing properties."""
@@ -170,6 +171,7 @@ async def test_connection(api_key: str) -> bool:
 
 
 # ── Properties ───────────────────────────────────────────────────────
+
 
 async def create_property(
     api_key: str,
@@ -214,7 +216,9 @@ async def create_property(
         payload["phone"] = phone
 
     data = await _request(
-        "POST", "/api/v1/properties", api_key,
+        "POST",
+        "/api/v1/properties",
+        api_key,
         json={"property": payload},
     )
     return data.get("data", data)
@@ -223,7 +227,9 @@ async def create_property(
 async def update_property(api_key: str, property_id: str, updates: dict) -> dict:
     """Update a Channex property."""
     data = await _request(
-        "PUT", f"/api/v1/properties/{property_id}", api_key,
+        "PUT",
+        f"/api/v1/properties/{property_id}",
+        api_key,
         json={"property": updates},
     )
     return data.get("data", data)
@@ -234,9 +240,11 @@ async def get_property(api_key: str, property_id: str) -> dict:
     return data.get("data", data)
 
 
-async def list_properties(api_key: str) -> List[dict]:
+async def list_properties(api_key: str) -> list[dict]:
     data = await _request(
-        "GET", "/api/v1/properties", api_key,
+        "GET",
+        "/api/v1/properties",
+        api_key,
         params={"pagination[page]": 1, "pagination[limit]": 100},
     )
     return data.get("data", [])
@@ -244,12 +252,11 @@ async def list_properties(api_key: str) -> List[dict]:
 
 async def delete_property(api_key: str, property_id: str, force: bool = False) -> None:
     params = {"force": "true"} if force else {}
-    await _request(
-        "DELETE", f"/api/v1/properties/{property_id}", api_key, params=params
-    )
+    await _request("DELETE", f"/api/v1/properties/{property_id}", api_key, params=params)
 
 
 # ── Room Types ───────────────────────────────────────────────────────
+
 
 async def create_room_type(
     api_key: str,
@@ -279,15 +286,19 @@ async def create_room_type(
     }
 
     data = await _request(
-        "POST", "/api/v1/room_types", api_key,
+        "POST",
+        "/api/v1/room_types",
+        api_key,
         json={"room_type": payload},
     )
     return data.get("data", data)
 
 
-async def list_room_types(api_key: str, property_id: str) -> List[dict]:
+async def list_room_types(api_key: str, property_id: str) -> list[dict]:
     data = await _request(
-        "GET", "/api/v1/room_types", api_key,
+        "GET",
+        "/api/v1/room_types",
+        api_key,
         params={
             "filter[property_id]": property_id,
             "pagination[page]": 1,
@@ -297,13 +308,9 @@ async def list_room_types(api_key: str, property_id: str) -> List[dict]:
     return data.get("data", [])
 
 
-async def delete_room_type(
-    api_key: str, room_type_id: str, force: bool = False
-) -> None:
+async def delete_room_type(api_key: str, room_type_id: str, force: bool = False) -> None:
     params = {"force": "true"} if force else {}
-    await _request(
-        "DELETE", f"/api/v1/room_types/{room_type_id}", api_key, params=params
-    )
+    await _request("DELETE", f"/api/v1/room_types/{room_type_id}", api_key, params=params)
 
 
 # ── Rate Plans ───────────────────────────────────────────────────────
@@ -330,7 +337,7 @@ async def create_rate_plan(
     property_id: str,
     room_type_id: str,
     title: str,
-    options: List[dict],
+    options: list[dict],
     sell_mode: str = "per_room",
     rate_mode: str = "manual",
     currency: str = None,
@@ -358,15 +365,19 @@ async def create_rate_plan(
         payload["currency"] = currency
 
     data = await _request(
-        "POST", "/api/v1/rate_plans", api_key,
+        "POST",
+        "/api/v1/rate_plans",
+        api_key,
         json={"rate_plan": payload},
     )
     return data.get("data", data)
 
 
-async def list_rate_plans(api_key: str, property_id: str) -> List[dict]:
+async def list_rate_plans(api_key: str, property_id: str) -> list[dict]:
     data = await _request(
-        "GET", "/api/v1/rate_plans", api_key,
+        "GET",
+        "/api/v1/rate_plans",
+        api_key,
         params={
             "filter[property_id]": property_id,
             "pagination[page]": 1,
@@ -380,7 +391,7 @@ async def update_rate_plan_cancellation_policy(
     api_key: str,
     rate_plan_id: str,
     *,
-    policies: List[dict],
+    policies: list[dict],
 ) -> dict:
     """Set the cancellation policy on a Channex rate plan.
 
@@ -394,7 +405,9 @@ async def update_rate_plan_cancellation_policy(
         "cancellation_policies": policies,
     }
     data = await _request(
-        "PUT", f"/api/v1/rate_plans/{rate_plan_id}", api_key,
+        "PUT",
+        f"/api/v1/rate_plans/{rate_plan_id}",
+        api_key,
         json={"rate_plan": payload},
     )
     return data.get("data", data)
@@ -402,14 +415,17 @@ async def update_rate_plan_cancellation_policy(
 
 # ── Channels ─────────────────────────────────────────────────────────
 
-async def list_channels(api_key: str, property_id: str) -> List[dict]:
+
+async def list_channels(api_key: str, property_id: str) -> list[dict]:
     """List OTA channels connected to a Channex property.
 
     Each item has attributes.application (e.g. "BookingCom", "Airbnb",
     "Expedia") and attributes.is_active.
     """
     data = await _request(
-        "GET", "/api/v1/channels", api_key,
+        "GET",
+        "/api/v1/channels",
+        api_key,
         params={
             "filter[property_id]": property_id,
             "pagination[page]": 1,
@@ -419,27 +435,26 @@ async def list_channels(api_key: str, property_id: str) -> List[dict]:
     return data.get("data", [])
 
 
-async def delete_rate_plan(
-    api_key: str, rate_plan_id: str, force: bool = False
-) -> None:
+async def delete_rate_plan(api_key: str, rate_plan_id: str, force: bool = False) -> None:
     params = {"force": "true"} if force else {}
-    await _request(
-        "DELETE", f"/api/v1/rate_plans/{rate_plan_id}", api_key, params=params
-    )
+    await _request("DELETE", f"/api/v1/rate_plans/{rate_plan_id}", api_key, params=params)
 
 
 # ── ARI: Availability ────────────────────────────────────────────────
 
+
 async def push_availability(
     api_key: str,
-    values: List[dict],
+    values: list[dict],
 ) -> dict:
     """Push availability updates to Channex.
 
     Each value: {property_id, room_type_id, date_from, date_to, availability}
     """
     data = await _request(
-        "POST", "/api/v1/availability", api_key,
+        "POST",
+        "/api/v1/availability",
+        api_key,
         json={"values": values},
     )
     return data
@@ -452,7 +467,9 @@ async def get_availability(
     date_to: str,
 ) -> dict:
     data = await _request(
-        "GET", "/api/v1/availability", api_key,
+        "GET",
+        "/api/v1/availability",
+        api_key,
         params={
             "filter[property_id]": property_id,
             "filter[date][gte]": date_from,
@@ -464,16 +481,19 @@ async def get_availability(
 
 # ── ARI: Restrictions (rates + rules) ────────────────────────────────
 
+
 async def push_restrictions(
     api_key: str,
-    values: List[dict],
+    values: list[dict],
 ) -> dict:
     """Push rate/restriction updates to Channex.
 
     Each value: {property_id, rate_plan_id, date_from, date_to, rate, min_stay_arrival, ...}
     """
     data = await _request(
-        "POST", "/api/v1/restrictions", api_key,
+        "POST",
+        "/api/v1/restrictions",
+        api_key,
         json={"values": values},
     )
     return data
@@ -486,7 +506,9 @@ async def get_restrictions(
     date_to: str,
 ) -> dict:
     data = await _request(
-        "GET", "/api/v1/restrictions", api_key,
+        "GET",
+        "/api/v1/restrictions",
+        api_key,
         params={
             "filter[property_id]": property_id,
             "filter[date][gte]": date_from,
@@ -498,10 +520,11 @@ async def get_restrictions(
 
 # ── Bookings ─────────────────────────────────────────────────────────
 
+
 async def get_booking_revisions_feed(
     api_key: str,
     property_id: str = None,
-) -> List[dict]:
+) -> list[dict]:
     """Fetch unacknowledged booking revisions (the primary PMS polling method)."""
     params = {}
     if property_id:
@@ -509,7 +532,9 @@ async def get_booking_revisions_feed(
     params["order[inserted_at]"] = "asc"
 
     data = await _request(
-        "GET", "/api/v1/booking_revisions/feed", api_key,
+        "GET",
+        "/api/v1/booking_revisions/feed",
+        api_key,
         params=params,
     )
     return data.get("data", [])
@@ -518,13 +543,17 @@ async def get_booking_revisions_feed(
 async def acknowledge_booking_revision(api_key: str, revision_id: str) -> dict:
     """Acknowledge receipt of a booking revision (prevents re-delivery)."""
     return await _request(
-        "POST", f"/api/v1/booking_revisions/{revision_id}/ack", api_key,
+        "POST",
+        f"/api/v1/booking_revisions/{revision_id}/ack",
+        api_key,
     )
 
 
 async def get_booking(api_key: str, booking_id: str) -> dict:
     data = await _request(
-        "GET", f"/api/v1/bookings/{booking_id}", api_key,
+        "GET",
+        f"/api/v1/bookings/{booking_id}",
+        api_key,
     )
     return data.get("data", data)
 
@@ -534,7 +563,7 @@ async def list_bookings(
     property_id: str = None,
     arrival_gte: str = None,
     arrival_lte: str = None,
-) -> List[dict]:
+) -> list[dict]:
     params = {"pagination[page]": 1, "pagination[limit]": 100}
     if property_id:
         params["filter[property_id]"] = property_id
@@ -547,16 +576,17 @@ async def list_bookings(
     return data.get("data", [])
 
 
-async def report_no_show(
-    api_key: str, booking_id: str, waived_fees: bool = False
-) -> dict:
+async def report_no_show(api_key: str, booking_id: str, waived_fees: bool = False) -> dict:
     return await _request(
-        "POST", f"/api/v1/bookings/{booking_id}/no_show", api_key,
+        "POST",
+        f"/api/v1/bookings/{booking_id}/no_show",
+        api_key,
         json={"no_show_report": {"waived_fees": waived_fees}},
     )
 
 
 # ── Channel IFrame ──────────────────────────────────────────────────
+
 
 async def create_iframe_token(
     api_key: str,
@@ -566,7 +596,9 @@ async def create_iframe_token(
     """Generate a one-time token for the Channex channel management iframe.
     Token is valid for 15 minutes and invalidated after first use."""
     data = await _request(
-        "POST", "/api/v1/auth/one_time_token", api_key,
+        "POST",
+        "/api/v1/auth/one_time_token",
+        api_key,
         json={
             "one_time_token": {
                 "property_id": property_id,
@@ -610,22 +642,24 @@ def build_iframe_url(
 MESSAGING_APP_CODE = "channex_messages"
 
 
-async def list_installed_applications(api_key: str, property_id: str) -> List[dict]:
+async def list_installed_applications(api_key: str, property_id: str) -> list[dict]:
     data = await _request(
-        "GET", "/api/v1/applications/installed", api_key,
+        "GET",
+        "/api/v1/applications/installed",
+        api_key,
         params={"filter[property_id]": property_id},
     )
     return data.get("data", [])
 
 
-async def install_application(
-    api_key: str, property_id: str, application_code: str
-) -> dict:
+async def install_application(api_key: str, property_id: str, application_code: str) -> dict:
     """Install an application on a Channex property. Idempotent at our layer:
     callers should check `list_installed_applications` first, but Channex itself
     may also reject duplicate installs."""
     data = await _request(
-        "POST", "/api/v1/applications/install", api_key,
+        "POST",
+        "/api/v1/applications/install",
+        api_key,
         json={
             "application_installation": {
                 "property_id": property_id,
@@ -651,7 +685,8 @@ async def install_messaging_app(api_key: str, property_id: str) -> dict:
 
 # ── Webhooks (account-level subscription) ────────────────────────────
 
-async def list_webhooks(api_key: str) -> List[dict]:
+
+async def list_webhooks(api_key: str) -> list[dict]:
     data = await _request("GET", "/api/v1/webhooks", api_key)
     return data.get("data", [])
 
@@ -679,7 +714,9 @@ async def create_webhook(
     if property_id:
         payload["property_id"] = property_id
     data = await _request(
-        "POST", "/api/v1/webhooks", api_key,
+        "POST",
+        "/api/v1/webhooks",
+        api_key,
         json={"webhook": payload},
     )
     return data.get("data", data)
@@ -687,7 +724,9 @@ async def create_webhook(
 
 async def update_webhook(api_key: str, webhook_id: str, updates: dict) -> dict:
     data = await _request(
-        "PUT", f"/api/v1/webhooks/{webhook_id}", api_key,
+        "PUT",
+        f"/api/v1/webhooks/{webhook_id}",
+        api_key,
         json={"webhook": updates},
     )
     return data.get("data", data)
@@ -699,6 +738,7 @@ async def delete_webhook(api_key: str, webhook_id: str) -> None:
 
 # ── Messaging ────────────────────────────────────────────────────────
 
+
 async def list_message_threads(
     api_key: str,
     property_id: str = None,
@@ -706,7 +746,7 @@ async def list_message_threads(
     page: int = 1,
     limit: int = 100,
     order: str = "desc",
-) -> List[dict]:
+) -> list[dict]:
     """List message threads. Without property_id, returns threads across the
     whole Channex account (used by the safety-net sweep)."""
     params = {
@@ -717,14 +757,19 @@ async def list_message_threads(
     if property_id:
         params["filter[property_id]"] = property_id
     data = await _request(
-        "GET", "/api/v1/message_threads", api_key, params=params,
+        "GET",
+        "/api/v1/message_threads",
+        api_key,
+        params=params,
     )
     return data.get("data", [])
 
 
 async def get_message_thread(api_key: str, thread_id: str) -> dict:
     data = await _request(
-        "GET", f"/api/v1/message_threads/{thread_id}", api_key,
+        "GET",
+        f"/api/v1/message_threads/{thread_id}",
+        api_key,
     )
     return data.get("data", data)
 
@@ -735,9 +780,11 @@ async def list_thread_messages(
     *,
     page: int = 1,
     limit: int = 100,
-) -> List[dict]:
+) -> list[dict]:
     data = await _request(
-        "GET", f"/api/v1/message_threads/{thread_id}/messages", api_key,
+        "GET",
+        f"/api/v1/message_threads/{thread_id}/messages",
+        api_key,
         params={
             "pagination[page]": page,
             "pagination[limit]": limit,
@@ -762,7 +809,9 @@ async def post_thread_message(
     if not payload:
         raise ValueError("message or attachment_id required")
     data = await _request(
-        "POST", f"/api/v1/message_threads/{thread_id}/messages", api_key,
+        "POST",
+        f"/api/v1/message_threads/{thread_id}/messages",
+        api_key,
         json={"message": payload},
     )
     return data.get("data", data)
@@ -770,7 +819,9 @@ async def post_thread_message(
 
 async def close_thread(api_key: str, thread_id: str) -> dict:
     data = await _request(
-        "POST", f"/api/v1/message_threads/{thread_id}/close", api_key,
+        "POST",
+        f"/api/v1/message_threads/{thread_id}/close",
+        api_key,
     )
     return data.get("data", data)
 
@@ -778,7 +829,9 @@ async def close_thread(api_key: str, thread_id: str) -> dict:
 async def mark_thread_no_reply_needed(api_key: str, thread_id: str) -> dict:
     """Booking.com only — marks a thread as not requiring a reply (counts toward response time)."""
     data = await _request(
-        "POST", f"/api/v1/message_threads/{thread_id}/no_reply_needed", api_key,
+        "POST",
+        f"/api/v1/message_threads/{thread_id}/no_reply_needed",
+        api_key,
     )
     return data.get("data", data)
 
@@ -793,13 +846,16 @@ async def upload_attachment(
     """Upload an attachment to Channex. Returns the attachment object whose
     `id` is then passed to `post_thread_message` as `attachment_id`."""
     import base64
+
     payload = {
         "file": base64.b64encode(file_bytes).decode("ascii"),
         "file_name": filename,
         "file_type": content_type,
     }
     data = await _request(
-        "POST", "/api/v1/attachments", api_key,
+        "POST",
+        "/api/v1/attachments",
+        api_key,
         json={"attachment": payload},
     )
     return data.get("data", data)

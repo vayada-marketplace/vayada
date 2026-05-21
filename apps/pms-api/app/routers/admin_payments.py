@@ -1,32 +1,32 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import require_hotel_admin
-from app.utils import get_hotel_id
-from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.models.payment import (
+    CancellationPolicy,
+    CancellationPolicyUpdate,
+    HotelPaymentSettings,
+    HotelPaymentSettingsUpdate,
+    PaymentSettingsResponse,
+    StripeConnectAccountRequest,
+    XenditBankDetailsRequest,
+)
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services import hotel_identity_service, stripe_service, xendit_service
 from app.services.currency_service import (
     convert_amount,
     convert_room_type_rates,
     decimals_for_currency,
     get_exchange_rate,
 )
-from app.models.payment import (
-    HotelPaymentSettings,
-    HotelPaymentSettingsUpdate,
-    CancellationPolicy,
-    CancellationPolicyUpdate,
-    PaymentSettingsResponse,
-    StripeConnectAccountRequest,
-    XenditBankDetailsRequest,
-)
-from app.services import stripe_service, xendit_service, hotel_identity_service
 from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.services.xendit_service import XenditError
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +62,21 @@ async def get_payment_settings(
             stripe_connect_onboarded=settings["stripe_connect_onboarded"] if settings else False,
             platform_fee_type=settings["platform_fee_type"] if settings else "percentage",
             platform_fee_value=float(settings["platform_fee_value"]) if settings else 8.00,
-            platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"]) if settings else 2.00,
+            platform_fee_with_affiliate=float(settings["platform_fee_with_affiliate"])
+            if settings
+            else 2.00,
             pay_at_property_enabled=settings["pay_at_property_enabled"] if settings else False,
             online_card_payment=settings.get("online_card_payment", False) if settings else False,
             bank_transfer=settings.get("bank_transfer", False) if settings else False,
-            xendit_payments_enabled=settings.get("xendit_payments_enabled", False) if settings else False,
+            xendit_payments_enabled=settings.get("xendit_payments_enabled", False)
+            if settings
+            else False,
             payment_provider=settings["payment_provider"] if settings else "stripe",
             xendit_channel_code=settings.get("xendit_channel_code") if settings else None,
             xendit_account_number=settings.get("xendit_account_number") if settings else None,
-            xendit_account_holder_name=settings.get("xendit_account_holder_name") if settings else None,
+            xendit_account_holder_name=settings.get("xendit_account_holder_name")
+            if settings
+            else None,
             default_currency=currency,
         ),
         cancellation_policy=CancellationPolicy(
@@ -93,9 +99,15 @@ async def update_payment_settings(
     # When switching to xendit, require all bank details
     if updates.get("payment_provider") == "xendit":
         existing = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-        final_code = updates.get("xendit_channel_code") or (existing or {}).get("xendit_channel_code")
-        final_number = updates.get("xendit_account_number") or (existing or {}).get("xendit_account_number")
-        final_name = updates.get("xendit_account_holder_name") or (existing or {}).get("xendit_account_holder_name")
+        final_code = updates.get("xendit_channel_code") or (existing or {}).get(
+            "xendit_channel_code"
+        )
+        final_number = updates.get("xendit_account_number") or (existing or {}).get(
+            "xendit_account_number"
+        )
+        final_name = updates.get("xendit_account_holder_name") or (existing or {}).get(
+            "xendit_account_holder_name"
+        )
         missing = []
         if not final_code:
             missing.append("xenditChannelCode")
@@ -119,7 +131,9 @@ async def update_payment_settings(
             try:
                 rate = await get_exchange_rate(old_currency, new_currency)
             except Exception as e:
-                logger.error("Failed to fetch exchange rate %s → %s: %s", old_currency, new_currency, e)
+                logger.error(
+                    "Failed to fetch exchange rate %s → %s: %s", old_currency, new_currency, e
+                )
                 raise HTTPException(
                     status_code=502,
                     detail=f"Failed to fetch exchange rate for {old_currency} → {new_currency}. Currency not updated.",
@@ -143,9 +157,13 @@ async def update_payment_settings(
                         except Exception:
                             logger.warning(
                                 "Skipping conversion for room type %s: cannot get rate %s → %s",
-                                rt["id"], room_currency, new_currency,
+                                rt["id"],
+                                room_currency,
+                                new_currency,
                             )
-                            await RoomTypeRepository.update(str(rt["id"]), {"currency": new_currency})
+                            await RoomTypeRepository.update(
+                                str(rt["id"]), {"currency": new_currency}
+                            )
                             continue
                     else:
                         room_rate = rate
@@ -156,10 +174,16 @@ async def update_payment_settings(
                     converted_count += 1
                 logger.info(
                     "Converted %d/%d room type rates from %s to %s (rate=%.6f)",
-                    converted_count, len(room_types), old_currency, new_currency, rate,
+                    converted_count,
+                    len(room_types),
+                    old_currency,
+                    new_currency,
+                    rate,
                 )
             except Exception as e:
-                logger.error("Failed to convert room rates %s → %s: %s", old_currency, new_currency, e)
+                logger.error(
+                    "Failed to convert room rates %s → %s: %s", old_currency, new_currency, e
+                )
                 raise HTTPException(
                     status_code=502,
                     detail=f"Failed to convert room rates to {new_currency}. Currency not updated.",
@@ -183,7 +207,7 @@ async def update_payment_settings(
             logger.error("Failed to write currency to booking engine: %s", e)
             raise HTTPException(
                 status_code=502,
-                detail=f"Failed to update currency in booking engine. Room rates may be in an inconsistent state — please retry.",
+                detail="Failed to update currency in booking engine. Room rates may be in an inconsistent state — please retry.",
             )
 
         # Convert addon prices in the booking engine DB for the
@@ -204,7 +228,9 @@ async def update_payment_settings(
                             addon_rate = await get_exchange_rate(addon_currency, new_currency)
                         new_price = round(float(addon["price"]) * addon_rate, addon_decimals)
                         await hotel_identity_service.update_addon_price(
-                            str(addon["id"]), new_price, new_currency,
+                            str(addon["id"]),
+                            new_price,
+                            new_currency,
                         )
                         converted_count += 1
                     except Exception as ae:
@@ -231,17 +257,28 @@ async def update_payment_settings(
                     try:
                         if booking_currency not in rate_cache:
                             rate_cache[booking_currency] = await get_exchange_rate(
-                                booking_currency, new_currency,
+                                booking_currency,
+                                new_currency,
                             )
                         bk_rate = rate_cache[booking_currency]
                         await BookingRepository.update_amounts_and_currency(
                             str(bk["id"]),
-                            total_amount=convert_amount(float(bk["total_amount"] or 0), bk_rate, booking_decimals),
-                            nightly_rate=convert_amount(float(bk["nightly_rate"] or 0), bk_rate, booking_decimals),
-                            addon_total=convert_amount(float(bk.get("addon_total") or 0), bk_rate, booking_decimals),
-                            promo_discount=convert_amount(float(bk.get("promo_discount") or 0), bk_rate, booking_decimals),
+                            total_amount=convert_amount(
+                                float(bk["total_amount"] or 0), bk_rate, booking_decimals
+                            ),
+                            nightly_rate=convert_amount(
+                                float(bk["nightly_rate"] or 0), bk_rate, booking_decimals
+                            ),
+                            addon_total=convert_amount(
+                                float(bk.get("addon_total") or 0), bk_rate, booking_decimals
+                            ),
+                            promo_discount=convert_amount(
+                                float(bk.get("promo_discount") or 0), bk_rate, booking_decimals
+                            ),
                             last_minute_discount_amount=convert_amount(
-                                float(bk.get("last_minute_discount_amount") or 0), bk_rate, booking_decimals,
+                                float(bk.get("last_minute_discount_amount") or 0),
+                                bk_rate,
+                                booking_decimals,
                             ),
                             currency=new_currency,
                         )
@@ -251,11 +288,15 @@ async def update_payment_settings(
                 if bookings_converted:
                     logger.info(
                         "Converted %d/%d booking amounts to %s",
-                        bookings_converted, len(bookings_to_convert), new_currency,
+                        bookings_converted,
+                        len(bookings_to_convert),
+                        new_currency,
                     )
 
                 payments_converted = 0
-                payments_to_convert = await PaymentRepository.list_for_hotel_currency_conversion(hotel_id)
+                payments_to_convert = await PaymentRepository.list_for_hotel_currency_conversion(
+                    hotel_id
+                )
                 for pmt in payments_to_convert:
                     payment_currency = pmt.get("currency") or old_currency
                     if payment_currency == new_currency:
@@ -263,16 +304,20 @@ async def update_payment_settings(
                     try:
                         if payment_currency not in rate_cache:
                             rate_cache[payment_currency] = await get_exchange_rate(
-                                payment_currency, new_currency,
+                                payment_currency,
+                                new_currency,
                             )
                         pmt_rate = rate_cache[payment_currency]
                         refund = pmt.get("refund_amount")
                         await PaymentRepository.update_amounts_and_currency(
                             str(pmt["id"]),
-                            amount=convert_amount(float(pmt["amount"] or 0), pmt_rate, booking_decimals),
+                            amount=convert_amount(
+                                float(pmt["amount"] or 0), pmt_rate, booking_decimals
+                            ),
                             refund_amount=(
                                 convert_amount(float(refund), pmt_rate, booking_decimals)
-                                if refund is not None else None
+                                if refund is not None
+                                else None
                             ),
                             currency=new_currency,
                         )
@@ -282,7 +327,9 @@ async def update_payment_settings(
                 if payments_converted:
                     logger.info(
                         "Converted %d/%d payment amounts to %s",
-                        payments_converted, len(payments_to_convert), new_currency,
+                        payments_converted,
+                        len(payments_to_convert),
+                        new_currency,
                     )
             except Exception as e:
                 logger.warning("Failed to convert booking/payment amounts: %s", e)
@@ -389,7 +436,11 @@ async def reconcile_xendit_payouts(
 
     stale = await PayoutRepository.list_processing_xendit(older_than_minutes=0)
     # Filter to this hotel's payouts
-    hotel_payouts = [p for p in stale if str(p.get("recipient_id")) == hotel_id and p.get("recipient_type") == "hotel"]
+    hotel_payouts = [
+        p
+        for p in stale
+        if str(p.get("recipient_id")) == hotel_id and p.get("recipient_type") == "hotel"
+    ]
 
     results = []
     for payout in hotel_payouts:
@@ -400,7 +451,9 @@ async def reconcile_xendit_payouts(
             xendit_status = status_data["status"]
 
             if xendit_status == "SUCCEEDED":
-                await PayoutRepository.update_status(payout_id, "completed", xendit_payout_id=xendit_id)
+                await PayoutRepository.update_status(
+                    payout_id, "completed", xendit_payout_id=xendit_id
+                )
                 results.append({"payoutId": payout_id, "status": "completed"})
             elif xendit_status in ("FAILED", "REVERSED"):
                 await PayoutRepository.update_status(payout_id, "failed")

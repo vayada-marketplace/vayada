@@ -1,6 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List
 from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def to_camel(string: str) -> str:
@@ -10,18 +10,20 @@ def to_camel(string: str) -> str:
 
 # ── Room type mapping ────────────────────────────────────────────────
 
+
 class ChannexRoomTypeMappingResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
     hotel_id: str
     room_type_id: str
-    room_type_name: Optional[str] = None
+    room_type_name: str | None = None
     channex_room_type_id: str
     created_at: str
 
 
 # ── Rate plan mapping ────────────────────────────────────────────────
+
 
 class ChannexRatePlanMappingResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -40,6 +42,7 @@ class ChannexRatePlanMappingResponse(BaseModel):
 
 # ── Booking mapping ──────────────────────────────────────────────────
 
+
 class ChannexBookingMappingResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -48,25 +51,27 @@ class ChannexBookingMappingResponse(BaseModel):
     booking_id: str
     channex_booking_id: str
     channel_source: str
-    last_synced_at: Optional[str] = None
+    last_synced_at: str | None = None
     created_at: str
 
 
 # ── Sync status ──────────────────────────────────────────────────────
 
+
 class ChannexSyncStatusResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     is_connected: bool
-    channex_property_id: Optional[str] = None
+    channex_property_id: str | None = None
     room_types_provisioned: int = 0
     rate_plans_provisioned: int = 0
-    last_booking_sync_at: Optional[str] = None
-    last_ari_sync_at: Optional[str] = None
+    last_booking_sync_at: str | None = None
+    last_ari_sync_at: str | None = None
     messaging_app_installed: bool = False
 
 
 # ── Channel markups ──────────────────────────────────────────────────
+
 
 class ChannelMarkup(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -82,16 +87,17 @@ class ChannelMarkup(BaseModel):
 class ChannelMarkupsResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    markups: List[ChannelMarkup]
+    markups: list[ChannelMarkup]
 
 
 class ChannelMarkupsUpdateRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    markups: List[ChannelMarkup]
+    markups: list[ChannelMarkup]
 
 
 # ── Connected channels ───────────────────────────────────────────────
+
 
 class ConnectedChannel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -100,11 +106,11 @@ class ConnectedChannel(BaseModel):
     key: str
     # Raw Channex application code (e.g. "BookingCom", "Airbnb")
     application: str
-    title: Optional[str] = None
+    title: str | None = None
     is_active: bool = True
 
 
 class ConnectedChannelsResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    channels: List[ConnectedChannel]
+    channels: list[ConnectedChannel]

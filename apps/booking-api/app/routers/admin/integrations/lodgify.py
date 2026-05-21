@@ -1,4 +1,5 @@
 """Admin endpoints for the Lodgify integration (VAY-398, Phase 1a)."""
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +12,6 @@ from app.services.lodgify.connection import (
     disconnect_lodgify,
     get_lodgify_status,
 )
-
 
 logger = logging.getLogger(__name__)
 

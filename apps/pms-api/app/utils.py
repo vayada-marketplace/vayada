@@ -1,12 +1,10 @@
 import json
-import secrets
-import string
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Callable, Awaitable, Optional
 
 from fastapi import HTTPException
-from app.database import Database
 
+from app.database import Database
 
 # Per-request override for the "current hotel" resolution. Populated
 # by the capture_hotel_header dependency (see dependencies.py), read
@@ -16,12 +14,12 @@ from app.database import Database
 #
 # Contextvars are task-local in asyncio, so each FastAPI request runs
 # in isolation — no cross-request leakage.
-_current_hotel_id_override: ContextVar[Optional[str]] = ContextVar(
+_current_hotel_id_override: ContextVar[str | None] = ContextVar(
     "_current_hotel_id_override", default=None
 )
 
 
-def set_current_hotel_id_override(hotel_id: Optional[str]) -> None:
+def set_current_hotel_id_override(hotel_id: str | None) -> None:
     """Set the per-request X-Hotel-Id override. Called by the global
     capture_hotel_header dependency at the start of each admin request."""
     _current_hotel_id_override.set(hotel_id)
@@ -50,7 +48,8 @@ async def get_hotel_id(user_id: str) -> str:
     if override:
         row = await Database.fetchrow(
             "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
-            override, user_id,
+            override,
+            user_id,
         )
         if not row:
             raise HTTPException(
@@ -96,9 +95,7 @@ async def upsert_by_hotel_id(
     data: dict,
 ) -> dict:
     """Generic upsert for tables with a hotel_id foreign key."""
-    existing = await Database.fetchrow(
-        f"SELECT * FROM {table} WHERE hotel_id = $1", hotel_id
-    )
+    existing = await Database.fetchrow(f"SELECT * FROM {table} WHERE hotel_id = $1", hotel_id)
 
     if existing:
         sets = ["updated_at = now()"]

@@ -4,12 +4,13 @@ In-platform notifications: list and mark-read for the authenticated user.
 Notifications are emitted by other parts of the platform (admin verification
 of creators, etc.) and surface in the user's inbox / notification center.
 """
-from datetime import datetime
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status as http_status
-from pydantic import BaseModel
 import logging
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import status as http_status
+from pydantic import BaseModel
 
 from app.dependencies import get_current_user_id_allow_pending
 from app.repositories.notification_repo import NotificationRepository
@@ -24,13 +25,13 @@ class NotificationResponse(BaseModel):
     type: str
     title: str
     body: str
-    link_url: Optional[str] = None
-    read_at: Optional[datetime] = None
+    link_url: str | None = None
+    read_at: datetime | None = None
     created_at: datetime
 
 
 class NotificationListResponse(BaseModel):
-    notifications: List[NotificationResponse]
+    notifications: list[NotificationResponse]
     unread_count: int
 
 
@@ -64,9 +65,7 @@ async def list_notifications(
             detail="limit must be between 1 and 200",
         )
 
-    rows = await NotificationRepository.list_for_user(
-        user_id, unread_only=unread_only, limit=limit
-    )
+    rows = await NotificationRepository.list_for_user(user_id, unread_only=unread_only, limit=limit)
     unread = await NotificationRepository.count_unread(user_id)
     return NotificationListResponse(
         notifications=[_serialize(r) for r in rows],

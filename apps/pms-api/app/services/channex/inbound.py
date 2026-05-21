@@ -9,24 +9,24 @@ multi-room OTA reservation produces N booking rows, all linked back to
 the same Channex booking ID via ``channex_booking_mappings`` rows keyed
 by ``channex_room_index``. Reading only ``rooms[0]`` would silently drop
 the other rooms and create a double-booking hazard (VAY-392)."""
+
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from app.channels import normalize_channel
 from app.config import settings as app_settings
 from app.database import BookingEngineDatabase, Database
-from app.repositories.room_type_repo import RoomTypeRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_mapping_repo import (
     ChannexBookingMappingRepository,
     ChannexConnectionRepository,
     ChannexRoomTypeMappingRepository,
 )
+from app.repositories.room_type_repo import RoomTypeRepository
 from app.services import channex_service
-from app.services.email_service import send_host_ota_booking_imported
-
 from app.services.channex.ari_push import push_availability_for_room_type
+from app.services.email_service import send_host_ota_booking_imported
 from app.services.room_assignment import (
     apply_moves_atomic,
     record_auto_rearrange,
@@ -37,9 +37,7 @@ from app.services.room_assignment import (
 logger = logging.getLogger(__name__)
 
 
-async def _maybe_notify_ota_booking(
-    hotel_id: str, booking_id: str, *, event: str
-) -> None:
+async def _maybe_notify_ota_booking(hotel_id: str, booking_id: str, *, event: str) -> None:
     """Send the host OTA-booking notification iff the hotel opted in.
 
     Checks ``email_notifications`` (master) AND ``ota_booking_alerts``
@@ -58,7 +56,8 @@ async def _maybe_notify_ota_booking(
     except Exception as exc:
         logger.warning(
             "Failed to read OTA notification toggles for hotel %s: %s",
-            hotel_id, exc,
+            hotel_id,
+            exc,
         )
         return
     if not toggles:
@@ -72,13 +71,8 @@ async def _maybe_notify_ota_booking(
 
     # Recipient comes from the PMS hotels row (kept in sync with booking_db
     # contact_email), with the booking_db value as a fallback.
-    hotel_row = await Database.fetchrow(
-        "SELECT contact_email FROM hotels WHERE id = $1", hotel_id
-    )
-    hotel_email = (
-        (hotel_row["contact_email"] if hotel_row else None)
-        or toggles["contact_email"]
-    )
+    hotel_row = await Database.fetchrow("SELECT contact_email FROM hotels WHERE id = $1", hotel_id)
+    hotel_email = (hotel_row["contact_email"] if hotel_row else None) or toggles["contact_email"]
     if not hotel_email:
         return
 
@@ -105,7 +99,8 @@ async def _resolve_room_type(
     if not room_mapping:
         logger.warning(
             "No room mapping for Channex room type %s, skipping booking %s",
-            channex_room_type_id, channex_booking_id,
+            channex_room_type_id,
+            channex_booking_id,
         )
         return None
 
@@ -119,8 +114,11 @@ async def _resolve_room_type(
         logger.error(
             "Channex room mapping %s resolves to room_type %s owned by hotel "
             "%s, but polling hotel is %s — refusing to import booking %s",
-            channex_room_type_id, room_type_id,
-            room_type["hotel_id"], hotel_id, channex_booking_id,
+            channex_room_type_id,
+            room_type_id,
+            room_type["hotel_id"],
+            hotel_id,
+            channex_booking_id,
         )
         return None
 
@@ -175,16 +173,18 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
 
     if existing_mappings:
         if status == "cancelled":
-            await _cancel_linked_bookings(
-                existing_mappings, hotel_id, channex_booking_id
-            )
+            await _cancel_linked_bookings(existing_mappings, hotel_id, channex_booking_id)
         elif status == "modified":
             await _apply_booking_modification(
-                existing_mappings, attrs, hotel_id, channex_booking_id,
-                revision_id=revision_id, ota_name=ota_name,
+                existing_mappings,
+                attrs,
+                hotel_id,
+                channex_booking_id,
+                revision_id=revision_id,
+                ota_name=ota_name,
             )
 
-        synced_at = datetime.now(timezone.utc)
+        synced_at = datetime.now(UTC)
         for mapping in existing_mappings:
             await ChannexBookingMappingRepository.update_sync_time(
                 str(mapping["booking_id"]),
@@ -290,9 +290,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
                 hotel_id=hotel_id,
                 moves=rearrange_moves,
                 triggered_by_booking_id=booking_id,
-                triggered_by_guest_name=(
-                    f"{first_name} {last_name}".strip() or "guest"
-                ),
+                triggered_by_guest_name=(f"{first_name} {last_name}".strip() or "guest"),
             )
 
         await ChannexBookingMappingRepository.create(
@@ -313,22 +311,31 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
 
     logger.info(
         "Imported Channex booking %s as %d vayada booking(s) (channel: %s)",
-        channex_booking_id, len(created_booking_ids), ota_name,
+        channex_booking_id,
+        len(created_booking_ids),
+        ota_name,
     )
 
     # Push updated availability for every distinct room type touched.
     for rt_id in affected_room_types:
-        asyncio.create_task(push_availability_for_room_type(
-            hotel_id, rt_id,
-            start_date=check_in,
-            end_date=check_out,
-        ))
+        asyncio.create_task(
+            push_availability_for_room_type(
+                hotel_id,
+                rt_id,
+                start_date=check_in,
+                end_date=check_out,
+            )
+        )
 
     # One notification per OTA reservation, not one per room — the host
     # cares about the booking, not the individual rows we created for it.
-    asyncio.create_task(_maybe_notify_ota_booking(
-        hotel_id, created_booking_ids[0], event="imported",
-    ))
+    asyncio.create_task(
+        _maybe_notify_ota_booking(
+            hotel_id,
+            created_booking_ids[0],
+            event="imported",
+        )
+    )
 
 
 async def _cancel_linked_bookings(
@@ -344,26 +351,36 @@ async def _cancel_linked_bookings(
         await BookingRepository.update_status(booking_id, "cancelled")
         logger.info(
             "Cancelled vayada booking %s (Channex %s cancelled)",
-            booking_id, channex_booking_id,
+            booking_id,
+            channex_booking_id,
         )
-        asyncio.create_task(push_availability_for_room_type(
-            hotel_id, str(booking["room_type_id"]),
-            start_date=booking["check_in"],
-            end_date=booking["check_out"],
-        ))
+        asyncio.create_task(
+            push_availability_for_room_type(
+                hotel_id,
+                str(booking["room_type_id"]),
+                start_date=booking["check_in"],
+                end_date=booking["check_out"],
+            )
+        )
         # VAY-397: OTA cancellations are the biggest source of overnight
         # freed slots — sweep for any unassigned booking that can take them.
         if booking.get("room_id"):
-            asyncio.create_task(try_place_unassigned_after_cancellation(
-                hotel_id,
-                str(booking["room_type_id"]),
-                booking["check_in"],
-                booking["check_out"],
-            ))
+            asyncio.create_task(
+                try_place_unassigned_after_cancellation(
+                    hotel_id,
+                    str(booking["room_type_id"]),
+                    booking["check_in"],
+                    booking["check_out"],
+                )
+            )
         if not notified:
-            asyncio.create_task(_maybe_notify_ota_booking(
-                hotel_id, booking_id, event="cancelled",
-            ))
+            asyncio.create_task(
+                _maybe_notify_ota_booking(
+                    hotel_id,
+                    booking_id,
+                    event="cancelled",
+                )
+            )
             notified = True
 
 
@@ -414,9 +431,7 @@ async def _apply_booking_modification(
             }
             # Stamp the slot index by post-processing the mapping row after
             # process_inbound_booking creates it at index 0.
-            await _import_extra_slot(
-                synthetic, hotel_id, channex_booking_id, index
-            )
+            await _import_extra_slot(synthetic, hotel_id, channex_booking_id, index)
             continue
 
         booking_id = str(mapping["booking_id"])
@@ -461,13 +476,19 @@ async def _apply_booking_modification(
             await _apply_updates(booking_id, updates)
             logger.info(
                 "Updated vayada booking %s (Channex %s modified, slot %d)",
-                booking_id, channex_booking_id, index,
+                booking_id,
+                channex_booking_id,
+                index,
             )
 
         if not notified:
-            asyncio.create_task(_maybe_notify_ota_booking(
-                hotel_id, booking_id, event="modified",
-            ))
+            asyncio.create_task(
+                _maybe_notify_ota_booking(
+                    hotel_id,
+                    booking_id,
+                    event="modified",
+                )
+            )
             notified = True
 
     # Guest reduced the room count — cancel the leftover slots.
@@ -481,13 +502,18 @@ async def _apply_booking_modification(
         await BookingRepository.update_status(booking_id, "cancelled")
         logger.info(
             "Cancelled vayada booking %s (Channex %s modified, slot %d removed)",
-            booking_id, channex_booking_id, index,
+            booking_id,
+            channex_booking_id,
+            index,
         )
-        asyncio.create_task(push_availability_for_room_type(
-            hotel_id, str(booking["room_type_id"]),
-            start_date=booking["check_in"],
-            end_date=booking["check_out"],
-        ))
+        asyncio.create_task(
+            push_availability_for_room_type(
+                hotel_id,
+                str(booking["room_type_id"]),
+                start_date=booking["check_in"],
+                end_date=booking["check_out"],
+            )
+        )
 
 
 async def _apply_updates(booking_id: str, updates: dict) -> None:
@@ -521,25 +547,21 @@ async def _import_extra_slot(
     # index 0 — there shouldn't be any (we only call this for added slots),
     # but assert defensively. We then run the import which creates an
     # index=0 mapping; immediately update it to the real index.
-    before = await ChannexBookingMappingRepository.list_by_channex_id(
-        hotel_id, channex_booking_id
-    )
+    before = await ChannexBookingMappingRepository.list_by_channex_id(hotel_id, channex_booking_id)
     before_ids = {str(m["booking_id"]) for m in before}
 
     await process_inbound_booking(synthetic_revision, hotel_id)
 
-    after = await ChannexBookingMappingRepository.list_by_channex_id(
-        hotel_id, channex_booking_id
-    )
+    after = await ChannexBookingMappingRepository.list_by_channex_id(hotel_id, channex_booking_id)
     for mapping in after:
         booking_id = str(mapping["booking_id"])
         if booking_id in before_ids:
             continue
         # New mapping just created at index 0 — bump it to the real slot.
         await Database.execute(
-            "UPDATE channex_booking_mappings SET channex_room_index = $2 "
-            "WHERE booking_id = $1",
-            booking_id, target_index,
+            "UPDATE channex_booking_mappings SET channex_room_index = $2 WHERE booking_id = $1",
+            booking_id,
+            target_index,
         )
 
 
@@ -580,9 +602,8 @@ async def poll_bookings_for_hotel(hotel_id: str) -> None:
         except Exception as e:
             logger.error(
                 "Failed to process Channex revision %s: %s",
-                revision_id, e,
+                revision_id,
+                e,
             )
 
-    await ChannexConnectionRepository.update_last_booking_sync(
-        hotel_id, datetime.now(timezone.utc)
-    )
+    await ChannexConnectionRepository.update_last_booking_sync(hotel_id, datetime.now(UTC))

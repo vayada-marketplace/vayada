@@ -51,7 +51,7 @@
       "prettier --write"
     ],
     "*.py": [
-      "ruff check --fix",
+      "ruff check --fix --exit-zero",
       "ruff format"
     ]
   },

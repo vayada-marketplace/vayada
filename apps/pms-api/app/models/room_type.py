@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-from typing import Optional, List, Dict
 
 MAX_ROOM_SIZE = 15000
 
@@ -41,26 +40,24 @@ def _validate_partial_refund_tiers(tiers: list) -> list:
             days_int = int(days)
             percent_int = int(percent)
         except (TypeError, ValueError):
-            raise ValueError(
-                "partial_refund_tiers entries must be integers"
-            )
+            raise ValueError("partial_refund_tiers entries must be integers")
         if days_int < 0 or days_int > 365:
             raise ValueError(
                 "partial_refund_tiers[].min_days_before_check_in must be between 0 and 365"
             )
         if percent_int < 0 or percent_int > 100:
-            raise ValueError(
-                "partial_refund_tiers[].refund_percent must be between 0 and 100"
-            )
+            raise ValueError("partial_refund_tiers[].refund_percent must be between 0 and 100")
         if days_int in seen_days:
             raise ValueError(
                 f"partial_refund_tiers contains duplicate min_days_before_check_in={days_int}"
             )
         seen_days.add(days_int)
-        normalized.append({
-            "min_days_before_check_in": days_int,
-            "refund_percent": percent_int,
-        })
+        normalized.append(
+            {
+                "min_days_before_check_in": days_int,
+                "refund_percent": percent_int,
+            }
+        )
     normalized.sort(key=lambda t: t["min_days_before_check_in"], reverse=True)
     return normalized
 
@@ -78,9 +75,7 @@ def _validate_meal_plans(plans: list) -> list:
             raise ValueError(f"meal_plans contains duplicate code {code}")
         seen.add(code)
         if surcharge is None or float(surcharge) < 0:
-            raise ValueError(
-                f"meal_plans[].surcharge must be >= 0 (code {code})"
-            )
+            raise ValueError(f"meal_plans[].surcharge must be >= 0 (code {code})")
         charge_per = p.get("chargePer") or p.get("charge_per") or "room"
         if charge_per not in VALID_MEAL_PLAN_CHARGE_UNITS:
             raise ValueError(
@@ -98,15 +93,14 @@ def _validate_operating_periods(periods: list) -> list:
     for p in periods:
         if p.get("from") and p.get("to") and p["to"] < p["from"]:
             raise ValueError(
-                f"Operating period end date must be on or after start date: "
-                f"{p['from']} – {p['to']}"
+                f"Operating period end date must be on or after start date: {p['from']} – {p['to']}"
             )
     return periods
 
 
 def _normalize_season_date(d: str) -> str:
     """Normalize MM-DD to YYYY-MM-DD using a leap year as reference."""
-    if d and len(d) == 5 and d[2] == '-':
+    if d and len(d) == 5 and d[2] == "-":
         return f"2024-{d}"  # Use leap year so Feb 29 is valid
     return d
 
@@ -124,7 +118,7 @@ def _normalize_season_dates(seasons: list) -> list:
 def _validate_no_season_overlap(seasons: list) -> list:
     """Raise ValueError if any two seasons have overlapping date ranges."""
     for i, a in enumerate(seasons):
-        for b in seasons[i + 1:]:
+        for b in seasons[i + 1 :]:
             if a.get("from") and a.get("to") and b.get("from") and b.get("to"):
                 # Normalize to YYYY-MM-DD for correct string comparison
                 af = _normalize_season_date(a["from"])
@@ -146,9 +140,7 @@ def _validate_season_rates(seasons: list) -> list:
         rate = s.get("rate")
         if rate is None or rate == "" or float(rate) <= 0:
             name = s.get("name") or "Unnamed"
-            raise ValueError(
-                f"Season \"{name}\" must have a rate greater than 0"
-            )
+            raise ValueError(f'Season "{name}" must have a rate greater than 0')
     return seasons
 
 
@@ -187,7 +179,7 @@ def _fill_range(target: list[bool], from_mmdd: str, to_mmdd: str) -> None:
             target[d] = True
 
 
-def _validate_no_season_gaps(seasons: list, operating_periods: Optional[list] = None) -> list:
+def _validate_no_season_gaps(seasons: list, operating_periods: list | None = None) -> list:
     """Raise ValueError if any open day has no season coverage.
 
     A day is "open" if it falls inside an operating period. Days outside all
@@ -210,7 +202,7 @@ def _validate_no_season_gaps(seasons: list, operating_periods: Optional[list] = 
         _fill_range(covered_days, s["from"], s["to"])
 
     gaps: list[str] = []
-    run_start: Optional[int] = None
+    run_start: int | None = None
     for d in range(1, _TOTAL_DAYS + 1):
         is_gap = open_days[d] and not covered_days[d]
         if is_gap and run_start is None:
@@ -222,9 +214,7 @@ def _validate_no_season_gaps(seasons: list, operating_periods: Optional[list] = 
         gaps.append(f"{_doy_to_mmdd(run_start)} – {_doy_to_mmdd(_TOTAL_DAYS)}")
 
     if gaps:
-        raise ValueError(
-            f"Season date ranges have gaps (dates with no price): {'; '.join(gaps)}"
-        )
+        raise ValueError(f"Season date ranges have gaps (dates with no price): {'; '.join(gaps)}")
     return seasons
 
 
@@ -236,8 +226,8 @@ def to_camel(string: str) -> str:
 class MonthlyRate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    base_rate: Optional[float] = None
-    non_refundable_rate: Optional[float] = None
+    base_rate: float | None = None
+    non_refundable_rate: float | None = None
 
 
 class RoomTypeCreate(BaseModel):
@@ -248,40 +238,40 @@ class RoomTypeCreate(BaseModel):
     description: str = ""
     short_description: str = ""
     max_occupancy: int = 2
-    max_adults: Optional[int] = None
-    max_children: Optional[int] = None
+    max_adults: int | None = None
+    max_children: int | None = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int = 0
     base_rate: float = 0
-    non_refundable_rate: Optional[float] = None
+    non_refundable_rate: float | None = None
     currency: str = "EUR"
-    amenities: List[str] = []
-    images: List[str] = []
+    amenities: list[str] = []
+    images: list[str] = []
     bed_type: str = ""
-    features: List[str] = []
-    benefits: List[str] = []
+    features: list[str] = []
+    benefits: list[str] = []
     total_rooms: int = 2
     is_active: bool = True
     sort_order: int = 0
-    monthly_rates: Optional[Dict[str, MonthlyRate]] = None
-    daily_rates: Optional[Dict[str, float]] = None
-    operating_periods: List[dict] = []
-    seasons: List[dict] = []
+    monthly_rates: dict[str, MonthlyRate] | None = None
+    daily_rates: dict[str, float] | None = None
+    operating_periods: list[dict] = []
+    seasons: list[dict] = []
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
-    partial_refund_tiers: List[dict] = []
+    partial_refund_tiers: list[dict] = []
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
-    last_minute_discount: Optional[dict] = None
+    last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
-    rate_payment_methods: Optional[Dict[str, List[str]]] = None
-    meal_plans: List[dict] = []
+    rate_payment_methods: dict[str, list[str]] | None = None
+    meal_plans: list[dict] = []
 
     @field_validator("size")
     @classmethod
@@ -292,21 +282,21 @@ class RoomTypeCreate(BaseModel):
 
     @field_validator("max_adults")
     @classmethod
-    def validate_max_adults(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_adults(cls, v: int | None) -> int | None:
         if v is not None and v < 1:
             raise ValueError("max_adults must be at least 1")
         return v
 
     @field_validator("max_children")
     @classmethod
-    def validate_max_children(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_children(cls, v: int | None) -> int | None:
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
 
     @field_validator("meal_plans")
     @classmethod
-    def validate_meal_plans(cls, v: List[dict]) -> List[dict]:
+    def validate_meal_plans(cls, v: list[dict]) -> list[dict]:
         return _validate_meal_plans(v)
 
     @field_validator("flexible_cancellation_type")
@@ -332,17 +322,17 @@ class RoomTypeCreate(BaseModel):
 
     @field_validator("partial_refund_tiers")
     @classmethod
-    def validate_partial_refund_tiers(cls, v: List[dict]) -> List[dict]:
+    def validate_partial_refund_tiers(cls, v: list[dict]) -> list[dict]:
         return _validate_partial_refund_tiers(v)
 
     @field_validator("operating_periods")
     @classmethod
-    def validate_operating_periods(cls, v: List[dict]) -> List[dict]:
+    def validate_operating_periods(cls, v: list[dict]) -> list[dict]:
         return _validate_operating_periods(v)
 
     @field_validator("seasons")
     @classmethod
-    def validate_seasons(cls, v: List[dict]) -> List[dict]:
+    def validate_seasons(cls, v: list[dict]) -> list[dict]:
         _normalize_season_dates(v)
         _validate_season_rates(v)
         _validate_no_season_overlap(v)
@@ -357,105 +347,105 @@ class RoomTypeCreate(BaseModel):
 class RoomTypeUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    name: Optional[str] = None
-    category: Optional[str] = None
-    description: Optional[str] = None
-    short_description: Optional[str] = None
-    max_occupancy: Optional[int] = None
-    max_adults: Optional[int] = None
-    max_children: Optional[int] = None
-    bedrooms: Optional[int] = None
-    bathrooms: Optional[int] = None
-    size: Optional[int] = None
-    base_rate: Optional[float] = None
-    non_refundable_rate: Optional[float] = None
-    currency: Optional[str] = None
-    amenities: Optional[List[str]] = None
-    images: Optional[List[str]] = None
-    bed_type: Optional[str] = None
-    features: Optional[List[str]] = None
-    benefits: Optional[List[str]] = None
-    total_rooms: Optional[int] = None
-    is_active: Optional[bool] = None
-    sort_order: Optional[int] = None
-    monthly_rates: Optional[Dict[str, MonthlyRate]] = None
-    daily_rates: Optional[Dict[str, float]] = None
-    operating_periods: Optional[List[dict]] = None
-    seasons: Optional[List[dict]] = None
-    weekend_surcharge: Optional[str] = None
-    cancellation_policy: Optional[str] = None
-    flexible_rate_enabled: Optional[bool] = None
-    flexible_cancellation_type: Optional[str] = None
-    partial_refund_cancel_window_days: Optional[int] = None
-    partial_refund_amount_percent: Optional[int] = None
-    partial_refund_tiers: Optional[List[dict]] = None
-    non_refundable_enabled: Optional[bool] = None
-    non_refundable_discount: Optional[int] = None
-    non_refundable_cancellation_policy: Optional[str] = None
-    last_minute_discount: Optional[dict] = None
-    minimum_advance_days: Optional[int] = None
-    rate_payment_methods: Optional[Dict[str, List[str]]] = None
-    meal_plans: Optional[List[dict]] = None
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    short_description: str | None = None
+    max_occupancy: int | None = None
+    max_adults: int | None = None
+    max_children: int | None = None
+    bedrooms: int | None = None
+    bathrooms: int | None = None
+    size: int | None = None
+    base_rate: float | None = None
+    non_refundable_rate: float | None = None
+    currency: str | None = None
+    amenities: list[str] | None = None
+    images: list[str] | None = None
+    bed_type: str | None = None
+    features: list[str] | None = None
+    benefits: list[str] | None = None
+    total_rooms: int | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+    monthly_rates: dict[str, MonthlyRate] | None = None
+    daily_rates: dict[str, float] | None = None
+    operating_periods: list[dict] | None = None
+    seasons: list[dict] | None = None
+    weekend_surcharge: str | None = None
+    cancellation_policy: str | None = None
+    flexible_rate_enabled: bool | None = None
+    flexible_cancellation_type: str | None = None
+    partial_refund_cancel_window_days: int | None = None
+    partial_refund_amount_percent: int | None = None
+    partial_refund_tiers: list[dict] | None = None
+    non_refundable_enabled: bool | None = None
+    non_refundable_discount: int | None = None
+    non_refundable_cancellation_policy: str | None = None
+    last_minute_discount: dict | None = None
+    minimum_advance_days: int | None = None
+    rate_payment_methods: dict[str, list[str]] | None = None
+    meal_plans: list[dict] | None = None
 
     @field_validator("size")
     @classmethod
-    def validate_size(cls, v: Optional[int]) -> Optional[int]:
+    def validate_size(cls, v: int | None) -> int | None:
         if v is not None and v > MAX_ROOM_SIZE:
             raise ValueError(f"Room size must not exceed {MAX_ROOM_SIZE} m²")
         return v
 
     @field_validator("max_adults")
     @classmethod
-    def validate_max_adults(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_adults(cls, v: int | None) -> int | None:
         if v is not None and v < 1:
             raise ValueError("max_adults must be at least 1")
         return v
 
     @field_validator("max_children")
     @classmethod
-    def validate_max_children(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_children(cls, v: int | None) -> int | None:
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
 
     @field_validator("flexible_cancellation_type")
     @classmethod
-    def validate_flexible_cancellation_type(cls, v: Optional[str]) -> Optional[str]:
+    def validate_flexible_cancellation_type(cls, v: str | None) -> str | None:
         if v is not None and v not in ("free", "partial_refund"):
             raise ValueError("flexible_cancellation_type must be 'free' or 'partial_refund'")
         return v
 
     @field_validator("partial_refund_cancel_window_days")
     @classmethod
-    def validate_partial_refund_window(cls, v: Optional[int]) -> Optional[int]:
+    def validate_partial_refund_window(cls, v: int | None) -> int | None:
         if v is not None and (v < 1 or v > 365):
             raise ValueError("partial_refund_cancel_window_days must be between 1 and 365")
         return v
 
     @field_validator("partial_refund_amount_percent")
     @classmethod
-    def validate_partial_refund_percent(cls, v: Optional[int]) -> Optional[int]:
+    def validate_partial_refund_percent(cls, v: int | None) -> int | None:
         if v is not None and (v < 1 or v > 99):
             raise ValueError("partial_refund_amount_percent must be between 1 and 99")
         return v
 
     @field_validator("partial_refund_tiers")
     @classmethod
-    def validate_partial_refund_tiers(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+    def validate_partial_refund_tiers(cls, v: list[dict] | None) -> list[dict] | None:
         if v is None:
             return v
         return _validate_partial_refund_tiers(v)
 
     @field_validator("operating_periods")
     @classmethod
-    def validate_operating_periods(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+    def validate_operating_periods(cls, v: list[dict] | None) -> list[dict] | None:
         if v is not None:
             _validate_operating_periods(v)
         return v
 
     @field_validator("seasons")
     @classmethod
-    def validate_seasons(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+    def validate_seasons(cls, v: list[dict] | None) -> list[dict] | None:
         if v is not None:
             _normalize_season_dates(v)
             _validate_season_rates(v)
@@ -473,7 +463,7 @@ class RoomTypeUpdate(BaseModel):
 
     @field_validator("meal_plans")
     @classmethod
-    def validate_meal_plans(cls, v: Optional[List[dict]]) -> Optional[List[dict]]:
+    def validate_meal_plans(cls, v: list[dict] | None) -> list[dict] | None:
         if v is not None:
             _validate_meal_plans(v)
         return v
@@ -481,6 +471,7 @@ class RoomTypeUpdate(BaseModel):
 
 class RoomTypeResponse(BaseModel):
     """Guest-facing response — includes availability."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
@@ -489,30 +480,30 @@ class RoomTypeResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
-    max_adults: Optional[int] = None
-    max_children: Optional[int] = None
+    max_adults: int | None = None
+    max_children: int | None = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int
     base_rate: float
-    non_refundable_rate: Optional[float] = None
-    original_rate: Optional[float] = None
-    last_minute_discount_percent: Optional[int] = None
+    non_refundable_rate: float | None = None
+    original_rate: float | None = None
+    last_minute_discount_percent: int | None = None
     currency: str
-    amenities: List[str]
-    images: List[str]
+    amenities: list[str]
+    images: list[str]
     bed_type: str
     remaining_rooms: int
-    features: List[str]
-    benefits: List[str] = []
+    features: list[str]
+    benefits: list[str] = []
     flexible_rate_enabled: bool = True
     cancellation_policy: str = "Free until 7 days before"
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
-    partial_refund_tiers: List[dict] = []
+    partial_refund_tiers: list[dict] = []
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
-    rate_payment_methods: Optional[Dict[str, List[str]]] = None
+    rate_payment_methods: dict[str, list[str]] | None = None
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -525,40 +516,40 @@ class RoomTypeAdminResponse(BaseModel):
     description: str
     short_description: str
     max_occupancy: int
-    max_adults: Optional[int] = None
-    max_children: Optional[int] = None
+    max_adults: int | None = None
+    max_children: int | None = None
     bedrooms: int = 1
     bathrooms: int = 1
     size: int
     base_rate: float
-    non_refundable_rate: Optional[float] = None
+    non_refundable_rate: float | None = None
     currency: str
-    amenities: List[str]
-    images: List[str]
+    amenities: list[str]
+    images: list[str]
     bed_type: str
-    features: List[str]
-    benefits: List[str] = []
+    features: list[str]
+    benefits: list[str] = []
     total_rooms: int
     is_active: bool
     sort_order: int
-    monthly_rates: Dict[str, MonthlyRate] = {}
-    daily_rates: Dict[str, float] = {}
-    operating_periods: List[dict] = []
-    seasons: List[dict] = []
+    monthly_rates: dict[str, MonthlyRate] = {}
+    daily_rates: dict[str, float] = {}
+    operating_periods: list[dict] = []
+    seasons: list[dict] = []
     weekend_surcharge: str = "+0%"
     cancellation_policy: str = "Free until 7 days before"
     flexible_rate_enabled: bool = True
     flexible_cancellation_type: str = "free"
     partial_refund_cancel_window_days: int = 30
     partial_refund_amount_percent: int = 50
-    partial_refund_tiers: List[dict] = []
+    partial_refund_tiers: list[dict] = []
     non_refundable_enabled: bool = False
     non_refundable_discount: int = 5
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
-    last_minute_discount: Optional[dict] = None
+    last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
-    rate_payment_methods: Optional[Dict[str, List[str]]] = None
-    meal_plans: List[dict] = []
+    rate_payment_methods: dict[str, list[str]] | None = None
+    meal_plans: list[dict] = []
     created_at: str
     updated_at: str
 
@@ -566,5 +557,6 @@ class RoomTypeAdminResponse(BaseModel):
 class UnavailableDatesResponse(BaseModel):
     """Public /api/hotels/{slug}/unavailable-dates: dates where every room
     type is fully booked, plus per-arrival min-stay constraints."""
-    dates: List[str] = []
-    min_stay_by_arrival: Dict[str, int] = {}
+
+    dates: list[str] = []
+    min_stay_by_arrival: dict[str, int] = {}

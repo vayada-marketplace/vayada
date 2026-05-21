@@ -1,7 +1,6 @@
 """
 Repository for notifications table (marketplace Database).
 """
-from typing import Optional, List
 
 import asyncpg
 
@@ -9,16 +8,15 @@ from app.database import Database
 
 
 class NotificationRepository:
-
     @staticmethod
     async def create(
         user_id: str,
         type: str,
         title: str,
         body: str,
-        link_url: Optional[str] = None,
+        link_url: str | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO notifications (user_id, type, title, body, link_url)
@@ -38,15 +36,15 @@ class NotificationRepository:
         *,
         unread_only: bool = False,
         limit: int = 50,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> List[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> list[dict]:
         clauses = ["user_id = $1"]
         if unread_only:
             clauses.append("read_at IS NULL")
         query = f"""
             SELECT id, user_id, type, title, body, link_url, read_at, created_at
             FROM notifications
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY created_at DESC
             LIMIT $2
         """
@@ -60,7 +58,7 @@ class NotificationRepository:
     async def count_unread(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> int:
         query = "SELECT COUNT(*) AS c FROM notifications WHERE user_id = $1 AND read_at IS NULL"
         if conn:
@@ -74,7 +72,7 @@ class NotificationRepository:
         notification_id: str,
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> bool:
         """Mark a notification as read. Returns True if a row was updated.
 
@@ -96,7 +94,7 @@ class NotificationRepository:
         user_id: str,
         type: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> int:
         query = "SELECT COUNT(*) AS c FROM notifications WHERE user_id = $1 AND type = $2"
         if conn:

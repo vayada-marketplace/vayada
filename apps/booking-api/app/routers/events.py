@@ -1,9 +1,9 @@
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
-from app.repositories.event_repo import EventRepository, VALID_EVENT_TYPES
+
+from app.repositories.event_repo import VALID_EVENT_TYPES, EventRepository
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/api", tags=["events"])
 class EventRequest(BaseModel):
     hotel_slug: str
     event_type: str
-    session_id: Optional[str] = None
-    metadata: Optional[dict] = None
+    session_id: str | None = None
+    metadata: dict | None = None
 
 
 @router.post("/events", status_code=204)

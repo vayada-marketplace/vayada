@@ -5,12 +5,12 @@ used to call response.raise_for_status() which strips that body and replaces
 it with an httpx string that points users at MDN. ChannexAPIError parses the
 body and exposes a one-line user-facing summary.
 """
+
 import asyncio
 from unittest.mock import patch
 
 import httpx
 import pytest
-
 from app.services import channex_service
 from app.services.channex_service import (
     ChannexAPIError,
@@ -18,15 +18,15 @@ from app.services.channex_service import (
     _summarize_channex_errors,
 )
 
-
 # ── _summarize_channex_errors ─────────────────────────────────────────
 
 
 def test_summary_handles_detail_string():
     body = {"errors": {"detail": "title has already been taken"}}
-    assert _summarize_channex_errors(
-        "/api/v1/rate_plans", body
-    ) == "Channex rejected rate_plans: title has already been taken"
+    assert (
+        _summarize_channex_errors("/api/v1/rate_plans", body)
+        == "Channex rejected rate_plans: title has already been taken"
+    )
 
 
 def test_summary_handles_per_field_dict():
@@ -48,9 +48,10 @@ def test_summary_handles_list_of_errors():
 
 def test_summary_falls_back_to_text_body():
     body = "Internal Server Error\n"
-    assert _summarize_channex_errors(
-        "/api/v1/rate_plans", body
-    ) == "Channex rejected rate_plans: Internal Server Error"
+    assert (
+        _summarize_channex_errors("/api/v1/rate_plans", body)
+        == "Channex rejected rate_plans: Internal Server Error"
+    )
 
 
 def test_summary_unknown_shape_does_not_crash():
@@ -148,6 +149,7 @@ def test_create_rate_plan_rejects_missing_options():
     which silently masked bugs at the call site (e.g. a single-occupancy
     room getting an invalid 2-person rate plan). VAY-386 makes options
     explicit."""
+
     async def run():
         await channex_service.create_rate_plan(
             "key",

@@ -1,20 +1,20 @@
 """
 Image validation and processing utilities
 """
+
 import io
 import logging
-from typing import Tuple, Optional
+
 from PIL import Image
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 def validate_image(
-    file_content: bytes,
-    filename: str,
-    content_type: Optional[str] = None
-) -> Tuple[bool, Optional[str]]:
+    file_content: bytes, filename: str, content_type: str | None = None
+) -> tuple[bool, str | None]:
     max_size_bytes = settings.MAX_IMAGE_SIZE_MB * 1024 * 1024
     if len(file_content) > max_size_bytes:
         return False, f"Image size exceeds maximum allowed size of {settings.MAX_IMAGE_SIZE_MB}MB"
@@ -23,18 +23,24 @@ def validate_image(
         image = Image.open(io.BytesIO(file_content))
         image_format = image.format
 
-        valid_formats = {'JPEG', 'PNG', 'WEBP', 'GIF', 'AVIF'}
+        valid_formats = {"JPEG", "PNG", "WEBP", "GIF", "AVIF"}
         if image_format not in valid_formats:
             return False, "Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF, AVIF"
 
         width, height = image.size
         if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:
-            return False, f"Image dimensions exceed maximum allowed size ({settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT})"
+            return (
+                False,
+                f"Image dimensions exceed maximum allowed size ({settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT})",
+            )
 
         if content_type:
             valid_content_types = settings.ALLOWED_IMAGE_TYPES
             if content_type not in valid_content_types:
-                return False, f"Invalid content type. Allowed types: {', '.join(valid_content_types)}"
+                return (
+                    False,
+                    f"Invalid content type. Allowed types: {', '.join(valid_content_types)}",
+                )
 
         return True, None
 
@@ -45,10 +51,10 @@ def validate_image(
 
 def process_image(
     file_content: bytes,
-    resize_width: Optional[int] = None,
-    resize_height: Optional[int] = None,
+    resize_width: int | None = None,
+    resize_height: int | None = None,
     quality: int = 85,
-    format: str = "JPEG"
+    format: str = "JPEG",
 ) -> bytes:
     try:
         image = Image.open(io.BytesIO(file_content))
@@ -82,13 +88,13 @@ def process_image(
                 image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         output = io.BytesIO()
-        save_kwargs = {'format': format}
+        save_kwargs = {"format": format}
 
         if format == "JPEG":
-            save_kwargs['quality'] = quality
-            save_kwargs['optimize'] = True
+            save_kwargs["quality"] = quality
+            save_kwargs["optimize"] = True
         elif format == "PNG":
-            save_kwargs['optimize'] = True
+            save_kwargs["optimize"] = True
 
         image.save(output, **save_kwargs)
         output.seek(0)
@@ -100,11 +106,7 @@ def process_image(
         raise Exception(f"Failed to process image: {str(e)}")
 
 
-def generate_thumbnail(
-    file_content: bytes,
-    size: int = 300,
-    quality: int = 85
-) -> bytes:
+def generate_thumbnail(file_content: bytes, size: int = 300, quality: int = 85) -> bytes:
     try:
         image = Image.open(io.BytesIO(file_content))
 
@@ -151,7 +153,7 @@ def get_image_info(file_content: bytes) -> dict:
             "height": image.size[1],
             "format": image.format,
             "mode": image.mode,
-            "size_bytes": len(file_content)
+            "size_bytes": len(file_content),
         }
     except Exception as e:
         logger.error(f"Error getting image info: {e}")

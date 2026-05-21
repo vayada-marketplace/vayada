@@ -8,11 +8,11 @@ payments table and updates bookings.payment_status.
 Out-of-scope work tracked separately: VAY-301 (manual invoices),
 VAY-302 (PDF / Resend / Credit Note / Void), VAY-303 (FX), VAY-304 (tax).
 """
+
 import csv
 import io
 import logging
-from datetime import date, datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -30,16 +30,15 @@ from app.models.financials import (
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.services.invoice_service import (
+    _amount_paid,
     derive_payment_status,
     derive_status,
     filter_invoices_by_status,
     index_payments_by_booking,
-    invoice_number,
     status_counts,
     to_detail,
     to_ledger_entry,
     to_list_item,
-    _amount_paid,
 )
 from app.utils import get_hotel_id
 
@@ -54,9 +53,9 @@ VALID_STATUSES = {"draft", "sent", "paid", "partial", "overdue", "voided"}
 async def _load_invoice_pairs(
     hotel_id: str,
     *,
-    search: Optional[str] = None,
+    search: str | None = None,
     fetch_limit: int = 500,
-) -> List[Tuple[dict, List[dict]]]:
+) -> list[tuple[dict, list[dict]]]:
     """Load (booking, payments) pairs for a hotel.
 
     Status filtering is applied in Python because the invoice status is
@@ -94,7 +93,8 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
           AND b.created_at >= $2
         GROUP BY b.id
         """,
-        hotel_id, prev_start,
+        hotel_id,
+        prev_start,
     )
 
     revenue_mtd = 0.0
@@ -122,7 +122,7 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
         if isinstance(check_in, date) and check_in < today and paid + 0.01 < total:
             overdue_count += 1
 
-    delta_pct: Optional[float] = None
+    delta_pct: float | None = None
     if revenue_prev > 0:
         delta_pct = round((revenue_mtd - revenue_prev) / revenue_prev * 100, 1)
 
@@ -137,8 +137,8 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
 
 @router.get("/invoices", response_model=InvoiceListResponse)
 async def list_invoices(
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
     sort: str = Query("date", pattern="^(date|guest|amount)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -153,7 +153,9 @@ async def list_invoices(
     filtered = filter_invoices_by_status(pairs, status)
 
     if sort == "guest":
-        filtered.sort(key=lambda p: (p[0]["guest_last_name"].lower(), p[0]["guest_first_name"].lower()))
+        filtered.sort(
+            key=lambda p: (p[0]["guest_last_name"].lower(), p[0]["guest_first_name"].lower())
+        )
     elif sort == "amount":
         filtered.sort(key=lambda p: float(p[0]["total_amount"]), reverse=True)
     else:
@@ -170,7 +172,7 @@ async def list_invoices(
     )
 
 
-async def _load_invoice_or_404(hotel_id: str, booking_id: str) -> Tuple[dict, List[dict]]:
+async def _load_invoice_or_404(hotel_id: str, booking_id: str) -> tuple[dict, list[dict]]:
     booking = await BookingRepository.get_by_id(booking_id)
     if not booking or str(booking["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -180,8 +182,8 @@ async def _load_invoice_or_404(hotel_id: str, booking_id: str) -> Tuple[dict, Li
 
 @router.get("/invoices/export.csv")
 async def export_invoices_csv(
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
     user_id: str = Depends(require_hotel_admin),
 ):
     if status is not None and status not in VALID_STATUSES:
@@ -194,26 +196,45 @@ async def export_invoices_csv(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow([
-        "Invoice #", "Booking #", "Guest", "Email",
-        "Check-in", "Check-out", "Room",
-        "Currency", "Total", "Amount Paid", "Balance Due",
-        "Status", "Issued At",
-    ])
+    writer.writerow(
+        [
+            "Invoice #",
+            "Booking #",
+            "Guest",
+            "Email",
+            "Check-in",
+            "Check-out",
+            "Room",
+            "Currency",
+            "Total",
+            "Amount Paid",
+            "Balance Due",
+            "Status",
+            "Issued At",
+        ]
+    )
     for booking, payments in filtered:
         item = to_list_item(booking, payments)
-        writer.writerow([
-            item.invoice_number, item.booking_reference,
-            f"{item.guest_first_name} {item.guest_last_name}", item.guest_email,
-            item.check_in, item.check_out,
-            f"#{item.room_number} · {item.room_name}" if item.room_number else item.room_name,
-            item.currency, f"{item.total_amount:.2f}",
-            f"{item.amount_paid:.2f}", f"{item.balance_due:.2f}",
-            item.status, item.issued_at,
-        ])
+        writer.writerow(
+            [
+                item.invoice_number,
+                item.booking_reference,
+                f"{item.guest_first_name} {item.guest_last_name}",
+                item.guest_email,
+                item.check_in,
+                item.check_out,
+                f"#{item.room_number} · {item.room_name}" if item.room_number else item.room_name,
+                item.currency,
+                f"{item.total_amount:.2f}",
+                f"{item.amount_paid:.2f}",
+                f"{item.balance_due:.2f}",
+                item.status,
+                item.issued_at,
+            ]
+        )
 
     buf.seek(0)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     filename = f"invoices-{timestamp}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
@@ -270,7 +291,10 @@ async def record_payment(
     booking_after = await BookingRepository.get_by_id(booking_id)
     logger.info(
         "Recorded manual payment booking=%s amount=%.2f method=%s status=%s",
-        booking_id, data.amount, data.payment_method, derive_status(booking_after, new_paid),
+        booking_id,
+        data.amount,
+        data.payment_method,
+        derive_status(booking_after, new_paid),
     )
     return to_detail(booking_after, payments_after)
 
@@ -285,7 +309,7 @@ async def list_payments(
     payment_rows = await PaymentRepository.list_by_hotel(hotel_id, limit=limit, offset=offset)
     total = await PaymentRepository.count_by_hotel(hotel_id)
 
-    entries: List[PaymentLedgerEntry] = []
+    entries: list[PaymentLedgerEntry] = []
     for row in payment_rows:
         # Compose a minimal "booking" dict so to_ledger_entry can derive the invoice number.
         synthetic_booking = {

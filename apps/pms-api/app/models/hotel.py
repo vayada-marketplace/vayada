@@ -1,5 +1,6 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
-from typing import Any, Optional, List
 
 
 def to_camel(string: str) -> str:
@@ -19,14 +20,32 @@ class HotelRegister(BaseModel):
     # wizard) must POST to booking-engine /admin/hotels first to get
     # the id, then pass it here. Optional only for backward compat
     # during the rollout — every new caller must supply it.
-    booking_hotel_id: Optional[str] = None
+    booking_hotel_id: str | None = None
 
 
 PROPERTY_TYPES = [
-    "apart_hotel", "apartment", "boat", "camping", "capsule_hotel",
-    "chalet", "country_house", "farm_stay", "guest_house", "holiday_home",
-    "holiday_park", "homestay", "hostel", "hotel", "inn", "lodge",
-    "motel", "resort", "riad", "ryokan", "tent", "villa",
+    "apart_hotel",
+    "apartment",
+    "boat",
+    "camping",
+    "capsule_hotel",
+    "chalet",
+    "country_house",
+    "farm_stay",
+    "guest_house",
+    "holiday_home",
+    "holiday_park",
+    "homestay",
+    "hostel",
+    "hotel",
+    "inn",
+    "lodge",
+    "motel",
+    "resort",
+    "riad",
+    "ryokan",
+    "tent",
+    "villa",
 ]
 
 
@@ -45,8 +64,8 @@ class HotelResponse(BaseModel):
     address: str = ""
     zip_code: str = ""
     phone: str = ""
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    latitude: float | None = None
+    longitude: float | None = None
     user_id: str
     created_at: str
 
@@ -54,13 +73,13 @@ class HotelResponse(BaseModel):
 class HotelBenefitsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    benefits: List[str]
+    benefits: list[str]
 
 
 class HotelBenefitsResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    benefits: List[str] = []
+    benefits: list[str] = []
 
 
 class GuestFormSettingsResponse(BaseModel):
@@ -74,9 +93,9 @@ class GuestFormSettingsResponse(BaseModel):
 class GuestFormSettingsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    special_requests_enabled: Optional[bool] = None
-    arrival_time_enabled: Optional[bool] = None
-    guest_count_enabled: Optional[bool] = None
+    special_requests_enabled: bool | None = None
+    arrival_time_enabled: bool | None = None
+    guest_count_enabled: bool | None = None
 
 
 class CalendarSettingsResponse(BaseModel):
@@ -102,6 +121,7 @@ class SetupStatusResponse(BaseModel):
 class HotelDeletionImpactResponse(BaseModel):
     """Counts shown in the Manage Properties delete-warning dialog so the
     user knows what they're about to wipe out."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     upcoming_bookings_count: int = 0
@@ -110,6 +130,7 @@ class HotelDeletionImpactResponse(BaseModel):
 
 class HotelDetailsResponse(BaseModel):
     """Full hotel detail surface returned by GET/PATCH /admin/hotel."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
@@ -124,7 +145,7 @@ class HotelDetailsResponse(BaseModel):
     address: str = ""
     zip_code: str = ""
     phone: str = ""
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    last_minute_discount: Optional[Any] = None
+    latitude: float | None = None
+    longitude: float | None = None
+    last_minute_discount: Any | None = None
     instant_book: bool = False

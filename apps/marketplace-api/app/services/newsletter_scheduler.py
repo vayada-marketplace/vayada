@@ -14,6 +14,7 @@ a /newsletter/send endpoint or run send_weekly_newsletter as a one-shot
 container. The flag NEWSLETTER_SCHEDULER_ENABLED gates this so prod
 can enable it on exactly one replica until that migration happens.
 """
+
 import asyncio
 import logging
 import traceback
@@ -42,6 +43,7 @@ async def run_forever() -> None:
 
             logger.info("Newsletter scheduler: starting weekly send...")
             from scripts.send_weekly_newsletter import send_newsletters_with_pools
+
             await send_newsletters_with_pools()
             logger.info("Newsletter scheduler: weekly send complete.")
         except asyncio.CancelledError:

@@ -1,7 +1,7 @@
 import json
 import secrets
 import string
-from typing import Optional, List
+
 from app.database import Database
 from app.services import hotel_identity_service
 from app.utils import generate_unique_code
@@ -26,7 +26,6 @@ def _make_booking_ref() -> str:
 
 
 class BookingRepository:
-
     @staticmethod
     async def create(data: dict) -> dict:
         # If the caller passed a pre-generated reference (VAY-388 draft
@@ -34,12 +33,17 @@ class BookingRepository:
         # use it; otherwise generate a fresh unique one.
         ref = data.get("booking_reference")
         if not ref:
-            async def ref_exists(ref: str) -> bool:
-                return bool(await Database.fetchval(
-                    "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
-                ))
 
-            ref = await generate_unique_code(_make_booking_ref, ref_exists, entity_name="booking reference")
+            async def ref_exists(ref: str) -> bool:
+                return bool(
+                    await Database.fetchval(
+                        "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
+                    )
+                )
+
+            ref = await generate_unique_code(
+                _make_booking_ref, ref_exists, entity_name="booking reference"
+            )
 
         # Allow callers (VAY-388 draft materialization) to pre-allocate
         # the booking id so they can stamp it on the draft *before* the
@@ -118,13 +122,11 @@ class BookingRepository:
         if extra_room_ids:
             from app.repositories.booking_room_repo import BookingRoomRepository
 
-            await BookingRoomRepository.set_extra_rooms(
-                str(booking["id"]), extra_room_ids
-            )
+            await BookingRoomRepository.set_extra_rooms(str(booking["id"]), extra_room_ids)
         return booking
 
     @staticmethod
-    async def get_by_id(booking_id: str) -> Optional[dict]:
+    async def get_by_id(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
@@ -142,7 +144,7 @@ class BookingRepository:
         return await _overlay_canonical_hotel_name(dict(row))
 
     @staticmethod
-    async def lookup(booking_reference: str, guest_email: str) -> Optional[dict]:
+    async def lookup(booking_reference: str, guest_email: str) -> dict | None:
         row = await Database.fetchrow(
             """
             SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
@@ -165,11 +167,11 @@ class BookingRepository:
     async def list_by_hotel_id(
         hotel_id: str,
         *,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
+        status: str | None = None,
+        search: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict]:
+    ) -> list[dict]:
         conditions = ["b.hotel_id = $1"]
         args: list = [hotel_id]
         idx = 2
@@ -208,9 +210,7 @@ class BookingRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def count_by_hotel_id(
-        hotel_id: str, *, status: Optional[str] = None
-    ) -> int:
+    async def count_by_hotel_id(hotel_id: str, *, status: str | None = None) -> int:
         if status:
             count = await Database.fetchval(
                 "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1 AND status = $2",
@@ -224,9 +224,7 @@ class BookingRepository:
         return count or 0
 
     @staticmethod
-    async def list_by_hotel_in_range(
-        hotel_id: str, start_date, end_date
-    ) -> List[dict]:
+    async def list_by_hotel_in_range(hotel_id: str, start_date, end_date) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT b.*, rt.name AS room_name, rm.room_number
@@ -250,7 +248,7 @@ class BookingRepository:
         room_id: str,
         check_in,
         check_out,
-        exclude_booking_id: Optional[str] = None,
+        exclude_booking_id: str | None = None,
     ) -> bool:
         if exclude_booking_id:
             count = await Database.fetchval(
@@ -287,7 +285,7 @@ class BookingRepository:
         room_id: str,
         check_in,
         check_out,
-        exclude_booking_ids: List[str],
+        exclude_booking_ids: list[str],
     ) -> bool:
         """Like is_room_available, but excludes any number of bookings.
 
@@ -313,9 +311,9 @@ class BookingRepository:
     @staticmethod
     async def swap_room_assignments(
         booking_a_id: str,
-        new_room_a_id: Optional[str],
+        new_room_a_id: str | None,
         booking_b_id: str,
-        new_room_b_id: Optional[str],
+        new_room_b_id: str | None,
     ) -> None:
         """Atomically reassign two bookings' room_ids in a single statement."""
         await Database.execute(
@@ -328,11 +326,14 @@ class BookingRepository:
                 updated_at = now()
             WHERE id IN ($1::uuid, $3::uuid)
             """,
-            booking_a_id, new_room_a_id, booking_b_id, new_room_b_id,
+            booking_a_id,
+            new_room_a_id,
+            booking_b_id,
+            new_room_b_id,
         )
 
     @staticmethod
-    async def apply_room_moves(moves: List[tuple]) -> None:
+    async def apply_room_moves(moves: list[tuple]) -> None:
         """Atomically reassign N bookings' room_ids in a single statement.
 
         `moves` is a list of (booking_id, new_room_id) pairs. Used by the
@@ -361,7 +362,7 @@ class BookingRepository:
         room_type_id: str,
         window_start,
         window_end,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Bookings of one room type whose stay window overlaps [start, end).
 
         Returns id, room_id, check_in, check_out, status. Used by the
@@ -389,7 +390,7 @@ class BookingRepository:
         room_type_id: str,
         window_start,
         window_end,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Unassigned (room_id IS NULL) bookings of one room type whose stay
         window overlaps [start, end). Used by the cancellation-triggered
         auto-place sweep (VAY-397) to find candidates to re-place into a
@@ -413,7 +414,7 @@ class BookingRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def update_status(booking_id: str, new_status: str) -> Optional[dict]:
+    async def update_status(booking_id: str, new_status: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE bookings SET status = $2, updated_at = now()
@@ -426,14 +427,22 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def update_details(booking_id: str, updates: dict) -> Optional[dict]:
+    async def update_details(booking_id: str, updates: dict) -> dict | None:
         """Update booking fields dynamically."""
         from datetime import date
 
         ALLOWED = {
-            "check_in", "check_out", "guest_first_name", "guest_last_name",
-            "guest_email", "guest_phone", "guest_country", "adults", "children",
-            "nightly_rate", "special_requests",
+            "check_in",
+            "check_out",
+            "guest_first_name",
+            "guest_last_name",
+            "guest_email",
+            "guest_phone",
+            "guest_country",
+            "adults",
+            "children",
+            "nightly_rate",
+            "special_requests",
         }
         filtered = {k: v for k, v in updates.items() if k in ALLOWED and v is not None}
         if not filtered:
@@ -473,7 +482,8 @@ class BookingRepository:
             total = round(rate * nights * rooms + addon_total - promo_discount, 2)
             await Database.execute(
                 "UPDATE bookings SET total_amount = $2, updated_at = now() WHERE id = $1",
-                booking_id, total,
+                booking_id,
+                total,
             )
 
         return await BookingRepository.get_by_id(booking_id)
@@ -491,7 +501,7 @@ class BookingRepository:
         addon_names: list,
         addon_total: float,
         total_amount: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Apply an approved guest change request to the booking row.
 
         Mutates dates, add-ons, nightly_rate, addon_total, and total_amount
@@ -529,7 +539,7 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def update_payment_status(booking_id: str, payment_status: str) -> Optional[dict]:
+    async def update_payment_status(booking_id: str, payment_status: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE bookings SET payment_status = $2, updated_at = now()
@@ -548,7 +558,7 @@ class BookingRepository:
         affiliate_commission: float,
         property_payout: float,
         payment_status: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE bookings SET
@@ -570,7 +580,7 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def assign_room(booking_id: str, room_id: str) -> Optional[dict]:
+    async def assign_room(booking_id: str, room_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE bookings SET room_id = $2, updated_at = now()
@@ -583,7 +593,7 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def unassign_room(booking_id: str) -> Optional[dict]:
+    async def unassign_room(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE bookings SET room_id = NULL, updated_at = now()
@@ -595,7 +605,7 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_for_currency_conversion(hotel_id: str) -> List[dict]:
+    async def list_for_currency_conversion(hotel_id: str) -> list[dict]:
         """Minimal projection used when re-denominating bookings on a
         hotel currency change (VAY-335). Cancelled rows are still
         included so the per-row currency stays consistent with the
@@ -644,7 +654,7 @@ class BookingRepository:
         )
 
     @staticmethod
-    async def list_expired_pending(before_date) -> List[dict]:
+    async def list_expired_pending(before_date) -> list[dict]:
         """Find bookings where host response deadline has passed."""
         rows = await Database.fetch(
             """

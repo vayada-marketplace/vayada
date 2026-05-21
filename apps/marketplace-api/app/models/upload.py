@@ -1,18 +1,19 @@
 """
 Upload-related Pydantic models
 """
-from pydantic import BaseModel
-from typing import List, Optional
 
+from pydantic import BaseModel
 
 # ============================================
 # IMAGE UPLOAD RESPONSES
 # ============================================
 
+
 class ImageUploadResponse(BaseModel):
     """Response model for single image upload"""
+
     url: str
-    thumbnail_url: Optional[str] = None
+    thumbnail_url: str | None = None
     key: str
     width: int
     height: int
@@ -22,5 +23,6 @@ class ImageUploadResponse(BaseModel):
 
 class MultipleImageUploadResponse(BaseModel):
     """Response model for multiple image uploads"""
-    images: List[ImageUploadResponse]
+
+    images: list[ImageUploadResponse]
     total: int

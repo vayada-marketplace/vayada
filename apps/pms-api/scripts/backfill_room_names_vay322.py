@@ -25,11 +25,9 @@ import logging
 import re
 import sys
 from collections import Counter
-from typing import List, Tuple
 
 from app.database import Database
 from app.repositories.room_repo import RoomRepository
-
 
 logger = logging.getLogger("backfill_vay322")
 
@@ -38,7 +36,7 @@ async def _plan_for_room_type(
     hotel_id: str,
     room_type_id: str,
     current_name: str,
-) -> List[Tuple[str, str, str]]:
+) -> list[tuple[str, str, str]]:
     """Return [(room_id, old_number, new_number)] this room type would
     have rewritten, using the same heuristic as
     RoomRepository.heal_stale_room_names. Kept in sync by mirroring
@@ -68,7 +66,7 @@ async def _plan_for_room_type(
     sibling_names = {row["name"] for row in sibling_rows}
 
     prefix_re = re.compile(r"^(.*?)( [0-9]+)?$")
-    candidates: List[Tuple[str, str, str, str]] = []
+    candidates: list[tuple[str, str, str, str]] = []
     for r in rooms:
         number = r["room_number"]
         m = prefix_re.match(number)
@@ -88,7 +86,7 @@ async def _plan_for_room_type(
     prefix_counts = Counter(c[2] for c in candidates)
     only_room_in_type = len(rooms) == 1
 
-    plan: List[Tuple[str, str, str]] = []
+    plan: list[tuple[str, str, str]] = []
     for room_id, old_number, prefix, suffix in candidates:
         shared = prefix_counts[prefix] >= 2
         if not (shared or only_room_in_type):
@@ -101,9 +99,7 @@ async def _plan_for_room_type(
 
 
 async def run(execute: bool) -> int:
-    hotels = await Database.fetch(
-        "SELECT id, name, slug FROM hotels ORDER BY created_at"
-    )
+    hotels = await Database.fetch("SELECT id, name, slug FROM hotels ORDER BY created_at")
     total_planned = 0
     total_applied = 0
     total_skipped = 0
@@ -124,7 +120,9 @@ async def run(execute: bool) -> int:
             room_type_id = str(rt["id"])
             current_name = rt["name"]
             plan = await _plan_for_room_type(
-                hotel_id, room_type_id, current_name,
+                hotel_id,
+                room_type_id,
+                current_name,
             )
             if not plan:
                 continue
@@ -140,7 +138,9 @@ async def run(execute: bool) -> int:
             hotel_planned += len(plan)
             if execute:
                 applied = await RoomRepository.heal_stale_room_names(
-                    hotel_id, room_type_id, current_name,
+                    hotel_id,
+                    room_type_id,
+                    current_name,
                 )
                 hotel_applied += applied
                 if applied != len(plan):

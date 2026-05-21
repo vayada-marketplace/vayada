@@ -5,14 +5,13 @@ booking. It lives in its own table so the booking row stays the
 authoritative current state until the host decides — and so we keep an
 audit trail of every requested change for the hotel.
 """
+
 import json
-from typing import Optional
 
 from app.database import Database
 
 
 class BookingChangeRequestRepository:
-
     @staticmethod
     async def create(data: dict) -> dict:
         row = await Database.fetchrow(
@@ -55,7 +54,7 @@ class BookingChangeRequestRepository:
         return dict(row)
 
     @staticmethod
-    async def get_by_id(change_request_id: str) -> Optional[dict]:
+    async def get_by_id(change_request_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_change_requests WHERE id = $1",
             change_request_id,
@@ -63,7 +62,7 @@ class BookingChangeRequestRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_decision_token(token: str) -> Optional[dict]:
+    async def get_by_decision_token(token: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_change_requests WHERE decision_token = $1",
             token,
@@ -71,7 +70,7 @@ class BookingChangeRequestRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_pending_for_booking(booking_id: str) -> Optional[dict]:
+    async def get_pending_for_booking(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             SELECT * FROM booking_change_requests
@@ -83,7 +82,7 @@ class BookingChangeRequestRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_latest_for_booking(booking_id: str) -> Optional[dict]:
+    async def get_latest_for_booking(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             SELECT * FROM booking_change_requests
@@ -98,8 +97,8 @@ class BookingChangeRequestRepository:
     async def mark_decided(
         change_request_id: str,
         new_status: str,
-        decline_reason: Optional[str] = None,
-    ) -> Optional[dict]:
+        decline_reason: str | None = None,
+    ) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE booking_change_requests

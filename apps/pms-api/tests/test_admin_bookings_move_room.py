@@ -2,15 +2,16 @@
 Tests for PATCH /admin/bookings/{id}/move-room — move a booking to another
 room of the same type.
 """
-import pytest
 
+import pytest
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
     create_test_booking,
+    create_test_hotel,
     create_test_room,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -41,7 +42,8 @@ class TestMoveBookingToRoom:
         # Pre-assign to first room
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
-            rooms[0]["id"], booking["id"],
+            rooms[0]["id"],
+            booking["id"],
         )
 
         resp = await _move(client, user["token"], str(booking["id"]), str(rooms[1]["id"]))
@@ -50,14 +52,14 @@ class TestMoveBookingToRoom:
 
         # Audit row written
         ev = await Database.fetchrow(
-            "SELECT event_type, payload, actor_user_id FROM booking_events "
-            "WHERE booking_id = $1",
+            "SELECT event_type, payload, actor_user_id FROM booking_events WHERE booking_id = $1",
             booking["id"],
         )
         assert ev is not None
         assert ev["event_type"] == "room_moved"
         assert str(ev["actor_user_id"]) == str(user["id"])
         import json as _json
+
         payload = ev["payload"] if isinstance(ev["payload"], dict) else _json.loads(ev["payload"])
         assert payload["from_room_id"] == str(rooms[0]["id"])
         assert payload["to_room_id"] == str(rooms[1]["id"])
@@ -70,8 +72,10 @@ class TestMoveBookingToRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-10", check_out="2026-06-12",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-10",
+            check_out="2026-06-12",
             status="confirmed",
         )
         # leave room_id NULL
@@ -87,13 +91,16 @@ class TestMoveBookingToRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
-            rooms[0]["id"], booking["id"],
+            rooms[0]["id"],
+            booking["id"],
         )
 
         resp = await _move(client, user["token"], str(booking["id"]), str(rooms[0]["id"]))
@@ -107,8 +114,10 @@ class TestMoveBookingToRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="cancelled",
         )
 
@@ -124,23 +133,31 @@ class TestMoveBookingToRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking_a = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         booking_b = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-03", check_out="2026-06-07",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-03",
+            check_out="2026-06-07",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         # A in room 0, B in room 1 — try to move A into room 1 (overlap)
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
-            rooms[0]["id"], booking_a["id"],
+            rooms[0]["id"],
+            booking_a["id"],
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
-            rooms[1]["id"], booking_b["id"],
+            rooms[1]["id"],
+            booking_b["id"],
         )
 
         resp = await _move(client, user["token"], str(booking_a["id"]), str(rooms[1]["id"]))
@@ -154,13 +171,16 @@ class TestMoveBookingToRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
-            rooms[0]["id"], booking["id"],
+            rooms[0]["id"],
+            booking["id"],
         )
         # Target room is empty for these dates → success.
         resp = await _move(client, user["token"], str(booking["id"]), str(rooms[2]["id"]))
@@ -174,15 +194,22 @@ class TestMoveBookingToRoom:
 
         # Second room type + a room under it
         other_type = await create_test_room_type(
-            str(hotel["id"]), name="Standard Double", base_rate=80.0, total_rooms=1,
+            str(hotel["id"]),
+            name="Standard Double",
+            base_rate=80.0,
+            total_rooms=1,
         )
         other_room = await create_test_room(
-            str(hotel["id"]), str(other_type["id"]), room_number="201",
+            str(hotel["id"]),
+            str(other_type["id"]),
+            room_number="201",
         )
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(room_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
 
@@ -197,8 +224,10 @@ class TestMoveBookingToRoom:
         rooms_a = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel_a["id"]), str(room_type_a["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel_a["id"]),
+            str(room_type_a["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
 

@@ -4,14 +4,12 @@ vayada-staff-only route for listing every booking across the platform.
 Used by the marketplace admin (admin.vayada.com) to review booking
 requests and their accept/reject history in one place.
 """
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.database import Database
 from app.dependencies import require_super_admin
-
 
 router = APIRouter(prefix="/super-admin", tags=["super-admin-bookings"])
 
@@ -40,7 +38,7 @@ class SuperAdminBookingRow(BaseModel):
     raw_status: str  # original bookings.status value
     channel: str
     requested_at: str
-    responded_at: Optional[str] = None
+    responded_at: str | None = None
 
 
 def _map_status(raw_status: str, guest_withdrawn: bool) -> str:
@@ -56,7 +54,7 @@ def _map_status(raw_status: str, guest_withdrawn: bool) -> str:
 @router.get("/bookings", response_model=dict)
 async def list_all_bookings(
     user_id: str = Depends(require_super_admin),
-    status: Optional[str] = Query(
+    status: str | None = Query(
         None,
         description="Filter by derived status: pending | accepted | rejected | withdrawn",
     ),
@@ -99,7 +97,7 @@ async def list_all_bookings(
         offset,
     )
 
-    bookings: List[SuperAdminBookingRow] = []
+    bookings: list[SuperAdminBookingRow] = []
     for r in rows:
         derived = _map_status(r["status"], r["guest_withdrawn"])
         if status and derived != status:

@@ -1,6 +1,5 @@
 import logging
 from datetime import date
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -60,7 +59,7 @@ async def get_hotel(slug: str, lang: str = "en"):
     raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
 
 
-@router.get("/{slug}/addons", response_model=List[AddonResponse])
+@router.get("/{slug}/addons", response_model=list[AddonResponse])
 async def get_addons(slug: str):
     return await get_addons_by_hotel_slug(slug)
 
@@ -73,7 +72,9 @@ async def get_payment_settings(slug: str):
     bank_transfer = bool(hotel.get("bank_transfer", False))
     return PaymentSettingsResponse(
         pay_at_property_enabled=hotel.get("pay_at_property_enabled", False),
-        pay_at_hotel_methods=parse_json(hotel.get("pay_at_hotel_methods"), default=["cash", "card"]),
+        pay_at_hotel_methods=parse_json(
+            hotel.get("pay_at_hotel_methods"), default=["cash", "card"]
+        ),
         online_card_payment=hotel.get("online_card_payment", False),
         bank_transfer=bank_transfer,
         free_cancellation_days=hotel.get("free_cancellation_days", 7),
@@ -89,7 +90,9 @@ async def get_payment_settings(slug: str):
             account_number=hotel.get("payout_account_number") or "",
             bank_name=hotel.get("payout_bank_name") or "",
             swift=hotel.get("payout_swift") or "",
-        ) if bank_transfer else None,
+        )
+        if bank_transfer
+        else None,
     )
 
 
@@ -101,19 +104,29 @@ async def validate_promo_code(slug: str, code: str = Query(...)):
 
     promo = await PromoCodeRepository.get_by_code(code.upper(), str(hotel["id"]))
     if not promo:
-        return ValidatePromoCodeResponse(valid=False, code=code.upper(), message="Invalid promo code")
+        return ValidatePromoCodeResponse(
+            valid=False, code=code.upper(), message="Invalid promo code"
+        )
 
     if not promo["is_active"]:
-        return ValidatePromoCodeResponse(valid=False, code=code.upper(), message="This promo code is no longer active")
+        return ValidatePromoCodeResponse(
+            valid=False, code=code.upper(), message="This promo code is no longer active"
+        )
 
     today = date.today()
     if promo["valid_from"] and today < promo["valid_from"]:
-        return ValidatePromoCodeResponse(valid=False, code=code.upper(), message="This promo code is not yet valid")
+        return ValidatePromoCodeResponse(
+            valid=False, code=code.upper(), message="This promo code is not yet valid"
+        )
     if promo["valid_until"] and today > promo["valid_until"]:
-        return ValidatePromoCodeResponse(valid=False, code=code.upper(), message="This promo code has expired")
+        return ValidatePromoCodeResponse(
+            valid=False, code=code.upper(), message="This promo code has expired"
+        )
 
     if promo["max_uses"] is not None and promo["use_count"] >= promo["max_uses"]:
-        return ValidatePromoCodeResponse(valid=False, code=code.upper(), message="This promo code has reached its usage limit")
+        return ValidatePromoCodeResponse(
+            valid=False, code=code.upper(), message="This promo code has reached its usage limit"
+        )
 
     return ValidatePromoCodeResponse(
         valid=True,

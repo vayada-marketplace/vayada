@@ -1,12 +1,19 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from app.database import Database, AuthDatabase, MarketplaceDatabase, PmsDatabase, check_database_connection
+
 from app.config import settings
-from app.routers import hotels, auth, admin, events
+from app.database import (
+    AuthDatabase,
+    Database,
+    MarketplaceDatabase,
+    PmsDatabase,
+    check_database_connection,
+)
+from app.routers import admin, auth, events, hotels
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +53,9 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled error on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    logger.error(
+        "Unhandled error on %s %s: %s", request.method, request.url.path, exc, exc_info=True
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 

@@ -1,16 +1,13 @@
-from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
 from app.database import Database
-
 
 # Channels that support a configurable markup. 'direct' is implicit (0%).
 MARKUP_CHANNELS = ("booking_com", "airbnb")
 
 
 class ChannexConnectionRepository:
-
     @staticmethod
     async def upsert(hotel_id: str) -> dict:
         existing = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -36,7 +33,7 @@ class ChannexConnectionRepository:
         return dict(row)
 
     @staticmethod
-    async def get_by_hotel_id(hotel_id: str) -> Optional[dict]:
+    async def get_by_hotel_id(hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_connections WHERE hotel_id = $1",
             hotel_id,
@@ -44,7 +41,7 @@ class ChannexConnectionRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_property_id(channex_property_id: str) -> Optional[dict]:
+    async def get_by_property_id(channex_property_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_connections WHERE channex_property_id = $1",
             channex_property_id,
@@ -52,7 +49,7 @@ class ChannexConnectionRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_active() -> List[dict]:
+    async def list_active() -> list[dict]:
         # NULL channex_property_id means the property hasn't been mapped yet.
         # Such connections must not be polled — without a property_id filter
         # the Channex feed returns revisions for every property in the shared
@@ -72,7 +69,8 @@ class ChannexConnectionRepository:
             WHERE hotel_id = $1
             RETURNING *
             """,
-            hotel_id, channex_property_id,
+            hotel_id,
+            channex_property_id,
         )
         return dict(row) if row else None
 
@@ -84,7 +82,8 @@ class ChannexConnectionRepository:
             SET last_booking_sync_at = $2, updated_at = now()
             WHERE hotel_id = $1
             """,
-            hotel_id, synced_at,
+            hotel_id,
+            synced_at,
         )
 
     @staticmethod
@@ -95,7 +94,8 @@ class ChannexConnectionRepository:
             SET last_ari_sync_at = $2, updated_at = now()
             WHERE hotel_id = $1
             """,
-            hotel_id, synced_at,
+            hotel_id,
+            synced_at,
         )
 
     @staticmethod
@@ -106,7 +106,8 @@ class ChannexConnectionRepository:
             SET messaging_app_installed = $2, updated_at = now()
             WHERE hotel_id = $1
             """,
-            hotel_id, installed,
+            hotel_id,
+            installed,
         )
 
     @staticmethod
@@ -117,11 +118,12 @@ class ChannexConnectionRepository:
             SET last_message_sync_at = $2, updated_at = now()
             WHERE hotel_id = $1
             """,
-            hotel_id, synced_at,
+            hotel_id,
+            synced_at,
         )
 
     @staticmethod
-    async def list_with_messaging() -> List[dict]:
+    async def list_with_messaging() -> list[dict]:
         rows = await Database.fetch(
             "SELECT * FROM channex_connections "
             "WHERE is_active = true "
@@ -143,11 +145,8 @@ class ChannexConnectionRepository:
 
 
 class ChannexRoomTypeMappingRepository:
-
     @staticmethod
-    async def create(
-        hotel_id: str, room_type_id: str, channex_room_type_id: str
-    ) -> dict:
+    async def create(hotel_id: str, room_type_id: str, channex_room_type_id: str) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO channex_room_type_mappings
@@ -155,12 +154,14 @@ class ChannexRoomTypeMappingRepository:
             VALUES ($1, $2, $3)
             RETURNING *
             """,
-            hotel_id, room_type_id, channex_room_type_id,
+            hotel_id,
+            room_type_id,
+            channex_room_type_id,
         )
         return dict(row)
 
     @staticmethod
-    async def get_by_room_type_id(room_type_id: str) -> Optional[dict]:
+    async def get_by_room_type_id(room_type_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_room_type_mappings WHERE room_type_id = $1",
             room_type_id,
@@ -168,18 +169,17 @@ class ChannexRoomTypeMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_channex_room_type_id(
-        hotel_id: str, channex_room_type_id: str
-    ) -> Optional[dict]:
+    async def get_by_channex_room_type_id(hotel_id: str, channex_room_type_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_room_type_mappings "
             "WHERE hotel_id = $1 AND channex_room_type_id = $2",
-            hotel_id, channex_room_type_id,
+            hotel_id,
+            channex_room_type_id,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_hotel_id(hotel_id: str) -> List[dict]:
+    async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT m.*, rt.name AS room_type_name
@@ -209,7 +209,6 @@ class ChannexRoomTypeMappingRepository:
 
 
 class ChannexRatePlanMappingRepository:
-
     @staticmethod
     async def create(
         hotel_id: str,
@@ -230,14 +229,19 @@ class ChannexRatePlanMappingRepository:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
-            hotel_id, room_type_id, channex_rate_plan_id,
-            channex_room_type_id, sell_mode, plan_name, channel,
+            hotel_id,
+            room_type_id,
+            channex_rate_plan_id,
+            channex_room_type_id,
+            sell_mode,
+            plan_name,
+            channel,
             meal_plan_code,
         )
         return dict(row)
 
     @staticmethod
-    async def get_by_room_type_id(room_type_id: str) -> Optional[dict]:
+    async def get_by_room_type_id(room_type_id: str) -> dict | None:
         """Get the first (primary) rate plan mapping for a room type."""
         row = await Database.fetchrow(
             "SELECT * FROM channex_rate_plan_mappings WHERE room_type_id = $1 LIMIT 1",
@@ -246,7 +250,7 @@ class ChannexRatePlanMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_room_type_id(room_type_id: str) -> List[dict]:
+    async def list_by_room_type_id(room_type_id: str) -> list[dict]:
         """Get ALL rate plan mappings for a room type."""
         rows = await Database.fetch(
             "SELECT * FROM channex_rate_plan_mappings WHERE room_type_id = $1",
@@ -255,7 +259,7 @@ class ChannexRatePlanMappingRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def get_by_channex_rate_plan_id(channex_rate_plan_id: str) -> Optional[dict]:
+    async def get_by_channex_rate_plan_id(channex_rate_plan_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_rate_plan_mappings WHERE channex_rate_plan_id = $1",
             channex_rate_plan_id,
@@ -263,7 +267,7 @@ class ChannexRatePlanMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_hotel_id(hotel_id: str) -> List[dict]:
+    async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT m.*, rt.name AS room_type_name
@@ -293,7 +297,6 @@ class ChannexRatePlanMappingRepository:
 
 
 class ChannexBookingMappingRepository:
-
     @staticmethod
     async def create(
         hotel_id: str,
@@ -311,13 +314,17 @@ class ChannexBookingMappingRepository:
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             """,
-            hotel_id, booking_id, channex_booking_id,
-            channel_source, channex_revision_id, channex_room_index,
+            hotel_id,
+            booking_id,
+            channex_booking_id,
+            channel_source,
+            channex_revision_id,
+            channex_room_index,
         )
         return dict(row)
 
     @staticmethod
-    async def get_by_booking_id(booking_id: str) -> Optional[dict]:
+    async def get_by_booking_id(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM channex_booking_mappings WHERE booking_id = $1",
             booking_id,
@@ -325,9 +332,7 @@ class ChannexBookingMappingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_channex_id(
-        hotel_id: str, channex_booking_id: str
-    ) -> Optional[dict]:
+    async def get_by_channex_id(hotel_id: str, channex_booking_id: str) -> dict | None:
         """First (lowest-index) mapping row for a Channex booking.
 
         Kept for dedup checks ("does this Channex booking exist at all?").
@@ -338,14 +343,13 @@ class ChannexBookingMappingRepository:
             "WHERE hotel_id = $1 AND channex_booking_id = $2 "
             "ORDER BY channex_room_index "
             "LIMIT 1",
-            hotel_id, channex_booking_id,
+            hotel_id,
+            channex_booking_id,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_channex_id(
-        hotel_id: str, channex_booking_id: str
-    ) -> List[dict]:
+    async def list_by_channex_id(hotel_id: str, channex_booking_id: str) -> list[dict]:
         """All mapping rows for a Channex booking, ordered by room index.
 
         A multi-room OTA reservation produces one mapping row per booked
@@ -355,7 +359,8 @@ class ChannexBookingMappingRepository:
             "SELECT * FROM channex_booking_mappings "
             "WHERE hotel_id = $1 AND channex_booking_id = $2 "
             "ORDER BY channex_room_index",
-            hotel_id, channex_booking_id,
+            hotel_id,
+            channex_booking_id,
         )
         return [dict(r) for r in rows]
 
@@ -370,7 +375,9 @@ class ChannexBookingMappingRepository:
                 SET last_synced_at = $2, channex_revision_id = $3, updated_at = now()
                 WHERE booking_id = $1
                 """,
-                booking_id, synced_at, revision_id,
+                booking_id,
+                synced_at,
+                revision_id,
             )
         else:
             await Database.execute(
@@ -379,14 +386,14 @@ class ChannexBookingMappingRepository:
                 SET last_synced_at = $2, updated_at = now()
                 WHERE booking_id = $1
                 """,
-                booking_id, synced_at,
+                booking_id,
+                synced_at,
             )
 
 
 class ChannexChannelMarkupRepository:
-
     @staticmethod
-    async def list_by_hotel_id(hotel_id: str) -> List[dict]:
+    async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         rows = await Database.fetch(
             "SELECT * FROM channex_channel_markups WHERE hotel_id = $1",
             hotel_id,
@@ -419,6 +426,8 @@ class ChannexChannelMarkupRepository:
             DO UPDATE SET markup_pct = EXCLUDED.markup_pct, updated_at = now()
             RETURNING *
             """,
-            hotel_id, channel, markup_pct,
+            hotel_id,
+            channel,
+            markup_pct,
         )
         return dict(row)

@@ -1,11 +1,10 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from app.config import settings as app_settings
 from app.database import BookingEngineDatabase
-from app.repositories.payout_repo import PayoutRepository
 from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.payout_repo import PayoutRepository
 from app.services import stripe_service, xendit_service
 
 logger = logging.getLogger(__name__)
@@ -72,7 +71,8 @@ async def fetch_billing_config(hotel_id: str) -> dict:
         logger.error(
             "Failed to fetch billing config from booking_db for hotel %s: %s — "
             "falling back to zero-fee defaults",
-            hotel_id, exc,
+            hotel_id,
+            exc,
         )
         return dict(DEFAULT_BILLING_CONFIG)
     if not row:
@@ -117,9 +117,7 @@ def calculate_split(
     safer fallback when the booking source can't be determined.
     """
     if not channel:
-        logger.warning(
-            "calculate_split called with empty channel — defaulting to 'direct' rate"
-        )
+        logger.warning("calculate_split called with empty channel — defaulting to 'direct' rate")
         channel = "direct"
     is_channel_booking = channel not in KNOWN_DIRECT_CHANNELS
 
@@ -133,9 +131,7 @@ def calculate_split(
 
     platform_fee = round(total_amount * platform_fee_pct / 100, 2)
     affiliate_commission = (
-        round(total_amount * effective_affiliate_commission_pct / 100, 2)
-        if has_affiliate
-        else 0.0
+        round(total_amount * effective_affiliate_commission_pct / 100, 2) if has_affiliate else 0.0
     )
     property_payout = round(total_amount - platform_fee - affiliate_commission, 2)
 
@@ -151,7 +147,7 @@ async def schedule_payouts(
     hotel_id: str,
     total_amount: float,
     currency: str,
-    affiliate_id: Optional[str],
+    affiliate_id: str | None,
     affiliate_commission: float,
     property_payout: float,
     check_out,
@@ -160,9 +156,9 @@ async def schedule_payouts(
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
     free_days = policy["free_cancellation_days"] if policy else 7
 
-    hotel_payout_date = datetime.combine(
-        check_out, datetime.min.time(), tzinfo=timezone.utc
-    ) + timedelta(days=free_days)
+    hotel_payout_date = datetime.combine(check_out, datetime.min.time(), tzinfo=UTC) + timedelta(
+        days=free_days
+    )
 
     await PayoutRepository.create(
         booking_id=booking_id,
@@ -174,9 +170,7 @@ async def schedule_payouts(
     )
 
     if affiliate_id and affiliate_commission > 0:
-        checkout_dt = datetime.combine(
-            check_out, datetime.min.time(), tzinfo=timezone.utc
-        )
+        checkout_dt = datetime.combine(check_out, datetime.min.time(), tzinfo=UTC)
         if checkout_dt.month == 12:
             batch_date = checkout_dt.replace(year=checkout_dt.year + 1, month=1, day=1)
         else:
@@ -212,9 +206,7 @@ async def dispatch_stripe_transfer(
         destination_account=destination_account,
         metadata=metadata,
     )
-    await PayoutRepository.update_status(
-        payout_id, "completed", stripe_transfer_id=result["id"]
-    )
+    await PayoutRepository.update_status(payout_id, "completed", stripe_transfer_id=result["id"])
     return result["id"]
 
 
@@ -241,25 +233,31 @@ async def dispatch_xendit_payout(
         currency=currency,
         description=description,
     )
-    await PayoutRepository.update_status(
-        payout_id, "processing", xendit_payout_id=result["id"]
-    )
+    await PayoutRepository.update_status(payout_id, "processing", xendit_payout_id=result["id"])
     return result["id"]
 
 
 async def handle_payout_failure(
-    payout_id: str, retry_count: int, error: Exception, label: str = "Payout",
+    payout_id: str,
+    retry_count: int,
+    error: Exception,
+    label: str = "Payout",
 ) -> None:
     """Either schedule a retry or mark the payout permanently failed."""
     if retry_count < MAX_PAYOUT_RETRIES:
         await PayoutRepository.increment_retry(payout_id, str(error))
         logger.info(
             "%s %s scheduled for retry (%d/%d)",
-            label, payout_id, retry_count + 1, MAX_PAYOUT_RETRIES,
+            label,
+            payout_id,
+            retry_count + 1,
+            MAX_PAYOUT_RETRIES,
         )
     else:
         await PayoutRepository.update_status(payout_id, "failed")
         logger.error(
             "%s %s permanently failed after %d retries",
-            label, payout_id, MAX_PAYOUT_RETRIES,
+            label,
+            payout_id,
+            MAX_PAYOUT_RETRIES,
         )

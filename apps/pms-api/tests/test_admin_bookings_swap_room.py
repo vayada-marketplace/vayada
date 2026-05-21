@@ -3,15 +3,17 @@ Tests for PATCH /admin/bookings/{id}/swap-room — atomically exchange two
 reservations' room assignments (or assign an unassigned booking by displacing
 the occupier into a free room).
 """
+
 import json as _json
 
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
     create_test_booking,
+    create_test_hotel,
     create_test_room,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -35,7 +37,9 @@ async def _swap(
 
 async def _set_room(booking_id, room_id):
     await Database.execute(
-        "UPDATE bookings SET room_id = $1 WHERE id = $2", room_id, booking_id,
+        "UPDATE bookings SET room_id = $1 WHERE id = $2",
+        room_id,
+        booking_id,
     )
 
 
@@ -48,14 +52,20 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-02", check_out="2026-06-06",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-02",
+            check_out="2026-06-06",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         await _set_room(b["id"], rooms[1]["id"])
@@ -66,7 +76,8 @@ class TestSwapRooms:
 
         # Partner row also swapped.
         b_after = await Database.fetchrow(
-            "SELECT room_id FROM bookings WHERE id = $1", b["id"],
+            "SELECT room_id FROM bookings WHERE id = $1",
+            b["id"],
         )
         assert str(b_after["room_id"]) == str(rooms[0]["id"])
 
@@ -74,7 +85,8 @@ class TestSwapRooms:
         events = await Database.fetch(
             "SELECT booking_id, event_type, payload FROM booking_events "
             "WHERE booking_id IN ($1, $2) ORDER BY created_at",
-            a["id"], b["id"],
+            a["id"],
+            b["id"],
         )
         assert len(events) == 2
         by_booking = {str(e["booking_id"]): e for e in events}
@@ -90,9 +102,7 @@ class TestSwapRooms:
         assert pb["to_room_id"] == str(rooms[0]["id"])
         assert pb["paired_booking_id"] == str(a["id"])
 
-    async def test_swap_unassigned_source_with_free_destination(
-        self, client, hotel_with_rooms
-    ):
+    async def test_swap_unassigned_source_with_free_destination(self, client, hotel_with_rooms):
         """Unassigned source takes partner's room; partner moves to free room."""
         user = hotel_with_rooms["user"]
         hotel = hotel_with_rooms["hotel"]
@@ -101,21 +111,30 @@ class TestSwapRooms:
 
         # Source: unassigned, June 19–22.
         source = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-19", check_out="2026-06-22",
-            status="confirmed", guest_email="victoria@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-19",
+            check_out="2026-06-22",
+            status="confirmed",
+            guest_email="victoria@example.com",
         )
         # Partner: assigned to room[0], dates overlap source.
         partner = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-18", check_out="2026-06-23",
-            status="confirmed", guest_email="partner@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-18",
+            check_out="2026-06-23",
+            status="confirmed",
+            guest_email="partner@example.com",
         )
         await _set_room(partner["id"], rooms[0]["id"])
         # rooms[1] is free for the whole window.
 
         resp = await _swap(
-            client, user["token"], str(source["id"]), str(partner["id"]),
+            client,
+            user["token"],
+            str(source["id"]),
+            str(partner["id"]),
             partner_destination_room_id=str(rooms[1]["id"]),
         )
         assert resp.status_code == 200, resp.text
@@ -123,7 +142,8 @@ class TestSwapRooms:
         assert resp.json()["roomId"] == str(rooms[0]["id"])
         # Partner moved to the free room.
         partner_after = await Database.fetchrow(
-            "SELECT room_id FROM bookings WHERE id = $1", partner["id"],
+            "SELECT room_id FROM bookings WHERE id = $1",
+            partner["id"],
         )
         assert str(partner_after["room_id"]) == str(rooms[1]["id"])
 
@@ -134,8 +154,11 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05", status="confirmed",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
         )
         await _set_room(a["id"], rooms[0]["id"])
 
@@ -150,14 +173,20 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="cancelled", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="cancelled",
+            guest_email="b@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         await _set_room(b["id"], rooms[1]["id"])
@@ -173,21 +202,32 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         other_type = await create_test_room_type(
-            str(hotel["id"]), name="Standard Double", base_rate=80.0, total_rooms=1,
+            str(hotel["id"]),
+            name="Standard Double",
+            base_rate=80.0,
+            total_rooms=1,
         )
         other_room = await create_test_room(
-            str(hotel["id"]), str(other_type["id"]), room_number="201",
+            str(hotel["id"]),
+            str(other_type["id"]),
+            room_number="201",
         )
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(other_type["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(other_type["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         await _set_room(b["id"], other_room["id"])
@@ -209,19 +249,28 @@ class TestSwapRooms:
         # A 8-day stay vs B 4-day stay, so when B moves out of room 1 there is
         # still C overlapping A's dates in room 1 → swap creates a conflict.
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-09",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-09",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-05", check_out="2026-06-09",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-05",
+            check_out="2026-06-09",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         c = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-04",
-            status="confirmed", guest_email="c@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-04",
+            status="confirmed",
+            guest_email="c@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         await _set_room(b["id"], rooms[1]["id"])
@@ -230,35 +279,47 @@ class TestSwapRooms:
         resp = await _swap(client, user["token"], str(a["id"]), str(b["id"]))
         assert resp.status_code == 409
 
-    async def test_swap_rejects_when_partner_destination_wrong_type(
-        self, client, hotel_with_rooms
-    ):
+    async def test_swap_rejects_when_partner_destination_wrong_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
         rooms = hotel_with_rooms["rooms"]
 
         other_type = await create_test_room_type(
-            str(hotel["id"]), name="Standard Double", base_rate=80.0, total_rooms=1,
+            str(hotel["id"]),
+            name="Standard Double",
+            base_rate=80.0,
+            total_rooms=1,
         )
         other_room = await create_test_room(
-            str(hotel["id"]), str(other_type["id"]), room_number="201",
+            str(hotel["id"]),
+            str(other_type["id"]),
+            room_number="201",
         )
 
         source = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-19", check_out="2026-06-22",
-            status="confirmed", guest_email="src@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-19",
+            check_out="2026-06-22",
+            status="confirmed",
+            guest_email="src@example.com",
         )
         partner = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-18", check_out="2026-06-23",
-            status="confirmed", guest_email="ptr@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-18",
+            check_out="2026-06-23",
+            status="confirmed",
+            guest_email="ptr@example.com",
         )
         await _set_room(partner["id"], rooms[0]["id"])
 
         resp = await _swap(
-            client, user["token"], str(source["id"]), str(partner["id"]),
+            client,
+            user["token"],
+            str(source["id"]),
+            str(partner["id"]),
             partner_destination_room_id=str(other_room["id"]),
         )
         assert resp.status_code == 400
@@ -273,14 +334,20 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         source = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-19", check_out="2026-06-22",
-            status="confirmed", guest_email="src@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-19",
+            check_out="2026-06-22",
+            status="confirmed",
+            guest_email="src@example.com",
         )
         partner = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-18", check_out="2026-06-23",
-            status="confirmed", guest_email="ptr@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-18",
+            check_out="2026-06-23",
+            status="confirmed",
+            guest_email="ptr@example.com",
         )
         await _set_room(partner["id"], rooms[0]["id"])
 
@@ -295,14 +362,20 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         # b is unassigned
@@ -317,14 +390,20 @@ class TestSwapRooms:
         rooms = hotel_with_rooms["rooms"]
 
         a = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="a@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="a@example.com",
         )
         b = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
-            status="confirmed", guest_email="b@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
+            status="confirmed",
+            guest_email="b@example.com",
         )
         await _set_room(a["id"], rooms[0]["id"])
         await _set_room(b["id"], rooms[1]["id"])

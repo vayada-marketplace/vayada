@@ -5,7 +5,6 @@ hotel profile route (PUT /hotels/me) and the admin override
 
 The dynamic-UPDATE field building lived inline in both routers.
 """
-from typing import Optional
 
 from app.repositories.hotel_repo import HotelRepository
 
@@ -13,17 +12,16 @@ _ALLOWED_FIELDS = ("name", "location", "about", "website", "phone", "picture")
 
 
 class HotelProfileService:
-
     @staticmethod
     async def apply_partial(
         profile_id: str,
         *,
-        name: Optional[str] = None,
-        location: Optional[str] = None,
-        about: Optional[str] = None,
-        website: Optional[str] = None,
-        phone: Optional[str] = None,
-        picture: Optional[str] = None,
+        name: str | None = None,
+        location: str | None = None,
+        about: str | None = None,
+        website: str | None = None,
+        phone: str | None = None,
+        picture: str | None = None,
     ) -> None:
         """Update only the provided columns on hotel_profiles.
 

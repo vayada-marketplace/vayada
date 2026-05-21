@@ -7,8 +7,9 @@ last 4 chars of its booking_reference.
 
 Manual invoices not tied to a booking are tracked in VAY-301.
 """
-from datetime import date, datetime, timezone
-from typing import Dict, Iterable, List, Optional, Tuple
+
+from collections.abc import Iterable
+from datetime import UTC, date, datetime
 
 from app.models.financials import (
     InvoiceCharge,
@@ -17,7 +18,6 @@ from app.models.financials import (
     InvoicePayment,
     PaymentLedgerEntry,
 )
-
 
 PAYMENT_METHOD_LABELS = {
     "card": "Card",
@@ -35,7 +35,7 @@ PAID_STATUSES = {"captured", "authorized"}
 def invoice_number(booking: dict) -> str:
     """`INV-YYYY-XXXX` — year of created_at + last 4 of booking_reference."""
     created = booking.get("created_at")
-    year = created.year if isinstance(created, datetime) else datetime.now(timezone.utc).year
+    year = created.year if isinstance(created, datetime) else datetime.now(UTC).year
     ref = (booking.get("booking_reference") or "")[-4:].upper() or "0000"
     return f"INV-{year}-{ref}"
 
@@ -44,7 +44,7 @@ def _amount_paid(payments: Iterable[dict]) -> float:
     return round(sum(float(p["amount"]) for p in payments if p.get("status") in PAID_STATUSES), 2)
 
 
-def derive_status(booking: dict, amount_paid: float, today: Optional[date] = None) -> str:
+def derive_status(booking: dict, amount_paid: float, today: date | None = None) -> str:
     """draft | sent | paid | partial | overdue | voided"""
     today = today or date.today()
     status = booking.get("status")
@@ -63,12 +63,12 @@ def derive_status(booking: dict, amount_paid: float, today: Optional[date] = Non
     return "sent"
 
 
-def build_charges(booking: dict) -> List[InvoiceCharge]:
+def build_charges(booking: dict) -> list[InvoiceCharge]:
     """Build charge line items from a booking row.
 
     Tax / service-charge breakdown is intentionally omitted — see VAY-304.
     """
-    charges: List[InvoiceCharge] = []
+    charges: list[InvoiceCharge] = []
 
     ci: date = booking["check_in"]
     co: date = booking["check_out"]
@@ -149,7 +149,7 @@ def to_payment(payment: dict) -> InvoicePayment:
     )
 
 
-def to_list_item(booking: dict, payments: List[dict]) -> InvoiceListItem:
+def to_list_item(booking: dict, payments: list[dict]) -> InvoiceListItem:
     paid = _amount_paid(payments)
     total = float(booking["total_amount"])
     status = derive_status(booking, paid)
@@ -174,7 +174,7 @@ def to_list_item(booking: dict, payments: List[dict]) -> InvoiceListItem:
     )
 
 
-def to_detail(booking: dict, payments: List[dict]) -> InvoiceDetail:
+def to_detail(booking: dict, payments: list[dict]) -> InvoiceDetail:
     paid = _amount_paid(payments)
     total = float(booking["total_amount"])
     charges = build_charges(booking)
@@ -236,8 +236,8 @@ def derive_payment_status(total: float, amount_paid: float) -> str:
     return "captured"
 
 
-def index_payments_by_booking(payments: List[dict]) -> Dict[str, List[dict]]:
-    grouped: Dict[str, List[dict]] = {}
+def index_payments_by_booking(payments: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
     for p in payments:
         bid = str(p["booking_id"])
         grouped.setdefault(bid, []).append(p)
@@ -245,8 +245,8 @@ def index_payments_by_booking(payments: List[dict]) -> Dict[str, List[dict]]:
 
 
 def filter_invoices_by_status(
-    items: List[Tuple[dict, List[dict]]], status: Optional[str], today: Optional[date] = None
-) -> List[Tuple[dict, List[dict]]]:
+    items: list[tuple[dict, list[dict]]], status: str | None, today: date | None = None
+) -> list[tuple[dict, list[dict]]]:
     if not status:
         return items
     filtered = []
@@ -256,8 +256,17 @@ def filter_invoices_by_status(
     return filtered
 
 
-def status_counts(items: List[Tuple[dict, List[dict]]], today: Optional[date] = None) -> Dict[str, int]:
-    counts: Dict[str, int] = {"draft": 0, "sent": 0, "paid": 0, "partial": 0, "overdue": 0, "voided": 0}
+def status_counts(
+    items: list[tuple[dict, list[dict]]], today: date | None = None
+) -> dict[str, int]:
+    counts: dict[str, int] = {
+        "draft": 0,
+        "sent": 0,
+        "paid": 0,
+        "partial": 0,
+        "overdue": 0,
+        "voided": 0,
+    }
     for booking, payments in items:
         s = derive_status(booking, _amount_paid(payments), today)
         counts[s] = counts.get(s, 0) + 1

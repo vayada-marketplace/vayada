@@ -7,6 +7,7 @@ tests cover the orchestration layer that sits on top of it:
   writes audit rows.
 - The Channex-inbound path picks rooms via the solver.
 """
+
 import json as _json
 
 from app.database import Database
@@ -14,6 +15,7 @@ from app.services.room_assignment import (
     resolve_assignment,
     try_place_unassigned_after_cancellation,
 )
+
 from tests.conftest import (
     create_test_booking,
 )
@@ -21,13 +23,17 @@ from tests.conftest import (
 
 async def _set_room(booking_id, room_id):
     await Database.execute(
-        "UPDATE bookings SET room_id = $1 WHERE id = $2", room_id, booking_id,
+        "UPDATE bookings SET room_id = $1 WHERE id = $2",
+        room_id,
+        booking_id,
     )
 
 
 async def _set_status(booking_id, status):
     await Database.execute(
-        "UPDATE bookings SET status = $1 WHERE id = $2", status, booking_id,
+        "UPDATE bookings SET status = $1 WHERE id = $2",
+        status,
+        booking_id,
     )
 
 
@@ -39,14 +45,17 @@ class TestResolveAssignment:
 
         # rooms[0] is busy for the window; rooms[1..] are free.
         existing = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-05-23", check_out="2026-05-26",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-05-23",
+            check_out="2026-05-26",
             status="confirmed",
         )
         await _set_room(existing["id"], rooms[0]["id"])
 
         target, moves = await resolve_assignment(
-            str(hotel["id"]), str(rt["id"]),
+            str(hotel["id"]),
+            str(rt["id"]),
             existing["check_in"].__class__.fromisoformat("2026-05-22"),
             existing["check_in"].__class__.fromisoformat("2026-05-27"),
         )
@@ -59,22 +68,28 @@ class TestResolveAssignment:
         Unassigned). With the toggle on, the solver should find a packing.
         """
         from datetime import date
+
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
         rooms = hotel_with_rooms["rooms"]
 
         # Block every room for some portion of [22, 27).
-        for idx, (ci, co) in enumerate([
-            ("2026-05-23", "2026-05-26"),
-            ("2026-05-25", "2026-05-28"),
-            ("2026-05-22", "2026-05-24"),
-            ("2026-05-21", "2026-05-23"),  # rooms[3]
-            ("2026-05-26", "2026-05-29"),  # rooms[4]
-        ]):
+        for idx, (ci, co) in enumerate(
+            [
+                ("2026-05-23", "2026-05-26"),
+                ("2026-05-25", "2026-05-28"),
+                ("2026-05-22", "2026-05-24"),
+                ("2026-05-21", "2026-05-23"),  # rooms[3]
+                ("2026-05-26", "2026-05-29"),  # rooms[4]
+            ]
+        ):
             b = await create_test_booking(
-                str(hotel["id"]), str(rt["id"]),
-                check_in=ci, check_out=co,
-                status="confirmed", guest_email=f"g{idx}@example.com",
+                str(hotel["id"]),
+                str(rt["id"]),
+                check_in=ci,
+                check_out=co,
+                status="confirmed",
+                guest_email=f"g{idx}@example.com",
             )
             await _set_room(b["id"], rooms[idx]["id"])
 
@@ -84,8 +99,10 @@ class TestResolveAssignment:
             hotel["id"],
         )
         target, moves = await resolve_assignment(
-            str(hotel["id"]), str(rt["id"]),
-            date(2026, 5, 22), date(2026, 5, 27),
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         # With the toggle off and no direct fit, both target and moves must
         # be empty — caller treats this as "Unassigned".
@@ -98,8 +115,10 @@ class TestResolveAssignment:
             hotel["id"],
         )
         target_on, _ = await resolve_assignment(
-            str(hotel["id"]), str(rt["id"]),
-            date(2026, 5, 22), date(2026, 5, 27),
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         # 5 rooms with overlapping but coverable windows — packing should
         # exist.
@@ -107,14 +126,13 @@ class TestResolveAssignment:
 
 
 class TestUnassignedSweep:
-    async def test_places_unassigned_after_cancellation_frees_slot(
-        self, client, hotel_with_rooms
-    ):
+    async def test_places_unassigned_after_cancellation_frees_slot(self, client, hotel_with_rooms):
         """Unassigned booking exists; another booking on the same room type
         cancels and frees up a slot that the unassigned booking now fits
         directly. Sweep should assign it and emit no movement audit (no
         moves were needed, just a direct fit)."""
         from datetime import date
+
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
         rooms = hotel_with_rooms["rooms"]
@@ -122,37 +140,46 @@ class TestUnassignedSweep:
         # All rooms occupied across [22, 27): unassigned booking sits in row.
         for idx, room in enumerate(rooms):
             occupant = await create_test_booking(
-                str(hotel["id"]), str(rt["id"]),
-                check_in="2026-05-22", check_out="2026-05-27",
-                status="confirmed", guest_email=f"occ{idx}@example.com",
+                str(hotel["id"]),
+                str(rt["id"]),
+                check_in="2026-05-22",
+                check_out="2026-05-27",
+                status="confirmed",
+                guest_email=f"occ{idx}@example.com",
             )
             await _set_room(occupant["id"], room["id"])
 
         # Unassigned booking waiting for a slot.
         unassigned = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-05-22", check_out="2026-05-27",
-            status="confirmed", guest_email="waiting@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-05-22",
+            check_out="2026-05-27",
+            status="confirmed",
+            guest_email="waiting@example.com",
         )
         # leave room_id NULL
 
         # Cancel one occupant — simulate the freed slot.
         first_occupant_id = await Database.fetchval(
-            "SELECT id FROM bookings WHERE hotel_id = $1 "
-            "AND guest_email = $2",
-            hotel["id"], "occ0@example.com",
+            "SELECT id FROM bookings WHERE hotel_id = $1 AND guest_email = $2",
+            hotel["id"],
+            "occ0@example.com",
         )
         await _set_status(str(first_occupant_id), "cancelled")
 
         placed = await try_place_unassigned_after_cancellation(
-            str(hotel["id"]), str(rt["id"]),
-            date(2026, 5, 22), date(2026, 5, 27),
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert placed == 1
 
         # The unassigned booking should now have rooms[0] assigned to it.
         row = await Database.fetchrow(
-            "SELECT room_id FROM bookings WHERE id = $1", unassigned["id"],
+            "SELECT room_id FROM bookings WHERE id = $1",
+            unassigned["id"],
         )
         assert row["room_id"] is not None
         assert str(row["room_id"]) == str(rooms[0]["id"])
@@ -161,6 +188,7 @@ class TestUnassignedSweep:
         """When auto_rearrange is off, the sweep is a no-op even if a
         booking could be placed."""
         from datetime import date
+
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
         rooms = hotel_with_rooms["rooms"]
@@ -171,29 +199,33 @@ class TestUnassignedSweep:
         )
 
         unassigned = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-05-22", check_out="2026-05-27",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-05-22",
+            check_out="2026-05-27",
             status="confirmed",
         )
         # Everything else free — direct fit on rooms[0] is trivially available.
         placed = await try_place_unassigned_after_cancellation(
-            str(hotel["id"]), str(rt["id"]),
-            date(2026, 5, 22), date(2026, 5, 27),
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         # Sweep is gated on the toggle, regardless of feasibility.
         assert placed == 0
         row = await Database.fetchrow(
-            "SELECT room_id FROM bookings WHERE id = $1", unassigned["id"],
+            "SELECT room_id FROM bookings WHERE id = $1",
+            unassigned["id"],
         )
         assert row["room_id"] is None
 
-    async def test_records_audit_event_when_moves_occur(
-        self, client, hotel_with_rooms
-    ):
+    async def test_records_audit_event_when_moves_occur(self, client, hotel_with_rooms):
         """When the sweep needs a rearrangement (not just a direct fit),
         an `auto_rearranged` event is written on the placed booking and
         an `auto_rearranged_move` event on each moved booking."""
         from datetime import date
+
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
         rooms = hotel_with_rooms["rooms"]
@@ -205,31 +237,40 @@ class TestUnassignedSweep:
         # rooms[3] busy 21–23 + 26–29
         # rooms[4] busy 21–23 + 26–29
         # Unassigned: 22–27 — single-swap on rooms[0..2] would place it.
-        for idx, ranges in enumerate([
-            [("2026-05-23", "2026-05-26")],
-            [("2026-05-25", "2026-05-28")],
-            [("2026-05-22", "2026-05-24")],
-            [("2026-05-21", "2026-05-23"), ("2026-05-26", "2026-05-29")],
-            [("2026-05-21", "2026-05-23"), ("2026-05-26", "2026-05-29")],
-        ]):
+        for idx, ranges in enumerate(
+            [
+                [("2026-05-23", "2026-05-26")],
+                [("2026-05-25", "2026-05-28")],
+                [("2026-05-22", "2026-05-24")],
+                [("2026-05-21", "2026-05-23"), ("2026-05-26", "2026-05-29")],
+                [("2026-05-21", "2026-05-23"), ("2026-05-26", "2026-05-29")],
+            ]
+        ):
             for ci, co in ranges:
                 b = await create_test_booking(
-                    str(hotel["id"]), str(rt["id"]),
-                    check_in=ci, check_out=co,
+                    str(hotel["id"]),
+                    str(rt["id"]),
+                    check_in=ci,
+                    check_out=co,
                     status="confirmed",
                     guest_email=f"occ{idx}-{ci}@example.com",
                 )
                 await _set_room(b["id"], rooms[idx]["id"])
 
         unassigned = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-05-22", check_out="2026-05-27",
-            status="confirmed", guest_email="waiting@example.com",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-05-22",
+            check_out="2026-05-27",
+            status="confirmed",
+            guest_email="waiting@example.com",
         )
 
         placed = await try_place_unassigned_after_cancellation(
-            str(hotel["id"]), str(rt["id"]),
-            date(2026, 5, 22), date(2026, 5, 27),
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert placed == 1
 
@@ -240,10 +281,7 @@ class TestUnassignedSweep:
             unassigned["id"],
         )
         assert ev is not None
-        payload = (
-            ev["payload"] if isinstance(ev["payload"], dict)
-            else _json.loads(ev["payload"])
-        )
+        payload = ev["payload"] if isinstance(ev["payload"], dict) else _json.loads(ev["payload"])
         assert payload["moves"], "expected at least one move in payload"
         # Each moved booking has its own audit row.
         for m in payload["moves"]:

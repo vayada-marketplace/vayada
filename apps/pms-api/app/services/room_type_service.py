@@ -1,12 +1,11 @@
 import json
 import logging
-from typing import Optional, List
 from datetime import date
 
 from app.database import Database
+from app.models.room_type import RoomTypeResponse
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.availability_service import remaining_for_stay
-from app.models.room_type import RoomTypeResponse
 from app.services.occupancy import room_allows_guest_mix
 from app.utils import parse_jsonb
 
@@ -14,10 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_last_minute_discount(
-    hotel_config: Optional[dict],
-    room_config: Optional[dict],
+    hotel_config: dict | None,
+    room_config: dict | None,
     days_before: int,
-) -> Optional[int]:
+) -> int | None:
     """Return the last-minute discount percent for the given days-before-check-in,
     or None if no discount applies.
 
@@ -43,20 +42,18 @@ def resolve_last_minute_discount(
     return None
 
 
-async def get_hotel_id_by_slug(slug: str) -> Optional[str]:
-    row = await Database.fetchrow(
-        "SELECT id FROM hotels WHERE slug = $1", slug
-    )
+async def get_hotel_id_by_slug(slug: str) -> str | None:
+    row = await Database.fetchrow("SELECT id FROM hotels WHERE slug = $1", slug)
     return str(row["id"]) if row else None
 
 
 async def get_rooms_for_guest(
     slug: str,
-    check_in: Optional[date] = None,
-    check_out: Optional[date] = None,
-    adults: Optional[int] = None,
-    children: Optional[int] = None,
-) -> List[RoomTypeResponse]:
+    check_in: date | None = None,
+    check_out: date | None = None,
+    adults: int | None = None,
+    children: int | None = None,
+) -> list[RoomTypeResponse]:
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
         return []
@@ -90,9 +87,7 @@ async def get_rooms_for_guest(
             if not RoomTypeRepository.is_date_in_operating_periods(room, check_in):
                 remaining = 0
             else:
-                remaining = await remaining_for_stay(
-                    str(room["id"]), total, check_in, check_out
-                )
+                remaining = await remaining_for_stay(str(room["id"]), total, check_in, check_out)
         else:
             remaining = total
 
@@ -131,7 +126,9 @@ async def get_rooms_for_guest(
             room_lm_raw = room.get("last_minute_discount")
             room_lm_config = None
             if room_lm_raw:
-                room_lm_config = json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw
+                room_lm_config = (
+                    json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw
+                )
             pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before)
             if pct and pct > 0:
                 lm_discount_pct = pct
@@ -170,8 +167,11 @@ async def get_rooms_for_guest(
                 partial_refund_cancel_window_days=room.get("partial_refund_cancel_window_days", 30),
                 partial_refund_amount_percent=room.get("partial_refund_amount_percent", 50),
                 partial_refund_tiers=parse_jsonb(room.get("partial_refund_tiers", [])),
-                non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
-                rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
+                non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy")
+                or "Non-refundable from booking",
+                rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(
+                    parse_jsonb(room.get("rate_payment_methods"))
+                ),
             )
         )
 

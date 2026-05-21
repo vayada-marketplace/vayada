@@ -1,48 +1,68 @@
 """
 Authentication routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
-import bcrypt
+
 import logging
 
-from app.jwt_utils import create_access_token, get_token_expiration_seconds, decode_access_token, is_token_expired
+import bcrypt
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.auth import (
-    create_password_reset_token, validate_password_reset_token, mark_password_reset_token_as_used,
-    hash_password, create_email_verification_code, verify_email_code, mark_email_as_verified,
-    validate_email_verification_token, mark_email_verification_token_as_used
+    create_email_verification_code,
+    create_password_reset_token,
+    hash_password,
+    mark_email_as_verified,
+    mark_email_verification_token_as_used,
+    mark_password_reset_token_as_used,
+    validate_email_verification_token,
+    validate_password_reset_token,
+    verify_email_code,
 )
-from app.email_service import send_email, create_password_reset_email_html, create_email_verification_html
 from app.config import settings
-from app.repositories.user_repo import UserRepository
-from app.repositories.password_reset_repo import PasswordResetRepository
-from app.repositories.consent_repo import ConsentRepository
-from app.repositories.creator_repo import CreatorRepository
-from app.repositories.hotel_repo import HotelRepository
+from app.email_service import (
+    create_email_verification_html,
+    create_password_reset_email_html,
+    send_email,
+)
+from app.jwt_utils import (
+    create_access_token,
+    decode_access_token,
+    get_token_expiration_seconds,
+    is_token_expired,
+)
 from app.models.auth import (
-    RegisterRequest,
-    RegisterResponse,
-    LoginRequest,
-    LoginResponse,
-    TokenValidationResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
     SendVerificationCodeRequest,
     SendVerificationCodeResponse,
+    TokenValidationResponse,
     VerifyEmailCodeRequest,
     VerifyEmailCodeResponse,
     VerifyEmailResponse,
 )
+from app.repositories.consent_repo import ConsentRepository
+from app.repositories.creator_repo import CreatorRepository
+from app.repositories.hotel_repo import HotelRepository
+from app.repositories.password_reset_repo import PasswordResetRepository
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
-@router.post("/send-verification-code", response_model=SendVerificationCodeResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/send-verification-code",
+    response_model=SendVerificationCodeResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def send_verification_code(request: SendVerificationCodeRequest):
     """
     Send a 6-digit verification code to the user's email address.
@@ -56,7 +76,7 @@ async def send_verification_code(request: SendVerificationCodeRequest):
             # Don't reveal if email exists for security
             return SendVerificationCodeResponse(
                 message="If this email is not registered, a verification code has been sent.",
-                code=None
+                code=None,
             )
 
         # Generate and store verification code
@@ -67,39 +87,37 @@ async def send_verification_code(request: SendVerificationCodeRequest):
 
         # Send email
         email_sent = await send_email(
-            to_email=request.email,
-            subject="Verify Your Email - vayada",
-            html_body=html_body
+            to_email=request.email, subject="Verify Your Email - vayada", html_body=html_body
         )
 
         if not email_sent and settings.DEBUG:
             # In debug mode, return code if email fails
             return SendVerificationCodeResponse(
-                message="Verification code sent. (Email failed, code returned for debug)",
-                code=code
+                message="Verification code sent. (Email failed, code returned for debug)", code=code
             )
         elif not email_sent:
             # In production, return generic message
             return SendVerificationCodeResponse(
                 message="If this email is not registered, a verification code has been sent.",
-                code=None
+                code=None,
             )
         else:
             return SendVerificationCodeResponse(
                 message="Verification code sent to your email.",
-                code=code if settings.DEBUG else None
+                code=code if settings.DEBUG else None,
             )
 
     except Exception as e:
         logger.error(f"Error sending verification code: {e}")
         # Return generic message for security
         return SendVerificationCodeResponse(
-            message="If this email is not registered, a verification code has been sent.",
-            code=None
+            message="If this email is not registered, a verification code has been sent.", code=None
         )
 
 
-@router.post("/verify-email-code", response_model=VerifyEmailCodeResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/verify-email-code", response_model=VerifyEmailCodeResponse, status_code=status.HTTP_200_OK
+)
 async def verify_email_code_endpoint(request: VerifyEmailCodeRequest):
     """
     Verify a 6-digit code sent to the user's email.
@@ -114,22 +132,20 @@ async def verify_email_code_endpoint(request: VerifyEmailCodeRequest):
             await mark_email_as_verified(request.email)
 
             logger.info(f"Email verification successful for: {request.email}")
-            return VerifyEmailCodeResponse(
-                message="Email verified successfully!",
-                verified=True
-            )
+            return VerifyEmailCodeResponse(message="Email verified successfully!", verified=True)
         else:
-            logger.warning(f"Email verification failed for: {request.email} with code: {request.code}")
+            logger.warning(
+                f"Email verification failed for: {request.email} with code: {request.code}"
+            )
             return VerifyEmailCodeResponse(
                 message="Invalid or expired verification code. Please request a new code.",
-                verified=False
+                verified=False,
             )
 
     except Exception as e:
         logger.error(f"Error verifying email code for {request.email}: {e}", exc_info=True)
         return VerifyEmailCodeResponse(
-            message="An error occurred while verifying the code. Please try again.",
-            verified=False
+            message="An error occurred while verifying the code. Please try again.", verified=False
         )
 
 
@@ -151,33 +167,31 @@ async def register(request: RegisterRequest):
         if not request.terms_accepted:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You must accept the Terms of Service to register"
+                detail="You must accept the Terms of Service to register",
             )
 
         if not request.privacy_accepted:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You must accept the Privacy Policy to register"
+                detail="You must accept the Privacy Policy to register",
             )
 
         # Check if email already exists
         if await UserRepository.exists_by_email(request.email):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
             )
 
         # Hash password
-        password_hash = bcrypt.hashpw(
-            request.password.encode('utf-8'),
-            bcrypt.gensalt()
-        ).decode('utf-8')
+        password_hash = bcrypt.hashpw(request.password.encode("utf-8"), bcrypt.gensalt()).decode(
+            "utf-8"
+        )
 
         # Use provided name or default to email prefix
         user_name = request.name
         if not user_name or user_name.strip() == "":
             # Extract name from email (part before @)
-            user_name = request.email.split('@')[0].capitalize()
+            user_name = request.email.split("@")[0].capitalize()
 
         # Default versions if not provided
         terms_version = request.terms_version or "2024-01-01"
@@ -199,47 +213,47 @@ async def register(request: RegisterRequest):
         try:
             # Automatically create corresponding profile based on user type
             if request.type == "creator":
-                await CreatorRepository.create(user['id'])
+                await CreatorRepository.create(user["id"])
             elif request.type == "hotel":
-                await HotelRepository.create_profile(user['id'], user['name'])
+                await HotelRepository.create_profile(user["id"], user["name"])
 
             # Create newsletter preferences (enabled by default)
             from app.repositories.newsletter_repo import NewsletterRepository
-            await NewsletterRepository.upsert(str(user['id']), enabled=True)
+
+            await NewsletterRepository.upsert(str(user["id"]), enabled=True)
 
             # Create consent history records for GDPR audit trail
-            await ConsentRepository.record(user['id'], 'terms', True, version=terms_version)
-            await ConsentRepository.record(user['id'], 'privacy', True, version=privacy_version)
+            await ConsentRepository.record(user["id"], "terms", True, version=terms_version)
+            await ConsentRepository.record(user["id"], "privacy", True, version=privacy_version)
 
             if request.marketing_consent:
-                await ConsentRepository.record(user['id'], 'marketing', True)
+                await ConsentRepository.record(user["id"], "marketing", True)
         except Exception:
             # Compensating action: clean up user from auth DB if profile creation failed
-            await UserRepository.delete(user['id'])
+            await UserRepository.delete(user["id"])
             raise
 
         # Create JWT token
         access_token = create_access_token(
-            data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
+            data={"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
         )
 
         return RegisterResponse(
-            id=str(user['id']),
-            email=user['email'],
-            name=user['name'],
-            type=user['type'],
-            status=user['status'],
+            id=str(user["id"]),
+            email=user["email"],
+            name=user["name"],
+            type=user["type"],
+            status=user["status"],
             access_token=access_token,
             expires_in=get_token_expiration_seconds(),
-            message="User registered successfully"
+            message="User registered successfully",
         )
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registration failed"
         )
 
 
@@ -257,56 +271,55 @@ async def login(request: LoginRequest):
 
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
         # Verify password
         password_valid = bcrypt.checkpw(
-            request.password.encode('utf-8'),
-            user['password_hash'].encode('utf-8')
+            request.password.encode("utf-8"), user["password_hash"].encode("utf-8")
         )
 
         if not password_valid:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
         # Check if user account is suspended
-        if user['status'] == 'suspended':
+        if user["status"] == "suspended":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is suspended"
+                status_code=status.HTTP_403_FORBIDDEN, detail="Account is suspended"
             )
 
         # Create JWT token
         access_token = create_access_token(
-            data={"sub": str(user['id']), "email": user['email'], "type": user['type']}
+            data={"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
         )
 
         return LoginResponse(
-            id=str(user['id']),
-            email=user['email'],
-            name=user['name'],
-            type=user['type'],
-            status=user['status'],
+            id=str(user["id"]),
+            email=user["email"],
+            name=user["name"],
+            type=user["type"],
+            status=user["status"],
             access_token=access_token,
             expires_in=get_token_expiration_seconds(),
-            message="Login successful"
+            message="Login successful",
         )
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login failed"
         )
 
 
-@router.post("/validate-token", response_model=TokenValidationResponse, status_code=status.HTTP_200_OK)
-async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))):
+@router.post(
+    "/validate-token", response_model=TokenValidationResponse, status_code=status.HTTP_200_OK
+)
+async def validate_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+):
     """
     Validate if the current token is still valid
 
@@ -319,11 +332,7 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
     """
     if not credentials:
         return TokenValidationResponse(
-            valid=False,
-            expired=False,
-            user_id=None,
-            email=None,
-            type=None
+            valid=False, expired=False, user_id=None, email=None, type=None
         )
 
     token = credentials.credentials
@@ -338,55 +347,43 @@ async def validate_token(credentials: Optional[HTTPAuthorizationCredentials] = D
         # If is_exp is False, token is valid but signature is wrong
         return TokenValidationResponse(
             valid=False,
-            expired=is_exp if is_exp is not None else False,  # False if invalid format, True if expired
+            expired=is_exp
+            if is_exp is not None
+            else False,  # False if invalid format, True if expired
             user_id=None,
             email=None,
-            type=None
+            type=None,
         )
 
     # Check if token is expired (only if payload exists)
     is_exp = is_token_expired(token)
     if is_exp is True:
         return TokenValidationResponse(
-            valid=False,
-            expired=True,
-            user_id=None,
-            email=None,
-            type=None
+            valid=False, expired=True, user_id=None, email=None, type=None
         )
 
     # Get user info
     user_id = payload.get("sub")
     if not user_id:
         return TokenValidationResponse(
-            valid=False,
-            expired=False,
-            user_id=None,
-            email=None,
-            type=None
+            valid=False, expired=False, user_id=None, email=None, type=None
         )
 
     user = await UserRepository.get_by_id(user_id, columns="id, email, type")
 
     if not user:
         return TokenValidationResponse(
-            valid=False,
-            expired=False,
-            user_id=None,
-            email=None,
-            type=None
+            valid=False, expired=False, user_id=None, email=None, type=None
         )
 
     return TokenValidationResponse(
-        valid=True,
-        expired=False,
-        user_id=str(user['id']),
-        email=user['email'],
-        type=user['type']
+        valid=True, expired=False, user_id=str(user["id"]), email=user["email"], type=user["type"]
     )
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_200_OK
+)
 async def forgot_password(request: ForgotPasswordRequest):
     """
     Request a password reset
@@ -408,24 +405,22 @@ async def forgot_password(request: ForgotPasswordRequest):
 
         # Always return success message (security best practice - don't reveal if email exists)
         # But only create token if user exists and is not suspended
-        if user and user['status'] != 'suspended':
+        if user and user["status"] != "suspended":
             # Create password reset token (expires in 1 hour)
-            token = await create_password_reset_token(str(user['id']), expires_in_hours=1)
+            token = await create_password_reset_token(str(user["id"]), expires_in_hours=1)
 
             # Create reset link
             reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
 
             # Get user name for email personalization
-            user_name = user.get('name') or user['email'].split('@')[0]
+            user_name = user.get("name") or user["email"].split("@")[0]
 
             # Create email content
             html_body = create_password_reset_email_html(reset_link, user_name)
 
             # Send email
             email_sent = await send_email(
-                to_email=user['email'],
-                subject="Reset Your vayada Password",
-                html_body=html_body
+                to_email=user["email"], subject="Reset Your vayada Password", html_body=html_body
             )
 
             # In development mode, return token for testing if email failed
@@ -434,28 +429,30 @@ async def forgot_password(request: ForgotPasswordRequest):
             if settings.DEBUG and not email_sent:
                 # If email sending failed in debug mode, return token for testing
                 return_token = token
-                logger.warning(f"Email sending failed in debug mode. Returning token in response.")
+                logger.warning("Email sending failed in debug mode. Returning token in response.")
 
             return ForgotPasswordResponse(
                 message="If an account with that email exists, a password reset link has been sent.",
-                token=return_token
+                token=return_token,
             )
         else:
             # Still return success (security best practice)
             return ForgotPasswordResponse(
                 message="If an account with that email exists, a password reset link has been sent.",
-                token=None
+                token=None,
             )
 
-    except Exception as e:
+    except Exception:
         # Still return success message (security best practice)
         return ForgotPasswordResponse(
             message="If an account with that email exists, a password reset link has been sent.",
-            token=None
+            token=None,
         )
 
 
-@router.post("/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK
+)
 async def reset_password(request: ResetPasswordRequest):
     """
     Reset password using a reset token
@@ -475,11 +472,10 @@ async def reset_password(request: ResetPasswordRequest):
 
         if not token_data:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset token"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
             )
 
-        user_id = token_data['user_id']
+        user_id = token_data["user_id"]
 
         # Hash the new password
         password_hash = hash_password(request.new_password)
@@ -493,16 +489,13 @@ async def reset_password(request: ResetPasswordRequest):
         # Invalidate all existing tokens for this user (security best practice)
         await PasswordResetRepository.invalidate_all_for_user(user_id)
 
-        return ResetPasswordResponse(
-            message="Password has been reset successfully"
-        )
+        return ResetPasswordResponse(message="Password has been reset successfully")
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reset password"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset password"
         )
 
 
@@ -525,15 +518,15 @@ async def verify_email_endpoint(token: str = Query(..., description="Email verif
         token_data = await validate_email_verification_token(token)
 
         if not token_data:
-            logger.warning(f"Invalid or expired email verification token attempted")
+            logger.warning("Invalid or expired email verification token attempted")
             return VerifyEmailResponse(
                 message="Invalid or expired verification token. Please request a new verification link.",
                 verified=False,
-                email=None
+                email=None,
             )
 
-        user_id = token_data['user_id']
-        email = token_data['email']
+        user_id = token_data["user_id"]
+        email = token_data["email"]
 
         # Mark email as verified
         email_verified = await mark_email_as_verified(email)
@@ -543,7 +536,7 @@ async def verify_email_endpoint(token: str = Query(..., description="Email verif
             return VerifyEmailResponse(
                 message="Failed to verify email. Please try again or contact support.",
                 verified=False,
-                email=email
+                email=email,
             )
 
         # Mark token as used
@@ -553,7 +546,7 @@ async def verify_email_endpoint(token: str = Query(..., description="Email verif
         return VerifyEmailResponse(
             message="Email verified successfully! Your account is now fully activated.",
             verified=True,
-            email=email
+            email=email,
         )
 
     except Exception as e:
@@ -561,5 +554,5 @@ async def verify_email_endpoint(token: str = Query(..., description="Email verif
         return VerifyEmailResponse(
             message="An error occurred while verifying your email. Please try again or contact support.",
             verified=False,
-            email=None
+            email=None,
         )

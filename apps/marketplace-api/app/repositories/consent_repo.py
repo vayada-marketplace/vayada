@@ -1,7 +1,6 @@
 """
 Repository for consent_history, cookie_consent tables (AuthDatabase).
 """
-from typing import Optional
 
 import asyncpg
 
@@ -10,7 +9,6 @@ from app.repositories._sql import safe_columns
 
 
 class ConsentRepository:
-
     # ── consent_history ──
 
     @staticmethod
@@ -18,11 +16,11 @@ class ConsentRepository:
         user_id,
         consent_type: str,
         consent_given: bool,
-        version: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        version: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         if version is not None and ip_address is not None:
             query = """
@@ -60,7 +58,7 @@ class ConsentRepository:
         limit: int = 50,
         offset: int = 0,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = """
             SELECT id, consent_type, consent_given, version, created_at
@@ -79,21 +77,21 @@ class ConsentRepository:
     async def count_history(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> int:
         query = "SELECT COUNT(*) as total FROM consent_history WHERE user_id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
         else:
             row = await AuthDatabase.fetchrow(query, user_id)
-        return row['total'] if row else 0
+        return row["total"] if row else 0
 
     @staticmethod
     async def get_all_history(
         user_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Return all consent history records (no pagination) for GDPR export."""
         query = f"SELECT {safe_columns(columns)} FROM consent_history WHERE user_id = $1 ORDER BY created_at DESC"
@@ -109,8 +107,8 @@ class ConsentRepository:
     async def get_cookie_consent(
         visitor_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = """
             SELECT id, visitor_id, user_id, necessary, functional, analytics, marketing, created_at, updated_at
             FROM cookie_consent WHERE visitor_id = $1
@@ -125,7 +123,7 @@ class ConsentRepository:
     async def get_cookie_consents_by_user_id(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = "SELECT * FROM cookie_consent WHERE user_id = $1"
         if conn:
@@ -137,13 +135,13 @@ class ConsentRepository:
     @staticmethod
     async def upsert_cookie_consent(
         visitor_id: str,
-        user_id: Optional[str],
+        user_id: str | None,
         necessary: bool,
         functional: bool,
         analytics: bool,
         marketing: bool,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         """Insert or update cookie consent, returning the resulting row."""
         # Check if exists
@@ -183,8 +181,8 @@ class ConsentRepository:
         user_id: str,
         marketing_consent: bool,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = """
             UPDATE users
             SET marketing_consent = $1,
@@ -203,8 +201,8 @@ class ConsentRepository:
     async def get_consent_status(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = """
             SELECT
                 terms_accepted_at,

@@ -1,5 +1,4 @@
 import logging
-from typing import Dict
 
 import httpx
 
@@ -23,7 +22,9 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
             data = resp.json()
             if data.get("result") == "success" and to_currency in data.get("rates", {}):
                 rate = data["rates"][to_currency]
-                logger.info("Exchange rate %s -> %s: %s (open.er-api)", from_currency, to_currency, rate)
+                logger.info(
+                    "Exchange rate %s -> %s: %s (open.er-api)", from_currency, to_currency, rate
+                )
                 return float(rate)
         except Exception as e:
             logger.warning("open.er-api failed for %s -> %s: %s", from_currency, to_currency, e)
@@ -37,7 +38,9 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
             resp.raise_for_status()
             data = resp.json()
             rate = data["rates"][to_currency]
-            logger.info("Exchange rate %s -> %s: %s (frankfurter)", from_currency, to_currency, rate)
+            logger.info(
+                "Exchange rate %s -> %s: %s (frankfurter)", from_currency, to_currency, rate
+            )
             return float(rate)
         except Exception as e:
             logger.warning("Frankfurter failed for %s -> %s: %s", from_currency, to_currency, e)
@@ -50,7 +53,9 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
             resp.raise_for_status()
             data = resp.json()
             rate = data[from_lower][to_lower]
-            logger.info("Exchange rate %s -> %s: %s (fawazahmed0)", from_currency, to_currency, rate)
+            logger.info(
+                "Exchange rate %s -> %s: %s (fawazahmed0)", from_currency, to_currency, rate
+            )
             return float(rate)
         except Exception as e:
             logger.warning("fawazahmed0 failed for %s -> %s: %s", from_currency, to_currency, e)
@@ -58,9 +63,21 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> float:
         raise ValueError(f"All exchange rate APIs failed for {from_currency} -> {to_currency}")
 
 
-ZERO_DECIMAL_CURRENCIES = frozenset({
-    "IDR", "JPY", "KRW", "VND", "CLP", "GNF", "PYG", "RWF", "UGX", "XOF", "XAF",
-})
+ZERO_DECIMAL_CURRENCIES = frozenset(
+    {
+        "IDR",
+        "JPY",
+        "KRW",
+        "VND",
+        "CLP",
+        "GNF",
+        "PYG",
+        "RWF",
+        "UGX",
+        "XOF",
+        "XAF",
+    }
+)
 
 
 def decimals_for_currency(currency: str) -> int:
@@ -72,7 +89,7 @@ def convert_amount(amount: float, rate: float, decimals: int = 2) -> float:
     return round(amount * rate, decimals)
 
 
-async def convert_room_type_rates(room: dict, rate: float, decimals: int = 2) -> Dict:
+async def convert_room_type_rates(room: dict, rate: float, decimals: int = 2) -> dict:
     """Build an updates dict with all monetary fields converted."""
     import json
 
@@ -82,7 +99,9 @@ async def convert_room_type_rates(room: dict, rate: float, decimals: int = 2) ->
         updates["base_rate"] = convert_amount(float(room["base_rate"]), rate, decimals)
 
     if room.get("non_refundable_rate") is not None:
-        updates["non_refundable_rate"] = convert_amount(float(room["non_refundable_rate"]), rate, decimals)
+        updates["non_refundable_rate"] = convert_amount(
+            float(room["non_refundable_rate"]), rate, decimals
+        )
 
     # Convert season rates
     seasons = room.get("seasons") or []
@@ -108,7 +127,9 @@ async def convert_room_type_rates(room: dict, rate: float, decimals: int = 2) ->
             if mr_copy.get("base_rate") is not None:
                 mr_copy["base_rate"] = convert_amount(float(mr_copy["base_rate"]), rate, decimals)
             if mr_copy.get("non_refundable_rate") is not None:
-                mr_copy["non_refundable_rate"] = convert_amount(float(mr_copy["non_refundable_rate"]), rate, decimals)
+                mr_copy["non_refundable_rate"] = convert_amount(
+                    float(mr_copy["non_refundable_rate"]), rate, decimals
+                )
             converted_monthly[month] = mr_copy
         updates["monthly_rates"] = converted_monthly
 

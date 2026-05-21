@@ -1,6 +1,4 @@
-import json
 import logging
-from typing import Optional
 
 import anthropic
 
@@ -8,7 +6,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[anthropic.AsyncAnthropic] = None
+_client: anthropic.AsyncAnthropic | None = None
 
 
 def _get_client() -> anthropic.AsyncAnthropic:

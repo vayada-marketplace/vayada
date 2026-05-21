@@ -1,4 +1,5 @@
 """Round-trip + misuse tests for the integration-credential cipher."""
+
 import importlib
 import os
 
@@ -12,6 +13,7 @@ def configured_cipher(monkeypatch):
     inside _fernet() doesn't leak across tests."""
     monkeypatch.setenv("INTEGRATION_SECRETS_KEY", Fernet.generate_key().decode())
     import app.integration_secrets as mod
+
     importlib.reload(mod)
     yield mod
     importlib.reload(mod)  # leave cache clean for the next test
@@ -35,6 +37,7 @@ def test_two_encrypts_yield_different_ciphertexts(configured_cipher):
 def test_missing_env_var_raises(monkeypatch):
     monkeypatch.delenv("INTEGRATION_SECRETS_KEY", raising=False)
     import app.integration_secrets as mod
+
     importlib.reload(mod)
     with pytest.raises(mod.IntegrationSecretError):
         mod.encrypt("anything")
@@ -44,6 +47,7 @@ def test_missing_env_var_raises(monkeypatch):
 def test_invalid_key_raises(monkeypatch):
     monkeypatch.setenv("INTEGRATION_SECRETS_KEY", "not-a-fernet-key")
     import app.integration_secrets as mod
+
     importlib.reload(mod)
     with pytest.raises(mod.IntegrationSecretError):
         mod.encrypt("anything")

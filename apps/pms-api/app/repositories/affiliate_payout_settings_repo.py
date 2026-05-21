@@ -1,6 +1,4 @@
-from typing import Optional
 from app.database import Database
-
 
 # Columns we treat as the canonical payout configuration. Exposed here so
 # the route layer and the affiliates-mirror update use the same list.
@@ -34,9 +32,8 @@ DEFAULT_SETTINGS = {
 
 
 class AffiliatePayoutSettingsRepository:
-
     @staticmethod
-    async def get_by_user_id(user_id: str) -> Optional[dict]:
+    async def get_by_user_id(user_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM affiliate_payout_settings WHERE user_id = $1",
             user_id,
@@ -66,7 +63,7 @@ class AffiliatePayoutSettingsRepository:
 
         cols = list(updates.keys())
         col_list = ", ".join(cols)
-        placeholders = ", ".join(f"${i+2}" for i in range(len(cols)))
+        placeholders = ", ".join(f"${i + 2}" for i in range(len(cols)))
         set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
 
         row = await Database.fetchrow(

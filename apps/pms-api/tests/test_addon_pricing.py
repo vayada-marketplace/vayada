@@ -3,16 +3,23 @@
 Covers VAY-360 — per-person and per-day add-ons must compose correctly so the
 Booking Engine and the booking total agree on price = unit × people × days.
 """
-import pytest
+
 from unittest.mock import patch
 
+import pytest
 from app.services import booking_service
-
 
 HOTEL_SLUG = "test-hotel"
 
 
-def _addon(id_: str, price: float, *, per_person: bool = False, per_night: bool = False, currency: str = "USD"):
+def _addon(
+    id_: str,
+    price: float,
+    *,
+    per_person: bool = False,
+    per_night: bool = False,
+    currency: str = "USD",
+):
     return {
         "id": id_,
         "name": f"addon-{id_}",
@@ -26,10 +33,13 @@ def _addon(id_: str, price: float, *, per_person: bool = False, per_night: bool 
 @pytest.fixture
 def fetch_addons_mock():
     """Patch _fetch_hotel_addons to return the addons supplied by the test."""
+
     def _make(addons):
         async def _fake(_slug):
             return addons
+
         return patch.object(booking_service, "_fetch_hotel_addons", _fake)
+
     return _make
 
 
@@ -117,12 +127,22 @@ async def test_per_night_falls_back_to_quantity_then_nights(fetch_addons_mock):
     addons = [_addon("a1", 50.0, per_night=True)]
     with fetch_addons_mock(addons):
         total_qty, _ = await booking_service._compute_addon_total(
-            HOTEL_SLUG, ["a1"], {"a1": 2}, "USD", adults=1, nights=4,
+            HOTEL_SLUG,
+            ["a1"],
+            {"a1": 2},
+            "USD",
+            adults=1,
+            nights=4,
         )
         total_legacy, _ = await booking_service._compute_addon_total(
-            HOTEL_SLUG, ["a1"], {}, "USD", adults=1, nights=4,
+            HOTEL_SLUG,
+            ["a1"],
+            {},
+            "USD",
+            adults=1,
+            nights=4,
         )
-    assert total_qty == 100.0    # 2 days from qty fallback
+    assert total_qty == 100.0  # 2 days from qty fallback
     assert total_legacy == 200.0  # all 4 nights when nothing supplied
 
 

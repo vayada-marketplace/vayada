@@ -5,15 +5,15 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 
 from app.database import AuthDatabase, Database
-from app.repositories.affiliate_repo import AffiliateRepository
-from app.utils import get_hotel_id_by_slug
 from app.models.affiliate import AffiliateRegister, AffiliateResponse
+from app.repositories.affiliate_repo import AffiliateRepository
 from app.services import stripe_service
 from app.services.email_service import (
     send_affiliate_registration_received,
     send_hotel_new_affiliate_application,
     send_vayada_new_affiliate_application,
 )
+from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
 
@@ -138,12 +138,12 @@ async def record_affiliate_click(slug: str, referral_code: str, request: Request
     if not affiliate or affiliate["status"] != "approved":
         raise HTTPException(status_code=404, detail="Affiliate not found")
 
-    ip_address = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
+    ip_address = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else None
+    )
     user_agent = request.headers.get("user-agent")
 
-    await AffiliateRepository.record_click(
-        str(affiliate["id"]), hotel_id, ip_address, user_agent
-    )
+    await AffiliateRepository.record_click(str(affiliate["id"]), hotel_id, ip_address, user_agent)
     return Response(status_code=204)
 
 
@@ -184,9 +184,7 @@ async def affiliate_self_stripe_connect(
 
 
 @router.get("/{slug}/affiliates/{affiliate_id}/stripe/onboarding-link")
-async def affiliate_self_stripe_onboarding_link(
-    slug: str, affiliate_id: str, email: str
-):
+async def affiliate_self_stripe_onboarding_link(slug: str, affiliate_id: str, email: str):
     """Get a fresh Stripe onboarding link. Verified by matching email."""
     hotel_id = await get_hotel_id_by_slug(slug)
     affiliate = await AffiliateRepository.get_by_id(affiliate_id)

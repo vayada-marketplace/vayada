@@ -1,22 +1,22 @@
 """Channex provisioning — first-time creation of a property + room types
 + rate plans for a hotel."""
+
 import logging
 
 from app.database import Database
 from app.repositories.channex_mapping_repo import (
     ChannexConnectionRepository,
-    ChannexRoomTypeMappingRepository,
     ChannexRatePlanMappingRepository,
+    ChannexRoomTypeMappingRepository,
 )
 from app.services import channex_service
-from app.services.hotel_identity_service import get_currency as get_be_currency
-
 from app.services.channex._common import (
     _CHANNEL_LABELS,
-    _CHANNELS_WITH_NON_REFUNDABLE,
     _CHANNELS_WITH_MEAL_PLANS,
+    _CHANNELS_WITH_NON_REFUNDABLE,
     MEAL_PLAN_LABELS,
 )
+from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,8 @@ async def provision_property(hotel_id: str) -> dict:
     if not conn.get("messaging_app_installed"):
         try:
             already = await channex_service.is_messaging_app_installed(
-                api_key, channex_property_id,
+                api_key,
+                channex_property_id,
             )
             if not already:
                 await channex_service.install_messaging_app(api_key, channex_property_id)
@@ -132,7 +133,8 @@ async def provision_property(hotel_id: str) -> dict:
             # paid-add-on restriction.
             logger.warning(
                 "Failed to install Channex messaging app for hotel %s: %s",
-                hotel_id, e,
+                hotel_id,
+                e,
             )
 
     # Step 2: Create room types + rate plans for each vayada room type.
@@ -167,7 +169,9 @@ async def provision_property(hotel_id: str) -> dict:
             rooms_created += 1
             logger.info(
                 "Created Channex room type %s for %s (%s)",
-                channex_room_type_id, rt["name"], room_type_id,
+                channex_room_type_id,
+                rt["name"],
+                room_type_id,
             )
 
         # Create rate plans — one per (channel, plan_name, meal_plan_code) combination:
@@ -191,25 +195,27 @@ async def provision_property(hotel_id: str) -> dict:
         plans_to_create = []
         for channel, label in _CHANNEL_LABELS.items():
             channel_prefix = f"{label} " if label else ""
-            channel_meal_codes = (
-                meal_codes if channel in _CHANNELS_WITH_MEAL_PLANS else [0]
-            )
+            channel_meal_codes = meal_codes if channel in _CHANNELS_WITH_MEAL_PLANS else [0]
             for meal_code in channel_meal_codes:
                 meal_label = MEAL_PLAN_LABELS.get(meal_code, "")
                 meal_suffix = f" ({meal_label})" if meal_label else ""
-                plans_to_create.append((
-                    channel,
-                    "standard",
-                    meal_code,
-                    f"{rt['name']} - {channel_prefix}Standard{meal_suffix}",
-                ))
-                if rt.get("non_refundable_enabled") and channel in _CHANNELS_WITH_NON_REFUNDABLE:
-                    plans_to_create.append((
+                plans_to_create.append(
+                    (
                         channel,
-                        "non_refundable",
+                        "standard",
                         meal_code,
-                        f"{rt['name']} - {channel_prefix}Non-Refundable{meal_suffix}",
-                    ))
+                        f"{rt['name']} - {channel_prefix}Standard{meal_suffix}",
+                    )
+                )
+                if rt.get("non_refundable_enabled") and channel in _CHANNELS_WITH_NON_REFUNDABLE:
+                    plans_to_create.append(
+                        (
+                            channel,
+                            "non_refundable",
+                            meal_code,
+                            f"{rt['name']} - {channel_prefix}Non-Refundable{meal_suffix}",
+                        )
+                    )
 
         for channel, plan_name, meal_code, plan_title in plans_to_create:
             if (channel, plan_name, meal_code) in existing_combos:
@@ -243,7 +249,11 @@ async def provision_property(hotel_id: str) -> dict:
             rates_created += 1
             logger.info(
                 "Created Channex rate plan %s (%s/%s/meal=%d) for %s",
-                channex_rp["id"], channel, plan_name, meal_code, rt["name"],
+                channex_rp["id"],
+                channel,
+                plan_name,
+                meal_code,
+                rt["name"],
             )
 
     return {

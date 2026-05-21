@@ -3,10 +3,10 @@
 Covers VAY-352: gap detection must only flag dates inside operating periods,
 not the whole calendar year.
 """
-import pytest
-from pydantic import ValidationError
 
+import pytest
 from app.models.room_type import RoomTypeCreate, RoomTypeUpdate
+from pydantic import ValidationError
 
 
 def _season(name: str, frm: str, to: str, rate: float = 100.0) -> dict:

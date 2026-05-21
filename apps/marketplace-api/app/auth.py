@@ -1,41 +1,41 @@
 """
 Authentication utilities
 """
-import bcrypt
-import secrets
-import random
-from typing import Optional
-from datetime import datetime, timezone
 
-from app.repositories.user_repo import UserRepository
+import random
+import secrets
+from datetime import UTC, datetime
+
+import bcrypt
+
 from app.repositories.password_reset_repo import PasswordResetRepository
+from app.repositories.user_repo import UserRepository
 from app.repositories.verification_repo import VerificationRepository
 
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt"""
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """Verify a password against a hash"""
-    return bcrypt.checkpw(
-        password.encode('utf-8'),
-        hashed_password.encode('utf-8')
-    )
+    return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
-async def get_user_by_email(email: str) -> Optional[dict]:
+async def get_user_by_email(email: str) -> dict | None:
     """Get user by email from database"""
     return await UserRepository.get_by_email(email)
 
 
-async def create_user(email: str, password_hash: str, user_type: str, name: Optional[str] = None) -> dict:
+async def create_user(
+    email: str, password_hash: str, user_type: str, name: str | None = None
+) -> dict:
     """Create a new user in the database"""
     if not name:
-        name = email.split('@')[0]
+        name = email.split("@")[0]
 
     return await UserRepository.create(
         email=email,
@@ -69,7 +69,7 @@ async def create_password_reset_token(user_id: str, expires_in_hours: int = 1) -
     return token
 
 
-async def validate_password_reset_token(token: str) -> Optional[dict]:
+async def validate_password_reset_token(token: str) -> dict | None:
     """
     Validate a password reset token
 
@@ -84,19 +84,16 @@ async def validate_password_reset_token(token: str) -> Optional[dict]:
     if not token_record:
         return None
 
-    if token_record['used']:
+    if token_record["used"]:
         return None
 
-    if datetime.now(timezone.utc) > token_record['expires_at']:
+    if datetime.now(UTC) > token_record["expires_at"]:
         return None
 
-    if token_record['status'] == 'suspended':
+    if token_record["status"] == "suspended":
         return None
 
-    return {
-        'user_id': str(token_record['user_id']),
-        'email': token_record['email']
-    }
+    return {"user_id": str(token_record["user_id"]), "email": token_record["email"]}
 
 
 async def mark_password_reset_token_as_used(token: str) -> bool:
@@ -151,6 +148,7 @@ async def verify_email_code(email: str, code: str) -> bool:
         True if code is valid and not expired, False otherwise
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     code_record = await VerificationRepository.get_valid_code(email, code)
@@ -160,9 +158,11 @@ async def verify_email_code(email: str, code: str) -> bool:
         return False
 
     # Mark code as used
-    await VerificationRepository.mark_code_used(code_record['id'])
+    await VerificationRepository.mark_code_used(code_record["id"])
 
-    logger.debug(f"Code verified successfully for email: {email}, expires_at: {code_record['expires_at']}")
+    logger.debug(
+        f"Code verified successfully for email: {email}, expires_at: {code_record['expires_at']}"
+    )
     return True
 
 
@@ -206,7 +206,7 @@ async def create_email_verification_token(user_id: str, expires_in_hours: int = 
     return token
 
 
-async def validate_email_verification_token(token: str) -> Optional[dict]:
+async def validate_email_verification_token(token: str) -> dict | None:
     """
     Validate an email verification token
 
@@ -221,19 +221,16 @@ async def validate_email_verification_token(token: str) -> Optional[dict]:
     if not token_record:
         return None
 
-    if token_record['used']:
+    if token_record["used"]:
         return None
 
-    if datetime.now(timezone.utc) > token_record['expires_at']:
+    if datetime.now(UTC) > token_record["expires_at"]:
         return None
 
-    if token_record['status'] == 'suspended':
+    if token_record["status"] == "suspended":
         return None
 
-    return {
-        'user_id': str(token_record['user_id']),
-        'email': token_record['email']
-    }
+    return {"user_id": str(token_record["user_id"]), "email": token_record["email"]}
 
 
 async def mark_email_verification_token_as_used(token: str) -> bool:

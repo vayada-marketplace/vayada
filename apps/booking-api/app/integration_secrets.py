@@ -15,11 +15,11 @@ the call site that actually wants to encrypt.
 Key rotation is deferred — when we need it, swap to ``MultiFernet``
 with the new key first in the list. Not building that yet.
 """
+
 import os
 from functools import lru_cache
 
 from cryptography.fernet import Fernet, InvalidToken
-
 
 _ENV_VAR = "INTEGRATION_SECRETS_KEY"
 

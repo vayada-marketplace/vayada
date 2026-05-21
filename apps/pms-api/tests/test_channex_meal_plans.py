@@ -1,4 +1,5 @@
 """Unit tests for meal-plan rate variants pushed to Channex (VAY-306)."""
+
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -8,7 +9,6 @@ from app.services.channex.ari_push import (
     _meal_surcharge_for_code,
 )
 from app.services.channex_service import meal_plan_code_to_channex_meal_type
-
 
 # ── meal_plan_code mapping ─────────────────────────────────────────────
 
@@ -127,7 +127,8 @@ def test_restriction_entry_direct_channel_is_one_to_one_with_base_rate():
     """
     room = _make_room_type(base_rate=3_000_000)
     entry = _build_restriction_entry(
-        room, date(2026, 5, 1),
+        room,
+        date(2026, 5, 1),
         plan_name="standard",
         markup_pct=Decimal(0),
         meal_plan_code=0,
@@ -146,9 +147,8 @@ def test_restriction_entry_negative_markup_no_longer_reachable_via_model():
     """
     from decimal import Decimal as _D
 
-    from pydantic import ValidationError
-
     from app.models.channex import ChannelMarkup
+    from pydantic import ValidationError
 
     # Zero and positive values are accepted.
     ChannelMarkup(channel="booking_com", markup_pct=_D(0))
@@ -173,7 +173,8 @@ def test_restriction_entry_surcharge_is_marked_up_with_channel():
     # how OTAs commission the full guest-paid amount.
     room = _make_room_type(meal_plans=[{"code": 1, "surcharge": 300_000}])
     entry = _build_restriction_entry(
-        room, date(2026, 5, 1),
+        room,
+        date(2026, 5, 1),
         plan_name="standard",
         markup_pct=Decimal(10),
         meal_plan_code=1,
@@ -188,7 +189,8 @@ def test_restriction_entry_non_refundable_with_meal_surcharge():
         meal_plans=[{"code": 1, "surcharge": 200_000}],
     )
     entry = _build_restriction_entry(
-        room, date(2026, 5, 1),
+        room,
+        date(2026, 5, 1),
         plan_name="non_refundable",
         meal_plan_code=1,
     )
@@ -211,6 +213,7 @@ def test_provisioning_creates_meal_plan_variants_for_booking_com_only():
     flow); Airbnb only allows one rate plan per listing.
     """
     import asyncio
+
     from app.services.channex import provisioning
 
     created_titles: list[str] = []
@@ -242,11 +245,13 @@ def test_provisioning_creates_meal_plan_variants_for_booking_com_only():
 
         @staticmethod
         async def create(**kwargs):
-            mapping_combos.append((
-                kwargs["channel"],
-                kwargs["plan_name"],
-                kwargs["meal_plan_code"],
-            ))
+            mapping_combos.append(
+                (
+                    kwargs["channel"],
+                    kwargs["plan_name"],
+                    kwargs["meal_plan_code"],
+                )
+            )
             return None
 
     async def fake_create_rate_plan(_api_key, *, title, meal_plan_code, **_kwargs):
@@ -261,15 +266,17 @@ def test_provisioning_creates_meal_plan_variants_for_booking_com_only():
 
         @staticmethod
         async def fetch(_query, *_args):
-            return [{
-                "id": "rt-1",
-                "name": "Suite",
-                "total_rooms": 5,
-                "max_occupancy": 2,
-                "currency": "IDR",
-                "non_refundable_enabled": False,
-                "meal_plans": [{"code": 1, "surcharge": 300_000}],
-            }]
+            return [
+                {
+                    "id": "rt-1",
+                    "name": "Suite",
+                    "total_rooms": 5,
+                    "max_occupancy": 2,
+                    "currency": "IDR",
+                    "non_refundable_enabled": False,
+                    "meal_plans": [{"code": 1, "surcharge": 300_000}],
+                }
+            ]
 
     async def fake_get_currency(_):
         return "IDR"
@@ -281,12 +288,8 @@ def test_provisioning_creates_meal_plan_variants_for_booking_com_only():
             patch.object(provisioning, "ChannexRatePlanMappingRepository", FakeRatePlanMappingRepo),
             patch.object(provisioning, "Database", FakeDatabase),
             patch.object(provisioning, "get_be_currency", fake_get_currency),
-            patch.object(
-                provisioning.channex_service, "create_rate_plan", fake_create_rate_plan
-            ),
-            patch.object(
-                provisioning.channex_service, "get_platform_api_key", lambda: "key"
-            ),
+            patch.object(provisioning.channex_service, "create_rate_plan", fake_create_rate_plan),
+            patch.object(provisioning.channex_service, "get_platform_api_key", lambda: "key"),
         ):
             await provisioning.provision_property("h1")
 

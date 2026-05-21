@@ -1,20 +1,20 @@
 import logging
-from typing import Optional, List
-from app.repositories.booking_hotel_repo import BookingHotelRepository
-from app.repositories.booking_addon_repo import BookingAddonRepository
+
 from app.models.hotel import (
-    HotelResponse,
-    HotelContact,
-    HotelSocialLinks,
-    HotelBranding,
     AddonResponse,
+    HotelBranding,
+    HotelContact,
+    HotelResponse,
+    HotelSocialLinks,
 )
 from app.models.utils import parse_json, parse_json_list
+from app.repositories.booking_addon_repo import BookingAddonRepository
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 
 logger = logging.getLogger(__name__)
 
 
-async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResponse]:
+async def get_hotel_by_slug(slug: str, locale: str = "en") -> HotelResponse | None:
     if locale and locale != "en":
         row = await BookingHotelRepository.get_by_slug_translated(slug, locale)
     else:
@@ -25,10 +25,16 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
 
     use_translated = locale != "en"
     name = row.get("t_name", row["name"]) if use_translated else row["name"]
-    description = row.get("t_description", row["description"]) if use_translated else row["description"]
+    description = (
+        row.get("t_description", row["description"]) if use_translated else row["description"]
+    )
     location = row.get("t_location", row["location"]) if use_translated else row["location"]
     country = row.get("t_country", row["country"]) if use_translated else row["country"]
-    contact_address = row.get("t_contact_address", row["contact_address"]) if use_translated else row["contact_address"]
+    contact_address = (
+        row.get("t_contact_address", row["contact_address"])
+        if use_translated
+        else row["contact_address"]
+    )
     raw_amenities = row.get("t_amenities", row["amenities"]) if use_translated else row["amenities"]
 
     contact = HotelContact(
@@ -39,7 +45,9 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     )
 
     social_links = None
-    if any(row[k] for k in ["social_facebook", "social_instagram", "social_tiktok", "social_youtube"]):
+    if any(
+        row[k] for k in ["social_facebook", "social_instagram", "social_tiktok", "social_youtube"]
+    ):
         social_links = HotelSocialLinks(
             facebook=row["social_facebook"],
             instagram=row["social_instagram"],
@@ -86,7 +94,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> Optional[HotelResp
     )
 
 
-async def get_addons_by_hotel_slug(slug: str) -> List[AddonResponse]:
+async def get_addons_by_hotel_slug(slug: str) -> list[AddonResponse]:
     hotel = await BookingHotelRepository.get_by_slug(slug)
     if not hotel or not hotel.get("show_addons_step", True):
         return []

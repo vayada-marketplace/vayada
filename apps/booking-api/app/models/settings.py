@@ -1,6 +1,6 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Any, Optional
+from typing import Any
 
+from pydantic import BaseModel, ConfigDict
 
 # Single source of truth for property defaults, keyed by booking_hotels
 # DB column name. Used by the GET (filling NULLs in the row), the
@@ -54,7 +54,7 @@ class PropertySettingsResponse(BaseModel):
     # multi-hotel-ids migration this is the same UUID as the PMS
     # hotels.id for this property. Clients use it for the
     # X-Hotel-Id header and for passing to POST /admin/register-hotel.
-    id: Optional[str] = None
+    id: str | None = None
     slug: str
     property_name: str
     reservation_email: str
@@ -68,10 +68,10 @@ class PropertySettingsResponse(BaseModel):
     supported_languages: list[str]
     check_in_time: str
     check_out_time: str
-    check_in_from: str = ''
-    check_in_until: str = ''
-    check_out_from: str = ''
-    check_out_until: str = ''
+    check_in_from: str = ""
+    check_in_until: str = ""
+    check_out_from: str = ""
+    check_out_until: str = ""
     custom_domain: str | None
     pay_at_property_enabled: bool
     pay_at_hotel_methods: list[str]
@@ -94,8 +94,8 @@ class PropertySettingsResponse(BaseModel):
     billing_active_plan: str
     billing_commission_rate: float
     billing_fixed_fee: float
-    billing_pending_switch: Optional[str]
-    billing_switch_effective_date: Optional[str] = None
+    billing_pending_switch: str | None
+    billing_switch_effective_date: str | None = None
     # Direct-booking Commission rate (read-only for the hotel; Vayada admin owns it).
     booking_engine_fee_pct: float = 5.0
     # Channel manager (OTA) and affiliate platform fees are separate platform fees,
@@ -103,7 +103,7 @@ class PropertySettingsResponse(BaseModel):
     channel_manager_fee_pct: float = 3.0
     affiliate_platform_fee_pct: float = 2.0
     # Optional internal note explaining a custom commission rate (admin-only context).
-    billing_commission_note: Optional[str] = None
+    billing_commission_note: str | None = None
     # Live room count + projected Fixed-plan fee at that count.
     active_room_count: int = 0
     fixed_plan_projected_monthly_fee: float = 0.0
@@ -113,59 +113,59 @@ class PropertySettingsResponse(BaseModel):
     payout_account_number: str
     payout_bank_name: str
     payout_swift: str
-    terms_text: str = ''
-    cancellation_policy_text: str = ''
+    terms_text: str = ""
+    cancellation_policy_text: str = ""
 
 
 class PropertySettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    property_name: Optional[str] = None
-    reservation_email: Optional[str] = None
-    phone_number: Optional[str] = None
-    whatsapp_number: Optional[str] = None
-    address: Optional[str] = None
-    timezone: Optional[str] = None
-    default_currency: Optional[str] = None
-    default_language: Optional[str] = None
-    supported_currencies: Optional[list[str]] = None
-    supported_languages: Optional[list[str]] = None
-    check_in_time: Optional[str] = None
-    check_out_time: Optional[str] = None
-    check_in_from: Optional[str] = None
-    check_in_until: Optional[str] = None
-    check_out_from: Optional[str] = None
-    check_out_until: Optional[str] = None
-    custom_domain: Optional[str] = None
-    pay_at_property_enabled: Optional[bool] = None
-    pay_at_hotel_methods: Optional[list[str]] = None
-    online_card_payment: Optional[bool] = None
-    bank_transfer: Optional[bool] = None
-    free_cancellation_days: Optional[int] = None
-    email_notifications: Optional[bool] = None
-    new_booking_alerts: Optional[bool] = None
-    payment_alerts: Optional[bool] = None
-    ota_booking_alerts: Optional[bool] = None
-    weekly_reports: Optional[bool] = None
-    refer_a_guest_enabled: Optional[bool] = None
-    special_requests_enabled: Optional[bool] = None
-    arrival_time_enabled: Optional[bool] = None
-    guest_count_enabled: Optional[bool] = None
-    instagram: Optional[str] = None
-    facebook: Optional[str] = None
-    tiktok: Optional[str] = None
-    youtube: Optional[str] = None
+    property_name: str | None = None
+    reservation_email: str | None = None
+    phone_number: str | None = None
+    whatsapp_number: str | None = None
+    address: str | None = None
+    timezone: str | None = None
+    default_currency: str | None = None
+    default_language: str | None = None
+    supported_currencies: list[str] | None = None
+    supported_languages: list[str] | None = None
+    check_in_time: str | None = None
+    check_out_time: str | None = None
+    check_in_from: str | None = None
+    check_in_until: str | None = None
+    check_out_from: str | None = None
+    check_out_until: str | None = None
+    custom_domain: str | None = None
+    pay_at_property_enabled: bool | None = None
+    pay_at_hotel_methods: list[str] | None = None
+    online_card_payment: bool | None = None
+    bank_transfer: bool | None = None
+    free_cancellation_days: int | None = None
+    email_notifications: bool | None = None
+    new_booking_alerts: bool | None = None
+    payment_alerts: bool | None = None
+    ota_booking_alerts: bool | None = None
+    weekly_reports: bool | None = None
+    refer_a_guest_enabled: bool | None = None
+    special_requests_enabled: bool | None = None
+    arrival_time_enabled: bool | None = None
+    guest_count_enabled: bool | None = None
+    instagram: str | None = None
+    facebook: str | None = None
+    tiktok: str | None = None
+    youtube: str | None = None
     # billing_active_plan is intentionally not exposed here: the active plan
     # only flips via the pending-switch flow (see _apply_pending_plan_switch_if_due).
     # Direct PATCH would bypass the scheduled effective date.
-    billing_commission_rate: Optional[float] = None
-    billing_fixed_fee: Optional[float] = None
-    billing_pending_switch: Optional[str] = None
-    payout_account_holder: Optional[str] = None
-    payout_account_type: Optional[str] = None
-    payout_iban: Optional[str] = None
-    payout_account_number: Optional[str] = None
-    payout_bank_name: Optional[str] = None
-    payout_swift: Optional[str] = None
-    terms_text: Optional[str] = None
-    cancellation_policy_text: Optional[str] = None
+    billing_commission_rate: float | None = None
+    billing_fixed_fee: float | None = None
+    billing_pending_switch: str | None = None
+    payout_account_holder: str | None = None
+    payout_account_type: str | None = None
+    payout_iban: str | None = None
+    payout_account_number: str | None = None
+    payout_bank_name: str | None = None
+    payout_swift: str | None = None
+    terms_text: str | None = None
+    cancellation_policy_text: str | None = None

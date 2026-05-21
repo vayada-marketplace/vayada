@@ -1,7 +1,6 @@
 """
 Repository for chat_messages table (Database).
 """
-from typing import Optional
 
 import asyncpg
 
@@ -9,14 +8,13 @@ from app.database import Database
 
 
 class ChatRepository:
-
     @staticmethod
     async def create_system_message(
         collaboration_id: str,
         content: str,
-        metadata_json: Optional[str] = None,
+        metadata_json: str | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, metadata)
@@ -31,7 +29,7 @@ class ChatRepository:
     async def get_conversations(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get all chat threads for a user with latest message and unread count."""
         query = """
@@ -96,7 +94,7 @@ class ChatRepository:
         collaboration_id: str,
         before=None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Fetch chat messages for a collaboration with sender avatars."""
         query = """
@@ -133,7 +131,7 @@ class ChatRepository:
         content: str,
         message_type: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type)
@@ -151,7 +149,7 @@ class ChatRepository:
         collaboration_id: str,
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             UPDATE chat_messages

@@ -1,11 +1,13 @@
 """
 Tests for public marketplace endpoints.
 """
-import pytest
-from httpx import AsyncClient
+
 import json
 
+import pytest
 from app.database import Database
+from httpx import AsyncClient
+
 from tests.conftest import (
     create_test_creator,
     create_test_hotel,
@@ -17,9 +19,7 @@ from tests.conftest import (
 class TestGetMarketplaceListings:
     """Tests for GET /marketplace/listings"""
 
-    async def test_get_listings_success(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_get_listings_success(self, client: AsyncClient, test_hotel_verified):
         """Test getting marketplace listings."""
         response = await client.get("/marketplace/listings")
 
@@ -38,8 +38,7 @@ class TestGetMarketplaceListings:
         # Create verified hotel with listing
         verified_hotel = await create_test_hotel(status="verified", profile_complete=True)
         await create_test_listing(
-            hotel_profile_id=str(verified_hotel["hotel"]["id"]),
-            name="Verified Hotel Listing"
+            hotel_profile_id=str(verified_hotel["hotel"]["id"]), name="Verified Hotel Listing"
         )
 
         response = await client.get("/marketplace/listings")
@@ -59,22 +58,18 @@ class TestGetMarketplaceListings:
         incomplete_hotel = await create_test_hotel(
             status="verified",
             profile_complete=False,
-            website=""  # Empty website means profile is incomplete
+            website="",  # Empty website means profile is incomplete
         )
         await create_test_listing(
-            hotel_profile_id=str(incomplete_hotel["hotel"]["id"]),
-            name="Incomplete Profile Listing"
+            hotel_profile_id=str(incomplete_hotel["hotel"]["id"]), name="Incomplete Profile Listing"
         )
 
         # Create hotel with complete profile (all fields set)
         complete_hotel = await create_test_hotel(
-            status="verified",
-            profile_complete=True,
-            website="https://complete-hotel.com"
+            status="verified", profile_complete=True, website="https://complete-hotel.com"
         )
         await create_test_listing(
-            hotel_profile_id=str(complete_hotel["hotel"]["id"]),
-            name="Complete Profile Listing"
+            hotel_profile_id=str(complete_hotel["hotel"]["id"]), name="Complete Profile Listing"
         )
 
         response = await client.get("/marketplace/listings")
@@ -86,9 +81,7 @@ class TestGetMarketplaceListings:
         assert "Complete Profile Listing" in listing_names
         assert "Incomplete Profile Listing" not in listing_names
 
-    async def test_listings_include_hotel_info(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_listings_include_hotel_info(self, client: AsyncClient, test_hotel_verified):
         """Test that listings include hotel information."""
         response = await client.get("/marketplace/listings")
 
@@ -101,9 +94,7 @@ class TestGetMarketplaceListings:
             assert "hotel_profile_id" in listing
             assert "hotel_picture" in listing
 
-    async def test_listings_include_offerings(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_listings_include_offerings(self, client: AsyncClient, test_hotel_verified):
         """Test that listings include collaboration offerings."""
         response = await client.get("/marketplace/listings")
 
@@ -115,9 +106,7 @@ class TestGetMarketplaceListings:
             assert "collaboration_offerings" in listing
             assert isinstance(listing["collaboration_offerings"], list)
 
-    async def test_listings_include_requirements(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_listings_include_requirements(self, client: AsyncClient, test_hotel_verified):
         """Test that listings include creator requirements."""
         response = await client.get("/marketplace/listings")
 
@@ -134,7 +123,9 @@ class TestGetMarketplaceListings:
         """Test that listings from unverified hotels are excluded."""
         # Create an unverified hotel with a listing
         unverified_hotel = await create_test_hotel(status="pending", profile_complete=True)
-        unverified_listing = await create_test_listing(hotel_profile_id=str(unverified_hotel["hotel"]["id"]))
+        unverified_listing = await create_test_listing(
+            hotel_profile_id=str(unverified_hotel["hotel"]["id"])
+        )
 
         response = await client.get("/marketplace/listings")
 
@@ -144,9 +135,7 @@ class TestGetMarketplaceListings:
         listing_ids = [listing["id"] for listing in data]
         assert str(unverified_listing["listing"]["id"]) not in listing_ids
 
-    async def test_listings_public_no_auth_required(
-        self, client: AsyncClient
-    ):
+    async def test_listings_public_no_auth_required(self, client: AsyncClient):
         """Test that marketplace listings are public."""
         response = await client.get("/marketplace/listings")
 
@@ -156,9 +145,7 @@ class TestGetMarketplaceListings:
 class TestGetMarketplaceCreators:
     """Tests for GET /marketplace/creators"""
 
-    async def test_get_creators_success(
-        self, client: AsyncClient, test_creator_verified
-    ):
+    async def test_get_creators_success(self, client: AsyncClient, test_creator_verified):
         """Test getting marketplace creators."""
         response = await client.get("/marketplace/creators")
 
@@ -172,26 +159,18 @@ class TestGetMarketplaceCreators:
         """Test that only verified creators appear."""
         # Create unverified creator
         unverified = await create_test_creator(
-            name="Unverified Creator",
-            status="pending",
-            profile_complete=True
+            name="Unverified Creator", status="pending", profile_complete=True
         )
         await create_test_platform(
-            creator_id=str(unverified["creator"]["id"]),
-            name="Instagram",
-            handle="@unverified"
+            creator_id=str(unverified["creator"]["id"]), name="Instagram", handle="@unverified"
         )
 
         # Create verified creator
         verified = await create_test_creator(
-            name="Verified Creator",
-            status="verified",
-            profile_complete=True
+            name="Verified Creator", status="verified", profile_complete=True
         )
         await create_test_platform(
-            creator_id=str(verified["creator"]["id"]),
-            name="Instagram",
-            handle="@verified"
+            creator_id=str(verified["creator"]["id"]), name="Instagram", handle="@verified"
         )
 
         response = await client.get("/marketplace/creators")
@@ -209,21 +188,15 @@ class TestGetMarketplaceCreators:
         """Test that only creators with complete profiles appear."""
         # Create creator with incomplete profile
         incomplete = await create_test_creator(
-            name="Incomplete Creator",
-            status="verified",
-            profile_complete=False
+            name="Incomplete Creator", status="verified", profile_complete=False
         )
 
         # Create creator with complete profile
         complete = await create_test_creator(
-            name="Complete Creator",
-            status="verified",
-            profile_complete=True
+            name="Complete Creator", status="verified", profile_complete=True
         )
         await create_test_platform(
-            creator_id=str(complete["creator"]["id"]),
-            name="Instagram",
-            handle="@complete"
+            creator_id=str(complete["creator"]["id"]), name="Instagram", handle="@complete"
         )
 
         response = await client.get("/marketplace/creators")
@@ -235,9 +208,7 @@ class TestGetMarketplaceCreators:
         assert "Complete Creator" in creator_names
         assert "Incomplete Creator" not in creator_names
 
-    async def test_creators_include_audience_size(
-        self, client: AsyncClient, test_creator_verified
-    ):
+    async def test_creators_include_audience_size(self, client: AsyncClient, test_creator_verified):
         """Test that creators include calculated audience size."""
         response = await client.get("/marketplace/creators")
 
@@ -253,23 +224,20 @@ class TestGetMarketplaceCreators:
         self, client: AsyncClient, cleanup_database, init_database
     ):
         """Test that audience size is sum of all platform followers."""
-        creator = await create_test_creator(
-            status="verified",
-            profile_complete=True
-        )
+        creator = await create_test_creator(status="verified", profile_complete=True)
 
         # Add multiple platforms
         await create_test_platform(
             creator_id=str(creator["creator"]["id"]),
             name="Instagram",
             handle="@multi1",
-            followers=50000
+            followers=50000,
         )
         await create_test_platform(
             creator_id=str(creator["creator"]["id"]),
             name="TikTok",
             handle="@multi2",
-            followers=100000
+            followers=100000,
         )
 
         response = await client.get("/marketplace/creators")
@@ -281,9 +249,7 @@ class TestGetMarketplaceCreators:
         if creator_data:
             assert creator_data[0]["audience_size"] == 150000
 
-    async def test_creators_include_platforms(
-        self, client: AsyncClient, test_creator_verified
-    ):
+    async def test_creators_include_platforms(self, client: AsyncClient, test_creator_verified):
         """Test that creators include platform information."""
         response = await client.get("/marketplace/creators")
 
@@ -308,7 +274,7 @@ class TestGetMarketplaceCreators:
             test_creator_verified["creator"]["id"],
             test_hotel_verified["hotel"]["id"],
             4.5,
-            "Great creator!"
+            "Great creator!",
         )
 
         response = await client.get("/marketplace/creators")
@@ -321,9 +287,7 @@ class TestGetMarketplaceCreators:
             assert "average_rating" in creator
             assert "total_reviews" in creator
 
-    async def test_creators_public_no_auth_required(
-        self, client: AsyncClient
-    ):
+    async def test_creators_public_no_auth_required(self, client: AsyncClient):
         """Test that marketplace creators are public."""
         response = await client.get("/marketplace/creators")
 
@@ -337,10 +301,7 @@ class TestMarketplacePlatformAnalytics:
         self, client: AsyncClient, cleanup_database, init_database
     ):
         """Test that marketplace creators include platform demographics."""
-        creator = await create_test_creator(
-            status="verified",
-            profile_complete=True
-        )
+        creator = await create_test_creator(status="verified", profile_complete=True)
 
         # Add platform with analytics
         await Database.execute(
@@ -356,7 +317,7 @@ class TestMarketplacePlatformAnalytics:
             4.5,
             json.dumps({"USA": 45, "UK": 20}),
             json.dumps({"25-34": 40, "35-44": 30}),
-            json.dumps({"male": 40, "female": 58, "other": 2})
+            json.dumps({"male": 40, "female": 58, "other": 2}),
         )
 
         response = await client.get("/marketplace/creators")
@@ -382,7 +343,7 @@ class TestMarketplaceListingDetails:
         hotel = await create_test_hotel(status="verified", profile_complete=True)
         await create_test_listing(
             hotel_profile_id=str(hotel["hotel"]["id"]),
-            images=["https://example.com/img1.jpg", "https://example.com/img2.jpg"]
+            images=["https://example.com/img1.jpg", "https://example.com/img2.jpg"],
         )
 
         response = await client.get("/marketplace/listings")
@@ -408,9 +369,7 @@ class TestMarketplaceListingDetails:
             listing = data[0]
             assert "accommodation_type" in listing
 
-    async def test_listing_includes_location(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_listing_includes_location(self, client: AsyncClient, test_hotel_verified):
         """Test that listings include location."""
         response = await client.get("/marketplace/listings")
 
@@ -432,14 +391,8 @@ class TestMarketplaceOrdering:
         hotel = await create_test_hotel(status="verified", profile_complete=True)
 
         # Create listings in order
-        await create_test_listing(
-            hotel_profile_id=str(hotel["hotel"]["id"]),
-            name="First Listing"
-        )
-        await create_test_listing(
-            hotel_profile_id=str(hotel["hotel"]["id"]),
-            name="Second Listing"
-        )
+        await create_test_listing(hotel_profile_id=str(hotel["hotel"]["id"]), name="First Listing")
+        await create_test_listing(hotel_profile_id=str(hotel["hotel"]["id"]), name="Second Listing")
 
         response = await client.get("/marketplace/listings")
 
@@ -457,16 +410,12 @@ class TestMarketplaceOrdering:
         """Test that creators are ordered by creation date (newest first)."""
         # Create creators in order
         first = await create_test_creator(
-            name="First Creator",
-            status="verified",
-            profile_complete=True
+            name="First Creator", status="verified", profile_complete=True
         )
         await create_test_platform(creator_id=str(first["creator"]["id"]))
 
         second = await create_test_creator(
-            name="Second Creator",
-            status="verified",
-            profile_complete=True
+            name="Second Creator", status="verified", profile_complete=True
         )
         await create_test_platform(creator_id=str(second["creator"]["id"]))
 

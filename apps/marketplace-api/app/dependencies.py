@@ -1,12 +1,14 @@
 """
 Dependencies for FastAPI routes
 """
-from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.jwt_utils import decode_access_token, get_user_id_from_token, is_token_expired
-from app.repositories.user_repo import UserRepository
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from app.jwt_utils import decode_access_token, is_token_expired
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
+from app.repositories.user_repo import UserRepository
 
 security = HTTPBearer()
 
@@ -56,13 +58,15 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
         )
 
     # Check if user account is active (verified)
-    if user['status'] != 'verified':
+    if user["status"] != "verified":
         status_messages = {
-            'pending': "Your account is pending verification. Please wait for approval.",
-            'rejected': "Your account has been rejected. Please contact support.",
-            'suspended': "Your account has been suspended. Please contact support.",
+            "pending": "Your account is pending verification. Please wait for approval.",
+            "rejected": "Your account has been rejected. Please contact support.",
+            "suspended": "Your account has been suspended. Please contact support.",
         }
-        detail = status_messages.get(user['status'], "Your account is not active. Please contact support.")
+        detail = status_messages.get(
+            user["status"], "Your account is not active. Please contact support."
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=detail,
@@ -71,7 +75,9 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
     return user_id
 
 
-async def get_current_user_id_allow_pending(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+async def get_current_user_id_allow_pending(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
     """
     Get current user ID from JWT token, allowing pending/unverified users.
     Used for profile completion endpoints that need to work before verification.
@@ -124,13 +130,13 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
             detail="User not found",
         )
 
-    if user['type'] != 'admin':
+    if user["type"] != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
 
-    if user['status'] == 'suspended':
+    if user["status"] == "suspended":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin account is suspended",
@@ -147,10 +153,10 @@ async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) ->
     # Verify user is a creator
     user = await UserRepository.get_by_id(user_id, columns="id, type")
 
-    if user['type'] != 'creator':
+    if user["type"] != "creator":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is only available for creators"
+            detail="This endpoint is only available for creators",
         )
 
     # Get creator profile
@@ -159,10 +165,10 @@ async def get_current_creator_id(user_id: str = Depends(get_current_user_id)) ->
     if not creator:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Creator profile not found. Please complete your profile first."
+            detail="Creator profile not found. Please complete your profile first.",
         )
 
-    return str(creator['id'])
+    return str(creator["id"])
 
 
 async def get_current_hotel_profile_id(user_id: str = Depends(get_current_user_id)) -> str:
@@ -173,10 +179,10 @@ async def get_current_hotel_profile_id(user_id: str = Depends(get_current_user_i
     # Verify user is a hotel
     user = await UserRepository.get_by_id(user_id, columns="id, type")
 
-    if user['type'] != 'hotel':
+    if user["type"] != "hotel":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is only available for hotels"
+            detail="This endpoint is only available for hotels",
         )
 
     # Get hotel profile
@@ -185,7 +191,7 @@ async def get_current_hotel_profile_id(user_id: str = Depends(get_current_user_i
     if not hotel_profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Hotel profile not found. Please create your profile first."
+            detail="Hotel profile not found. Please create your profile first.",
         )
 
-    return str(hotel_profile['id'])
+    return str(hotel_profile["id"])

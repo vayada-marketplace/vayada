@@ -1,7 +1,6 @@
 """
 Repository for users table (AuthDatabase).
 """
-from typing import Optional, List
 
 import asyncpg
 
@@ -10,11 +9,8 @@ from app.repositories._sql import safe_columns
 
 
 class UserRepository:
-
     @staticmethod
-    async def get_by_email(
-        email: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> Optional[dict]:
+    async def get_by_email(email: str, *, conn: asyncpg.Connection | None = None) -> dict | None:
         query = "SELECT * FROM users WHERE email = $1"
         if conn:
             row = await conn.fetchrow(query, email)
@@ -27,8 +23,8 @@ class UserRepository:
         user_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM users WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
@@ -37,9 +33,7 @@ class UserRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def exists_by_email(
-        email: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> bool:
+    async def exists_by_email(email: str, *, conn: asyncpg.Connection | None = None) -> bool:
         query = "SELECT id FROM users WHERE email = $1"
         if conn:
             row = await conn.fetchrow(query, email)
@@ -57,7 +51,7 @@ class UserRepository:
         privacy_version: str,
         marketing_consent: bool,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO users (
@@ -69,7 +63,15 @@ class UserRepository:
             VALUES ($1, $2, $3, $4, 'pending', now(), $5, now(), $6, $7, CASE WHEN $7 THEN now() ELSE NULL END)
             RETURNING id, email, name, type, status
         """
-        args = (email, password_hash, name, user_type, terms_version, privacy_version, marketing_consent)
+        args = (
+            email,
+            password_hash,
+            name,
+            user_type,
+            terms_version,
+            privacy_version,
+            marketing_consent,
+        )
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -81,7 +83,7 @@ class UserRepository:
         user_id: str,
         password_hash: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             UPDATE users
@@ -94,9 +96,7 @@ class UserRepository:
             await AuthDatabase.execute(query, password_hash, user_id)
 
     @staticmethod
-    async def mark_email_verified(
-        email: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> bool:
+    async def mark_email_verified(email: str, *, conn: asyncpg.Connection | None = None) -> bool:
         query = """
             UPDATE users
             SET email_verified = true
@@ -109,9 +109,7 @@ class UserRepository:
         return result == "UPDATE 1"
 
     @staticmethod
-    async def delete(
-        user_id: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> None:
+    async def delete(user_id: str, *, conn: asyncpg.Connection | None = None) -> None:
         query = "DELETE FROM users WHERE id = $1"
         if conn:
             await conn.execute(query, user_id)
@@ -123,7 +121,7 @@ class UserRepository:
         user_id: str,
         name: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "UPDATE users SET name = $1, updated_at = now() WHERE id = $2"
         if conn:
@@ -136,7 +134,7 @@ class UserRepository:
         user_id: str,
         email: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "UPDATE users SET email = $1, updated_at = now() WHERE id = $2"
         if conn:
@@ -148,7 +146,7 @@ class UserRepository:
     async def get_verified_users(
         *,
         columns: str = "id",
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Return all users with status = 'verified'."""
         query = f"SELECT {safe_columns(columns)} FROM users WHERE status = 'verified'"
@@ -160,10 +158,10 @@ class UserRepository:
 
     @staticmethod
     async def batch_get_by_ids(
-        user_ids: List[str],
+        user_ids: list[str],
         *,
         columns: str = "id, name, status",
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         """Return {user_id_str: dict} mapping for a list of user IDs."""
         if not user_ids:
@@ -177,7 +175,7 @@ class UserRepository:
 
     @staticmethod
     async def batch_get_names(
-        user_ids: List[str], *, conn: Optional[asyncpg.Connection] = None
+        user_ids: list[str], *, conn: asyncpg.Connection | None = None
     ) -> dict:
         """Return {user_id_str: name} mapping for a list of user IDs."""
         if not user_ids:

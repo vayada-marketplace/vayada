@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 import stripe
 
@@ -14,7 +13,7 @@ async def create_payment_intent(
     amount: int,
     currency: str,
     metadata: dict,
-    stripe_account: Optional[str] = None,
+    stripe_account: str | None = None,
     capture_method: str = "manual",
 ) -> dict:
     """Create a PaymentIntent.
@@ -40,9 +39,7 @@ async def create_payment_intent(
     }
 
 
-async def capture_payment_intent(
-    payment_intent_id: str, amount: Optional[int] = None
-) -> dict:
+async def capture_payment_intent(payment_intent_id: str, amount: int | None = None) -> dict:
     """Capture a previously authorized PaymentIntent."""
     params = {}
     if amount is not None:
@@ -57,9 +54,7 @@ async def cancel_payment_intent(payment_intent_id: str) -> dict:
     return {"id": pi.id, "status": pi.status}
 
 
-async def create_refund(
-    payment_intent_id: str, amount: Optional[int] = None
-) -> dict:
+async def create_refund(payment_intent_id: str, amount: int | None = None) -> dict:
     """Create a full or partial refund."""
     params = {"payment_intent": payment_intent_id}
     if amount is not None:
@@ -95,9 +90,7 @@ async def create_connect_account(email: str, country: str = "AT") -> dict:
     return {"id": account.id, "email": account.email}
 
 
-async def create_connect_account_link(
-    account_id: str, return_url: str, refresh_url: str
-) -> str:
+async def create_connect_account_link(account_id: str, return_url: str, refresh_url: str) -> str:
     """Generate an onboarding link for a Connect account."""
     link = stripe.AccountLink.create(
         account=account_id,
@@ -110,6 +103,4 @@ async def create_connect_account_link(
 
 def construct_webhook_event(payload: bytes, signature: str) -> stripe.Event:
     """Verify and parse a Stripe webhook event."""
-    return stripe.Webhook.construct_event(
-        payload, signature, settings.STRIPE_WEBHOOK_SECRET
-    )
+    return stripe.Webhook.construct_event(payload, signature, settings.STRIPE_WEBHOOK_SECRET)

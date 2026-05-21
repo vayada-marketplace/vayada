@@ -5,16 +5,15 @@ user-facing request — validating the key by listing properties before
 we persist anything. Everything else (rates, availability, booking
 write-back) will run from background jobs that this row enables.
 """
+
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from app.database import Database
 from app.integration_secrets import encrypt
 from app.models.lodgify import LodgifyConnectionStatus
 from app.repositories.lodgify_connection_repo import LodgifyConnectionRepository
 from app.services.lodgify.client import LodgifyAPIError, LodgifyAuthError, LodgifyClient
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ async def connect_lodgify(
         api_key_encrypted=encrypted,
         lodgify_property_id=lodgify_property_id,
         lodgify_property_name=match.get("name") or "",
-        last_validated_at=datetime.now(timezone.utc),
+        last_validated_at=datetime.now(UTC),
     )
     await Database.execute(
         "UPDATE booking_hotels SET pms_type = 'lodgify', updated_at = now() WHERE id = $1",
@@ -91,7 +90,7 @@ async def get_lodgify_status(hotel_id: str) -> LodgifyConnectionStatus:
     return _row_to_status(row)
 
 
-def _find_property(payload, lodgify_property_id: str) -> Optional[dict]:
+def _find_property(payload, lodgify_property_id: str) -> dict | None:
     """Lodgify's /v2/properties returns either a list or an envelope
     around a list depending on key configuration — defensively accept
     either, ignore anything else."""

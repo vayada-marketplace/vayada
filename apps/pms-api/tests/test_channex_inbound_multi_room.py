@@ -6,9 +6,10 @@ entries. The import must materialize one PMS booking row per room — taking
 only ``rooms[0]`` would leave the other rooms unblocked and open the
 property to silent double-bookings.
 """
-import pytest
+
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from app.services.channex.inbound import process_inbound_booking
 
 
@@ -61,34 +62,42 @@ async def test_two_rooms_same_type_create_two_bookings():
         mappings.append(kwargs)
         return kwargs
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=[],
-    ), patch(
-        "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
-        new_callable=AsyncMock,
-        return_value={"room_type_id": "rt-1"},
-    ), patch(
-        "app.services.channex.inbound.RoomTypeRepository.get_by_id",
-        new_callable=AsyncMock,
-        return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
-    ), patch(
-        # No available physical room and no rearrange possible — skip room_id
-        # assignment. The legacy stub was `Database.fetchrow=None`; the new
-        # auto-rearrange path goes through `resolve_assignment` instead.
-        "app.services.channex.inbound.resolve_assignment",
-        new_callable=AsyncMock,
-        return_value=(None, []),
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.create",
-        new=fake_create,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.create",
-        new=fake_create_mapping,
-    ), patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
+            new_callable=AsyncMock,
+            return_value={"room_type_id": "rt-1"},
+        ),
+        patch(
+            "app.services.channex.inbound.RoomTypeRepository.get_by_id",
+            new_callable=AsyncMock,
+            return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
+        ),
+        patch(
+            # No available physical room and no rearrange possible — skip room_id
+            # assignment. The legacy stub was `Database.fetchrow=None`; the new
+            # auto-rearrange path goes through `resolve_assignment` instead.
+            "app.services.channex.inbound.resolve_assignment",
+            new_callable=AsyncMock,
+            return_value=(None, []),
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.create",
+            new=fake_create,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.create",
+            new=fake_create_mapping,
+        ),
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 
@@ -127,29 +136,37 @@ async def test_two_rooms_different_types_resolve_each_independently():
         created.append(data)
         return {"id": f"booking-{len(created)}", **data}
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=[],
-    ), patch(
-        "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
-        new=fake_get_mapping,
-    ), patch(
-        "app.services.channex.inbound.RoomTypeRepository.get_by_id",
-        new=fake_get_room_type,
-    ), patch(
-        "app.services.channex.inbound.resolve_assignment",
-        new_callable=AsyncMock,
-        return_value=(None, []),
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.create",
-        new=fake_create,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.create",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
+            new=fake_get_mapping,
+        ),
+        patch(
+            "app.services.channex.inbound.RoomTypeRepository.get_by_id",
+            new=fake_get_room_type,
+        ),
+        patch(
+            "app.services.channex.inbound.resolve_assignment",
+            new_callable=AsyncMock,
+            return_value=(None, []),
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.create",
+            new=fake_create,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.create",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 
@@ -164,31 +181,39 @@ async def test_single_room_booking_unchanged_regression_guard():
     rev = _multi_room_revision(rooms=[_room("crt-1")])
     create_mock = AsyncMock(return_value={"id": "booking-1"})
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=[],
-    ), patch(
-        "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
-        new_callable=AsyncMock,
-        return_value={"room_type_id": "rt-1"},
-    ), patch(
-        "app.services.channex.inbound.RoomTypeRepository.get_by_id",
-        new_callable=AsyncMock,
-        return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
-    ), patch(
-        "app.services.channex.inbound.resolve_assignment",
-        new_callable=AsyncMock,
-        return_value=(None, []),
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.create",
-        new=create_mock,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.create",
-        new_callable=AsyncMock,
-    ) as mapping_create, patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
+            new_callable=AsyncMock,
+            return_value={"room_type_id": "rt-1"},
+        ),
+        patch(
+            "app.services.channex.inbound.RoomTypeRepository.get_by_id",
+            new_callable=AsyncMock,
+            return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
+        ),
+        patch(
+            "app.services.channex.inbound.resolve_assignment",
+            new_callable=AsyncMock,
+            return_value=(None, []),
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.create",
+            new=create_mock,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.create",
+            new_callable=AsyncMock,
+        ) as mapping_create,
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 
@@ -201,20 +226,29 @@ async def test_single_room_booking_unchanged_regression_guard():
 async def test_cancellation_cancels_every_linked_pms_booking():
     """When the OTA reservation is cancelled, every linked PMS booking row
     must be flipped to ``cancelled`` — not just the first one."""
-    rev = _multi_room_revision(
-        rooms=[_room("crt-1"), _room("crt-1")], status="cancelled"
-    )
+    rev = _multi_room_revision(rooms=[_room("crt-1"), _room("crt-1")], status="cancelled")
     existing = [
-        {"booking_id": "b-1", "channex_room_index": 0,
-         "hotel_id": "hotel-A", "channex_booking_id": "ch-bk-multi"},
-        {"booking_id": "b-2", "channex_room_index": 1,
-         "hotel_id": "hotel-A", "channex_booking_id": "ch-bk-multi"},
+        {
+            "booking_id": "b-1",
+            "channex_room_index": 0,
+            "hotel_id": "hotel-A",
+            "channex_booking_id": "ch-bk-multi",
+        },
+        {
+            "booking_id": "b-2",
+            "channex_room_index": 1,
+            "hotel_id": "hotel-A",
+            "channex_booking_id": "ch-bk-multi",
+        },
     ]
 
     async def fake_get_by_id(booking_id):
         return {
-            "id": booking_id, "status": "confirmed", "room_type_id": "rt-1",
-            "check_in": "2026-07-10", "check_out": "2026-07-12",
+            "id": booking_id,
+            "status": "confirmed",
+            "room_type_id": "rt-1",
+            "check_in": "2026-07-10",
+            "check_out": "2026-07-12",
         }
 
     cancelled = []
@@ -223,25 +257,32 @@ async def test_cancellation_cancels_every_linked_pms_booking():
         cancelled.append((booking_id, new_status))
         return {}
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=existing,
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.get_by_id",
-        new=fake_get_by_id,
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.update_status",
-        new=fake_update_status,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.update_sync_time",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound._maybe_notify_ota_booking",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=existing,
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.get_by_id",
+            new=fake_get_by_id,
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.update_status",
+            new=fake_update_status,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.update_sync_time",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound._maybe_notify_ota_booking",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 
@@ -252,22 +293,31 @@ async def test_cancellation_cancels_every_linked_pms_booking():
 async def test_modification_with_reduced_room_count_cancels_trailing_slot():
     """Guest reduces from 2 rooms to 1 → the slot-0 booking is updated, and
     the slot-1 booking is cancelled. Sibling slots are not silently dropped."""
-    rev = _multi_room_revision(
-        rooms=[_room("crt-1", amount="220.00")], status="modified"
-    )
+    rev = _multi_room_revision(rooms=[_room("crt-1", amount="220.00")], status="modified")
     existing = [
-        {"booking_id": "b-1", "channex_room_index": 0,
-         "hotel_id": "hotel-A", "channex_booking_id": "ch-bk-multi"},
-        {"booking_id": "b-2", "channex_room_index": 1,
-         "hotel_id": "hotel-A", "channex_booking_id": "ch-bk-multi"},
+        {
+            "booking_id": "b-1",
+            "channex_room_index": 0,
+            "hotel_id": "hotel-A",
+            "channex_booking_id": "ch-bk-multi",
+        },
+        {
+            "booking_id": "b-2",
+            "channex_room_index": 1,
+            "hotel_id": "hotel-A",
+            "channex_booking_id": "ch-bk-multi",
+        },
     ]
 
     from datetime import date as _date
 
     async def fake_get_by_id(booking_id):
         return {
-            "id": booking_id, "status": "confirmed", "room_type_id": "rt-1",
-            "check_in": _date(2026, 7, 10), "check_out": _date(2026, 7, 12),
+            "id": booking_id,
+            "status": "confirmed",
+            "room_type_id": "rt-1",
+            "check_in": _date(2026, 7, 10),
+            "check_out": _date(2026, 7, 12),
         }
 
     update_calls = []
@@ -280,28 +330,36 @@ async def test_modification_with_reduced_room_count_cancels_trailing_slot():
         status_calls.append((booking_id, new_status))
         return {}
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=existing,
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.get_by_id",
-        new=fake_get_by_id,
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.update_status",
-        new=fake_update_status,
-    ), patch(
-        "app.services.channex.inbound.Database.execute",
-        new=fake_execute,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.update_sync_time",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound._maybe_notify_ota_booking",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=existing,
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.get_by_id",
+            new=fake_get_by_id,
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.update_status",
+            new=fake_update_status,
+        ),
+        patch(
+            "app.services.channex.inbound.Database.execute",
+            new=fake_execute,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.update_sync_time",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound._maybe_notify_ota_booking",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 
@@ -325,31 +383,39 @@ async def test_per_room_amount_used_when_present():
         created.append(data)
         return {"id": f"booking-{len(created)}", **data}
 
-    with patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
-        new_callable=AsyncMock,
-        return_value=[],
-    ), patch(
-        "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
-        new_callable=AsyncMock,
-        return_value={"room_type_id": "rt-1"},
-    ), patch(
-        "app.services.channex.inbound.RoomTypeRepository.get_by_id",
-        new_callable=AsyncMock,
-        return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
-    ), patch(
-        "app.services.channex.inbound.resolve_assignment",
-        new_callable=AsyncMock,
-        return_value=(None, []),
-    ), patch(
-        "app.services.channex.inbound.BookingRepository.create",
-        new=fake_create,
-    ), patch(
-        "app.services.channex.inbound.ChannexBookingMappingRepository.create",
-        new_callable=AsyncMock,
-    ), patch(
-        "app.services.channex.inbound.push_availability_for_room_type",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.list_by_channex_id",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexRoomTypeMappingRepository.get_by_channex_room_type_id",
+            new_callable=AsyncMock,
+            return_value={"room_type_id": "rt-1"},
+        ),
+        patch(
+            "app.services.channex.inbound.RoomTypeRepository.get_by_id",
+            new_callable=AsyncMock,
+            return_value={"id": "rt-1", "hotel_id": "hotel-A", "currency": "IDR"},
+        ),
+        patch(
+            "app.services.channex.inbound.resolve_assignment",
+            new_callable=AsyncMock,
+            return_value=(None, []),
+        ),
+        patch(
+            "app.services.channex.inbound.BookingRepository.create",
+            new=fake_create,
+        ),
+        patch(
+            "app.services.channex.inbound.ChannexBookingMappingRepository.create",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.channex.inbound.push_availability_for_room_type",
+            new_callable=AsyncMock,
+        ),
     ):
         await process_inbound_booking(rev, "hotel-A")
 

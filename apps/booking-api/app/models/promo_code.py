@@ -1,6 +1,6 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
 from datetime import date, datetime
+
+from pydantic import BaseModel, ConfigDict
 
 from app.models.utils import to_camel
 
@@ -12,36 +12,36 @@ class PromoCodeResponse(BaseModel):
     code: str
     discount_type: str
     discount_value: float
-    valid_from: Optional[date] = None
-    valid_until: Optional[date] = None
+    valid_from: date | None = None
+    valid_until: date | None = None
     is_active: bool
-    max_uses: Optional[int] = None
+    max_uses: int | None = None
     use_count: int
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
 
 class CreatePromoCodeRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     code: str
-    discount_type: str = 'percentage'
+    discount_type: str = "percentage"
     discount_value: float
-    valid_from: Optional[date] = None
-    valid_until: Optional[date] = None
+    valid_from: date | None = None
+    valid_until: date | None = None
     is_active: bool = True
-    max_uses: Optional[int] = None
+    max_uses: int | None = None
 
 
 class UpdatePromoCodeRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    code: Optional[str] = None
-    discount_type: Optional[str] = None
-    discount_value: Optional[float] = None
-    valid_from: Optional[date] = None
-    valid_until: Optional[date] = None
-    is_active: Optional[bool] = None
-    max_uses: Optional[int] = None
+    code: str | None = None
+    discount_type: str | None = None
+    discount_value: float | None = None
+    valid_from: date | None = None
+    valid_until: date | None = None
+    is_active: bool | None = None
+    max_uses: int | None = None
 
 
 class ValidatePromoCodeResponse(BaseModel):
@@ -49,6 +49,6 @@ class ValidatePromoCodeResponse(BaseModel):
 
     valid: bool
     code: str
-    discount_type: Optional[str] = None
-    discount_value: Optional[float] = None
+    discount_type: str | None = None
+    discount_value: float | None = None
     message: str

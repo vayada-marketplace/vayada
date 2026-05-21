@@ -4,6 +4,7 @@ dynamic-UPDATE-creators + replace-platforms transaction shared by the
 self-service router (PUT /creators/me) and the admin router
 (PUT /admin/users/{id}/profile/creator).
 """
+
 import json
 from decimal import Decimal
 
@@ -11,7 +12,6 @@ from app.database import Database
 
 
 class CreatorProfileService:
-
     @staticmethod
     async def update(creator_id: str, request) -> None:
         """Apply partial creator-profile update + replace platforms when provided.

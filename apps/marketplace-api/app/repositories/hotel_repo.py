@@ -2,7 +2,6 @@
 Repository for hotel_profiles, hotel_listings, listing_collaboration_offerings,
 and listing_creator_requirements tables (Database).
 """
-from typing import Optional, List
 
 import asyncpg
 
@@ -11,7 +10,6 @@ from app.repositories._sql import safe_columns
 
 
 class HotelRepository:
-
     # ── hotel_profiles ──
 
     @staticmethod
@@ -19,8 +17,8 @@ class HotelRepository:
         user_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM hotel_profiles WHERE user_id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
@@ -33,8 +31,8 @@ class HotelRepository:
         profile_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM hotel_profiles WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, profile_id)
@@ -48,7 +46,7 @@ class HotelRepository:
         name: str,
         location: str = "Not specified",
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             INSERT INTO hotel_profiles (user_id, name, location)
@@ -62,10 +60,10 @@ class HotelRepository:
     @staticmethod
     async def update_profile(
         profile_id: str,
-        update_fields: List[str],
+        update_fields: list[str],
         update_values: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         """Execute a dynamic UPDATE on hotel_profiles.
 
@@ -79,7 +77,7 @@ class HotelRepository:
         update_values_final = list(update_values) + [profile_id]
         query = f"""
             UPDATE hotel_profiles
-            SET {', '.join(update_fields_with_ts)}
+            SET {", ".join(update_fields_with_ts)}
             WHERE id = ${param_idx}
         """
         if conn:
@@ -94,7 +92,7 @@ class HotelRepository:
         profile_id: str,
         *,
         columns: str = "id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at",
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = f"SELECT {safe_columns(columns)} FROM hotel_listings WHERE hotel_profile_id = $1 ORDER BY created_at DESC"
         if conn:
@@ -109,8 +107,8 @@ class HotelRepository:
         hotel_profile_id: str,
         *,
         columns: str = "id, hotel_profile_id, name, location, description, accommodation_type, images, status, created_at, updated_at",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM hotel_listings WHERE id = $1 AND hotel_profile_id = $2"
         if conn:
             row = await conn.fetchrow(query, listing_id, hotel_profile_id)
@@ -127,7 +125,7 @@ class HotelRepository:
         accommodation_type: str,
         images: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO hotel_listings
@@ -137,16 +135,20 @@ class HotelRepository:
                       status, created_at, updated_at
         """
         if conn:
-            row = await conn.fetchrow(query, hotel_profile_id, name, location, description, accommodation_type, images)
+            row = await conn.fetchrow(
+                query, hotel_profile_id, name, location, description, accommodation_type, images
+            )
         else:
-            row = await Database.fetchrow(query, hotel_profile_id, name, location, description, accommodation_type, images)
+            row = await Database.fetchrow(
+                query, hotel_profile_id, name, location, description, accommodation_type, images
+            )
         return dict(row)
 
     @staticmethod
     async def delete_listing(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "DELETE FROM hotel_listings WHERE id = $1"
         if conn:
@@ -160,7 +162,7 @@ class HotelRepository:
     async def get_offerings(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = """
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
@@ -182,15 +184,15 @@ class HotelRepository:
         collaboration_type: str,
         availability_months: list,
         platforms: list,
-        free_stay_min_nights: Optional[int],
-        free_stay_max_nights: Optional[int],
-        paid_max_amount: Optional[float],
-        discount_percentage: Optional[float],
-        currency: Optional[str] = None,
-        commission_percentage: Optional[int] = None,
-        min_followers: Optional[int] = None,
+        free_stay_min_nights: int | None,
+        free_stay_max_nights: int | None,
+        paid_max_amount: float | None,
+        discount_percentage: float | None,
+        currency: str | None = None,
+        commission_percentage: int | None = None,
+        min_followers: int | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO listing_collaboration_offerings
@@ -202,9 +204,19 @@ class HotelRepository:
                       free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
                       discount_percentage, commission_percentage, min_followers, created_at, updated_at
         """
-        args = (listing_id, collaboration_type, availability_months, platforms,
-                free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage, currency,
-                commission_percentage, min_followers)
+        args = (
+            listing_id,
+            collaboration_type,
+            availability_months,
+            platforms,
+            free_stay_min_nights,
+            free_stay_max_nights,
+            paid_max_amount,
+            discount_percentage,
+            currency,
+            commission_percentage,
+            min_followers,
+        )
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -215,7 +227,7 @@ class HotelRepository:
     async def delete_offerings(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "DELETE FROM listing_collaboration_offerings WHERE listing_id = $1"
         if conn:
@@ -229,8 +241,8 @@ class HotelRepository:
     async def get_requirements(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = """
             SELECT id, listing_id, platforms, target_countries,
                    target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
@@ -248,12 +260,12 @@ class HotelRepository:
         listing_id: str,
         platforms: list,
         target_countries: list,
-        target_age_min: Optional[int],
-        target_age_max: Optional[int],
+        target_age_min: int | None,
+        target_age_max: int | None,
         target_age_groups: list,
         creator_types: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO listing_creator_requirements
@@ -262,8 +274,15 @@ class HotelRepository:
             RETURNING id, platforms, target_countries,
                       target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at
         """
-        args = (listing_id, platforms, target_countries,
-                target_age_min, target_age_max, target_age_groups, creator_types)
+        args = (
+            listing_id,
+            platforms,
+            target_countries,
+            target_age_min,
+            target_age_max,
+            target_age_groups,
+            creator_types,
+        )
         if conn:
             row = await conn.fetchrow(query, *args)
         else:
@@ -274,7 +293,7 @@ class HotelRepository:
     async def delete_requirements(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "DELETE FROM listing_creator_requirements WHERE listing_id = $1"
         if conn:
@@ -288,7 +307,7 @@ class HotelRepository:
     async def get_listing_collaboration_types(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Return distinct collaboration types offered by a listing."""
         query = "SELECT DISTINCT collaboration_type FROM listing_collaboration_offerings WHERE listing_id = $1"
@@ -296,7 +315,7 @@ class HotelRepository:
             rows = await conn.fetch(query, listing_id)
         else:
             rows = await Database.fetch(query, listing_id)
-        return [row['collaboration_type'] for row in rows]
+        return [row["collaboration_type"] for row in rows]
 
     # ── marketplace queries ──
 
@@ -304,7 +323,7 @@ class HotelRepository:
     async def get_marketplace_listings(
         verified_user_ids: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get listings from verified hotels with complete profiles."""
         query = """
@@ -337,12 +356,12 @@ class HotelRepository:
     async def get_offerings_for_listings(
         listing_ids: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Batch-fetch offerings for multiple listings."""
         if not listing_ids:
             return []
-        placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
+        placeholders = ",".join([f"${i + 1}" for i in range(len(listing_ids))])
         query = f"""
             SELECT id, listing_id, collaboration_type, availability_months, platforms,
                    free_stay_min_nights, free_stay_max_nights, paid_max_amount, currency,
@@ -361,12 +380,12 @@ class HotelRepository:
     async def get_requirements_for_listings(
         listing_ids: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Batch-fetch requirements for multiple listings."""
         if not listing_ids:
             return []
-        placeholders = ','.join([f'${i+1}' for i in range(len(listing_ids))])
+        placeholders = ",".join([f"${i + 1}" for i in range(len(listing_ids))])
         query = f"""
             SELECT id, listing_id, platforms, target_countries,
                    target_age_min, target_age_max, target_age_groups, creator_types, created_at, updated_at

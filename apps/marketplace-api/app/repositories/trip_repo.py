@@ -1,7 +1,6 @@
 """
 Repository for trips and external_collaborations tables (Database).
 """
-from typing import Optional
 
 import asyncpg
 
@@ -9,17 +8,16 @@ from app.database import Database
 
 
 class TripRepository:
-
     @staticmethod
     async def create(
         creator_id: str,
         name: str,
-        location: Optional[str],
+        location: str | None,
         start_date,
         end_date,
-        notes: Optional[str],
+        notes: str | None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO trips (creator_id, name, location, start_date, end_date, notes)
@@ -27,17 +25,21 @@ class TripRepository:
             RETURNING *
         """
         if conn:
-            row = await conn.fetchrow(query, creator_id, name, location, start_date, end_date, notes)
+            row = await conn.fetchrow(
+                query, creator_id, name, location, start_date, end_date, notes
+            )
         else:
-            row = await Database.fetchrow(query, creator_id, name, location, start_date, end_date, notes)
+            row = await Database.fetchrow(
+                query, creator_id, name, location, start_date, end_date, notes
+            )
         return dict(row)
 
     @staticmethod
     async def get_by_id(
         trip_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT * FROM trips WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, trip_id)
@@ -50,8 +52,8 @@ class TripRepository:
         trip_id: str,
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT * FROM trips WHERE id = $1 AND creator_id = $2"
         if conn:
             row = await conn.fetchrow(query, trip_id, creator_id)
@@ -63,7 +65,7 @@ class TripRepository:
     async def list_by_creator(
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = "SELECT * FROM trips WHERE creator_id = $1 ORDER BY start_date DESC"
         if conn:
@@ -73,7 +75,7 @@ class TripRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def update(trip_id: str, **kwargs) -> Optional[dict]:
+    async def update(trip_id: str, **kwargs) -> dict | None:
         fields = {k: v for k, v in kwargs.items() if v is not None}
         if not fields:
             return await TripRepository.get_by_id(trip_id)
@@ -96,7 +98,6 @@ class TripRepository:
 
 
 class ExternalCollaborationRepository:
-
     @staticmethod
     async def create(
         creator_id: str,
@@ -110,7 +111,7 @@ class ExternalCollaborationRepository:
         collaboration_type=None,
         deliverables=None,
         notes=None,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO external_collaborations
@@ -118,7 +119,18 @@ class ExternalCollaborationRepository:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
         """
-        params = (creator_id, trip_id, title, hotel_name, location, collaboration_type, start_date, end_date, deliverables, notes)
+        params = (
+            creator_id,
+            trip_id,
+            title,
+            hotel_name,
+            location,
+            collaboration_type,
+            start_date,
+            end_date,
+            deliverables,
+            notes,
+        )
         if conn:
             row = await conn.fetchrow(query, *params)
         else:
@@ -129,8 +141,8 @@ class ExternalCollaborationRepository:
     async def get_by_id(
         collab_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT * FROM external_collaborations WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, collab_id)
@@ -143,8 +155,8 @@ class ExternalCollaborationRepository:
         collab_id: str,
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT * FROM external_collaborations WHERE id = $1 AND creator_id = $2"
         if conn:
             row = await conn.fetchrow(query, collab_id, creator_id)
@@ -156,8 +168,8 @@ class ExternalCollaborationRepository:
     async def list_by_creator(
         creator_id: str,
         *,
-        trip_id: Optional[str] = None,
-        conn: Optional[asyncpg.Connection] = None,
+        trip_id: str | None = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = "SELECT * FROM external_collaborations WHERE creator_id = $1"
         params: list = [creator_id]
@@ -175,7 +187,7 @@ class ExternalCollaborationRepository:
     async def list_by_trip(
         trip_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = "SELECT * FROM external_collaborations WHERE trip_id = $1 ORDER BY start_date ASC"
         if conn:
@@ -185,7 +197,7 @@ class ExternalCollaborationRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def update(collab_id: str, **kwargs) -> Optional[dict]:
+    async def update(collab_id: str, **kwargs) -> dict | None:
         fields = {k: v for k, v in kwargs.items() if v is not None}
         if not fields:
             return await ExternalCollaborationRepository.get_by_id(collab_id)
@@ -203,5 +215,7 @@ class ExternalCollaborationRepository:
 
     @staticmethod
     async def delete(collab_id: str) -> bool:
-        result = await Database.execute("DELETE FROM external_collaborations WHERE id = $1", collab_id)
+        result = await Database.execute(
+            "DELETE FROM external_collaborations WHERE id = $1", collab_id
+        )
         return result == "DELETE 1"

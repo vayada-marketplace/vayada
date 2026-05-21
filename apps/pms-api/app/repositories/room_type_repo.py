@@ -1,16 +1,15 @@
 import json
 import logging
-from typing import Optional, List, Tuple
 from datetime import date
+
 from app.database import Database
 
 logger = logging.getLogger(__name__)
 
 
 class RoomTypeRepository:
-
     @staticmethod
-    async def list_by_hotel_id(hotel_id: str, *, active_only: bool = False) -> List[dict]:
+    async def list_by_hotel_id(hotel_id: str, *, active_only: bool = False) -> list[dict]:
         where = "WHERE hotel_id = $1"
         if active_only:
             where += " AND is_active = true"
@@ -20,10 +19,8 @@ class RoomTypeRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def get_by_id(room_type_id: str) -> Optional[dict]:
-        row = await Database.fetchrow(
-            "SELECT * FROM room_types WHERE id = $1", room_type_id
-        )
+    async def get_by_id(room_type_id: str) -> dict | None:
+        row = await Database.fetchrow("SELECT * FROM room_types WHERE id = $1", room_type_id)
         return dict(row) if row else None
 
     @staticmethod
@@ -87,9 +84,13 @@ class RoomTypeRepository:
             data.get("flexible_rate_enabled", True),
             data.get("non_refundable_discount", 5),
             data.get("non_refundable_enabled", False),
-            json.dumps(data.get("last_minute_discount")) if data.get("last_minute_discount") else None,
+            json.dumps(data.get("last_minute_discount"))
+            if data.get("last_minute_discount")
+            else None,
             data.get("minimum_advance_days", 0),
-            json.dumps(data.get("rate_payment_methods")) if data.get("rate_payment_methods") else None,
+            json.dumps(data.get("rate_payment_methods"))
+            if data.get("rate_payment_methods")
+            else None,
             data.get("non_refundable_cancellation_policy", "Non-refundable from booking"),
             data.get("flexible_cancellation_type", "free"),
             data.get("partial_refund_cancel_window_days", 30),
@@ -100,7 +101,7 @@ class RoomTypeRepository:
         return dict(row)
 
     @staticmethod
-    async def update(room_type_id: str, updates: dict) -> Optional[dict]:
+    async def update(room_type_id: str, updates: dict) -> dict | None:
         if not updates:
             return await RoomTypeRepository.get_by_id(room_type_id)
 
@@ -108,7 +109,20 @@ class RoomTypeRepository:
         values = []
         idx = 1
         for col, val in updates.items():
-            if col in ("amenities", "images", "features", "benefits", "monthly_rates", "daily_rates", "operating_periods", "seasons", "last_minute_discount", "rate_payment_methods", "meal_plans", "partial_refund_tiers"):
+            if col in (
+                "amenities",
+                "images",
+                "features",
+                "benefits",
+                "monthly_rates",
+                "daily_rates",
+                "operating_periods",
+                "seasons",
+                "last_minute_discount",
+                "rate_payment_methods",
+                "meal_plans",
+                "partial_refund_tiers",
+            ):
                 set_clauses.append(f"{col} = ${idx}::jsonb")
                 values.append(json.dumps(val))
             else:
@@ -117,10 +131,7 @@ class RoomTypeRepository:
             idx += 1
 
         set_clauses.append("updated_at = now()")
-        query = (
-            f"UPDATE room_types SET {', '.join(set_clauses)} "
-            f"WHERE id = ${idx} RETURNING *"
-        )
+        query = f"UPDATE room_types SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *"
         values.append(room_type_id)
         row = await Database.fetchrow(query, *values)
         return dict(row) if row else None
@@ -132,15 +143,11 @@ class RoomTypeRepository:
             "DELETE FROM bookings WHERE room_type_id = $1 AND status IN ('cancelled', 'withdrawn', 'expired')",
             room_type_id,
         )
-        result = await Database.execute(
-            "DELETE FROM room_types WHERE id = $1", room_type_id
-        )
+        result = await Database.execute("DELETE FROM room_types WHERE id = $1", room_type_id)
         return result == "DELETE 1"
 
     @staticmethod
-    async def count_booked(
-        room_type_id: str, check_in: date, check_out: date
-    ) -> int:
+    async def count_booked(room_type_id: str, check_in: date, check_out: date) -> int:
         """Sum the rooms held by overlapping non-cancelled bookings.
 
         VAY-403: a multi-room booking (number_of_rooms > 1) consumes that
@@ -171,9 +178,7 @@ class RoomTypeRepository:
         return count or 0
 
     @staticmethod
-    async def count_blocked(
-        room_type_id: str, start_date: date, end_date: date
-    ) -> int:
+    async def count_blocked(room_type_id: str, start_date: date, end_date: date) -> int:
         """Sum blocked_count for overlapping room blocks."""
         count = await Database.fetchval(
             """
@@ -219,7 +224,7 @@ class RoomTypeRepository:
         return seasons
 
     @staticmethod
-    def _find_season_rate(seasons: list, check_in: date, adults: Optional[int] = None) -> Optional[float]:
+    def _find_season_rate(seasons: list, check_in: date, adults: int | None = None) -> float | None:
         """Find the season rate that covers the check-in date. Seasons repeat yearly.
         If adults is provided and the season has occupancyRates, use the per-occupancy rate."""
         for season in seasons:
@@ -260,7 +265,7 @@ class RoomTypeRepository:
         return None
 
     @staticmethod
-    def _find_season_min_stay(seasons: list, check_in: date) -> Optional[int]:
+    def _find_season_min_stay(seasons: list, check_in: date) -> int | None:
         """Return the minStay configured on the season covering check_in, if any."""
         for season in seasons:
             season_from = season.get("from")
@@ -293,7 +298,7 @@ class RoomTypeRepository:
         return None
 
     @staticmethod
-    def _get_lowest_season_rate(seasons: list) -> Optional[float]:
+    def _get_lowest_season_rate(seasons: list) -> float | None:
         """Return the lowest non-zero season rate (for display when no dates selected)."""
         rates = []
         for season in seasons:
@@ -319,7 +324,9 @@ class RoomTypeRepository:
             return 0.0
 
     @staticmethod
-    def resolve_rate(room: dict, check_in: date, adults: Optional[int] = None) -> Tuple[float, Optional[float]]:
+    def resolve_rate(
+        room: dict, check_in: date, adults: int | None = None
+    ) -> tuple[float, float | None]:
         """Return (base_rate, non_refundable_rate) using daily override, then season, then base.
         If adults is provided, uses per-occupancy rates from seasons when available.
         Applies weekend surcharge for Friday/Saturday nights."""

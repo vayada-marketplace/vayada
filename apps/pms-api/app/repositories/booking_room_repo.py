@@ -6,23 +6,19 @@ occupies (positions 1..N-1). Single-room bookings never get a row here, so
 every single-room path is unaffected.
 """
 
-from typing import List, Optional
 from app.database import Database
 
 
 class BookingRoomRepository:
-
     @staticmethod
-    async def set_extra_rooms(booking_id: str, room_ids: List[str]) -> None:
+    async def set_extra_rooms(booking_id: str, room_ids: list[str]) -> None:
         """Replace the extra-room set for a booking.
 
         ``room_ids`` are the rooms beyond the primary, in order. They are
         written at positions 1..len(room_ids); position 0 is the primary
         room held by bookings.room_id.
         """
-        await Database.execute(
-            "DELETE FROM booking_rooms WHERE booking_id = $1", booking_id
-        )
+        await Database.execute("DELETE FROM booking_rooms WHERE booking_id = $1", booking_id)
         if not room_ids:
             return
         await Database.execute(
@@ -36,7 +32,7 @@ class BookingRoomRepository:
         )
 
     @staticmethod
-    async def list_extra_rooms(booking_id: str) -> List[dict]:
+    async def list_extra_rooms(booking_id: str) -> list[dict]:
         """Extra rooms for one booking, ordered by slot position.
 
         Returns dicts with room_id, room_number, position.
@@ -54,7 +50,7 @@ class BookingRoomRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def list_extra_rooms_for_bookings(booking_ids: List[str]) -> List[dict]:
+    async def list_extra_rooms_for_bookings(booking_ids: list[str]) -> list[dict]:
         """Batched variant for the calendar render — one query for many
         bookings to avoid an N+1. Returns booking_id, room_id, room_number,
         position rows.
@@ -74,9 +70,7 @@ class BookingRoomRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def occupied_room_ids_for_room_type(
-        room_type_id: str, check_in, check_out
-    ) -> set:
+    async def occupied_room_ids_for_room_type(room_type_id: str, check_in, check_out) -> set:
         """Every physical room of a room type taken by an overlapping
         non-cancelled booking — the union of the primary room
         (bookings.room_id) and every extra room (booking_rooms).
@@ -121,7 +115,7 @@ class BookingRoomRepository:
     @staticmethod
     async def reassign_extra_room(
         booking_id: str, old_room_id: str, new_room_id: str
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Move one extra room of a booking to a different unit, leaving the
         booking's other rooms (primary + remaining extras) where they are.
         """

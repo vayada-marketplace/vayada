@@ -1,7 +1,6 @@
 """
 Repository for creators and creator_platforms tables (Database).
 """
-from typing import Optional, List
 
 import asyncpg
 
@@ -10,14 +9,13 @@ from app.repositories._sql import safe_columns
 
 
 class CreatorRepository:
-
     @staticmethod
     async def get_by_user_id(
         user_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM creators WHERE user_id = $1"
         if conn:
             row = await conn.fetchrow(query, user_id)
@@ -30,8 +28,8 @@ class CreatorRepository:
         creator_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM creators WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, creator_id)
@@ -43,7 +41,7 @@ class CreatorRepository:
     async def create(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             INSERT INTO creators (user_id, location, short_description)
@@ -57,10 +55,10 @@ class CreatorRepository:
     @staticmethod
     async def update(
         creator_id: str,
-        update_fields: List[str],
+        update_fields: list[str],
         update_values: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         """Execute a dynamic UPDATE on the creators table.
 
@@ -74,7 +72,7 @@ class CreatorRepository:
         update_values_final = list(update_values) + [creator_id]
         query = f"""
             UPDATE creators
-            SET {', '.join(update_fields_with_ts)}
+            SET {", ".join(update_fields_with_ts)}
             WHERE id = ${param_idx}
         """
         if conn:
@@ -87,7 +85,7 @@ class CreatorRepository:
         creator_id: str,
         *,
         columns: str = "id, name, handle, followers, engagement_rate, top_countries, top_age_groups, gender_split",
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = f"SELECT {safe_columns(columns)} FROM creator_platforms WHERE creator_id = $1 ORDER BY name"
         if conn:
@@ -100,7 +98,7 @@ class CreatorRepository:
     async def delete_platforms(
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = "DELETE FROM creator_platforms WHERE creator_id = $1"
         if conn:
@@ -115,11 +113,11 @@ class CreatorRepository:
         handle: str,
         followers: int,
         engagement_rate,
-        top_countries_json: Optional[str] = None,
-        top_age_groups_json: Optional[str] = None,
-        gender_split_json: Optional[str] = None,
+        top_countries_json: str | None = None,
+        top_age_groups_json: str | None = None,
+        gender_split_json: str | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         query = """
             INSERT INTO creator_platforms
@@ -128,20 +126,34 @@ class CreatorRepository:
         """
         if conn:
             await conn.execute(
-                query, creator_id, name, handle, followers, engagement_rate,
-                top_countries_json, top_age_groups_json, gender_split_json,
+                query,
+                creator_id,
+                name,
+                handle,
+                followers,
+                engagement_rate,
+                top_countries_json,
+                top_age_groups_json,
+                gender_split_json,
             )
         else:
             await Database.execute(
-                query, creator_id, name, handle, followers, engagement_rate,
-                top_countries_json, top_age_groups_json, gender_split_json,
+                query,
+                creator_id,
+                name,
+                handle,
+                followers,
+                engagement_rate,
+                top_countries_json,
+                top_age_groups_json,
+                gender_split_json,
             )
 
     @staticmethod
     async def get_ratings(
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = """
             SELECT cr.id, cr.hotel_id, cr.rating, cr.comment, cr.created_at,
@@ -161,8 +173,8 @@ class CreatorRepository:
     async def get_complete_creators_by_user_ids(
         verified_ids: list,
         *,
-        creator_type_filter: Optional[list] = None,
-        conn: Optional[asyncpg.Connection] = None,
+        creator_type_filter: list | None = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get creators with complete profiles whose user_id is in verified_ids."""
         query = """
@@ -209,12 +221,12 @@ class CreatorRepository:
     async def get_platforms_for_creators(
         creator_ids: list,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Batch-fetch platforms for multiple creators."""
         if not creator_ids:
             return []
-        placeholders = ','.join([f'${i+1}' for i in range(len(creator_ids))])
+        placeholders = ",".join([f"${i + 1}" for i in range(len(creator_ids))])
         query = f"""
             SELECT id, creator_id, name, handle, followers, engagement_rate,
                    top_countries, top_age_groups, gender_split

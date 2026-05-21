@@ -10,13 +10,10 @@ Usage:
 import asyncio
 import json
 import os
-import sys
-import uuid
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
-import bcrypt
 
 MARKETPLACE_DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -47,7 +44,13 @@ CREATOR_PROFILES = {
                 "handle": "@alexandratravels",
                 "followers": 150000,
                 "engagement_rate": Decimal("4.5"),
-                "top_countries": {"USA": 40, "UK": 25, "Canada": 15, "Australia": 10, "Germany": 10},
+                "top_countries": {
+                    "USA": 40,
+                    "UK": 25,
+                    "Canada": 15,
+                    "Australia": 10,
+                    "Germany": 10,
+                },
                 "top_age_groups": {"25-34": 45, "35-44": 30, "18-24": 15, "45+": 10},
                 "gender_split": {"female": 60, "male": 35, "other": 5},
             },
@@ -123,7 +126,13 @@ CREATOR_PROFILES = {
                 "handle": "EmmaStyleOfficial",
                 "followers": 120000,
                 "engagement_rate": Decimal("2.8"),
-                "top_countries": {"UK": 45, "USA": 20, "Canada": 15, "Australia": 10, "Germany": 10},
+                "top_countries": {
+                    "UK": 45,
+                    "USA": 20,
+                    "Canada": 15,
+                    "Australia": 10,
+                    "Germany": 10,
+                },
                 "top_age_groups": {"25-34": 40, "35-44": 35, "45+": 15, "18-24": 10},
                 "gender_split": {"female": 70, "male": 25, "other": 5},
             },
@@ -187,7 +196,16 @@ HOTEL_PROFILES = {
                 "collaboration_offerings": [
                     {
                         "collaboration_type": "Free Stay",
-                        "availability_months": ["January", "February", "March", "April", "May", "September", "October", "November"],
+                        "availability_months": [
+                            "January",
+                            "February",
+                            "March",
+                            "April",
+                            "May",
+                            "September",
+                            "October",
+                            "November",
+                        ],
                         "platforms": ["Instagram", "TikTok", "YouTube"],
                         "free_stay_min_nights": 3,
                         "free_stay_max_nights": 7,
@@ -222,7 +240,13 @@ HOTEL_PROFILES = {
                 "collaboration_offerings": [
                     {
                         "collaboration_type": "Discount",
-                        "availability_months": ["January", "February", "March", "November", "December"],
+                        "availability_months": [
+                            "January",
+                            "February",
+                            "March",
+                            "November",
+                            "December",
+                        ],
                         "platforms": ["Instagram", "Facebook"],
                         "discount_percentage": 30,
                     },
@@ -367,7 +391,13 @@ HOTEL_PROFILES = {
                     },
                     {
                         "collaboration_type": "Discount",
-                        "availability_months": ["January", "February", "March", "November", "December"],
+                        "availability_months": [
+                            "January",
+                            "February",
+                            "March",
+                            "November",
+                            "December",
+                        ],
                         "platforms": ["Instagram", "Facebook"],
                         "discount_percentage": 35,
                     },
@@ -431,7 +461,13 @@ HOTEL_PROFILES = {
                 "collaboration_offerings": [
                     {
                         "collaboration_type": "Discount",
-                        "availability_months": ["January", "February", "March", "November", "December"],
+                        "availability_months": [
+                            "January",
+                            "February",
+                            "March",
+                            "November",
+                            "December",
+                        ],
                         "platforms": ["Instagram", "Facebook"],
                         "discount_percentage": 20,
                     },
@@ -505,7 +541,13 @@ COLLABORATIONS = [
         "preferred_months": ["May", "Jun"],
         "consent": True,
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 7}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 3},
+                    {"type": "Instagram Stories", "quantity": 7},
+                ],
+            },
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 1}]},
         ],
         "responded_at": datetime.now() - timedelta(days=5),
@@ -541,7 +583,13 @@ COLLABORATIONS = [
         "preferred_months": ["Apr", "May"],
         "consent": True,
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 8}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 3},
+                    {"type": "Instagram Stories", "quantity": 8},
+                ],
+            },
             {"platform": "TikTok", "deliverables": [{"type": "TikTok Video", "quantity": 5}]},
         ],
         "responded_at": datetime.now() - timedelta(days=45),
@@ -562,7 +610,13 @@ COLLABORATIONS = [
         "preferred_date_from": date.today() + timedelta(days=14),
         "preferred_date_to": date.today() + timedelta(days=44),
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 2}, {"type": "Instagram Stories", "quantity": 4}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 2},
+                    {"type": "Instagram Stories", "quantity": 4},
+                ],
+            },
             {"platform": "Facebook", "deliverables": [{"type": "Facebook Post", "quantity": 1}]},
         ],
     },
@@ -578,7 +632,13 @@ COLLABORATIONS = [
         "preferred_date_from": date.today() + timedelta(days=20),
         "preferred_date_to": date.today() + timedelta(days=90),
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 6}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 3},
+                    {"type": "Instagram Stories", "quantity": 6},
+                ],
+            },
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 1}]},
         ],
         "responded_at": datetime.now() - timedelta(days=3),
@@ -615,7 +675,13 @@ COLLABORATIONS = [
         "preferred_date_from": date.today() + timedelta(days=30),
         "preferred_date_to": date.today() + timedelta(days=100),
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 2}, {"type": "Instagram Stories", "quantity": 5}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 2},
+                    {"type": "Instagram Stories", "quantity": 5},
+                ],
+            },
             {"platform": "TikTok", "deliverables": [{"type": "TikTok Video", "quantity": 2}]},
         ],
     },
@@ -630,7 +696,13 @@ COLLABORATIONS = [
         "preferred_date_from": date.today() + timedelta(days=15),
         "preferred_date_to": date.today() + timedelta(days=150),
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 4}, {"type": "Instagram Stories", "quantity": 8}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 4},
+                    {"type": "Instagram Stories", "quantity": 8},
+                ],
+            },
             {"platform": "YouTube", "deliverables": [{"type": "YouTube Video", "quantity": 2}]},
         ],
         "responded_at": datetime.now() - timedelta(days=7),
@@ -649,7 +721,13 @@ COLLABORATIONS = [
         "preferred_months": ["Jul"],
         "consent": True,
         "platform_deliverables": [
-            {"platform": "Instagram", "deliverables": [{"type": "Instagram Post", "quantity": 3}, {"type": "Instagram Stories", "quantity": 10}]},
+            {
+                "platform": "Instagram",
+                "deliverables": [
+                    {"type": "Instagram Post", "quantity": 3},
+                    {"type": "Instagram Stories", "quantity": 10},
+                ],
+            },
         ],
         "hotel_agreed_at": datetime.now() - timedelta(days=2),
         "creator_agreed_at": None,
@@ -738,11 +816,31 @@ EXTERNAL_COLLABORATIONS = [
 # Reviews
 # ---------------------------------------------------------------------------
 REVIEWS = [
-    {"creator_email": "creator1@mock.com", "rating": 5, "comment": "Excellent content quality and very professional to work with. Highly recommended!"},
-    {"creator_email": "creator2@mock.com", "rating": 5, "comment": "Amazing photos! Exactly what we were looking for. Delivered everything on time."},
-    {"creator_email": "creator3@mock.com", "rating": 4, "comment": "Great reach and engagement. Communication could be slightly faster but overall good experience."},
-    {"creator_email": "creator4@mock.com", "rating": 5, "comment": "Truly authentic content. Our guests loved the reel! Will definitely work again."},
-    {"creator_email": "creator1@mock.com", "rating": 5, "comment": "Super creative and professional. The video quality is top notch."},
+    {
+        "creator_email": "creator1@mock.com",
+        "rating": 5,
+        "comment": "Excellent content quality and very professional to work with. Highly recommended!",
+    },
+    {
+        "creator_email": "creator2@mock.com",
+        "rating": 5,
+        "comment": "Amazing photos! Exactly what we were looking for. Delivered everything on time.",
+    },
+    {
+        "creator_email": "creator3@mock.com",
+        "rating": 4,
+        "comment": "Great reach and engagement. Communication could be slightly faster but overall good experience.",
+    },
+    {
+        "creator_email": "creator4@mock.com",
+        "rating": 5,
+        "comment": "Truly authentic content. Our guests loved the reel! Will definitely work again.",
+    },
+    {
+        "creator_email": "creator1@mock.com",
+        "rating": 5,
+        "comment": "Super creative and professional. The video quality is top notch.",
+    },
 ]
 
 
@@ -818,8 +916,16 @@ async def main():
             creator_db_ids[email] = row["id"]
 
             for p in profile["platforms"]:
-                top_countries = [{"country": k, "percentage": v} for k, v in p["top_countries"].items()] if p.get("top_countries") else None
-                top_age = [{"ageRange": k, "percentage": v} for k, v in p["top_age_groups"].items()] if p.get("top_age_groups") else None
+                top_countries = (
+                    [{"country": k, "percentage": v} for k, v in p["top_countries"].items()]
+                    if p.get("top_countries")
+                    else None
+                )
+                top_age = (
+                    [{"ageRange": k, "percentage": v} for k, v in p["top_age_groups"].items()]
+                    if p.get("top_age_groups")
+                    else None
+                )
                 await conn.execute(
                     """
                     INSERT INTO creator_platforms
@@ -955,11 +1061,16 @@ async def main():
             creator_id = creator_db_ids.get(c["creator_email"])
             listing_row = listing_lookup.get((c["hotel_email"], c["listing_name"]))
             if not creator_id or not listing_row:
-                print(f"  Skipped collab: missing creator or listing")
+                print("  Skipped collab: missing creator or listing")
                 continue
 
             # Parse dates
-            for f in ("travel_date_from", "travel_date_to", "preferred_date_from", "preferred_date_to"):
+            for f in (
+                "travel_date_from",
+                "travel_date_to",
+                "preferred_date_from",
+                "preferred_date_to",
+            ):
                 if c.get(f):
                     c[f] = parse_date(c[f])
 
@@ -1096,27 +1207,47 @@ async def main():
             if collab["status"] == "negotiating":
                 msgs = [
                     (cuid, "Hi! Can we adjust the check-in date to July 10th?", "text"),
-                    (None, "Creator has suggested a counter-offer with updated terms: Check-in: 2024-07-10. Please review the new terms.", "system"),
+                    (
+                        None,
+                        "Creator has suggested a counter-offer with updated terms: Check-in: 2024-07-10. Please review the new terms.",
+                        "system",
+                    ),
                     (huid, "Sure, that works for us! I've updated the terms on my end.", "text"),
-                    (None, "Hotel has suggested a counter-offer - Deliverables updated. Please review.", "system"),
+                    (
+                        None,
+                        "Hotel has suggested a counter-offer - Deliverables updated. Please review.",
+                        "system",
+                    ),
                     (None, "Hotel approved the terms.", "system"),
                 ]
             elif collab["status"] == "accepted":
                 msgs = [
                     (cuid, "Looking forward to our stay!", "text"),
                     (huid, "We are excited to host you!", "text"),
-                    (None, "Collaboration Accepted! Both parties have agreed to the terms.", "system"),
+                    (
+                        None,
+                        "Collaboration Accepted! Both parties have agreed to the terms.",
+                        "system",
+                    ),
                 ]
             elif collab["status"] == "completed":
                 msgs = [
                     (cuid, "I've just posted the content! Check it out.", "text"),
                     (huid, "This looks amazing! Thank you so much.", "text"),
-                    (None, "Collaboration completed. All deliverables have been fulfilled.", "system"),
+                    (
+                        None,
+                        "Collaboration completed. All deliverables have been fulfilled.",
+                        "system",
+                    ),
                 ]
             elif collab["status"] == "declined":
                 msgs = [
                     (cuid, "Hi, I'm really interested in this collaboration.", "text"),
-                    (huid, "Thank you for your interest. Unfortunately, we are fully booked for those dates.", "text"),
+                    (
+                        huid,
+                        "Thank you for your interest. Unfortunately, we are fully booked for those dates.",
+                        "text",
+                    ),
                     (None, "Hotel has declined the collaboration request.", "system"),
                 ]
             for sender, content, mtype in msgs:
@@ -1125,7 +1256,10 @@ async def main():
                     INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, created_at)
                     VALUES ($1, $2, $3, $4, now() - interval '1 day')
                     """,
-                    collab["id"], sender, content, mtype,
+                    collab["id"],
+                    sender,
+                    content,
+                    mtype,
                 )
                 chat_count += 1
         print(f"  Created {chat_count} messages")
@@ -1150,7 +1284,9 @@ async def main():
             if not matching:
                 continue
             target = matching[i % len(matching)]
-            exists = await conn.fetchval("SELECT 1 FROM creator_ratings WHERE collaboration_id = $1", target["id"])
+            exists = await conn.fetchval(
+                "SELECT 1 FROM creator_ratings WHERE collaboration_id = $1", target["id"]
+            )
             if exists:
                 continue
             await conn.execute(
@@ -1158,7 +1294,11 @@ async def main():
                 INSERT INTO creator_ratings (creator_id, hotel_id, collaboration_id, rating, comment, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
                 """,
-                target["creator_id"], target["hotel_id"], target["id"], rev["rating"], rev["comment"],
+                target["creator_id"],
+                target["hotel_id"],
+                target["id"],
+                rev["rating"],
+                rev["comment"],
             )
             review_count += 1
         print(f"  Created {review_count} reviews")

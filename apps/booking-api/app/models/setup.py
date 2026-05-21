@@ -1,16 +1,15 @@
 from pydantic import BaseModel
-from typing import Optional
 
 
 class SetupPrefillData(BaseModel):
-    property_name: Optional[str] = None
-    reservation_email: Optional[str] = None
-    phone_number: Optional[str] = None
-    address: Optional[str] = None
-    hero_image: Optional[str] = None
+    property_name: str | None = None
+    reservation_email: str | None = None
+    phone_number: str | None = None
+    address: str | None = None
+    hero_image: str | None = None
 
 
 class SetupStatusResponse(BaseModel):
     setup_complete: bool
     missing_fields: list[str]
-    prefill_data: Optional[SetupPrefillData] = None
+    prefill_data: SetupPrefillData | None = None

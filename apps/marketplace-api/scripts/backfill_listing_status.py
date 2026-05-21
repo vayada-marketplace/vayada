@@ -9,6 +9,7 @@ would otherwise stay stuck on 'pending'.
 
 Safe to re-run; only rows currently != 'verified' are touched.
 """
+
 import argparse
 import asyncio
 import sys
@@ -30,7 +31,7 @@ async def backfill(dry_run: bool):
     finally:
         await auth_conn.close()
 
-    verified_user_ids = [row['id'] for row in verified_rows]
+    verified_user_ids = [row["id"] for row in verified_rows]
     print(f"Found {len(verified_user_ids)} verified hotel users")
 
     if not verified_user_ids:

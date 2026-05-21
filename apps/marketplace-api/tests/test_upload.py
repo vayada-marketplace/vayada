@@ -1,19 +1,17 @@
 """
 Tests for file upload endpoints.
 """
+
+from io import BytesIO
+
 import pytest
 from httpx import AsyncClient
-from io import BytesIO
 from PIL import Image
 
 from tests.conftest import get_auth_headers
 
 
-def create_test_image(
-    width: int = 100,
-    height: int = 100,
-    format: str = "JPEG"
-) -> bytes:
+def create_test_image(width: int = 100, height: int = 100, format: str = "JPEG") -> bytes:
     """Create a test image file."""
     img = Image.new("RGB", (width, height), color="red")
     buffer = BytesIO()
@@ -30,16 +28,14 @@ def create_invalid_file(content: bytes = b"not an image") -> bytes:
 class TestUploadImage:
     """Tests for POST /upload/image"""
 
-    async def test_upload_jpeg_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_jpeg_success(self, client: AsyncClient, test_creator):
         """Test uploading a JPEG image."""
         image_data = create_test_image(format="JPEG")
 
         response = await client.post(
             "/upload/image",
             files={"file": ("test.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -48,80 +44,67 @@ class TestUploadImage:
         assert "key" in data
         assert data["format"] in ["JPEG", "jpeg"]
 
-    async def test_upload_png_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_png_success(self, client: AsyncClient, test_creator):
         """Test uploading a PNG image."""
         image_data = create_test_image(format="PNG")
 
         response = await client.post(
             "/upload/image",
             files={"file": ("test.png", image_data, "image/png")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "url" in data
 
-    async def test_upload_webp_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_webp_success(self, client: AsyncClient, test_creator):
         """Test uploading a WEBP image."""
         image_data = create_test_image(format="WEBP")
 
         response = await client.post(
             "/upload/image",
             files={"file": ("test.webp", image_data, "image/webp")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "url" in data
 
-    async def test_upload_invalid_format(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_invalid_format(self, client: AsyncClient, test_creator):
         """Test uploading file with invalid format."""
         invalid_file = create_invalid_file()
 
         response = await client.post(
             "/upload/image",
             files={"file": ("test.txt", invalid_file, "text/plain")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
 
-    async def test_upload_empty_file(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_empty_file(self, client: AsyncClient, test_creator):
         """Test uploading empty file."""
         response = await client.post(
             "/upload/image",
             files={"file": ("empty.jpg", b"", "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
 
-    async def test_upload_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_upload_no_auth(self, client: AsyncClient):
         """Test uploading without authentication."""
         image_data = create_test_image()
 
         response = await client.post(
-            "/upload/image",
-            files={"file": ("test.jpg", image_data, "image/jpeg")}
+            "/upload/image", files={"file": ("test.jpg", image_data, "image/jpeg")}
         )
 
         assert response.status_code == 403
 
-    async def test_upload_with_prefix(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_with_prefix(self, client: AsyncClient, test_creator):
         """Test uploading with custom prefix."""
         image_data = create_test_image()
 
@@ -129,7 +112,7 @@ class TestUploadImage:
             "/upload/image",
             files={"file": ("test.jpg", image_data, "image/jpeg")},
             params={"prefix": "custom-prefix"},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -140,9 +123,7 @@ class TestUploadImage:
 class TestUploadMultipleImages:
     """Tests for POST /upload/images"""
 
-    async def test_upload_multiple_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_multiple_success(self, client: AsyncClient, test_creator):
         """Test uploading multiple images."""
         image1 = create_test_image()
         image2 = create_test_image()
@@ -151,9 +132,9 @@ class TestUploadMultipleImages:
             "/upload/images",
             files=[
                 ("files", ("test1.jpg", image1, "image/jpeg")),
-                ("files", ("test2.jpg", image2, "image/jpeg"))
+                ("files", ("test2.jpg", image2, "image/jpeg")),
             ],
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -162,9 +143,7 @@ class TestUploadMultipleImages:
         assert data["total"] == 2
         assert len(data["images"]) == 2
 
-    async def test_upload_multiple_partial_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_multiple_partial_success(self, client: AsyncClient, test_creator):
         """Test uploading multiple images with some invalid."""
         valid_image = create_test_image()
         invalid_file = create_invalid_file()
@@ -173,9 +152,9 @@ class TestUploadMultipleImages:
             "/upload/images",
             files=[
                 ("files", ("valid.jpg", valid_image, "image/jpeg")),
-                ("files", ("invalid.txt", invalid_file, "text/plain"))
+                ("files", ("invalid.txt", invalid_file, "text/plain")),
             ],
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -183,22 +162,16 @@ class TestUploadMultipleImages:
         # Only valid image should be uploaded
         assert data["total"] == 1
 
-    async def test_upload_multiple_no_files(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_multiple_no_files(self, client: AsyncClient, test_creator):
         """Test uploading with no files."""
         response = await client.post(
-            "/upload/images",
-            files=[],
-            headers=get_auth_headers(test_creator["token"])
+            "/upload/images", files=[], headers=get_auth_headers(test_creator["token"])
         )
 
         # Should fail validation
         assert response.status_code in [400, 422]
 
-    async def test_upload_multiple_all_invalid(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_multiple_all_invalid(self, client: AsyncClient, test_creator):
         """Test uploading multiple invalid files."""
         invalid1 = create_invalid_file(b"not image 1")
         invalid2 = create_invalid_file(b"not image 2")
@@ -207,9 +180,9 @@ class TestUploadMultipleImages:
             "/upload/images",
             files=[
                 ("files", ("invalid1.txt", invalid1, "text/plain")),
-                ("files", ("invalid2.txt", invalid2, "text/plain"))
+                ("files", ("invalid2.txt", invalid2, "text/plain")),
             ],
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
@@ -218,31 +191,26 @@ class TestUploadMultipleImages:
 class TestUploadHotelProfileImage:
     """Tests for POST /upload/image/hotel-profile"""
 
-    async def test_upload_hotel_profile_success(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_upload_hotel_profile_success(self, client: AsyncClient, test_hotel):
         """Test uploading hotel profile image."""
         image_data = create_test_image()
 
         response = await client.post(
             "/upload/image/hotel-profile",
             files={"file": ("hotel.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "hotels" in data["key"]
 
-    async def test_upload_hotel_profile_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_upload_hotel_profile_no_auth(self, client: AsyncClient):
         """Test uploading hotel profile image without auth."""
         image_data = create_test_image()
 
         response = await client.post(
-            "/upload/image/hotel-profile",
-            files={"file": ("hotel.jpg", image_data, "image/jpeg")}
+            "/upload/image/hotel-profile", files={"file": ("hotel.jpg", image_data, "image/jpeg")}
         )
 
         assert response.status_code == 403
@@ -251,31 +219,26 @@ class TestUploadHotelProfileImage:
 class TestUploadListingImage:
     """Tests for POST /upload/image/listing"""
 
-    async def test_upload_listing_image_success(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_upload_listing_image_success(self, client: AsyncClient, test_hotel):
         """Test uploading listing image."""
         image_data = create_test_image()
 
         response = await client.post(
             "/upload/image/listing",
             files={"file": ("listing.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "listings" in data["key"]
 
-    async def test_upload_listing_image_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_upload_listing_image_no_auth(self, client: AsyncClient):
         """Test uploading listing image without auth."""
         image_data = create_test_image()
 
         response = await client.post(
-            "/upload/image/listing",
-            files={"file": ("listing.jpg", image_data, "image/jpeg")}
+            "/upload/image/listing", files={"file": ("listing.jpg", image_data, "image/jpeg")}
         )
 
         assert response.status_code == 403
@@ -284,9 +247,7 @@ class TestUploadListingImage:
 class TestUploadListingImages:
     """Tests for POST /upload/images/listing"""
 
-    async def test_upload_listing_images_success(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_upload_listing_images_success(self, client: AsyncClient, test_hotel):
         """Test uploading multiple listing images."""
         image1 = create_test_image()
         image2 = create_test_image()
@@ -295,9 +256,9 @@ class TestUploadListingImages:
             "/upload/images/listing",
             files=[
                 ("files", ("listing1.jpg", image1, "image/jpeg")),
-                ("files", ("listing2.jpg", image2, "image/jpeg"))
+                ("files", ("listing2.jpg", image2, "image/jpeg")),
             ],
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
@@ -316,7 +277,7 @@ class TestUploadListingImages:
         response = await client.post(
             f"/upload/images/listing?target_user_id={target_user_id}",
             files=[("files", ("listing.jpg", image_data, "image/jpeg"))],
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
@@ -328,16 +289,14 @@ class TestUploadListingImages:
 class TestUploadCreatorProfileImage:
     """Tests for POST /upload/image/creator-profile"""
 
-    async def test_upload_creator_profile_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_creator_profile_success(self, client: AsyncClient, test_creator):
         """Test uploading creator profile image."""
         image_data = create_test_image()
 
         response = await client.post(
             "/upload/image/creator-profile",
             files={"file": ("profile.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -354,7 +313,7 @@ class TestUploadCreatorProfileImage:
         response = await client.post(
             f"/upload/image/creator-profile?target_user_id={target_user_id}",
             files={"file": ("profile.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
@@ -365,9 +324,7 @@ class TestUploadCreatorProfileImage:
 class TestS3Configuration:
     """Tests for S3 configuration requirements"""
 
-    async def test_upload_requires_s3_config(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_requires_s3_config(self, client: AsyncClient, test_creator):
         """Test that upload fails gracefully when S3 is not configured."""
         from unittest.mock import patch
 
@@ -380,7 +337,7 @@ class TestS3Configuration:
             response = await client.post(
                 "/upload/image",
                 files={"file": ("test.jpg", image_data, "image/jpeg")},
-                headers=get_auth_headers(test_creator["token"])
+                headers=get_auth_headers(test_creator["token"]),
             )
 
             assert response.status_code == 503
@@ -390,16 +347,14 @@ class TestS3Configuration:
 class TestUploadChatImage:
     """Tests for POST /upload/image/chat"""
 
-    async def test_upload_chat_image_jpeg_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_jpeg_success(self, client: AsyncClient, test_creator):
         """Test uploading a JPEG chat image."""
         image_data = create_test_image(format="JPEG")
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -407,97 +362,82 @@ class TestUploadChatImage:
         assert "url" in data
         assert "chat" in data["key"]
 
-    async def test_upload_chat_image_png_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_png_success(self, client: AsyncClient, test_creator):
         """Test uploading a PNG chat image."""
         image_data = create_test_image(format="PNG")
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.png", image_data, "image/png")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "url" in data
 
-    async def test_upload_chat_image_webp_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_webp_success(self, client: AsyncClient, test_creator):
         """Test uploading a WEBP chat image."""
         image_data = create_test_image(format="WEBP")
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.webp", image_data, "image/webp")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "url" in data
 
-    async def test_upload_chat_image_gif_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_gif_success(self, client: AsyncClient, test_creator):
         """Test uploading a GIF chat image."""
         image_data = create_test_image(format="GIF")
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.gif", image_data, "image/gif")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert "url" in data
 
-    async def test_upload_chat_image_invalid_format(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_invalid_format(self, client: AsyncClient, test_creator):
         """Test uploading chat image with invalid format."""
         invalid_file = create_invalid_file()
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.txt", invalid_file, "text/plain")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
         assert "Please select an image" in response.json()["detail"]
 
-    async def test_upload_chat_image_empty_file(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_empty_file(self, client: AsyncClient, test_creator):
         """Test uploading empty chat image."""
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("empty.jpg", b"", "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
 
-    async def test_upload_chat_image_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_upload_chat_image_no_auth(self, client: AsyncClient):
         """Test uploading chat image without authentication."""
         image_data = create_test_image()
 
         response = await client.post(
-            "/upload/image/chat",
-            files={"file": ("chat.jpg", image_data, "image/jpeg")}
+            "/upload/image/chat", files={"file": ("chat.jpg", image_data, "image/jpeg")}
         )
 
         assert response.status_code == 403
 
-    async def test_upload_chat_image_too_large(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_chat_image_too_large(self, client: AsyncClient, test_creator):
         """Test uploading chat image larger than 20MB."""
         # Create a large image (slightly over 20MB)
         large_image = create_test_image(width=3000, height=3000)
@@ -513,22 +453,20 @@ class TestUploadChatImage:
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("large.jpg", large_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400
         assert "20MB" in response.json()["detail"]
 
-    async def test_upload_chat_image_hotel_user(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_upload_chat_image_hotel_user(self, client: AsyncClient, test_hotel):
         """Test that hotel users can also upload chat images."""
         image_data = create_test_image()
 
         response = await client.post(
             "/upload/image/chat",
             files={"file": ("chat.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
@@ -540,16 +478,14 @@ class TestUploadChatImage:
 class TestImageValidation:
     """Tests for image validation"""
 
-    async def test_upload_returns_image_dimensions(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_returns_image_dimensions(self, client: AsyncClient, test_creator):
         """Test that upload returns image dimensions."""
         image_data = create_test_image(width=800, height=600)
 
         response = await client.post(
             "/upload/image",
             files={"file": ("test.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 201
@@ -558,9 +494,7 @@ class TestImageValidation:
         assert "height" in data
         assert "size_bytes" in data
 
-    async def test_upload_corrupted_image(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_upload_corrupted_image(self, client: AsyncClient, test_creator):
         """Test uploading corrupted image file."""
         # Create corrupted JPEG-like data
         corrupted_data = b"\xff\xd8\xff" + b"corrupted_data_here"
@@ -568,7 +502,7 @@ class TestImageValidation:
         response = await client.post(
             "/upload/image",
             files={"file": ("corrupted.jpg", corrupted_data, "image/jpeg")},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 400

@@ -1,12 +1,20 @@
 """
 Pytest fixtures and configuration for PMS backend tests.
 """
+
 import os
 
 # Set environment variables BEFORE importing any app modules
-os.environ.setdefault("DATABASE_URL", "postgresql://vayada_pms_user:vayada_pms_password@localhost:5436/vayada_pms_db")
-os.environ.setdefault("AUTH_DATABASE_URL", "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db")
-os.environ.setdefault("CORS_ORIGINS", "http://localhost:3002,http://localhost:3003,http://localhost:3004")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql://vayada_pms_user:vayada_pms_password@localhost:5436/vayada_pms_db"
+)
+os.environ.setdefault(
+    "AUTH_DATABASE_URL",
+    "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db",
+)
+os.environ.setdefault(
+    "CORS_ORIGINS", "http://localhost:3002,http://localhost:3003,http://localhost:3004"
+)
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -22,20 +30,19 @@ os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "test-access-key")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
-import pytest
 import uuid
-import jwt
-from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Dict, Optional
 from unittest.mock import patch
 
 import bcrypt
-from httpx import AsyncClient, ASGITransport
-
-from app.main import app
-from app.database import Database, AuthDatabase
+import jwt
+import pytest
 from app.config import settings
-
+from app.database import AuthDatabase, Database
+from app.main import app
+from httpx import ASGITransport, AsyncClient
 
 # Test data patterns for cleanup
 TEST_EMAIL_PATTERN = "pmstest%@example.com"
@@ -204,9 +211,7 @@ async def cleanup_database(init_database):
 
     # Clean auth users
     async with auth_pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN
-        )
+        await conn.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
 
 
 @pytest.fixture(autouse=True)
@@ -253,29 +258,31 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_jwt_token(user_id: str, email: str = "test@example.com", user_type: str = "hotel") -> str:
+def create_jwt_token(
+    user_id: str, email: str = "test@example.com", user_type: str = "hotel"
+) -> str:
     """Create a JWT token matching what the booking engine issues."""
     payload = {
         "sub": user_id,
         "email": email,
         "type": user_type,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(UTC) + timedelta(hours=24),
+        "iat": datetime.now(UTC),
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def get_auth_headers(token: str) -> Dict[str, str]:
+def get_auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
 async def create_test_user(
-    email: Optional[str] = None,
+    email: str | None = None,
     password: str = "TestPassword123!",
     name: str = "Test Hotel User",
     user_type: str = "hotel",
     user_status: str = "verified",
-) -> Dict:
+) -> dict:
     """Create a test user in the auth database."""
     email = email or generate_test_email()
     password_hash = hash_password(password)
@@ -286,7 +293,12 @@ async def create_test_user(
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, email, name, type, status
         """,
-        email, password_hash, name, user_type, user_status, user_status == "verified",
+        email,
+        password_hash,
+        name,
+        user_type,
+        user_status,
+        user_status == "verified",
     )
     user = dict(user)
     user["token"] = create_jwt_token(str(user["id"]), user["email"], user["type"])
@@ -296,9 +308,9 @@ async def create_test_user(
 async def create_test_hotel(
     user_id: str,
     name: str = "Test Hotel",
-    slug: Optional[str] = None,
+    slug: str | None = None,
     contact_email: str = "contact@testhotel.com",
-) -> Dict:
+) -> dict:
     """Create a hotel in the PMS database."""
     slug = slug or generate_test_slug()
     row = await Database.fetchrow(
@@ -307,7 +319,10 @@ async def create_test_hotel(
         VALUES ($1, $2, $3, $4)
         RETURNING id, slug, name, contact_email, user_id, created_at
         """,
-        slug, name, contact_email, user_id,
+        slug,
+        name,
+        contact_email,
+        user_id,
     )
     return dict(row)
 
@@ -318,12 +333,12 @@ async def create_test_room_type(
     base_rate: float = 150.0,
     total_rooms: int = 5,
     max_occupancy: int = 2,
-    max_adults: Optional[int] = None,
-    max_children: Optional[int] = None,
+    max_adults: int | None = None,
+    max_children: int | None = None,
     is_active: bool = True,
-    non_refundable_rate: Optional[float] = None,
+    non_refundable_rate: float | None = None,
     non_refundable_enabled: bool = False,
-) -> Dict:
+) -> dict:
     """Create a room type in the PMS database."""
     import json
 
@@ -340,11 +355,25 @@ async def create_test_room_type(
             $16, $17, $18, $19
         ) RETURNING *
         """,
-        hotel_id, name, "A spacious suite", "Spacious and comfortable",
-        max_occupancy, max_adults, max_children, 45, base_rate, non_refundable_rate, "EUR",
-        json.dumps(["WiFi", "Minibar"]), json.dumps([]), "King",
+        hotel_id,
+        name,
+        "A spacious suite",
+        "Spacious and comfortable",
+        max_occupancy,
+        max_adults,
+        max_children,
+        45,
+        base_rate,
+        non_refundable_rate,
+        "EUR",
+        json.dumps(["WiFi", "Minibar"]),
+        json.dumps([]),
+        "King",
         json.dumps(["Mountain View"]),
-        total_rooms, is_active, 0, non_refundable_enabled,
+        total_rooms,
+        is_active,
+        0,
+        non_refundable_enabled,
     )
     return dict(row)
 
@@ -357,7 +386,7 @@ async def create_test_booking(
     guest_email: str = "guest@example.com",
     nightly_rate: float = 150.0,
     status: str = "pending",
-) -> Dict:
+) -> dict:
     """Create a booking in the PMS database."""
     from datetime import date as date_type
 
@@ -377,10 +406,22 @@ async def create_test_booking(
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
         ) RETURNING *
         """,
-        hotel_id, room_type_id, f"VAY-T{uuid.uuid4().hex[:5].upper()}",
-        "John", "Doe", guest_email, "+1234567890",
-        "", ci, co,
-        2, 0, nightly_rate, total, "EUR", status,
+        hotel_id,
+        room_type_id,
+        f"VAY-T{uuid.uuid4().hex[:5].upper()}",
+        "John",
+        "Doe",
+        guest_email,
+        "+1234567890",
+        "",
+        ci,
+        co,
+        2,
+        0,
+        nightly_rate,
+        total,
+        "EUR",
+        status,
     )
     return dict(row)
 
@@ -388,11 +429,13 @@ async def create_test_booking(
 async def create_test_affiliate(
     hotel_id: str,
     full_name: str = "Test Affiliate",
-    email: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> Dict:
+    email: str | None = None,
+    user_id: str | None = None,
+) -> dict:
     """Create an affiliate in the PMS database. Optionally link to a user."""
-    import secrets, string
+    import secrets
+    import string
+
     email = email or generate_test_email("pmstest-aff")
     code = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
     row = await Database.fetchrow(
@@ -403,8 +446,13 @@ async def create_test_affiliate(
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
-        hotel_id, code, full_name, email,
-        "https://instagram.com/test", "guest", user_id,
+        hotel_id,
+        code,
+        full_name,
+        email,
+        "https://instagram.com/test",
+        "guest",
+        user_id,
     )
     return dict(row)
 
@@ -418,11 +466,11 @@ async def set_test_payout_settings(user_id: str, **fields) -> None:
     if not fields:
         return
     cols = list(fields.keys())
-    placeholders = ", ".join(f"${i+2}" for i in range(len(cols)))
+    placeholders = ", ".join(f"${i + 2}" for i in range(len(cols)))
     set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
     await Database.execute(
         f"""
-        INSERT INTO affiliate_payout_settings (user_id, {', '.join(cols)})
+        INSERT INTO affiliate_payout_settings (user_id, {", ".join(cols)})
         VALUES ($1, {placeholders})
         ON CONFLICT (user_id) DO UPDATE SET {set_clause}, updated_at = now()
         """,
@@ -438,10 +486,11 @@ async def create_test_room_block(
     end_date: str = "2026-07-05",
     blocked_count: int = 1,
     reason: str = "Maintenance",
-    room_id: Optional[str] = None,
-) -> Dict:
+    room_id: str | None = None,
+) -> dict:
     """Create a room block in the PMS database."""
     from datetime import date as date_type
+
     sd = date_type.fromisoformat(start_date)
     ed = date_type.fromisoformat(end_date)
     row = await Database.fetchrow(
@@ -450,7 +499,13 @@ async def create_test_room_block(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
-        hotel_id, room_type_id, room_id, sd, ed, blocked_count, reason,
+        hotel_id,
+        room_type_id,
+        room_id,
+        sd,
+        ed,
+        blocked_count,
+        reason,
     )
     return dict(row)
 
@@ -461,7 +516,7 @@ async def create_test_room(
     room_number: str = "101",
     floor: str = "1",
     status: str = "available",
-) -> Dict:
+) -> dict:
     """Create a single individual room in the PMS database."""
     row = await Database.fetchrow(
         """
@@ -469,7 +524,11 @@ async def create_test_room(
         VALUES ($1, $2, $3, $4, $5, 0)
         RETURNING *
         """,
-        hotel_id, room_type_id, room_number, floor, status,
+        hotel_id,
+        room_type_id,
+        room_number,
+        floor,
+        status,
     )
     return dict(row)
 
@@ -480,9 +539,9 @@ async def create_test_payment_settings(
     platform_fee_value: float = 8.0,
     platform_fee_with_affiliate: float = 2.0,
     pay_at_property_enabled: bool = False,
-    stripe_connect_account_id: Optional[str] = None,
+    stripe_connect_account_id: str | None = None,
     stripe_connect_onboarded: bool = False,
-) -> Dict:
+) -> dict:
     """Create payment settings for a hotel."""
     row = await Database.fetchrow(
         """
@@ -500,9 +559,13 @@ async def create_test_payment_settings(
             stripe_connect_onboarded = EXCLUDED.stripe_connect_onboarded
         RETURNING *
         """,
-        hotel_id, platform_fee_type, platform_fee_value,
-        platform_fee_with_affiliate, pay_at_property_enabled,
-        stripe_connect_account_id, stripe_connect_onboarded,
+        hotel_id,
+        platform_fee_type,
+        platform_fee_value,
+        platform_fee_with_affiliate,
+        pay_at_property_enabled,
+        stripe_connect_account_id,
+        stripe_connect_onboarded,
     )
     return dict(row)
 
@@ -511,7 +574,7 @@ async def create_test_cancellation_policy(
     hotel_id: str,
     free_cancellation_days: int = 7,
     partial_refund_pct: float = 0.0,
-) -> Dict:
+) -> dict:
     """Create a cancellation policy for a hotel."""
     row = await Database.fetchrow(
         """
@@ -522,7 +585,9 @@ async def create_test_cancellation_policy(
             partial_refund_pct = EXCLUDED.partial_refund_pct
         RETURNING *
         """,
-        hotel_id, free_cancellation_days, partial_refund_pct,
+        hotel_id,
+        free_cancellation_days,
+        partial_refund_pct,
     )
     return dict(row)
 
@@ -537,8 +602,8 @@ async def create_test_booking_with_payment(
     status: str = "pending",
     payment_method: str = "card",
     payment_status: str = "authorized",
-    host_response_deadline: Optional[datetime] = None,
-) -> Dict:
+    host_response_deadline: datetime | None = None,
+) -> dict:
     """Create a booking with payment fields set."""
     from datetime import date as date_type
 
@@ -548,7 +613,7 @@ async def create_test_booking_with_payment(
     total = nightly_rate * nights
 
     if host_response_deadline is None:
-        host_response_deadline = datetime.now(timezone.utc) + timedelta(hours=24)
+        host_response_deadline = datetime.now(UTC) + timedelta(hours=24)
 
     row = await Database.fetchrow(
         """
@@ -563,11 +628,25 @@ async def create_test_booking_with_payment(
             $17, $18, $19
         ) RETURNING *
         """,
-        hotel_id, room_type_id, f"VAY-T{uuid.uuid4().hex[:5].upper()}",
-        "John", "Doe", guest_email, "+1234567890",
-        "", ci, co,
-        2, 0, nightly_rate, total, "EUR", status,
-        payment_method, payment_status, host_response_deadline,
+        hotel_id,
+        room_type_id,
+        f"VAY-T{uuid.uuid4().hex[:5].upper()}",
+        "John",
+        "Doe",
+        guest_email,
+        "+1234567890",
+        "",
+        ci,
+        co,
+        2,
+        0,
+        nightly_rate,
+        total,
+        "EUR",
+        status,
+        payment_method,
+        payment_status,
+        host_response_deadline,
     )
     return dict(row)
 

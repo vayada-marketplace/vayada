@@ -1,18 +1,16 @@
-from typing import List, Optional
 from app.database import Database
 
 
 class PaymentRepository:
-
     @staticmethod
     async def create(
         booking_id: str,
         amount: float,
         currency: str,
         payment_method: str,
-        stripe_pi_id: Optional[str] = None,
-        xendit_invoice_id: Optional[str] = None,
-        xendit_invoice_url: Optional[str] = None,
+        stripe_pi_id: str | None = None,
+        xendit_invoice_id: str | None = None,
+        xendit_invoice_url: str | None = None,
     ) -> dict:
         row = await Database.fetchrow(
             """
@@ -35,7 +33,7 @@ class PaymentRepository:
         return dict(row)
 
     @staticmethod
-    async def get_by_booking_id(booking_id: str) -> Optional[dict]:
+    async def get_by_booking_id(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1",
             booking_id,
@@ -43,7 +41,7 @@ class PaymentRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_xendit_invoice(xendit_invoice_id: str) -> Optional[dict]:
+    async def get_by_xendit_invoice(xendit_invoice_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM payments WHERE xendit_invoice_id = $1",
             xendit_invoice_id,
@@ -51,7 +49,7 @@ class PaymentRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_stripe_pi(stripe_pi_id: str) -> Optional[dict]:
+    async def get_by_stripe_pi(stripe_pi_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM payments WHERE stripe_payment_intent_id = $1",
             stripe_pi_id,
@@ -59,7 +57,7 @@ class PaymentRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_booking_ids(booking_ids: List[str]) -> List[dict]:
+    async def list_by_booking_ids(booking_ids: list[str]) -> list[dict]:
         if not booking_ids:
             return []
         rows = await Database.fetch(
@@ -78,7 +76,7 @@ class PaymentRepository:
         *,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict]:
+    ) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT p.*, b.booking_reference, b.guest_first_name,
@@ -89,7 +87,9 @@ class PaymentRepository:
             ORDER BY p.created_at DESC
             LIMIT $2 OFFSET $3
             """,
-            hotel_id, limit, offset,
+            hotel_id,
+            limit,
+            offset,
         )
         return [dict(r) for r in rows]
 
@@ -111,8 +111,8 @@ class PaymentRepository:
         amount: float,
         currency: str,
         payment_method: str,
-        reference: Optional[str] = None,
-        recorded_by: Optional[str] = None,
+        reference: str | None = None,
+        recorded_by: str | None = None,
     ) -> dict:
         """Record a payment that was made offline (cash, bank transfer, …).
 
@@ -127,12 +127,17 @@ class PaymentRepository:
             ) VALUES ($1, $2, $3, $4, 'captured', $5, $6, now())
             RETURNING *
             """,
-            booking_id, amount, currency, payment_method, reference, recorded_by,
+            booking_id,
+            amount,
+            currency,
+            payment_method,
+            reference,
+            recorded_by,
         )
         return dict(row)
 
     @staticmethod
-    async def list_for_hotel_currency_conversion(hotel_id: str) -> List[dict]:
+    async def list_for_hotel_currency_conversion(hotel_id: str) -> list[dict]:
         """Minimal projection used when re-denominating payments on a
         hotel currency change (VAY-335)."""
         rows = await Database.fetch(
@@ -151,7 +156,7 @@ class PaymentRepository:
         payment_id: str,
         *,
         amount: float,
-        refund_amount: Optional[float],
+        refund_amount: float | None,
         currency: str,
     ) -> None:
         await Database.execute(

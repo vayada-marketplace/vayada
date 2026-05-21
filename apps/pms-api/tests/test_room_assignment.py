@@ -35,7 +35,10 @@ class TestDirectFit:
     def test_empty_room_returns_first_room(self):
         rooms = [_room(1), _room(2)]
         plan = plan_assignment(
-            rooms, [], date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            [],
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is not None
         assert plan.new_booking_room_id == "room-1"
@@ -47,7 +50,10 @@ class TestDirectFit:
             _booking("a", "room-1", "2026-05-20", "2026-05-25"),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 26), date(2026, 5, 30),
+            rooms,
+            existing,
+            date(2026, 5, 26),
+            date(2026, 5, 30),
         )
         # Room 1 frees up on 2026-05-25 so it's available for 26+. Picks
         # room 1 (lower sort order) over room 2.
@@ -61,7 +67,10 @@ class TestDirectFit:
             _booking("a", "room-1", "2026-05-20", "2026-05-30"),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is not None
         assert plan.new_booking_room_id == "room-2"
@@ -85,7 +94,10 @@ class TestSingleSwap:
             _booking("c", "room-3", "2026-05-22", "2026-05-24"),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is not None
         # No single room is free 22–27, so a rearrange must happen.
@@ -96,17 +108,11 @@ class TestSingleSwap:
         # on the same room with overlapping dates.
         new_room = plan.new_booking_room_id
         moved = {m.booking_id: m.to_room_id for m in plan.moves}
-        final = {
-            b.booking_id: moved.get(b.booking_id, b.original_room_id)
-            for b in existing
-        }
+        final = {b.booking_id: moved.get(b.booking_id, b.original_room_id) for b in existing}
         for b in existing:
             if final[b.booking_id] != new_room:
                 continue
-            assert (
-                b.check_out <= date(2026, 5, 22)
-                or b.check_in >= date(2026, 5, 27)
-            )
+            assert b.check_out <= date(2026, 5, 22) or b.check_in >= date(2026, 5, 27)
 
 
 class TestThreeWayShuffle:
@@ -125,7 +131,10 @@ class TestThreeWayShuffle:
         ]
         # New booking wants the full 22–27 span.
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         # A valid packing exists here: c→room-1's tail (after 25), b stays,
         # a stays, new booking takes room-3 (which is empty after 24, but
@@ -134,10 +143,7 @@ class TestThreeWayShuffle:
         if plan is None:
             return  # Truly infeasible is also a valid outcome here.
         moved = {m.booking_id: m.to_room_id for m in plan.moves}
-        final = {
-            b.booking_id: moved.get(b.booking_id, b.original_room_id)
-            for b in existing
-        }
+        final = {b.booking_id: moved.get(b.booking_id, b.original_room_id) for b in existing}
         new_room = plan.new_booking_room_id
         # Verify no overlap on the new booking's room.
         for b in existing:
@@ -156,19 +162,28 @@ class TestInfeasible:
             _booking("b", "room-2", "2026-05-20", "2026-05-30", movable=False),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is None
 
     def test_no_rooms_returns_none(self):
         plan = plan_assignment(
-            [], [], date(2026, 5, 22), date(2026, 5, 27),
+            [],
+            [],
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is None
 
     def test_invalid_dates_returns_none(self):
         plan = plan_assignment(
-            [_room(1)], [], date(2026, 5, 27), date(2026, 5, 22),
+            [_room(1)],
+            [],
+            date(2026, 5, 27),
+            date(2026, 5, 22),
         )
         assert plan is None
 
@@ -180,14 +195,16 @@ class TestPinnedBookings:
         rooms = [_room(1), _room(2)]
         existing = [
             # Pinned long-running booking on room-1 covering the whole window.
-            _booking("guest-arrived", "room-1", "2026-05-20", "2026-05-30",
-                     movable=False),
+            _booking("guest-arrived", "room-1", "2026-05-20", "2026-05-30", movable=False),
             # Movable booking on room-2 also covering the window — could
             # have shuffled to room-1 if not for the pin.
             _booking("future", "room-2", "2026-05-20", "2026-05-30"),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is None, (
             "solver should respect pinned bookings: the only way to free a slot "
@@ -198,11 +215,13 @@ class TestPinnedBookings:
         """A pinned booking on one room doesn't block a direct fit on another."""
         rooms = [_room(1), _room(2)]
         existing = [
-            _booking("guest-arrived", "room-1", "2026-05-20", "2026-05-30",
-                     movable=False),
+            _booking("guest-arrived", "room-1", "2026-05-20", "2026-05-30", movable=False),
         ]
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is not None
         assert plan.new_booking_room_id == "room-2"
@@ -225,7 +244,10 @@ class TestMinimizeMoves:
         # room-3 is free — the solver should pick the direct fit on room-3
         # without any moves.
         plan = plan_assignment(
-            rooms, existing, date(2026, 5, 22), date(2026, 5, 27),
+            rooms,
+            existing,
+            date(2026, 5, 22),
+            date(2026, 5, 27),
         )
         assert plan is not None
         assert plan.new_booking_room_id == "room-3"
@@ -259,7 +281,10 @@ class TestPerformance:
                 )
         start_t = time.monotonic()
         plan = plan_assignment(
-            rooms, existing, date(2026, 6, 1), date(2026, 6, 5),
+            rooms,
+            existing,
+            date(2026, 6, 1),
+            date(2026, 6, 5),
             timeout_seconds=0.5,
         )
         elapsed = time.monotonic() - start_t

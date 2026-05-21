@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict, EmailStr
-from typing import Optional
 
 
 def to_camel(string: str) -> str:
@@ -67,16 +66,16 @@ class AffiliateAdminResponse(BaseModel):
     # - commission_pct_override: the custom rate for this affiliate, or null if inheriting
     # - effective_commission_pct: what's actually paid on bookings
     default_commission_pct: float
-    commission_pct_override: Optional[float] = None
+    commission_pct_override: float | None = None
     effective_commission_pct: float
     status: str
     created_at: str
     updated_at: str
-    stripe_connect_account_id: Optional[str] = None
+    stripe_connect_account_id: str | None = None
     stripe_connect_onboarded: bool = False
-    xendit_channel_code: Optional[str] = None
-    xendit_account_number: Optional[str] = None
-    xendit_account_holder_name: Optional[str] = None
+    xendit_channel_code: str | None = None
+    xendit_account_number: str | None = None
+    xendit_account_holder_name: str | None = None
     # Stats from LEFT JOIN
     booking_count: int = 0
     total_revenue: float = 0.0
@@ -95,7 +94,7 @@ class AffiliateCommissionUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     # null clears the override so the affiliate reverts to the hotel default.
-    commission_pct: Optional[float]
+    commission_pct: float | None
 
 
 class DefaultAffiliateCommissionResponse(BaseModel):

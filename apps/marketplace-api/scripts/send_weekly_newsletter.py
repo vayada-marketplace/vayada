@@ -7,22 +7,23 @@ Run via cron or a scheduler once a week, e.g.:
 
 Reads newsletter preferences, fetches recommendations, and sends emails.
 """
+
 import asyncio
 import logging
+import os
 import random
 import sys
-import os
 from datetime import datetime, timedelta
 
 # Add parent dir to path so we can import app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import Database, AuthDatabase
 from app.config import settings
+from app.database import AuthDatabase, Database
 from app.email_service import (
-    send_email,
     create_newsletter_for_creator_html,
     create_newsletter_for_hotel_html,
+    send_email,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -37,14 +38,12 @@ async def _get_verified_user_ids() -> dict:
     rows = await AuthDatabase.fetch(
         "SELECT id, email, name, type FROM users WHERE status = 'verified'"
     )
-    return {str(r['id']): dict(r) for r in rows}
+    return {str(r["id"]): dict(r) for r in rows}
 
 
 async def _get_newsletter_prefs() -> list:
     """Return all enabled newsletter preference rows."""
-    rows = await Database.fetch(
-        "SELECT * FROM newsletter_preferences WHERE enabled = TRUE"
-    )
+    rows = await Database.fetch("SELECT * FROM newsletter_preferences WHERE enabled = TRUE")
     return [dict(r) for r in rows]
 
 
@@ -67,8 +66,9 @@ async def _get_hotel_listings(country_filter: list | None = None) -> list:
         # Simple case-insensitive substring match on location
         lower_filter = [c.lower() for c in country_filter]
         results = [
-            r for r in results
-            if r.get('location') and any(c in r['location'].lower() for c in lower_filter)
+            r
+            for r in results
+            if r.get("location") and any(c in r["location"].lower() for c in lower_filter)
         ]
 
     return results
@@ -91,8 +91,9 @@ async def _get_creators(country_filter: list | None = None) -> list:
     if country_filter:
         lower_filter = [c.lower() for c in country_filter]
         results = [
-            r for r in results
-            if r.get('location') and any(c in r['location'].lower() for c in lower_filter)
+            r
+            for r in results
+            if r.get("location") and any(c in r["location"].lower() for c in lower_filter)
         ]
 
     return results
@@ -117,7 +118,9 @@ def _pick_recommendations(items: list, count: int) -> list:
 def _get_new_items(items: list, count: int, days: int = 7) -> list:
     """Items created in the last `days` days."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    new = [i for i in items if i.get('created_at') and i['created_at'].replace(tzinfo=None) > cutoff]
+    new = [
+        i for i in items if i.get("created_at") and i["created_at"].replace(tzinfo=None) > cutoff
+    ]
     return new[:count]
 
 
@@ -146,25 +149,23 @@ async def _run_newsletter_loop():
     prefs_list = await _get_newsletter_prefs()
 
     # Build a lookup: user_id -> preferences
-    prefs_map = {str(p['user_id']): p for p in prefs_list}
+    prefs_map = {str(p["user_id"]): p for p in prefs_list}
 
     # Collect users who explicitly disabled
     disabled_ids = set()
-    rows = await Database.fetch(
-        "SELECT user_id FROM newsletter_preferences WHERE enabled = FALSE"
-    )
+    rows = await Database.fetch("SELECT user_id FROM newsletter_preferences WHERE enabled = FALSE")
     for r in rows:
-        disabled_ids.add(str(r['user_id']))
+        disabled_ids.add(str(r["user_id"]))
 
     # Build final recipient list: verified users who are not explicitly disabled
     recipients = []
     for user_id, user in verified_users.items():
-        if user['type'] not in ('creator', 'hotel'):
+        if user["type"] not in ("creator", "hotel"):
             continue
         if user_id in disabled_ids:
             continue
         pref = prefs_map.get(user_id)
-        country_filter = pref.get('country_filter') if pref else None
+        country_filter = pref.get("country_filter") if pref else None
         recipients.append((user_id, user, country_filter))
 
     if not recipients:
@@ -175,14 +176,14 @@ async def _run_newsletter_loop():
     skipped = 0
 
     for user_id, user, country_filter in recipients:
-        user_type = user['type']
-        user_email = user['email']
-        user_name = user['name'] or 'there'
+        user_type = user["type"]
+        user_email = user["email"]
+        user_name = user["name"] or "there"
 
         try:
-            if user_type == 'creator':
+            if user_type == "creator":
                 await _send_creator_newsletter(user_email, user_name, country_filter)
-            elif user_type == 'hotel':
+            elif user_type == "hotel":
                 await _send_hotel_newsletter(user_email, user_name, user_id, country_filter)
             else:
                 continue
@@ -206,23 +207,27 @@ async def _send_creator_newsletter(email: str, name: str, country_filter: list |
 
     rec_items = []
     for r in recs:
-        images = r.get('images') or []
-        rec_items.append({
-            "name": r['hotel_name'] + " — " + r['name'],
-            "location": r.get('location', ''),
-            "description": r.get('description', '')[:120],
-            "image_url": images[0] if images else None,
-        })
+        images = r.get("images") or []
+        rec_items.append(
+            {
+                "name": r["hotel_name"] + " — " + r["name"],
+                "location": r.get("location", ""),
+                "description": r.get("description", "")[:120],
+                "image_url": images[0] if images else None,
+            }
+        )
 
     new_items = []
     for h in new_hotels:
-        images = h.get('images') or []
-        new_items.append({
-            "name": h['hotel_name'] + " — " + h['name'],
-            "location": h.get('location', ''),
-            "description": h.get('description', '')[:120],
-            "image_url": images[0] if images else None,
-        })
+        images = h.get("images") or []
+        new_items.append(
+            {
+                "name": h["hotel_name"] + " — " + h["name"],
+                "location": h.get("location", ""),
+                "description": h.get("description", "")[:120],
+                "image_url": images[0] if images else None,
+            }
+        )
 
     html = create_newsletter_for_creator_html(
         creator_name=name,
@@ -240,8 +245,8 @@ async def _send_hotel_newsletter(email: str, name: str, user_id: str, country_fi
     all_creators = await _get_creators(country_filter)
 
     # Only include creators whose user is verified
-    verified_creator_ids = {uid for uid, u in verified_users.items() if u['type'] == 'creator'}
-    all_creators = [c for c in all_creators if str(c['user_id']) in verified_creator_ids]
+    verified_creator_ids = {uid for uid, u in verified_users.items() if u["type"] == "creator"}
+    all_creators = [c for c in all_creators if str(c["user_id"]) in verified_creator_ids]
 
     if not all_creators:
         logger.info(f"No creators to recommend for hotel {email}")
@@ -250,21 +255,21 @@ async def _send_hotel_newsletter(email: str, name: str, user_id: str, country_fi
     # Resolve creator names
     creator_names = {}
     for c in all_creators:
-        uid = str(c['user_id'])
+        uid = str(c["user_id"])
         u = verified_users.get(uid)
-        creator_names[uid] = u['name'] if u else 'Creator'
+        creator_names[uid] = u["name"] if u else "Creator"
 
     recs = _pick_recommendations(all_creators, RECOMMENDATIONS_COUNT)
     new_creators = _get_new_items(all_creators, NEW_ITEMS_COUNT)
 
     def _to_item(c):
         return {
-            "name": creator_names.get(str(c['user_id']), 'Creator'),
-            "location": c.get('location', ''),
-            "description": c.get('short_description', '')[:120],
-            "image_url": c.get('profile_picture'),
-            "followers": c.get('total_followers'),
-            "platform": c.get('top_platform'),
+            "name": creator_names.get(str(c["user_id"]), "Creator"),
+            "location": c.get("location", ""),
+            "description": c.get("short_description", "")[:120],
+            "image_url": c.get("profile_picture"),
+            "followers": c.get("total_followers"),
+            "platform": c.get("top_platform"),
         }
 
     rec_items = [_to_item(c) for c in recs]

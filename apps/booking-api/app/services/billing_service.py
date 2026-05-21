@@ -5,6 +5,7 @@ Pulled out of ``routers/admin/settings.py`` so a sibling router
 (``superadmin``) can use them without importing private symbols across
 router files.
 """
+
 import logging
 from datetime import date
 

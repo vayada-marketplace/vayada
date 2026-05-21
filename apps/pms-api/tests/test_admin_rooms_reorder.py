@@ -1,12 +1,14 @@
 """
 Tests for PATCH /admin/rooms/reorder — VAY-307 Calendar reorder mode.
 """
+
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
     create_test_hotel,
-    create_test_room_type,
     create_test_room,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -48,9 +50,7 @@ class TestReorderRooms:
         ids_in_order = [r["id"] for r in list_resp.json()]
         assert ids_in_order == new_order
 
-    async def test_reorder_is_idempotent_on_repeated_save(
-        self, client, cleanup_database
-    ):
+    async def test_reorder_is_idempotent_on_repeated_save(self, client, cleanup_database):
         user, _, rooms = await _make_hotel_with_rooms(3)
         ordered = [str(r["id"]) for r in rooms]
 

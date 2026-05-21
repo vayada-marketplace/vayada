@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
 
 
 def to_camel(string: str) -> str:
@@ -18,9 +17,9 @@ class ExtractedRoomType(BaseModel):
     bed_type: str = ""
     base_rate: float = 0
     currency: str = "EUR"
-    amenities: List[str] = []
-    features: List[str] = []
-    source_image_urls: List[str] = []
+    amenities: list[str] = []
+    features: list[str] = []
+    source_image_urls: list[str] = []
     cancellation_policy: str = ""
 
 
@@ -33,7 +32,7 @@ class ListingImportPreview(BaseModel):
 
     source_platform: str  # "booking" or "airbnb"
     source_url: str
-    room_types: List[ExtractedRoomType]
+    room_types: list[ExtractedRoomType]
     hotel_name: str = ""
     hotel_description: str = ""
 
@@ -49,22 +48,22 @@ class ListingImportConfirmRoomType(BaseModel):
     bed_type: str = ""
     base_rate: float = 0
     currency: str = "EUR"
-    amenities: List[str] = []
-    features: List[str] = []
-    source_image_urls: List[str] = []
+    amenities: list[str] = []
+    features: list[str] = []
+    source_image_urls: list[str] = []
     total_rooms: int = 1
 
 
 class ListingImportConfirm(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    room_types: List[ListingImportConfirmRoomType]
+    room_types: list[ListingImportConfirmRoomType]
 
 
 class ListingImportResult(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    room_type_ids: List[str]
+    room_type_ids: list[str]
     images_pending: bool
     message: str
 
@@ -73,4 +72,4 @@ class ImportImagesRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     room_type_id: str
-    source_image_urls: List[str]
+    source_image_urls: list[str]

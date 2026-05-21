@@ -1,28 +1,26 @@
 """
 Tests for creator profile endpoints.
 """
+
 import pytest
+from app.database import Database
 from httpx import AsyncClient
 
-from app.database import Database
 from tests.conftest import (
-    get_auth_headers,
     create_test_creator,
     create_test_hotel,
     create_test_platform,
+    get_auth_headers,
 )
 
 
 class TestGetCreatorProfileStatus:
     """Tests for GET /creators/me/profile-status"""
 
-    async def test_profile_status_complete(
-        self, client: AsyncClient, test_creator_verified
-    ):
+    async def test_profile_status_complete(self, client: AsyncClient, test_creator_verified):
         """Test profile status for complete profile."""
         response = await client.get(
-            "/creators/me/profile-status",
-            headers=get_auth_headers(test_creator_verified["token"])
+            "/creators/me/profile-status", headers=get_auth_headers(test_creator_verified["token"])
         )
 
         assert response.status_code == 200
@@ -36,14 +34,10 @@ class TestGetCreatorProfileStatus:
     ):
         """Test profile status for incomplete profile."""
         # Create creator with missing fields
-        creator = await create_test_creator(
-            location=None,
-            short_description=None
-        )
+        creator = await create_test_creator(location=None, short_description=None)
 
         response = await client.get(
-            "/creators/me/profile-status",
-            headers=get_auth_headers(creator["token"])
+            "/creators/me/profile-status", headers=get_auth_headers(creator["token"])
         )
 
         assert response.status_code == 200
@@ -54,33 +48,25 @@ class TestGetCreatorProfileStatus:
         assert data["missing_platforms"] is True
         assert len(data["completion_steps"]) > 0
 
-    async def test_profile_status_missing_platforms(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_profile_status_missing_platforms(self, client: AsyncClient, test_creator):
         """Test profile status when platforms are missing."""
         response = await client.get(
-            "/creators/me/profile-status",
-            headers=get_auth_headers(test_creator["token"])
+            "/creators/me/profile-status", headers=get_auth_headers(test_creator["token"])
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["missing_platforms"] is True
 
-    async def test_profile_status_wrong_user_type(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_profile_status_wrong_user_type(self, client: AsyncClient, test_hotel):
         """Test profile status as hotel user."""
         response = await client.get(
-            "/creators/me/profile-status",
-            headers=get_auth_headers(test_hotel["token"])
+            "/creators/me/profile-status", headers=get_auth_headers(test_hotel["token"])
         )
 
         assert response.status_code == 403
 
-    async def test_profile_status_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_profile_status_no_auth(self, client: AsyncClient):
         """Test profile status without authentication."""
         response = await client.get("/creators/me/profile-status")
 
@@ -90,14 +76,9 @@ class TestGetCreatorProfileStatus:
 class TestGetCreatorProfile:
     """Tests for GET /creators/me"""
 
-    async def test_get_profile_success(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_get_profile_success(self, client: AsyncClient, test_creator):
         """Test getting creator profile."""
-        response = await client.get(
-            "/creators/me",
-            headers=get_auth_headers(test_creator["token"])
-        )
+        response = await client.get("/creators/me", headers=get_auth_headers(test_creator["token"]))
 
         assert response.status_code == 200
         data = response.json()
@@ -106,13 +87,10 @@ class TestGetCreatorProfile:
         assert "platforms" in data
         assert "rating" in data
 
-    async def test_get_profile_with_platforms(
-        self, client: AsyncClient, test_creator_verified
-    ):
+    async def test_get_profile_with_platforms(self, client: AsyncClient, test_creator_verified):
         """Test getting profile with platforms."""
         response = await client.get(
-            "/creators/me",
-            headers=get_auth_headers(test_creator_verified["token"])
+            "/creators/me", headers=get_auth_headers(test_creator_verified["token"])
         )
 
         assert response.status_code == 200
@@ -136,12 +114,11 @@ class TestGetCreatorProfile:
             test_creator_verified["creator"]["id"],
             test_hotel_verified["hotel"]["id"],
             5,
-            "Excellent creator!"
+            "Excellent creator!",
         )
 
         response = await client.get(
-            "/creators/me",
-            headers=get_auth_headers(test_creator_verified["token"])
+            "/creators/me", headers=get_auth_headers(test_creator_verified["token"])
         )
 
         assert response.status_code == 200
@@ -149,22 +126,15 @@ class TestGetCreatorProfile:
         assert data["rating"]["total_reviews"] >= 1
         assert data["rating"]["average_rating"] > 0
 
-    async def test_get_profile_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_get_profile_no_auth(self, client: AsyncClient):
         """Test getting profile without authentication."""
         response = await client.get("/creators/me")
 
         assert response.status_code == 403
 
-    async def test_get_profile_wrong_user_type(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_get_profile_wrong_user_type(self, client: AsyncClient, test_hotel):
         """Test getting creator profile as hotel user."""
-        response = await client.get(
-            "/creators/me",
-            headers=get_auth_headers(test_hotel["token"])
-        )
+        response = await client.get("/creators/me", headers=get_auth_headers(test_hotel["token"]))
 
         assert response.status_code == 403
 
@@ -172,18 +142,16 @@ class TestGetCreatorProfile:
 class TestUpdateCreatorProfile:
     """Tests for PUT /creators/me"""
 
-    async def test_update_profile_basic_fields(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_profile_basic_fields(self, client: AsyncClient, test_creator):
         """Test updating basic profile fields."""
         response = await client.put(
             "/creators/me",
             json={
                 "name": "Updated Name",
                 "location": "Los Angeles, USA",
-                "shortDescription": "Updated description"
+                "shortDescription": "Updated description",
             },
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
@@ -192,9 +160,7 @@ class TestUpdateCreatorProfile:
         assert data["location"] == "Los Angeles, USA"
         assert data["short_description"] == "Updated description"
 
-    async def test_update_profile_with_platforms(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_profile_with_platforms(self, client: AsyncClient, test_creator):
         """Test updating profile with platforms."""
         response = await client.put(
             "/creators/me",
@@ -204,17 +170,17 @@ class TestUpdateCreatorProfile:
                         "name": "Instagram",
                         "handle": "@newhandle",
                         "followers": 75000,
-                        "engagementRate": 4.2
+                        "engagementRate": 4.2,
                     },
                     {
                         "name": "TikTok",
                         "handle": "@tiktokhandle",
                         "followers": 150000,
-                        "engagementRate": 6.5
-                    }
+                        "engagementRate": 6.5,
+                    },
                 ]
             },
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
@@ -230,9 +196,7 @@ class TestUpdateCreatorProfile:
 
         # Add initial platform
         await create_test_platform(
-            creator_id=str(creator["creator"]["id"]),
-            name="Instagram",
-            handle="@old"
+            creator_id=str(creator["creator"]["id"]), name="Instagram", handle="@old"
         )
 
         # Update with new platforms
@@ -240,15 +204,10 @@ class TestUpdateCreatorProfile:
             "/creators/me",
             json={
                 "platforms": [
-                    {
-                        "name": "TikTok",
-                        "handle": "@new",
-                        "followers": 50000,
-                        "engagementRate": 5.0
-                    }
+                    {"name": "TikTok", "handle": "@new", "followers": 50000, "engagementRate": 5.0}
                 ]
             },
-            headers=get_auth_headers(creator["token"])
+            headers=get_auth_headers(creator["token"]),
         )
 
         assert response.status_code == 200
@@ -262,9 +221,7 @@ class TestUpdateCreatorProfile:
     ):
         """Test that completion email is sent when profile becomes complete."""
         creator = await create_test_creator(
-            location=None,
-            short_description=None,
-            profile_complete=False
+            location=None, short_description=None, profile_complete=False
         )
 
         # Complete the profile
@@ -278,24 +235,22 @@ class TestUpdateCreatorProfile:
                         "name": "Instagram",
                         "handle": "@complete",
                         "followers": 10000,
-                        "engagementRate": 3.0
+                        "engagementRate": 3.0,
                     }
-                ]
+                ],
             },
-            headers=get_auth_headers(creator["token"])
+            headers=get_auth_headers(creator["token"]),
         )
 
         assert response.status_code == 200
 
-    async def test_update_profile_partial(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_profile_partial(self, client: AsyncClient, test_creator):
         """Test partial profile update."""
         # Update only name
         response = await client.put(
             "/creators/me",
             json={"name": "Only Name Updated"},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
@@ -304,28 +259,24 @@ class TestUpdateCreatorProfile:
         # Other fields should remain
         assert data["location"] == test_creator["creator"]["location"]
 
-    async def test_update_profile_picture(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_profile_picture(self, client: AsyncClient, test_creator):
         """Test updating profile picture URL."""
         response = await client.put(
             "/creators/me",
             json={"profilePicture": "https://example.com/new-picture.jpg"},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["profile_picture"] == "https://example.com/new-picture.jpg"
 
-    async def test_update_profile_portfolio_link(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_profile_portfolio_link(self, client: AsyncClient, test_creator):
         """Test updating portfolio link."""
         response = await client.put(
             "/creators/me",
             json={"portfolioLink": "https://portfolio.example.com"},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
@@ -333,14 +284,9 @@ class TestUpdateCreatorProfile:
         # URL may be normalized with trailing slash
         assert data["portfolio_link"].rstrip("/") == "https://portfolio.example.com"
 
-    async def test_update_profile_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_update_profile_no_auth(self, client: AsyncClient):
         """Test updating profile without authentication."""
-        response = await client.put(
-            "/creators/me",
-            json={"name": "Test"}
-        )
+        response = await client.put("/creators/me", json={"name": "Test"})
 
         assert response.status_code == 403
 
@@ -348,13 +294,11 @@ class TestUpdateCreatorProfile:
 class TestGetCreatorCollaborations:
     """Tests for GET /creators/me/collaborations"""
 
-    async def test_get_collaborations_list(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_get_collaborations_list(self, client: AsyncClient, test_collaboration):
         """Test getting creator collaborations list."""
         response = await client.get(
             "/creators/me/collaborations",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -368,7 +312,7 @@ class TestGetCreatorCollaborations:
         """Test filtering collaborations by status."""
         response = await client.get(
             "/creators/me/collaborations?status=pending",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -382,7 +326,7 @@ class TestGetCreatorCollaborations:
         """Test filtering collaborations by initiator."""
         response = await client.get(
             "/creators/me/collaborations?initiated_by=creator",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -390,22 +334,17 @@ class TestGetCreatorCollaborations:
         for collab in data:
             assert collab["initiator_type"] == "creator"
 
-    async def test_get_collaborations_empty(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_get_collaborations_empty(self, client: AsyncClient, test_creator):
         """Test getting collaborations when none exist."""
         response = await client.get(
-            "/creators/me/collaborations",
-            headers=get_auth_headers(test_creator["token"])
+            "/creators/me/collaborations", headers=get_auth_headers(test_creator["token"])
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data == []
 
-    async def test_get_collaborations_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_get_collaborations_no_auth(self, client: AsyncClient):
         """Test getting collaborations without authentication."""
         response = await client.get("/creators/me/collaborations")
 
@@ -415,15 +354,13 @@ class TestGetCreatorCollaborations:
 class TestGetCreatorCollaborationDetail:
     """Tests for GET /creators/me/collaborations/{collaboration_id}"""
 
-    async def test_get_collaboration_detail(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_get_collaboration_detail(self, client: AsyncClient, test_collaboration):
         """Test getting collaboration detail."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.get(
             f"/creators/me/collaborations/{collab_id}",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -444,31 +381,27 @@ class TestGetCreatorCollaborationDetail:
 
         response = await client.get(
             f"/creators/me/collaborations/{collab_id}",
-            headers=get_auth_headers(other_creator["token"])
+            headers=get_auth_headers(other_creator["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_get_collaboration_detail_not_found(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_get_collaboration_detail_not_found(self, client: AsyncClient, test_creator):
         """Test getting non-existent collaboration."""
         response = await client.get(
             "/creators/me/collaborations/00000000-0000-0000-0000-000000000000",
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_get_collaboration_detail_as_hotel(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_get_collaboration_detail_as_hotel(self, client: AsyncClient, test_collaboration):
         """Test that hotel cannot use creator collaboration detail endpoint."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.get(
             f"/creators/me/collaborations/{collab_id}",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 403
@@ -477,9 +410,7 @@ class TestGetCreatorCollaborationDetail:
 class TestPlatformAnalytics:
     """Tests for platform analytics in creator profile"""
 
-    async def test_update_platform_with_analytics(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_platform_with_analytics(self, client: AsyncClient, test_creator):
         """Test updating platform with full analytics data."""
         response = await client.put(
             "/creators/me",
@@ -492,21 +423,17 @@ class TestPlatformAnalytics:
                         "engagementRate": 4.5,
                         "topCountries": [
                             {"country": "USA", "percentage": 45},
-                            {"country": "UK", "percentage": 20}
+                            {"country": "UK", "percentage": 20},
                         ],
                         "topAgeGroups": [
                             {"ageRange": "25-34", "percentage": 40},
-                            {"ageRange": "18-24", "percentage": 35}
+                            {"ageRange": "18-24", "percentage": 35},
                         ],
-                        "genderSplit": {
-                            "male": 40,
-                            "female": 58,
-                            "other": 2
-                        }
+                        "genderSplit": {"male": 40, "female": 58, "other": 2},
                     }
                 ]
             },
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 200
@@ -538,13 +465,10 @@ class TestPlatformAnalytics:
             3.5,
             json.dumps([{"country": "USA", "percentage": 50}]),
             json.dumps([{"ageRange": "25-34", "percentage": 60}]),
-            json.dumps({"male": 50, "female": 50})
+            json.dumps({"male": 50, "female": 50}),
         )
 
-        response = await client.get(
-            "/creators/me",
-            headers=get_auth_headers(creator["token"])
-        )
+        response = await client.get("/creators/me", headers=get_auth_headers(creator["token"]))
 
         assert response.status_code == 200
         data = response.json()

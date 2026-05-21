@@ -1,25 +1,24 @@
 import logging
-from typing import Optional, List
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.room_type import RoomTypeResponse, UnavailableDatesResponse
-from app.services.room_type_service import get_rooms_for_guest, get_hotel_id_by_slug
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.room_type_service import get_hotel_id_by_slug, get_rooms_for_guest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/hotels", tags=["rooms"])
 
 
-@router.get("/{slug}/rooms", response_model=List[RoomTypeResponse])
+@router.get("/{slug}/rooms", response_model=list[RoomTypeResponse])
 async def get_rooms(
     slug: str,
-    check_in: Optional[date] = Query(None),
-    check_out: Optional[date] = Query(None),
-    adults: Optional[int] = Query(None),
-    children: Optional[int] = Query(None),
+    check_in: date | None = Query(None),
+    check_out: date | None = Query(None),
+    adults: int | None = Query(None),
+    children: int | None = Query(None),
 ):
     try:
         rooms = await get_rooms_for_guest(slug, check_in, check_out, adults, children)
@@ -74,9 +73,12 @@ async def get_unavailable_dates(
             remaining = total - booked - blocked
             if remaining > 0:
                 all_full = False
-                room_min = RoomTypeRepository._find_season_min_stay(
-                    seasons_by_room[str(room["id"])], current
-                ) or 1
+                room_min = (
+                    RoomTypeRepository._find_season_min_stay(
+                        seasons_by_room[str(room["id"])], current
+                    )
+                    or 1
+                )
                 eligible_min_stays.append(room_min)
         if all_full:
             unavailable.append(current.isoformat())

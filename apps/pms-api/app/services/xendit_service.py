@@ -3,6 +3,7 @@ import logging
 import httpx
 import xendit
 from xendit.apis import PayoutApi
+
 try:
     from xendit.exceptions import ApiException
 except ImportError:
@@ -15,7 +16,12 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 VALID_CHANNEL_CODES = {
-    "ID_BCA", "ID_MANDIRI", "ID_BNI", "ID_BRI", "ID_PERMATA", "ID_CIMB",
+    "ID_BCA",
+    "ID_MANDIRI",
+    "ID_BNI",
+    "ID_BRI",
+    "ID_PERMATA",
+    "ID_CIMB",
 }
 
 configuration = xendit.Configuration()
@@ -55,7 +61,10 @@ async def create_payout(
 
     logger.info(
         "Creating Xendit payout: ref=%s channel=%s amount=%s %s",
-        reference_id, channel_code, amount, currency,
+        reference_id,
+        channel_code,
+        amount,
+        currency,
     )
 
     try:
@@ -75,7 +84,9 @@ async def create_payout(
     except ApiException as e:
         logger.error(
             "Xendit API error creating payout ref=%s: status=%s body=%s",
-            reference_id, e.status, e.body,
+            reference_id,
+            e.status,
+            e.body,
         )
         raise XenditError(
             f"Xendit API error: {e.body}",
@@ -85,7 +96,9 @@ async def create_payout(
 
     logger.info(
         "Xendit payout created: ref=%s xendit_id=%s status=%s",
-        reference_id, payout.id, payout.status,
+        reference_id,
+        payout.id,
+        payout.status,
     )
     return {
         "id": payout.id,
@@ -119,7 +132,10 @@ async def create_invoice(
 
     logger.info(
         "Creating Xendit invoice: ref=%s amount=%s %s email=%s",
-        external_id, amount, currency, payer_email,
+        external_id,
+        amount,
+        currency,
+        payer_email,
     )
 
     try:
@@ -140,7 +156,9 @@ async def create_invoice(
     except ApiException as e:
         logger.error(
             "Xendit API error creating invoice ref=%s: status=%s body=%s",
-            external_id, e.status, e.body,
+            external_id,
+            e.status,
+            e.body,
         )
         raise XenditError(
             f"Xendit API error: {e.body}",
@@ -149,7 +167,9 @@ async def create_invoice(
 
     logger.info(
         "Xendit invoice created: ref=%s id=%s url=%s",
-        external_id, invoice.id, invoice.invoice_url,
+        external_id,
+        invoice.id,
+        invoice.invoice_url,
     )
     return {
         "id": invoice.id,
@@ -167,7 +187,9 @@ async def get_invoice(invoice_id: str) -> dict:
     except ApiException as e:
         logger.error(
             "Xendit API error fetching invoice %s: status=%s body=%s",
-            invoice_id, e.status, e.body,
+            invoice_id,
+            e.status,
+            e.body,
         )
         raise XenditError(
             f"Xendit API error: {e.body}",
@@ -190,7 +212,9 @@ async def expire_invoice(invoice_id: str) -> dict:
     except ApiException as e:
         logger.error(
             "Xendit API error expiring invoice %s: status=%s body=%s",
-            invoice_id, e.status, e.body,
+            invoice_id,
+            e.status,
+            e.body,
         )
         raise XenditError(
             f"Xendit API error: {e.body}",
@@ -222,7 +246,8 @@ async def validate_bank_account(
 
     logger.info(
         "Validating bank account: channel=%s account=%s",
-        channel_code, account_number,
+        channel_code,
+        account_number,
     )
 
     # Strip the "ID_" prefix for the inquiry API (e.g. ID_BCA -> BCA)
@@ -246,7 +271,8 @@ async def validate_bank_account(
     if resp.status_code != 200:
         logger.warning(
             "Xendit bank validation failed: status=%s body=%s",
-            resp.status_code, resp.text,
+            resp.status_code,
+            resp.text,
         )
         raise XenditError(
             f"Bank account validation failed: {resp.text}",
@@ -256,7 +282,8 @@ async def validate_bank_account(
     data = resp.json()
     logger.info(
         "Bank account validated: channel=%s holder=%s",
-        channel_code, data.get("account_holder"),
+        channel_code,
+        data.get("account_holder"),
     )
     return {
         "account_holder": data.get("account_holder", ""),
@@ -271,7 +298,9 @@ async def get_payout(payout_id: str) -> dict:
     except ApiException as e:
         logger.error(
             "Xendit API error fetching payout %s: status=%s body=%s",
-            payout_id, e.status, e.body,
+            payout_id,
+            e.status,
+            e.body,
         )
         raise XenditError(
             f"Xendit API error: {e.body}",

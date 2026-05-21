@@ -1,7 +1,7 @@
 import json
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
-from typing import Dict, List, Optional
 from datetime import date
+
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
 def to_camel(string: str) -> str:
@@ -19,26 +19,27 @@ class BookingCreate(BaseModel):
     guest_phone: str
     guest_country: str = ""
     special_requests: str = ""
-    estimated_arrival_time: Optional[str] = None
-    number_of_guests: Optional[int] = None
+    estimated_arrival_time: str | None = None
+    number_of_guests: int | None = None
     check_in: date
     check_out: date
     adults: int = 1
     children: int = 0
-    referral_code: Optional[str] = None
+    referral_code: str | None = None
     payment_method: str = "card"
     rate_type: str = "flexible"
     number_of_rooms: int = 1
-    addon_ids: List[str] = []
-    addon_quantities: Dict[str, int] = {}
+    addon_ids: list[str] = []
+    addon_quantities: dict[str, int] = {}
     # For per-day add-ons, the specific ISO dates the guest selected. Empty
     # list (or missing key) means "every night of the stay".
-    addon_dates: Dict[str, List[str]] = {}
-    promo_code: Optional[str] = None
+    addon_dates: dict[str, list[str]] = {}
+    promo_code: str | None = None
 
 
 class BookingResponse(BaseModel):
     """Returned to the guest after creating or looking up a booking."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
@@ -59,9 +60,9 @@ class BookingResponse(BaseModel):
     addon_total: float = 0
     currency: str
     status: str
-    payment_method: Optional[str] = None
-    payment_status: Optional[str] = None
-    host_response_deadline: Optional[str] = None
+    payment_method: str | None = None
+    payment_status: str | None = None
+    host_response_deadline: str | None = None
     created_at: str
 
 
@@ -79,7 +80,7 @@ class AdminBookingCreate(BaseModel):
     check_out: date
     adults: int = 1
     children: int = 0
-    nightly_rate: Optional[float] = None
+    nightly_rate: float | None = None
     channel: str = "direct"
 
 
@@ -87,10 +88,11 @@ class AssignedRoom(BaseModel):
     """One physical room a booking occupies. position 0 is the primary room
     (bookings.room_id); 1..N-1 are the extra rooms of a multi-room booking
     (VAY-403)."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    room_id: Optional[str] = None
-    room_number: Optional[str] = None
+    room_id: str | None = None
+    room_number: str | None = None
     position: int = 0
 
 
@@ -107,8 +109,8 @@ class BookingAdminResponse(BaseModel):
     guest_phone: str
     guest_country: str = ""
     special_requests: str
-    estimated_arrival_time: Optional[str] = None
-    number_of_guests: Optional[int] = None
+    estimated_arrival_time: str | None = None
+    number_of_guests: int | None = None
     check_in: str
     check_out: str
     nights: int
@@ -119,26 +121,26 @@ class BookingAdminResponse(BaseModel):
     total_amount: float
     currency: str
     status: str
-    room_id: Optional[str] = None
-    room_number: Optional[str] = None
+    room_id: str | None = None
+    room_number: str | None = None
     # Full ordered room list incl. the primary at position 0. For a
     # single-room booking this is just the primary; for a multi-room
     # booking it is every physical room the guest paid for (VAY-403).
-    assigned_rooms: List[AssignedRoom] = []
+    assigned_rooms: list[AssignedRoom] = []
     channel: str = "direct"
-    payment_method: Optional[str] = None
-    payment_status: Optional[str] = None
-    host_response_deadline: Optional[str] = None
-    platform_fee_amount: Optional[float] = None
-    affiliate_commission_amount: Optional[float] = None
-    property_payout_amount: Optional[float] = None
-    addon_ids: List[str] = []
-    addon_names: List[str] = []
+    payment_method: str | None = None
+    payment_status: str | None = None
+    host_response_deadline: str | None = None
+    platform_fee_amount: float | None = None
+    affiliate_commission_amount: float | None = None
+    property_payout_amount: float | None = None
+    addon_ids: list[str] = []
+    addon_names: list[str] = []
     addon_total: float = 0
-    addon_quantities: Dict[str, int] = {}
-    addon_dates: Dict[str, List[str]] = {}
+    addon_quantities: dict[str, int] = {}
+    addon_dates: dict[str, list[str]] = {}
     guest_withdrawn: bool = False
-    promo_code: Optional[str] = None
+    promo_code: str | None = None
     promo_discount: float = 0
     last_minute_discount_percent: float = 0
     last_minute_discount_amount: float = 0
@@ -187,17 +189,17 @@ class BookingStatusUpdate(BaseModel):
 class BookingDetailsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    check_in: Optional[str] = None
-    check_out: Optional[str] = None
-    guest_first_name: Optional[str] = None
-    guest_last_name: Optional[str] = None
-    guest_email: Optional[str] = None
-    guest_phone: Optional[str] = None
-    guest_country: Optional[str] = None
-    adults: Optional[int] = None
-    children: Optional[int] = None
-    nightly_rate: Optional[float] = None
-    special_requests: Optional[str] = None
+    check_in: str | None = None
+    check_out: str | None = None
+    guest_first_name: str | None = None
+    guest_last_name: str | None = None
+    guest_email: str | None = None
+    guest_phone: str | None = None
+    guest_country: str | None = None
+    adults: int | None = None
+    children: int | None = None
+    nightly_rate: float | None = None
+    special_requests: str | None = None
 
 
 class BookingRoomAssign(BaseModel):
@@ -207,7 +209,7 @@ class BookingRoomAssign(BaseModel):
     # VAY-403: which of a multi-room booking's rooms to move. Omitted (or
     # equal to the primary) moves the primary room exactly as before;
     # otherwise the matching extra room is reassigned independently.
-    from_room_id: Optional[str] = None
+    from_room_id: str | None = None
 
 
 class BookingRoomSwap(BaseModel):
@@ -216,7 +218,7 @@ class BookingRoomSwap(BaseModel):
     partner_booking_id: str
     # Optional: only used when the source booking is unassigned. The partner
     # then moves to this free room while the source takes the partner's room.
-    partner_destination_room_id: Optional[str] = None
+    partner_destination_room_id: str | None = None
 
 
 class BookingLookup(BaseModel):
@@ -228,19 +230,21 @@ class BookingLookup(BaseModel):
 
 class ChangeRequestPayload(BaseModel):
     """Guest-supplied desired state for a booking change request."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     guest_email: EmailStr
     check_in: date
     check_out: date
-    addon_ids: List[str] = []
-    addon_quantities: Dict[str, int] = {}
-    addon_dates: Dict[str, List[str]] = {}
+    addon_ids: list[str] = []
+    addon_quantities: dict[str, int] = {}
+    addon_dates: dict[str, list[str]] = {}
 
 
 class ChangeRequestPreview(BaseModel):
     """Returned by the preview endpoint so the guest can see the price diff
     (and any block reason) before they submit."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     old_total: float
@@ -248,12 +252,13 @@ class ChangeRequestPreview(BaseModel):
     price_difference: float
     currency: str
     blocked: bool = False
-    block_reason: Optional[str] = None
+    block_reason: str | None = None
     available: bool = True
 
 
 class ChangeRequestResponse(BaseModel):
     """Full change-request row, returned to guest UI + PMS UI."""
+
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
@@ -261,27 +266,31 @@ class ChangeRequestResponse(BaseModel):
     status: str  # pending | approved | declined | cancelled
     old_check_in: str
     old_check_out: str
-    old_addon_ids: List[str] = []
-    old_addon_quantities: Dict[str, int] = {}
-    old_addon_dates: Dict[str, List[str]] = {}
+    old_addon_ids: list[str] = []
+    old_addon_quantities: dict[str, int] = {}
+    old_addon_dates: dict[str, list[str]] = {}
     old_total: float
     requested_check_in: str
     requested_check_out: str
-    requested_addon_ids: List[str] = []
-    requested_addon_quantities: Dict[str, int] = {}
-    requested_addon_dates: Dict[str, List[str]] = {}
-    requested_addon_names: List[str] = []
+    requested_addon_ids: list[str] = []
+    requested_addon_quantities: dict[str, int] = {}
+    requested_addon_dates: dict[str, list[str]] = {}
+    requested_addon_names: list[str] = []
     new_total: float
     price_difference: float
     currency: str
-    decline_reason: Optional[str] = None
-    decided_at: Optional[str] = None
+    decline_reason: str | None = None
+    decided_at: str | None = None
     created_at: str
 
     @field_validator(
-        "old_addon_ids", "old_addon_quantities", "old_addon_dates",
-        "requested_addon_ids", "requested_addon_quantities",
-        "requested_addon_dates", "requested_addon_names",
+        "old_addon_ids",
+        "old_addon_quantities",
+        "old_addon_dates",
+        "requested_addon_ids",
+        "requested_addon_quantities",
+        "requested_addon_dates",
+        "requested_addon_names",
         mode="before",
     )
     @classmethod
@@ -294,4 +303,4 @@ class ChangeRequestResponse(BaseModel):
 class ChangeRequestDecline(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    reason: Optional[str] = None
+    reason: str | None = None

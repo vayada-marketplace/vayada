@@ -1,12 +1,12 @@
 """Unit tests for Channex cancellation-policy sync (VAY-297)."""
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from app.services.channex_sync_service import (
     _build_cancellation_policy,
     push_cancellation_policy_for_room_type,
 )
-
 
 # ── _build_cancellation_policy ────────────────────────────────────────
 
@@ -60,13 +60,16 @@ def test_build_cancellation_policy_missing_field_defaults_to_free():
 
 @pytest.mark.asyncio
 async def test_push_skips_when_no_active_connection():
-    with patch(
-        "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
-        new_callable=AsyncMock,
-    ) as get_conn, patch(
-        "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
-        new_callable=AsyncMock,
-    ) as update_rp:
+    with (
+        patch(
+            "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
+            new_callable=AsyncMock,
+        ) as get_conn,
+        patch(
+            "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
+            new_callable=AsyncMock,
+        ) as update_rp,
+    ):
         get_conn.return_value = None
         await push_cancellation_policy_for_room_type("h1", "rt1")
         update_rp.assert_not_called()
@@ -102,22 +105,28 @@ async def test_push_calls_update_for_standard_plans_only():
         "partial_refund_amount_percent": 60,
     }
 
-    with patch(
-        "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
-        new_callable=AsyncMock,
-    ) as get_conn, patch(
-        "app.services.channex_sync_service.RoomTypeRepository.get_by_id",
-        new_callable=AsyncMock,
-    ) as get_rt, patch(
-        "app.services.channex_sync_service.ChannexRatePlanMappingRepository.list_by_room_type_id",
-        new_callable=AsyncMock,
-    ) as list_rps, patch(
-        "app.services.channex_sync_service.channex_service.get_platform_api_key",
-        return_value="key",
-    ), patch(
-        "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
-        new_callable=AsyncMock,
-    ) as update_rp:
+    with (
+        patch(
+            "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
+            new_callable=AsyncMock,
+        ) as get_conn,
+        patch(
+            "app.services.channex_sync_service.RoomTypeRepository.get_by_id",
+            new_callable=AsyncMock,
+        ) as get_rt,
+        patch(
+            "app.services.channex_sync_service.ChannexRatePlanMappingRepository.list_by_room_type_id",
+            new_callable=AsyncMock,
+        ) as list_rps,
+        patch(
+            "app.services.channex_sync_service.channex_service.get_platform_api_key",
+            return_value="key",
+        ),
+        patch(
+            "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
+            new_callable=AsyncMock,
+        ) as update_rp,
+    ):
         get_conn.return_value = {
             "is_active": True,
             "channex_property_id": "prop-1",
@@ -147,26 +156,32 @@ async def test_push_swallows_channex_errors():
         {"channex_rate_plan_id": "rp1", "channel": "direct", "plan_name": "standard"},
         {"channex_rate_plan_id": "rp2", "channel": "booking_com", "plan_name": "standard"},
     ]
-    with patch(
-        "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
-        new_callable=AsyncMock,
-        return_value={"is_active": True, "channex_property_id": "p"},
-    ), patch(
-        "app.services.channex_sync_service.RoomTypeRepository.get_by_id",
-        new_callable=AsyncMock,
-        return_value={"flexible_cancellation_type": "free"},
-    ), patch(
-        "app.services.channex_sync_service.ChannexRatePlanMappingRepository.list_by_room_type_id",
-        new_callable=AsyncMock,
-        return_value=rate_plans,
-    ), patch(
-        "app.services.channex_sync_service.channex_service.get_platform_api_key",
-        return_value="key",
-    ), patch(
-        "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
-        new_callable=AsyncMock,
-        side_effect=[Exception("boom"), {"id": "rp2"}],
-    ) as update_rp:
+    with (
+        patch(
+            "app.services.channex_sync_service.ChannexConnectionRepository.get_by_hotel_id",
+            new_callable=AsyncMock,
+            return_value={"is_active": True, "channex_property_id": "p"},
+        ),
+        patch(
+            "app.services.channex_sync_service.RoomTypeRepository.get_by_id",
+            new_callable=AsyncMock,
+            return_value={"flexible_cancellation_type": "free"},
+        ),
+        patch(
+            "app.services.channex_sync_service.ChannexRatePlanMappingRepository.list_by_room_type_id",
+            new_callable=AsyncMock,
+            return_value=rate_plans,
+        ),
+        patch(
+            "app.services.channex_sync_service.channex_service.get_platform_api_key",
+            return_value="key",
+        ),
+        patch(
+            "app.services.channex_sync_service.channex_service.update_rate_plan_cancellation_policy",
+            new_callable=AsyncMock,
+            side_effect=[Exception("boom"), {"id": "rp2"}],
+        ) as update_rp,
+    ):
         # Should not raise.
         await push_cancellation_policy_for_room_type("h1", "rt1")
         assert update_rp.await_count == 2

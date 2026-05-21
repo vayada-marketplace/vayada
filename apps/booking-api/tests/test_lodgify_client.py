@@ -4,9 +4,9 @@ These tests do not hit the network. They drive the client via an
 httpx MockTransport so we can assert: retry counts, backoff on 5xx,
 rate-limit handling, and auth-error classification.
 """
+
 import httpx
 import pytest
-
 from app.services.lodgify.client import (
     DEFAULT_RETRY,
     LodgifyAPIError,
@@ -15,11 +15,12 @@ from app.services.lodgify.client import (
     RetryPolicy,
 )
 
-
 pytestmark = pytest.mark.asyncio
 
 
-def _make_client_with_transport(transport: httpx.MockTransport, retry: RetryPolicy = DEFAULT_RETRY) -> LodgifyClient:
+def _make_client_with_transport(
+    transport: httpx.MockTransport, retry: RetryPolicy = DEFAULT_RETRY
+) -> LodgifyClient:
     """Patch the per-call httpx.AsyncClient to use a MockTransport."""
 
     class _FakeAsyncClient(httpx.AsyncClient):
@@ -27,9 +28,12 @@ def _make_client_with_transport(transport: httpx.MockTransport, retry: RetryPoli
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    client = LodgifyClient(api_key="test-key", hotel_id="h-1", retry=retry, base_url="https://api.lodgify.test")
+    client = LodgifyClient(
+        api_key="test-key", hotel_id="h-1", retry=retry, base_url="https://api.lodgify.test"
+    )
     # Monkey-patch httpx.AsyncClient inside the module under test.
     import app.services.lodgify.client as mod
+
     mod.httpx.AsyncClient = _FakeAsyncClient  # type: ignore[attr-defined]
     return client
 
@@ -38,6 +42,7 @@ def _make_client_with_transport(transport: httpx.MockTransport, retry: RetryPoli
 def restore_async_client():
     """Always restore the real AsyncClient after each test."""
     import app.services.lodgify.client as mod
+
     real = httpx.AsyncClient
     yield
     mod.httpx.AsyncClient = real  # type: ignore[attr-defined]

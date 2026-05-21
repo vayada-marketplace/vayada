@@ -1,17 +1,19 @@
 """
 Tests for /admin endpoints — hotel registration, setup status, room CRUD, booking management.
 """
-import pytest
+
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from tests.conftest import (
-    create_test_user,
+    create_test_booking,
     create_test_hotel,
     create_test_room_type,
-    create_test_booking,
-    get_auth_headers,
+    create_test_user,
     generate_test_slug,
+    get_auth_headers,
 )
-
 
 # ── Hotel Registration ────────────────────────────────────────────
 
@@ -287,7 +289,8 @@ class TestAdminRoomTypes:
             headers=get_auth_headers(user["token"]),
         )
         room_to_rename = next(
-            r for r in rooms_resp.json()
+            r
+            for r in rooms_resp.json()
             if r["roomTypeId"] == room_type_id and r["roomNumber"] == "Garden King 1"
         )
         manual_rename = await client.patch(
@@ -336,9 +339,7 @@ class TestAdminRoomTypes:
             "/admin/rooms",
             headers=get_auth_headers(user["token"]),
         )
-        only_room = next(
-            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
-        )
+        only_room = next(r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id)
         # Drop the auto-generated " 1" suffix to reproduce the production
         # state where a single room is named exactly after its room type.
         bare_rename = await client.patch(
@@ -421,7 +422,9 @@ class TestAdminRoomTypes:
             "Penthouse",
         }
 
-    async def test_update_room_type_without_name_change_keeps_room_numbers(self, client, cleanup_database):
+    async def test_update_room_type_without_name_change_keeps_room_numbers(
+        self, client, cleanup_database
+    ):
         """A PATCH that doesn't include a name change must not touch the
         room_number column."""
         user = await create_test_user()
@@ -478,9 +481,7 @@ class TestAdminRoomTypes:
             "/admin/rooms",
             headers=get_auth_headers(user["token"]),
         )
-        only_room = next(
-            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
-        )
+        only_room = next(r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id)
         # Reproduce the broken pre-fix state: room still carries the
         # previous type name even though the type is now "Deluxe Party Room".
         await client.patch(
@@ -599,9 +600,7 @@ class TestAdminRoomTypes:
             "/admin/rooms",
             headers=get_auth_headers(user["token"]),
         )
-        target_room = next(
-            r for r in rooms_resp.json() if r["roomTypeId"] == target_id
-        )
+        target_room = next(r for r in rooms_resp.json() if r["roomTypeId"] == target_id)
         await client.patch(
             f"/admin/rooms/{target_room['id']}",
             json={"roomNumber": "Deluxe Suite 7"},
@@ -645,9 +644,7 @@ class TestAdminRoomTypes:
             "/admin/rooms",
             headers=get_auth_headers(user["token"]),
         )
-        only_room = next(
-            r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id
-        )
+        only_room = next(r for r in rooms_resp.json() if r["roomTypeId"] == room_type_id)
         await client.patch(
             f"/admin/rooms/{only_room['id']}",
             json={"roomNumber": "Deluxe Room"},
@@ -690,14 +687,13 @@ class TestAdminRoomTypes:
         )
         assert resp.status_code == 404
 
-    async def test_resolved_rate_uses_season_when_base_rate_zero(
-        self, client, cleanup_database
-    ):
+    async def test_resolved_rate_uses_season_when_base_rate_zero(self, client, cleanup_database):
         """When base_rate=0 and a season covers the check-in date, the
         resolved-rate endpoint must return the season rate — same logic the
         booking engine uses — so the calendar's New Booking modal pre-fills
         the actual price the guest would pay."""
         import json
+
         from app.database import Database
 
         user = await create_test_user()
@@ -916,9 +912,7 @@ class TestAdminRoomTypes:
         assert body["partialRefundCancelWindowDays"] == 30
         assert body["partialRefundAmountPercent"] == 50
 
-    async def test_update_to_partial_refund_cancellation_type(
-        self, client, hotel_with_rooms
-    ):
+    async def test_update_to_partial_refund_cancellation_type(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
 
@@ -937,9 +931,7 @@ class TestAdminRoomTypes:
         assert body["partialRefundCancelWindowDays"] == 14
         assert body["partialRefundAmountPercent"] == 75
 
-    async def test_invalid_flexible_cancellation_type_rejected(
-        self, client, hotel_with_rooms
-    ):
+    async def test_invalid_flexible_cancellation_type_rejected(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
 
@@ -950,9 +942,7 @@ class TestAdminRoomTypes:
         )
         assert resp.status_code == 422
 
-    async def test_invalid_partial_refund_percent_rejected(
-        self, client, hotel_with_rooms
-    ):
+    async def test_invalid_partial_refund_percent_rejected(self, client, hotel_with_rooms):
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
 
@@ -963,9 +953,7 @@ class TestAdminRoomTypes:
         )
         assert resp.status_code == 422
 
-    async def test_patch_triggers_channex_cancellation_push(
-        self, client, hotel_with_rooms
-    ):
+    async def test_patch_triggers_channex_cancellation_push(self, client, hotel_with_rooms):
         """Changing flexible-cancellation fields fires the Channex sync."""
         user = hotel_with_rooms["user"]
         room = hotel_with_rooms["room"]
@@ -983,6 +971,7 @@ class TestAdminRoomTypes:
             # asyncio.create_task schedules but may not complete before
             # the request returns; await any pending task explicitly.
             import asyncio
+
             await asyncio.sleep(0)
             push.assert_awaited_once()
             assert push.await_args.args[1] == str(room["id"])
@@ -1005,12 +994,11 @@ class TestAdminRoomTypes:
             )
             assert resp.status_code == 200
             import asyncio
+
             await asyncio.sleep(0)
             push.assert_not_awaited()
 
-    async def test_patch_meal_plans_triggers_channex_reprovision(
-        self, client, hotel_with_rooms
-    ):
+    async def test_patch_meal_plans_triggers_channex_reprovision(self, client, hotel_with_rooms):
         """Adding a meal plan re-provisions Channex (so breakfast variants
         like 'BDC Standard (Breakfast)' get created) and pushes ARI."""
         user = hotel_with_rooms["user"]
@@ -1033,14 +1021,13 @@ class TestAdminRoomTypes:
             )
             assert resp.status_code == 200
             import asyncio
+
             await asyncio.sleep(0)
             provision.assert_awaited_once()
             ari.assert_awaited_once()
             assert provision.await_args.args[0] == str(room["hotel_id"])
 
-    async def test_patch_meal_plans_swallows_no_connection_error(
-        self, client, hotel_with_rooms
-    ):
+    async def test_patch_meal_plans_swallows_no_connection_error(self, client, hotel_with_rooms):
         """ValueError from provision_property (no Channex connection) is
         swallowed silently — meal plans on hotels without a CM still save."""
         user = hotel_with_rooms["user"]
@@ -1064,6 +1051,7 @@ class TestAdminRoomTypes:
             )
             assert resp.status_code == 200
             import asyncio
+
             await asyncio.sleep(0)
             ari.assert_not_awaited()
 
@@ -1085,6 +1073,7 @@ class TestAdminRoomTypes:
             )
             assert resp.status_code == 200
             import asyncio
+
             await asyncio.sleep(0)
             provision.assert_not_awaited()
 
@@ -1204,8 +1193,8 @@ class TestAdminBookings:
             await create_test_booking(
                 str(hotel["id"]),
                 str(room["id"]),
-                check_in=f"2026-0{i+7}-01",
-                check_out=f"2026-0{i+7}-05",
+                check_in=f"2026-0{i + 7}-01",
+                check_out=f"2026-0{i + 7}-05",
                 guest_email=f"guest{i}@example.com",
             )
 
@@ -1256,16 +1245,28 @@ class TestHotelDeletionImpact:
         past_in = (date.today() - timedelta(days=20)).isoformat()
         past_out = (date.today() - timedelta(days=18)).isoformat()
 
-        await create_test_booking(str(hotel["id"]), str(room["id"]),
-                                  check_in=future_in, check_out=future_out,
-                                  guest_email="future@example.com")
-        await create_test_booking(str(hotel["id"]), str(room["id"]),
-                                  check_in=future_in, check_out=future_out,
-                                  guest_email="cancelled@example.com",
-                                  status="cancelled")
-        await create_test_booking(str(hotel["id"]), str(room["id"]),
-                                  check_in=past_in, check_out=past_out,
-                                  guest_email="past@example.com")
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_in,
+            check_out=future_out,
+            guest_email="future@example.com",
+        )
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_in,
+            check_out=future_out,
+            guest_email="cancelled@example.com",
+            status="cancelled",
+        )
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=past_in,
+            check_out=past_out,
+            guest_email="past@example.com",
+        )
 
         resp = await client.get(
             "/admin/hotel/deletion-impact",
@@ -1290,6 +1291,7 @@ class TestDeleteHotel:
         # (setup-status would auto-create one — use a direct repo lookup
         # via the admin endpoint instead).
         from app.repositories.hotel_repo import HotelRepository
+
         assert await HotelRepository.get_by_id(str(hotel["id"])) is None
 
     async def test_delete_cascades_bookings(self, client, cleanup_database):
@@ -1305,6 +1307,7 @@ class TestDeleteHotel:
         assert resp.status_code == 204
 
         from app.database import Database
+
         remaining = await Database.fetchval(
             "SELECT COUNT(*) FROM bookings WHERE hotel_id = $1", str(hotel["id"])
         )
@@ -1330,17 +1333,21 @@ class TestDeleteHotel:
         hotel = await create_test_hotel(str(user["id"]))
 
         from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+
         await ChannexConnectionRepository.upsert(str(hotel["id"]))
         await ChannexConnectionRepository.set_property_id(
             str(hotel["id"]), "11111111-1111-1111-1111-111111111111"
         )
 
-        with patch(
-            "app.services.channex_service.delete_property",
-            new=AsyncMock(return_value=None),
-        ) as mock_delete, patch(
-            "app.services.channex_service.get_platform_api_key",
-            return_value="test-key",
+        with (
+            patch(
+                "app.services.channex_service.delete_property",
+                new=AsyncMock(return_value=None),
+            ) as mock_delete,
+            patch(
+                "app.services.channex_service.get_platform_api_key",
+                return_value="test-key",
+            ),
         ):
             resp = await client.delete(
                 "/admin/hotel",
@@ -1359,17 +1366,21 @@ class TestDeleteHotel:
         hotel = await create_test_hotel(str(user["id"]))
 
         from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+
         await ChannexConnectionRepository.upsert(str(hotel["id"]))
         await ChannexConnectionRepository.set_property_id(
             str(hotel["id"]), "11111111-1111-1111-1111-111111111111"
         )
 
-        with patch(
-            "app.services.channex_service.delete_property",
-            new=AsyncMock(side_effect=Exception("Channex 500")),
-        ), patch(
-            "app.services.channex_service.get_platform_api_key",
-            return_value="test-key",
+        with (
+            patch(
+                "app.services.channex_service.delete_property",
+                new=AsyncMock(side_effect=Exception("Channex 500")),
+            ),
+            patch(
+                "app.services.channex_service.get_platform_api_key",
+                return_value="test-key",
+            ),
         ):
             resp = await client.delete(
                 "/admin/hotel",
@@ -1380,4 +1391,5 @@ class TestDeleteHotel:
         # don't block the local delete on a Channex hiccup.
         assert resp.status_code == 204
         from app.repositories.hotel_repo import HotelRepository
+
         assert await HotelRepository.get_by_id(str(hotel["id"])) is None

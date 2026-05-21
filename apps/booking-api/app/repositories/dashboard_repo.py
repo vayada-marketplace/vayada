@@ -2,11 +2,12 @@
 Dashboard repository — queries PMS database for booking stats
 and booking_events table for funnel/page-view analytics.
 """
+
 import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from app.database import Database, PmsDatabase
-from app.config import settings
+
+from app.database import PmsDatabase
 from app.repositories.event_repo import EventRepository
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,6 @@ def _date_range(range_key: str) -> tuple[date, date, date, date]:
 
 
 class DashboardRepository:
-
     @staticmethod
     async def get_stats(hotel: dict, range_key: str = "today") -> dict:
         """
@@ -60,11 +60,16 @@ class DashboardRepository:
         hotel_slug = hotel.get("slug") if hotel else None
         if not hotel_id:
             return {
-                "revenue": 0, "revenue_previous": 0,
-                "bookings": 0, "bookings_previous": 0,
-                "avg_nightly_rate": 0, "avg_nightly_rate_previous": 0,
-                "page_views": 0, "page_views_previous": 0,
-                "next_arrival": None, "live_since": None,
+                "revenue": 0,
+                "revenue_previous": 0,
+                "bookings": 0,
+                "bookings_previous": 0,
+                "avg_nightly_rate": 0,
+                "avg_nightly_rate_previous": 0,
+                "page_views": 0,
+                "page_views_previous": 0,
+                "next_arrival": None,
+                "live_since": None,
             }
 
         start, end, prev_start, prev_end = _date_range(range_key)
@@ -81,7 +86,9 @@ class DashboardRepository:
               AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             """,
-            hotel_id, start, end,
+            hotel_id,
+            start,
+            end,
         )
 
         # Previous period stats
@@ -96,7 +103,9 @@ class DashboardRepository:
               AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             """,
-            hotel_id, prev_start, prev_end,
+            hotel_id,
+            prev_start,
+            prev_end,
         )
 
         # Next arrival
@@ -106,7 +115,8 @@ class DashboardRepository:
             WHERE hotel_id = $1 AND status = 'confirmed' AND check_in >= $2
             ORDER BY check_in LIMIT 1
             """,
-            hotel_id, date.today(),
+            hotel_id,
+            date.today(),
         )
 
         # Live since (first booking)
@@ -120,7 +130,9 @@ class DashboardRepository:
         page_views_previous = 0
         if hotel_slug:
             page_views = await EventRepository.count_by_type(hotel_slug, "page_visit", start, end)
-            page_views_previous = await EventRepository.count_by_type(hotel_slug, "page_visit", prev_start, prev_end)
+            page_views_previous = await EventRepository.count_by_type(
+                hotel_slug, "page_visit", prev_start, prev_end
+            )
 
         return {
             "revenue": float(current["revenue"]),
@@ -131,8 +143,12 @@ class DashboardRepository:
             "avg_nightly_rate_previous": round(float(previous["avg_rate"]), 2),
             "page_views": page_views,
             "page_views_previous": page_views_previous,
-            "next_arrival": str(next_arrival_row["check_in"]) if next_arrival_row and next_arrival_row["check_in"] else None,
-            "live_since": str(live_since_row["first"].date()) if live_since_row and live_since_row["first"] else None,
+            "next_arrival": str(next_arrival_row["check_in"])
+            if next_arrival_row and next_arrival_row["check_in"]
+            else None,
+            "live_since": str(live_since_row["first"].date())
+            if live_since_row and live_since_row["first"]
+            else None,
         }
 
     @staticmethod
@@ -156,19 +172,23 @@ class DashboardRepository:
             GROUP BY COALESCE(channel, 'direct')
             ORDER BY revenue DESC
             """,
-            hotel_id, start, end,
+            hotel_id,
+            start,
+            end,
         )
 
         total = sum(float(r["revenue"]) for r in rows)
         sources = []
         for r in rows:
             rev = float(r["revenue"])
-            sources.append({
-                "source": r["source"],
-                "revenue": rev,
-                "percentage": round((rev / total * 100) if total > 0 else 0, 1),
-                "count": r["count"],
-            })
+            sources.append(
+                {
+                    "source": r["source"],
+                    "revenue": rev,
+                    "percentage": round((rev / total * 100) if total > 0 else 0, 1),
+                    "count": r["count"],
+                }
+            )
 
         return {"total_revenue": total, "sources": sources}
 
@@ -189,19 +209,35 @@ class DashboardRepository:
         completed = counts.get("completed_booking", 0)
 
         if page_visits == 0:
-            return {"steps": [
-                {"label": "Page visits", "value": 0, "percentage": 0},
-                {"label": "Viewed a room", "value": 0, "percentage": 0},
-                {"label": "Started booking", "value": 0, "percentage": 0},
-                {"label": "Completed booking", "value": 0, "percentage": 0},
-            ]}
+            return {
+                "steps": [
+                    {"label": "Page visits", "value": 0, "percentage": 0},
+                    {"label": "Viewed a room", "value": 0, "percentage": 0},
+                    {"label": "Started booking", "value": 0, "percentage": 0},
+                    {"label": "Completed booking", "value": 0, "percentage": 0},
+                ]
+            }
 
-        return {"steps": [
-            {"label": "Page visits", "value": page_visits, "percentage": 100},
-            {"label": "Viewed a room", "value": viewed_room, "percentage": round(viewed_room / page_visits * 100, 1)},
-            {"label": "Started booking", "value": started, "percentage": round(started / page_visits * 100, 1)},
-            {"label": "Completed booking", "value": completed, "percentage": round(completed / page_visits * 100, 1)},
-        ]}
+        return {
+            "steps": [
+                {"label": "Page visits", "value": page_visits, "percentage": 100},
+                {
+                    "label": "Viewed a room",
+                    "value": viewed_room,
+                    "percentage": round(viewed_room / page_visits * 100, 1),
+                },
+                {
+                    "label": "Started booking",
+                    "value": started,
+                    "percentage": round(started / page_visits * 100, 1),
+                },
+                {
+                    "label": "Completed booking",
+                    "value": completed,
+                    "percentage": round(completed / page_visits * 100, 1),
+                },
+            ]
+        }
 
     @staticmethod
     def _sparkline_buckets(range_key: str) -> list[tuple[date, date]]:
@@ -252,14 +288,19 @@ class DashboardRepository:
               AND status = 'confirmed'
               AND created_at::date >= $2 AND created_at::date <= $3
             """,
-            hotel_id, window_start, window_end,
+            hotel_id,
+            window_start,
+            window_end,
         )
 
         # Page-view counts in the window — also one query.
         page_view_by_day: dict[date, int] = {}
         if hotel_slug:
             page_view_by_day = await EventRepository.count_by_day(
-                hotel_slug, "page_visit", window_start, window_end,
+                hotel_slug,
+                "page_visit",
+                window_start,
+                window_end,
             )
 
         revenue: list[float] = []
@@ -308,8 +349,7 @@ class DashboardRepository:
         previous_window_start = previous_window_end - timedelta(days=6)
 
         empty_buckets = [
-            {"date": (window_start + timedelta(days=i)).isoformat(), "count": 0}
-            for i in range(7)
+            {"date": (window_start + timedelta(days=i)).isoformat(), "count": 0} for i in range(7)
         ]
         empty_previous = [
             {"date": (previous_window_start + timedelta(days=i)).isoformat(), "count": 0}
@@ -331,7 +371,11 @@ class DashboardRepository:
         # Single query covers both windows (14 contiguous days) so the
         # comparison metric doesn't double the round-trip count.
         counts = await EventRepository.count_by_day_in_tz(
-            hotel_slug, "page_visit", previous_window_start, window_end, tz_name,
+            hotel_slug,
+            "page_visit",
+            previous_window_start,
+            window_end,
+            tz_name,
         )
 
         buckets = [

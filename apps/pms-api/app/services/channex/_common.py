@@ -1,8 +1,8 @@
 """Shared constants + helpers for the channex package."""
+
 from datetime import date
 
 from app.database import Database
-
 
 SYNC_HORIZON_DAYS = 365
 
@@ -31,9 +31,7 @@ MEAL_PLAN_LABELS = {
 CHANNEX_SYNC_REASON = "channex_sync"
 
 
-async def _count_local_blocks(
-    room_type_id: str, start_date: date, end_date: date
-) -> int:
+async def _count_local_blocks(room_type_id: str, start_date: date, end_date: date) -> int:
     """Count blocked rooms excluding channex_sync blocks (to avoid circular push)."""
     count = await Database.fetchval(
         """
@@ -43,6 +41,9 @@ async def _count_local_blocks(
           AND end_date > $2
           AND reason != $4
         """,
-        room_type_id, start_date, end_date, CHANNEX_SYNC_REASON,
+        room_type_id,
+        start_date,
+        end_date,
+        CHANNEX_SYNC_REASON,
     )
     return count or 0

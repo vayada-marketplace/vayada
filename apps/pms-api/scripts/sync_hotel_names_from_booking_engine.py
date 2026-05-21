@@ -23,16 +23,14 @@ import argparse
 import asyncio
 import logging
 import sys
-from typing import Optional
 
 from app.config import settings
 from app.database import BookingEngineDatabase, Database
 
-
 logger = logging.getLogger("sync_hotel_names_vay393")
 
 
-async def _canonical(hotel_id: str) -> Optional[dict]:
+async def _canonical(hotel_id: str) -> dict | None:
     row = await BookingEngineDatabase.fetchrow(
         "SELECT name, slug FROM booking_hotels WHERE id = $1",
         hotel_id,
@@ -45,9 +43,7 @@ async def run(execute: bool) -> int:
         logger.error("BOOKING_ENGINE_DATABASE_URL not configured; aborting")
         return 0
 
-    hotels = await Database.fetch(
-        "SELECT id, name, slug FROM hotels ORDER BY created_at"
-    )
+    hotels = await Database.fetch("SELECT id, name, slug FROM hotels ORDER BY created_at")
     total = len(hotels)
     diffs = 0
     applied = 0
@@ -60,7 +56,9 @@ async def run(execute: bool) -> int:
             missing += 1
             logger.warning(
                 "%s no booking_db row (pms slug=%s name=%r) — skipping",
-                hotel_id, h["slug"], h["name"],
+                hotel_id,
+                h["slug"],
+                h["name"],
             )
             continue
 
@@ -76,19 +74,27 @@ async def run(execute: bool) -> int:
             "%s [%s] name: %r -> %r | slug: %r -> %r",
             "PLAN" if not execute else "APPLY",
             hotel_id,
-            h["name"], new_name,
-            h["slug"], new_slug,
+            h["name"],
+            new_name,
+            h["slug"],
+            new_slug,
         )
         if execute:
             await Database.execute(
                 "UPDATE hotels SET name = $2, slug = $3 WHERE id = $1",
-                hotel_id, new_name, new_slug,
+                hotel_id,
+                new_name,
+                new_slug,
             )
             applied += 1
 
     logger.info(
         "Done. hotels=%d diffs=%d applied=%d missing=%d execute=%s",
-        total, diffs, applied, missing, execute,
+        total,
+        diffs,
+        applied,
+        missing,
+        execute,
     )
     return applied
 

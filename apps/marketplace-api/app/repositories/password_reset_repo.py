@@ -1,8 +1,8 @@
 """
 Repository for password_reset_tokens table (AuthDatabase).
 """
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -10,16 +10,15 @@ from app.database import AuthDatabase
 
 
 class PasswordResetRepository:
-
     @staticmethod
     async def create(
         user_id: str,
         token: str,
         expires_in_hours: int = 1,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
         query = """
             INSERT INTO password_reset_tokens (user_id, token, expires_at)
             VALUES ($1, $2, $3)
@@ -30,9 +29,7 @@ class PasswordResetRepository:
             await AuthDatabase.execute(query, user_id, token, expires_at)
 
     @staticmethod
-    async def get_valid_token(
-        token: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> Optional[dict]:
+    async def get_valid_token(token: str, *, conn: asyncpg.Connection | None = None) -> dict | None:
         query = """
             SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.status
             FROM password_reset_tokens prt
@@ -46,9 +43,7 @@ class PasswordResetRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def mark_used(
-        token: str, *, conn: Optional[asyncpg.Connection] = None
-    ) -> bool:
+    async def mark_used(token: str, *, conn: asyncpg.Connection | None = None) -> bool:
         query = """
             UPDATE password_reset_tokens
             SET used = true
@@ -62,7 +57,7 @@ class PasswordResetRepository:
 
     @staticmethod
     async def invalidate_all_for_user(
-        user_id: str, *, conn: Optional[asyncpg.Connection] = None
+        user_id: str, *, conn: asyncpg.Connection | None = None
     ) -> None:
         query = """
             UPDATE password_reset_tokens

@@ -3,28 +3,34 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 
+from app.database import Database
 from app.models.booking import (
-    BookingCreate, BookingResponse, BookingLookup,
+    BookingCreate,
+    BookingLookup,
+    BookingResponse,
     ChangeRequestPayload,
 )
-from app.services.booking_service import (
-    create_booking_request,
-    confirm_payment_authorized,
-    guest_withdraw_booking,
-    get_cancellation_preview,
-    handle_guest_cancellation,
-    lookup_booking,
-    get_booking_status,
+from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.services import hotel_identity_service
+from app.services.booking_change_service import (
+    get_change_request_for_guest,
 )
 from app.services.booking_change_service import (
     preview_change as preview_booking_change,
-    submit_change as submit_booking_change,
-    get_change_request_for_guest,
 )
-from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
-from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
-from app.database import Database
-from app.services import hotel_identity_service
+from app.services.booking_change_service import (
+    submit_change as submit_booking_change,
+)
+from app.services.booking_service import (
+    confirm_payment_authorized,
+    create_booking_request,
+    get_booking_status,
+    get_cancellation_preview,
+    guest_withdraw_booking,
+    handle_guest_cancellation,
+    lookup_booking,
+)
 from app.utils import get_hotel_id_by_slug
 
 logger = logging.getLogger(__name__)
@@ -109,9 +115,7 @@ async def post_cancel(slug: str, booking_id: str, data: GuestActionRequest):
 @router.post("/{slug}/bookings/lookup", response_model=BookingResponse)
 async def post_booking_lookup(slug: str, data: BookingLookup):
     try:
-        booking = await lookup_booking(
-            slug, data.booking_reference, data.guest_email
-        )
+        booking = await lookup_booking(slug, data.booking_reference, data.guest_email)
     except Exception as e:
         logger.error("Error looking up booking: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -136,12 +140,16 @@ async def get_status(
 
 @router.post("/{slug}/bookings/{booking_id}/change-request/preview")
 async def post_change_request_preview(
-    slug: str, booking_id: str, data: ChangeRequestPayload,
+    slug: str,
+    booking_id: str,
+    data: ChangeRequestPayload,
 ):
     """Preview the price diff for a guest's hypothetical change request."""
     try:
         result = await preview_booking_change(
-            slug, booking_id, data.guest_email,
+            slug,
+            booking_id,
+            data.guest_email,
             check_in=data.check_in,
             check_out=data.check_out,
             addon_ids=data.addon_ids,
@@ -158,12 +166,16 @@ async def post_change_request_preview(
 
 @router.post("/{slug}/bookings/{booking_id}/change-request")
 async def post_change_request(
-    slug: str, booking_id: str, data: ChangeRequestPayload,
+    slug: str,
+    booking_id: str,
+    data: ChangeRequestPayload,
 ):
     """Submit a change request for a confirmed booking."""
     try:
         cr = await submit_booking_change(
-            slug, booking_id, data.guest_email,
+            slug,
+            booking_id,
+            data.guest_email,
             check_in=data.check_in,
             check_out=data.check_out,
             addon_ids=data.addon_ids,
@@ -242,7 +254,8 @@ async def get_payment_settings(slug: str):
 
     hotel = await Database.fetchrow(
         "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
-        "FROM hotels WHERE id = $1", hotel_id,
+        "FROM hotels WHERE id = $1",
+        hotel_id,
     )
 
     # Read payment method flags from booking engine DB (authoritative source —
@@ -285,7 +298,9 @@ async def get_payment_settings(slug: str):
         "payAtPropertyEnabled": pay_at_property,
         "onlineCardPayment": online_card,
         "bankTransfer": bank_transfer,
-        "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False) if settings else False,
+        "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False)
+        if settings
+        else False,
         "freeCancellationDays": policy["free_cancellation_days"] if policy else 7,
         "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,
         "arrivalTimeEnabled": hotel["arrival_time_enabled"] if hotel else False,
@@ -296,6 +311,7 @@ async def get_payment_settings(slug: str):
     be_hotel = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
     if be_hotel:
         import json
+
         methods = be_hotel.get("pay_at_hotel_methods")
         if isinstance(methods, str):
             methods = json.loads(methods)

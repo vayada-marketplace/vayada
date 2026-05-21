@@ -1,13 +1,13 @@
 """
 Email service for the booking engine backend.
 """
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from typing import Optional
+
 import logging
 import re
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from app.config import settings
 
@@ -18,7 +18,7 @@ async def send_email(
     to_email: str,
     subject: str,
     html_body: str,
-    text_body: Optional[str] = None,
+    text_body: str | None = None,
 ) -> bool:
     if not settings.EMAIL_ENABLED:
         logger.warning(f"Email sending is disabled. Would send to {to_email}: {subject}")
@@ -30,19 +30,21 @@ async def send_email(
 
     try:
         if not text_body:
-            text_body = re.sub(r'<[^>]+>', '', html_body).replace('&nbsp;', ' ').strip()
+            text_body = re.sub(r"<[^>]+>", "", html_body).replace("&nbsp;", " ").strip()
 
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
-        msg['To'] = to_email
-        msg.attach(MIMEText(text_body, 'plain'))
-        msg.attach(MIMEText(html_body, 'html'))
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
 
         if settings.SMTP_PORT == 465:
             context = ssl.create_default_context()
             context.minimum_version = ssl.TLSVersion.TLSv1_2
-            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, context=context) as server:
+            with smtplib.SMTP_SSL(
+                settings.SMTP_HOST, settings.SMTP_PORT, context=context
+            ) as server:
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.send_message(msg)
@@ -58,7 +60,9 @@ async def send_email(
         return True
     except smtplib.SMTPAuthenticationError as e:
         logger.error(f"SMTP authentication failed: {e}")
-        logger.error(f"  Host: {settings.SMTP_HOST}, Port: {settings.SMTP_PORT}, User: {settings.SMTP_USER}")
+        logger.error(
+            f"  Host: {settings.SMTP_HOST}, Port: {settings.SMTP_PORT}, User: {settings.SMTP_USER}"
+        )
         return False
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {e}")
@@ -127,7 +131,7 @@ _EXPIRY_NOTE = """
 # ── Templates ────────────────────────────────────────────────────────
 
 
-def create_password_reset_html(reset_link: str, user_name: Optional[str] = None) -> str:
+def create_password_reset_html(reset_link: str, user_name: str | None = None) -> str:
     name = user_name or "there"
     content = f"""
             <p>Hi {name},</p>
@@ -161,7 +165,9 @@ def create_welcome_email_html(user_name: str, login_link: str) -> str:
     return _email_layout(title, f"{title}!", content)
 
 
-def create_email_change_verification_html(verification_link: str, new_email: str, user_name: Optional[str] = None) -> str:
+def create_email_change_verification_html(
+    verification_link: str, new_email: str, user_name: str | None = None
+) -> str:
     name = user_name or "there"
     content = f"""
             <p>Hi {name},</p>

@@ -4,13 +4,12 @@ Before VAY-386 a hotel that hadn't set its currency would get a useless 422
 from Channex. Pre-flight catches the gap up front; the currency fallback +
 title cap also harden the payload we send.
 """
+
 import asyncio
 from unittest.mock import patch
 
 import pytest
-
 from app.services.channex import provisioning
-
 
 # ── _preflight_check ──────────────────────────────────────────────────
 
@@ -110,15 +109,17 @@ def _make_fakes(*, room_currency, room_name="Suite"):
 
         @staticmethod
         async def fetch(_query, *_args):
-            return [{
-                "id": "rt-1",
-                "name": room_name,
-                "total_rooms": 5,
-                "max_occupancy": 2,
-                "currency": room_currency,
-                "non_refundable_enabled": False,
-                "meal_plans": [],
-            }]
+            return [
+                {
+                    "id": "rt-1",
+                    "name": room_name,
+                    "total_rooms": 5,
+                    "max_occupancy": 2,
+                    "currency": room_currency,
+                    "non_refundable_enabled": False,
+                    "meal_plans": [],
+                }
+            ]
 
     async def fake_get_currency(_):
         return "IDR"
@@ -130,12 +131,8 @@ def _make_fakes(*, room_currency, room_name="Suite"):
             patch.object(provisioning, "ChannexRatePlanMappingRepository", FakeRatePlanMappingRepo),
             patch.object(provisioning, "Database", FakeDatabase),
             patch.object(provisioning, "get_be_currency", fake_get_currency),
-            patch.object(
-                provisioning.channex_service, "create_rate_plan", fake_create_rate_plan
-            ),
-            patch.object(
-                provisioning.channex_service, "get_platform_api_key", lambda: "key"
-            ),
+            patch.object(provisioning.channex_service, "create_rate_plan", fake_create_rate_plan),
+            patch.object(provisioning.channex_service, "get_platform_api_key", lambda: "key"),
         ):
             await provisioning.provision_property("h1")
 

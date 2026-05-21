@@ -1,40 +1,42 @@
 """
 Admin-specific Pydantic models
 """
-from pydantic import BaseModel, Field, EmailStr, model_validator, ConfigDict
-from typing import List, Optional, Union, Literal
+
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+
+from app.models.collaborations import CollaborationResponse
 from app.models.common import (
-    CollaborationOfferingResponse,
-    CreatorRequirementsResponse,
     PlatformResponse,
 )
-from app.models.collaborations import CollaborationResponse
 from app.models.hotels import CreateListingRequest, ListingResponse
-
 
 # ============================================
 # USER LIST/RESPONSE MODELS
 # ============================================
 
+
 class UserResponse(BaseModel):
     """User response model"""
+
     id: str
     email: str
     name: str
     type: str
     status: str
     email_verified: bool
-    avatar: Optional[str] = None
+    avatar: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class UserListResponse(BaseModel):
     """User list response"""
-    users: List[UserResponse]
+
+    users: list[UserResponse]
     total: int
 
 
@@ -42,9 +44,11 @@ class UserListResponse(BaseModel):
 # COLLABORATION LIST RESPONSE
 # ============================================
 
+
 class CollaborationListResponse(BaseModel):
     """Admin collaboration list response"""
-    collaborations: List[CollaborationResponse]
+
+    collaborations: list[CollaborationResponse]
     total: int
 
 
@@ -52,15 +56,17 @@ class CollaborationListResponse(BaseModel):
 # PLATFORM REQUEST (Admin version with ConfigDict)
 # ============================================
 
+
 class AdminPlatformRequest(BaseModel):
     """Platform request model for creating platforms (admin)"""
+
     name: Literal["Instagram", "TikTok", "YouTube", "Facebook"]
     handle: str
     followers: int
     engagementRate: float = Field(alias="engagement_rate")
-    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
-    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
-    genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    topCountries: list[dict] | None = Field(None, alias="top_countries")
+    topAgeGroups: list[dict] | None = Field(None, alias="top_age_groups")
+    genderSplit: dict | None = Field(None, alias="gender_split")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -69,43 +75,47 @@ class AdminPlatformRequest(BaseModel):
 # CREATE USER REQUESTS
 # ============================================
 
+
 class CreateCreatorProfileRequest(BaseModel):
     """Creator profile data for admin user creation"""
-    location: Optional[str] = None
-    shortDescription: Optional[str] = Field(None, alias="short_description")
-    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
-    phone: Optional[str] = None
-    profilePicture: Optional[str] = Field(None, alias="profile_picture")
-    platforms: Optional[List[AdminPlatformRequest]] = None
+
+    location: str | None = None
+    shortDescription: str | None = Field(None, alias="short_description")
+    portfolioLink: str | None = Field(None, alias="portfolio_link")
+    phone: str | None = None
+    profilePicture: str | None = Field(None, alias="profile_picture")
+    platforms: list[AdminPlatformRequest] | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class CreateHotelProfileRequest(BaseModel):
     """Hotel profile data for admin user creation"""
-    name: Optional[str] = None
-    location: Optional[str] = None
-    about: Optional[str] = None
-    website: Optional[str] = None
-    phone: Optional[str] = None
-    listings: Optional[List[CreateListingRequest]] = None
+
+    name: str | None = None
+    location: str | None = None
+    about: str | None = None
+    website: str | None = None
+    phone: str | None = None
+    listings: list[CreateListingRequest] | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class CreateUserRequest(BaseModel):
     """Request model for creating a user"""
+
     email: EmailStr
     password: str = Field(..., min_length=8)
     name: str
     type: Literal["creator", "hotel"]
-    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = "pending"
+    status: Literal["pending", "verified", "rejected", "suspended"] | None = "pending"
     emailVerified: bool = Field(False, alias="email_verified")
-    avatar: Optional[str] = None
-    creatorProfile: Optional[CreateCreatorProfileRequest] = Field(None, alias="creator_profile")
-    hotelProfile: Optional[CreateHotelProfileRequest] = Field(None, alias="hotel_profile")
+    avatar: str | None = None
+    creatorProfile: CreateCreatorProfileRequest | None = Field(None, alias="creator_profile")
+    hotelProfile: CreateHotelProfileRequest | None = Field(None, alias="hotel_profile")
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_profile_type(self):
         if self.type == "creator" and self.hotelProfile:
             raise ValueError("Cannot provide hotel_profile for creator user")
@@ -118,11 +128,12 @@ class CreateUserRequest(BaseModel):
 
 class UpdateUserRequest(BaseModel):
     """Request model for updating user fields (status, emailVerified, name, email)"""
-    name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    status: Optional[Literal["pending", "verified", "rejected", "suspended"]] = None
-    emailVerified: Optional[bool] = Field(None, alias="email_verified")
-    avatar: Optional[str] = None
+
+    name: str | None = None
+    email: EmailStr | None = None
+    status: Literal["pending", "verified", "rejected", "suspended"] | None = None
+    emailVerified: bool | None = Field(None, alias="email_verified")
+    avatar: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -131,16 +142,18 @@ class UpdateUserRequest(BaseModel):
 # USER DETAIL RESPONSES (nested profile info)
 # ============================================
 
+
 class AdminPlatformResponse(BaseModel):
     """Platform response model for creator platforms (admin detail view)"""
+
     id: str
     name: str
     handle: str
     followers: int
     engagementRate: float = Field(alias="engagement_rate")
-    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
-    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
-    genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    topCountries: list[dict] | None = Field(None, alias="top_countries")
+    topAgeGroups: list[dict] | None = Field(None, alias="top_age_groups")
+    genderSplit: dict | None = Field(None, alias="gender_split")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
 
@@ -149,95 +162,103 @@ class AdminPlatformResponse(BaseModel):
 
 class CreatorProfileDetail(BaseModel):
     """Creator profile detail"""
+
     id: str
     userId: str = Field(alias="user_id")
-    location: Optional[str] = None
-    shortDescription: Optional[str] = Field(None, alias="short_description")
-    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
-    phone: Optional[str] = None
-    profilePicture: Optional[str] = Field(None, alias="profile_picture")
+    location: str | None = None
+    shortDescription: str | None = Field(None, alias="short_description")
+    portfolioLink: str | None = Field(None, alias="portfolio_link")
+    phone: str | None = None
+    profilePicture: str | None = Field(None, alias="profile_picture")
     profileComplete: bool = Field(alias="profile_complete")
-    profileCompletedAt: Optional[datetime] = Field(None, alias="profile_completed_at")
+    profileCompletedAt: datetime | None = Field(None, alias="profile_completed_at")
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
-    platforms: List[PlatformResponse] = Field(default_factory=list)
+    platforms: list[PlatformResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class AdminCollaborationOfferingResponse(BaseModel):
     """Collaboration offering response model (admin - snake_case)"""
+
     id: str
     listing_id: str
     collaboration_type: str
-    availability_months: List[str]
-    platforms: List[str]
-    free_stay_min_nights: Optional[int] = None
-    free_stay_max_nights: Optional[int] = None
-    paid_max_amount: Optional[Decimal] = None
-    currency: Optional[str] = None
-    discount_percentage: Optional[Decimal] = None
+    availability_months: list[str]
+    platforms: list[str]
+    free_stay_min_nights: int | None = None
+    free_stay_max_nights: int | None = None
+    paid_max_amount: Decimal | None = None
+    currency: str | None = None
+    discount_percentage: Decimal | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class AdminCreatorRequirementsResponse(BaseModel):
     """Creator requirements response model (admin - snake_case)"""
+
     id: str
     listing_id: str
-    platforms: List[str]
-    top_countries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
-    target_age_min: Optional[int] = None
-    target_age_max: Optional[int] = None
-    target_age_groups: Optional[List[str]] = None
+    platforms: list[str]
+    top_countries: list[str] | None = Field(
+        None, alias="target_countries", description="Top Countries of the audience"
+    )
+    target_age_min: int | None = None
+    target_age_max: int | None = None
+    target_age_groups: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class AdminListingResponse(BaseModel):
     """Listing response model (admin - snake_case)"""
+
     id: str
     hotel_profile_id: str
     name: str
     location: str
-    description: Optional[str] = None
+    description: str | None = None
     accommodation_type: str
-    images: List[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
     status: str
     created_at: datetime
     updated_at: datetime
-    collaboration_offerings: List[AdminCollaborationOfferingResponse] = Field(default_factory=list)
-    creator_requirements: Optional[AdminCreatorRequirementsResponse] = None
+    collaboration_offerings: list[AdminCollaborationOfferingResponse] = Field(default_factory=list)
+    creator_requirements: AdminCreatorRequirementsResponse | None = None
 
 
 class HotelProfileDetail(BaseModel):
     """Hotel profile detail"""
+
     id: str
     userId: str = Field(alias="user_id")
     name: str
     location: str
-    picture: Optional[str] = None
-    website: Optional[str] = None
-    about: Optional[str] = None
+    picture: str | None = None
+    website: str | None = None
+    about: str | None = None
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
     status: str
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
-    listings: List[ListingResponse] = Field(default_factory=list)
+    listings: list[ListingResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class UserDetailResponse(BaseModel):
     """User detail response"""
+
     id: str
     email: str
     name: str
     type: str
     status: str
     email_verified: bool
-    avatar: Optional[str] = None
+    avatar: str | None = None
     created_at: datetime
     updated_at: datetime
-    profile: Optional[Union[CreatorProfileDetail, HotelProfileDetail]] = None
+    profile: CreatorProfileDetail | HotelProfileDetail | None = None

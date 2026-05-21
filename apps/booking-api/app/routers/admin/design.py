@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
-from app.dependencies import require_hotel_admin, get_current_hotel, require_current_hotel
-from app.repositories.booking_hotel_repo import BookingHotelRepository
+
+from app.dependencies import get_current_hotel, require_current_hotel, require_hotel_admin
 from app.models.design import DesignSettingsResponse, DesignSettingsUpdate
 from app.models.utils import parse_json
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 
 router = APIRouter()
 
@@ -21,23 +22,29 @@ _DESIGN_FIELD_MAP = {
 }
 
 _DESIGN_DEFAULTS = DesignSettingsResponse(
-    hero_image='', hero_heading='', hero_subtext='',
-    primary_color='', accent_color='', font_pairing='',
-    booking_filters=[], custom_filters={}, filter_rooms={},
+    hero_image="",
+    hero_heading="",
+    hero_subtext="",
+    primary_color="",
+    accent_color="",
+    font_pairing="",
+    booking_filters=[],
+    custom_filters={},
+    filter_rooms={},
 )
 
 
 def _hotel_to_design_settings(hotel: dict) -> DesignSettingsResponse:
     return DesignSettingsResponse(
-        hero_image=hotel.get('hero_image') or '',
-        hero_heading=hotel.get('name') or '',
-        hero_subtext=hotel.get('description') or '',
-        primary_color=hotel.get('branding_primary_color') or '',
-        accent_color=hotel.get('branding_accent_color') or '',
-        font_pairing=hotel.get('branding_font_pairing') or '',
-        booking_filters=parse_json(hotel.get('booking_filters')),
-        custom_filters=parse_json(hotel.get('custom_filters'), default={}),
-        filter_rooms=parse_json(hotel.get('filter_rooms'), default={}),
+        hero_image=hotel.get("hero_image") or "",
+        hero_heading=hotel.get("name") or "",
+        hero_subtext=hotel.get("description") or "",
+        primary_color=hotel.get("branding_primary_color") or "",
+        accent_color=hotel.get("branding_accent_color") or "",
+        font_pairing=hotel.get("branding_font_pairing") or "",
+        booking_filters=parse_json(hotel.get("booking_filters")),
+        custom_filters=parse_json(hotel.get("custom_filters"), default={}),
+        filter_rooms=parse_json(hotel.get("filter_rooms"), default={}),
     )
 
 

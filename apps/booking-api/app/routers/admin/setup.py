@@ -3,6 +3,7 @@
 Pulled out of the property-settings router so the setup wizard's
 read-only check sits next to its data sources, not next to property
 CRUD."""
+
 import logging
 
 from fastapi import APIRouter, Depends
@@ -37,14 +38,22 @@ async def get_setup_status(
 ):
     if not hotel:
         prefill = await get_setup_prefill(user_id)
-        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill)
+        return SetupStatusResponse(
+            setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill
+        )
 
     hotel_data = await BookingHotelRepository.get_by_id(str(hotel["id"]), columns=_SETUP_COLUMNS)
     if not hotel_data:
         prefill = await get_setup_prefill(user_id)
-        return SetupStatusResponse(setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill)
+        return SetupStatusResponse(
+            setup_complete=False, missing_fields=_ALL_SETUP_FIELDS, prefill_data=prefill
+        )
 
-    missing = [api_name for db_col, api_name in _SETUP_FIELD_MAP.items() if not hotel_data.get(db_col)]
+    missing = [
+        api_name for db_col, api_name in _SETUP_FIELD_MAP.items() if not hotel_data.get(db_col)
+    ]
     prefill = await get_setup_prefill(user_id) if missing else None
 
-    return SetupStatusResponse(setup_complete=len(missing) == 0, missing_fields=missing, prefill_data=prefill)
+    return SetupStatusResponse(
+        setup_complete=len(missing) == 0, missing_fields=missing, prefill_data=prefill
+    )

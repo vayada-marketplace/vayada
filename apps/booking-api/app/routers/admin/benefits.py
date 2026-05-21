@@ -1,8 +1,10 @@
 import json
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from app.dependencies import require_current_hotel
+
 from app.database import Database
+from app.dependencies import require_current_hotel
 from app.models.utils import parse_json
 
 router = APIRouter()
@@ -23,14 +25,13 @@ class BenefitsUpdate(BaseModel):
 # of whether the PMS row was created via the multi-hotel-ids unification
 # (id-matched) or predates it (id mismatch but linked by user_id+slug).
 
+
 @router.get("/benefits", response_model=BenefitsResponse)
 async def get_benefits(hotel: dict = Depends(require_current_hotel)):
     row = await Database.fetchrow(
         "SELECT benefits FROM booking_hotels WHERE id = $1", str(hotel["id"])
     )
-    return BenefitsResponse(
-        benefits=parse_json(row["benefits"]) if row else []
-    )
+    return BenefitsResponse(benefits=parse_json(row["benefits"]) if row else [])
 
 
 @router.put("/benefits", response_model=BenefitsResponse)

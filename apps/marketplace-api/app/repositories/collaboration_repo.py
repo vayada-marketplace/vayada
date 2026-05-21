@@ -1,7 +1,6 @@
 """
 Repository for collaborations, collaboration_deliverables, and creator_ratings tables (Database).
 """
-from typing import Optional, List
 
 import asyncpg
 
@@ -10,7 +9,6 @@ from app.repositories._sql import safe_columns
 
 
 class CollaborationRepository:
-
     # ── collaborations ──
 
     @staticmethod
@@ -18,8 +16,8 @@ class CollaborationRepository:
         collaboration_id: str,
         *,
         columns: str = "*",
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = f"SELECT {safe_columns(columns)} FROM collaborations WHERE id = $1"
         if conn:
             row = await conn.fetchrow(query, collaboration_id)
@@ -31,8 +29,8 @@ class CollaborationRepository:
     async def get_full(
         collaboration_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         """Fetch collaboration with joined creator/hotel/listing data."""
         query = """
             SELECT c.*, cr.profile_picture as creator_profile_picture,
@@ -54,8 +52,8 @@ class CollaborationRepository:
     async def get_listing_with_hotel(
         listing_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         """Fetch listing with hotel name, creator requirements, and free stay nights."""
         query = """
             SELECT hl.id, hl.hotel_profile_id, hl.name, hl.location, hl.status,
@@ -87,7 +85,7 @@ class CollaborationRepository:
         collaboration_id: str,
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> bool:
         """Return True if user_id is the creator or hotel participant on the collaboration."""
         query = """
@@ -111,7 +109,7 @@ class CollaborationRepository:
     async def get_deliverables(
         collaboration_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         query = """
             SELECT id, platform, type, quantity, status
@@ -130,8 +128,8 @@ class CollaborationRepository:
         deliverable_id: str,
         collaboration_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT type, status FROM collaboration_deliverables WHERE id = $1 AND collaboration_id = $2"
         if conn:
             row = await conn.fetchrow(query, deliverable_id, collaboration_id)
@@ -144,9 +142,11 @@ class CollaborationRepository:
         deliverable_id: str,
         new_status: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> None:
-        query = "UPDATE collaboration_deliverables SET status = $1, updated_at = NOW() WHERE id = $2"
+        query = (
+            "UPDATE collaboration_deliverables SET status = $1, updated_at = NOW() WHERE id = $2"
+        )
         if conn:
             await conn.execute(query, new_status, deliverable_id)
         else:
@@ -158,8 +158,8 @@ class CollaborationRepository:
     async def get_rating_by_collaboration(
         collaboration_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         query = "SELECT id FROM creator_ratings WHERE collaboration_id = $1"
         if conn:
             row = await conn.fetchrow(query, collaboration_id)
@@ -173,9 +173,9 @@ class CollaborationRepository:
         hotel_id: str,
         collaboration_id: str,
         rating: int,
-        comment: Optional[str] = None,
+        comment: str | None = None,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> dict:
         query = """
             INSERT INTO creator_ratings (creator_id, hotel_id, collaboration_id, rating, comment)
@@ -183,18 +183,22 @@ class CollaborationRepository:
             RETURNING id, created_at
         """
         if conn:
-            row = await conn.fetchrow(query, creator_id, hotel_id, collaboration_id, rating, comment)
+            row = await conn.fetchrow(
+                query, creator_id, hotel_id, collaboration_id, rating, comment
+            )
         else:
-            row = await Database.fetchrow(query, creator_id, hotel_id, collaboration_id, rating, comment)
+            row = await Database.fetchrow(
+                query, creator_id, hotel_id, collaboration_id, rating, comment
+            )
         return dict(row)
 
     @staticmethod
     async def get_creator_collaborations(
         creator_id: str,
         *,
-        status: Optional[str] = None,
-        initiator_type: Optional[str] = None,
-        conn: Optional[asyncpg.Connection] = None,
+        status: str | None = None,
+        initiator_type: str | None = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get collaborations for a creator with hotel/listing info and optional filters."""
         query = """
@@ -240,10 +244,10 @@ class CollaborationRepository:
     async def get_hotel_collaborations(
         hotel_id: str,
         *,
-        listing_id: Optional[str] = None,
-        status: Optional[str] = None,
-        initiator_type: Optional[str] = None,
-        conn: Optional[asyncpg.Connection] = None,
+        listing_id: str | None = None,
+        status: str | None = None,
+        initiator_type: str | None = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get collaborations for a hotel with creator info and optional filters."""
         query = """
@@ -296,9 +300,9 @@ class CollaborationRepository:
 
     @staticmethod
     async def get_deliverables_batch(
-        collab_ids: List[str],
+        collab_ids: list[str],
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Batch-fetch deliverables for multiple collaboration IDs."""
         if not collab_ids:
@@ -315,8 +319,8 @@ class CollaborationRepository:
         collaboration_id: str,
         creator_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         """Fetch detailed collaboration from creator perspective with hotel/listing/requirements."""
         query = """
             SELECT
@@ -363,8 +367,8 @@ class CollaborationRepository:
         collaboration_id: str,
         hotel_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
-    ) -> Optional[dict]:
+        conn: asyncpg.Connection | None = None,
+    ) -> dict | None:
         """Fetch detailed collaboration from hotel perspective with creator info."""
         query = """
             SELECT
@@ -399,7 +403,7 @@ class CollaborationRepository:
     async def get_user_collaborations(
         user_id: str,
         *,
-        conn: Optional[asyncpg.Connection] = None,
+        conn: asyncpg.Connection | None = None,
     ) -> list:
         """Get all collaborations where user is either creator or hotel owner (for GDPR export)."""
         query = """

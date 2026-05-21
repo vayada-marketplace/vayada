@@ -1,17 +1,18 @@
 import json
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.dependencies import require_current_hotel
-from app.repositories.booking_addon_repo import BookingAddonRepository
-from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.models.addon import (
     AddonResponse,
-    CreateAddonRequest,
-    UpdateAddonRequest,
     AddonSettingsResponse,
     AddonSettingsUpdate,
+    CreateAddonRequest,
+    UpdateAddonRequest,
 )
 from app.models.utils import parse_json_list
+from app.repositories.booking_addon_repo import BookingAddonRepository
+from app.repositories.booking_hotel_repo import BookingHotelRepository
 
 router = APIRouter()
 
@@ -77,7 +78,19 @@ async def update_addon(
         raise HTTPException(status_code=404, detail="Addon not found")
 
     updates = {}
-    for field in ("name", "description", "price", "currency", "category", "image", "duration", "per_person", "per_night", "location", "max_guests"):
+    for field in (
+        "name",
+        "description",
+        "price",
+        "currency",
+        "category",
+        "image",
+        "duration",
+        "per_person",
+        "per_night",
+        "location",
+        "max_guests",
+    ):
         value = getattr(data, field)
         if value is not None:
             updates[field] = value

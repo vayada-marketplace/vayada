@@ -1,14 +1,17 @@
 """
 Tests for public /api/hotels/{slug}/rooms endpoint.
 """
+
 import json
+
 import pytest
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
+    create_test_booking,
     create_test_hotel,
     create_test_room_type,
-    create_test_booking,
+    create_test_user,
     generate_test_slug,
 )
 
@@ -49,11 +52,15 @@ class TestPublicRooms:
         assert too_many_adults.status_code == 200
         assert too_many_adults.json() == []
 
-        too_many_children = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=1&children=2")
+        too_many_children = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms?adults=1&children=2"
+        )
         assert too_many_children.status_code == 200
         assert too_many_children.json() == []
 
-    async def test_unconfigured_adult_child_limits_fall_back_to_total_occupancy(self, client, cleanup_database):
+    async def test_unconfigured_adult_child_limits_fall_back_to_total_occupancy(
+        self, client, cleanup_database
+    ):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         await create_test_room_type(str(hotel["id"]), name="Legacy Room", max_occupancy=3)
@@ -80,12 +87,16 @@ class TestPublicRooms:
 
         # Create 2 bookings overlapping with the query dates
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
         )
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-06-03", check_out="2026-06-07",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-03",
+            check_out="2026-06-07",
             guest_email="guest2@example.com",
         )
 
@@ -111,8 +122,10 @@ class TestPublicRooms:
         room = await create_test_room_type(str(hotel["id"]), total_rooms=2)
 
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="cancelled",
         )
 
@@ -154,7 +167,9 @@ class TestPublicRooms:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         # base_rate=150, default discount=5% → NR rate = 150 * 0.95 = 142.5
-        await create_test_room_type(str(hotel["id"]), name="NR Room", non_refundable_rate=120.0, non_refundable_enabled=True)
+        await create_test_room_type(
+            str(hotel["id"]), name="NR Room", non_refundable_rate=120.0, non_refundable_enabled=True
+        )
 
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
         rooms = resp.json()
@@ -184,7 +199,8 @@ class TestPublicRooms:
         }
         await Database.execute(
             "UPDATE room_types SET rate_payment_methods = $1::jsonb WHERE id = $2",
-            json.dumps(methods), str(room["id"]),
+            json.dumps(methods),
+            str(room["id"]),
         )
 
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")

@@ -1,9 +1,7 @@
-from typing import Optional, List
 from app.database import Database
 
 
 class PayoutRepository:
-
     @staticmethod
     async def create(
         booking_id: str,
@@ -31,7 +29,7 @@ class PayoutRepository:
         return dict(row)
 
     @staticmethod
-    async def list_due_payouts(before_date) -> List[dict]:
+    async def list_due_payouts(before_date) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT p.*, b.booking_reference
@@ -46,7 +44,7 @@ class PayoutRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def list_monthly_affiliate_payouts(month: int, year: int) -> List[dict]:
+    async def list_monthly_affiliate_payouts(month: int, year: int) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT p.*, b.booking_reference, b.check_out, b.status AS booking_status
@@ -69,8 +67,8 @@ class PayoutRepository:
     async def update_status(
         payout_id: str,
         status: str,
-        stripe_transfer_id: Optional[str] = None,
-        xendit_payout_id: Optional[str] = None,
+        stripe_transfer_id: str | None = None,
+        xendit_payout_id: str | None = None,
     ) -> dict:
         if stripe_transfer_id:
             row = await Database.fetchrow(
@@ -134,7 +132,7 @@ class PayoutRepository:
         return dict(row)
 
     @staticmethod
-    async def list_processing_xendit(older_than_minutes: int = 30) -> List[dict]:
+    async def list_processing_xendit(older_than_minutes: int = 30) -> list[dict]:
         """List Xendit payouts stuck in 'processing' for longer than the threshold."""
         rows = await Database.fetch(
             """
@@ -162,10 +160,10 @@ class PayoutRepository:
     async def list_by_hotel(
         hotel_id: str,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict]:
+    ) -> list[dict]:
         conditions = ["b.hotel_id = $1"]
         args: list = [hotel_id]
         idx = 2
@@ -191,7 +189,7 @@ class PayoutRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def count_by_hotel(hotel_id: str, *, status: Optional[str] = None) -> int:
+    async def count_by_hotel(hotel_id: str, *, status: str | None = None) -> int:
         if status:
             count = await Database.fetchval(
                 """

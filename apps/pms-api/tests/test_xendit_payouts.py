@@ -2,26 +2,27 @@
 Tests for Xendit payout integration: config, models, service, repositories,
 admin endpoints, webhook, and scheduler dispatch.
 """
-import json
-import hmac
+
 import hashlib
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, AsyncMock, MagicMock
+import hmac
+import json
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.config import settings
+from app.database import Database
 
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
+    create_test_affiliate,
     create_test_booking,
     create_test_booking_with_payment,
+    create_test_hotel,
     create_test_payment_settings,
-    create_test_affiliate,
-    set_test_payout_settings,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
+    set_test_payout_settings,
 )
-from app.database import Database
-from app.config import settings
-
 
 # ── Config ────────────────────────────────────────────────────────
 
@@ -97,7 +98,11 @@ class TestXenditModels:
         from app.models.payment import XenditBankDetailsRequest
 
         req = XenditBankDetailsRequest.model_validate(
-            {"channelCode": "ID_BNI", "accountNumber": "12345678", "accountHolderName": "Alias Test"}
+            {
+                "channelCode": "ID_BNI",
+                "accountNumber": "12345678",
+                "accountHolderName": "Alias Test",
+            }
         )
         assert req.channel_code == "ID_BNI"
 
@@ -250,9 +255,7 @@ class TestPayoutRepoXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         from app.repositories.payout_repo import PayoutRepository
 
@@ -262,7 +265,7 @@ class TestPayoutRepoXendit:
             recipient_id=str(hotel["id"]),
             amount=100.0,
             currency="IDR",
-            scheduled_for=datetime.now(timezone.utc),
+            scheduled_for=datetime.now(UTC),
         )
 
         updated = await PayoutRepository.update_status(
@@ -278,9 +281,7 @@ class TestPayoutRepoXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         from app.repositories.payout_repo import PayoutRepository
 
@@ -290,7 +291,7 @@ class TestPayoutRepoXendit:
             recipient_id=str(hotel["id"]),
             amount=100.0,
             currency="EUR",
-            scheduled_for=datetime.now(timezone.utc),
+            scheduled_for=datetime.now(UTC),
         )
 
         updated = await PayoutRepository.update_status(str(payout["id"]), "processing")
@@ -302,9 +303,7 @@ class TestPayoutRepoXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         from app.repositories.payout_repo import PayoutRepository
 
@@ -314,7 +313,7 @@ class TestPayoutRepoXendit:
             recipient_id=str(hotel["id"]),
             amount=100.0,
             currency="EUR",
-            scheduled_for=datetime.now(timezone.utc),
+            scheduled_for=datetime.now(UTC),
         )
 
         updated = await PayoutRepository.update_status(
@@ -339,9 +338,7 @@ class TestAdminAffiliateXendit:
         # Affiliate must be linked to a user so payout settings can be stored
         aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         # Approve first
-        await Database.execute(
-            "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
-        )
+        await Database.execute("UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"])
 
         resp = await client.post(
             f"/admin/affiliates/{aff['id']}/xendit/bank-details",
@@ -396,9 +393,7 @@ class TestAdminAffiliateXendit:
         user_a = await create_test_user()
         hotel_a = await create_test_hotel(str(user_a["id"]))
         aff = await create_test_affiliate(str(hotel_a["id"]))
-        await Database.execute(
-            "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
-        )
+        await Database.execute("UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"])
 
         user_b = await create_test_user()
         await create_test_hotel(str(user_b["id"]))
@@ -530,9 +525,7 @@ class TestAdminAffiliateDetailXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
-        await Database.execute(
-            "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
-        )
+        await Database.execute("UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"])
 
         # Save Xendit details
         await client.post(
@@ -567,9 +560,7 @@ class TestXenditWebhook:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         # Create a payout with xendit_payout_id
         payout = await Database.fetchrow(
@@ -578,19 +569,22 @@ class TestXenditWebhook:
             VALUES ($1, 'hotel', $2, 100.0, 'IDR', now(), 'processing', 'disb_webhook_test')
             RETURNING *
             """,
-            str(booking["id"]), str(hotel["id"]),
+            str(booking["id"]),
+            str(hotel["id"]),
         )
 
         resp = await client.post(
             "/webhooks/xendit",
-            content=json.dumps({
-                "event": "payout.succeeded",
-                "data": {
-                    "id": "disb_webhook_test",
-                    "status": "SUCCEEDED",
-                    "reference_id": f"hotel-{payout['id']}",
-                },
-            }),
+            content=json.dumps(
+                {
+                    "event": "payout.succeeded",
+                    "data": {
+                        "id": "disb_webhook_test",
+                        "status": "SUCCEEDED",
+                        "reference_id": f"hotel-{payout['id']}",
+                    },
+                }
+            ),
             headers={
                 "x-callback-token": settings.XENDIT_WEBHOOK_SECRET,
                 "content-type": "application/json",
@@ -610,9 +604,7 @@ class TestXenditWebhook:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         payout = await Database.fetchrow(
             """
@@ -620,18 +612,21 @@ class TestXenditWebhook:
             VALUES ($1, 'hotel', $2, 100.0, 'IDR', now(), 'processing', 'disb_fail_test')
             RETURNING *
             """,
-            str(booking["id"]), str(hotel["id"]),
+            str(booking["id"]),
+            str(hotel["id"]),
         )
 
         resp = await client.post(
             "/webhooks/xendit",
-            content=json.dumps({
-                "event": "payout.failed",
-                "data": {
-                    "id": "disb_fail_test",
-                    "status": "FAILED",
-                },
-            }),
+            content=json.dumps(
+                {
+                    "event": "payout.failed",
+                    "data": {
+                        "id": "disb_fail_test",
+                        "status": "FAILED",
+                    },
+                }
+            ),
             headers={
                 "x-callback-token": settings.XENDIT_WEBHOOK_SECRET,
                 "content-type": "application/json",
@@ -639,9 +634,7 @@ class TestXenditWebhook:
         )
         assert resp.status_code == 200
 
-        updated = await Database.fetchrow(
-            "SELECT status FROM payouts WHERE id = $1", payout["id"]
-        )
+        updated = await Database.fetchrow("SELECT status FROM payouts WHERE id = $1", payout["id"])
         assert updated["status"] == "failed"
 
     async def test_xendit_webhook_missing_token(self, client, init_database):
@@ -669,10 +662,12 @@ class TestXenditWebhook:
         """Unknown payout ID in webhook is handled gracefully."""
         resp = await client.post(
             "/webhooks/xendit",
-            content=json.dumps({
-                "event": "payout.succeeded",
-                "data": {"id": "disb_nonexistent", "status": "SUCCEEDED"},
-            }),
+            content=json.dumps(
+                {
+                    "event": "payout.succeeded",
+                    "data": {"id": "disb_nonexistent", "status": "SUCCEEDED"},
+                }
+            ),
             headers={
                 "x-callback-token": settings.XENDIT_WEBHOOK_SECRET,
                 "content-type": "application/json",
@@ -706,9 +701,7 @@ class TestSchedulerPropertyPayoutsXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         # Create payment settings with xendit provider
         await Database.execute(
@@ -735,11 +728,16 @@ class TestSchedulerPropertyPayoutsXendit:
             """,
             str(booking["id"]),
             str(hotel["id"]),
-            datetime.now(timezone.utc) - timedelta(hours=1),
+            datetime.now(UTC) - timedelta(hours=1),
         )
 
         with patch("app.services.xendit_service.create_payout", new_callable=AsyncMock) as mock_xen:
-            mock_xen.return_value = {"id": "disb_sched_hotel", "reference_id": f"hotel-{payout['id']}", "status": "ACCEPTED", "amount": 500}
+            mock_xen.return_value = {
+                "id": "disb_sched_hotel",
+                "reference_id": f"hotel-{payout['id']}",
+                "status": "ACCEPTED",
+                "amount": 500,
+            }
             await process_property_payouts()
 
         mock_xen.assert_called_once()
@@ -760,9 +758,7 @@ class TestSchedulerPropertyPayoutsXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         await create_test_payment_settings(
             str(hotel["id"]),
@@ -777,10 +773,12 @@ class TestSchedulerPropertyPayoutsXendit:
             """,
             str(booking["id"]),
             str(hotel["id"]),
-            datetime.now(timezone.utc) - timedelta(hours=1),
+            datetime.now(UTC) - timedelta(hours=1),
         )
 
-        with patch("app.services.stripe_service.create_transfer", new_callable=AsyncMock) as mock_stripe:
+        with patch(
+            "app.services.stripe_service.create_transfer", new_callable=AsyncMock
+        ) as mock_stripe:
             mock_stripe.return_value = {"id": "tr_sched_hotel", "amount": 20000}
             await process_property_payouts()
 
@@ -799,9 +797,7 @@ class TestSchedulerPropertyPayoutsXendit:
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
-        booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]), status="confirmed"
-        )
+        booking = await create_test_booking(str(hotel["id"]), str(room["id"]), status="confirmed")
 
         # Xendit provider but no bank details
         await Database.execute(
@@ -821,14 +817,12 @@ class TestSchedulerPropertyPayoutsXendit:
             """,
             str(booking["id"]),
             str(hotel["id"]),
-            datetime.now(timezone.utc) - timedelta(hours=1),
+            datetime.now(UTC) - timedelta(hours=1),
         )
 
         await process_property_payouts()
 
-        updated = await Database.fetchrow(
-            "SELECT status FROM payouts WHERE id = $1", payout["id"]
-        )
+        updated = await Database.fetchrow("SELECT status FROM payouts WHERE id = $1", payout["id"])
         assert updated["status"] == "scheduled"
 
 
@@ -846,9 +840,11 @@ class TestSchedulerAffiliatePayoutsXendit:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             status="confirmed",
-            check_in="2025-12-01", check_out="2025-12-05",
+            check_in="2025-12-01",
+            check_out="2025-12-05",
         )
         aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
 
@@ -877,14 +873,19 @@ class TestSchedulerAffiliatePayoutsXendit:
         )
 
         # Mock datetime to February 2026 so it processes January payouts
-        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=timezone.utc)
+        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=UTC)
         with (
             patch("app.services.scheduler.datetime") as mock_dt,
             patch("app.services.xendit_service.create_payout", new_callable=AsyncMock) as mock_xen,
         ):
             mock_dt.now.return_value = mock_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            mock_xen.return_value = {"id": "disb_aff_xen", "reference_id": f"affiliate-{payout['id']}", "status": "ACCEPTED", "amount": 50}
+            mock_xen.return_value = {
+                "id": "disb_aff_xen",
+                "reference_id": f"affiliate-{payout['id']}",
+                "status": "ACCEPTED",
+                "amount": 50,
+            }
             await process_affiliate_payouts()
 
         mock_xen.assert_called_once()
@@ -907,9 +908,11 @@ class TestSchedulerAffiliatePayoutsXendit:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             status="confirmed",
-            check_in="2025-12-01", check_out="2025-12-05",
+            check_in="2025-12-01",
+            check_out="2025-12-05",
         )
         aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         await Database.execute(
@@ -934,10 +937,12 @@ class TestSchedulerAffiliatePayoutsXendit:
             str(aff["id"]),
         )
 
-        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=timezone.utc)
+        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=UTC)
         with (
             patch("app.services.scheduler.datetime") as mock_dt,
-            patch("app.services.stripe_service.create_transfer", new_callable=AsyncMock) as mock_stripe,
+            patch(
+                "app.services.stripe_service.create_transfer", new_callable=AsyncMock
+            ) as mock_stripe,
         ):
             mock_dt.now.return_value = mock_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -960,14 +965,14 @@ class TestSchedulerAffiliatePayoutsXendit:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             status="confirmed",
-            check_in="2025-12-01", check_out="2025-12-05",
+            check_in="2025-12-01",
+            check_out="2025-12-05",
         )
         aff = await create_test_affiliate(str(hotel["id"]))
-        await Database.execute(
-            "UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"]
-        )
+        await Database.execute("UPDATE affiliates SET status = 'approved' WHERE id = $1", aff["id"])
 
         payout = await Database.fetchrow(
             """
@@ -979,16 +984,14 @@ class TestSchedulerAffiliatePayoutsXendit:
             str(aff["id"]),
         )
 
-        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=timezone.utc)
+        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=UTC)
         with patch("app.services.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = mock_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             await process_affiliate_payouts()
 
         # Payout should remain scheduled (skipped)
-        updated = await Database.fetchrow(
-            "SELECT status FROM payouts WHERE id = $1", payout["id"]
-        )
+        updated = await Database.fetchrow("SELECT status FROM payouts WHERE id = $1", payout["id"])
         assert updated["status"] == "scheduled"
 
     async def test_affiliate_payout_xendit_missing_details_skipped(self, cleanup_database):
@@ -999,9 +1002,11 @@ class TestSchedulerAffiliatePayoutsXendit:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             status="confirmed",
-            check_in="2025-12-01", check_out="2025-12-05",
+            check_in="2025-12-01",
+            check_out="2025-12-05",
         )
         aff = await create_test_affiliate(str(hotel["id"]), user_id=str(user["id"]))
         await Database.execute(
@@ -1021,13 +1026,11 @@ class TestSchedulerAffiliatePayoutsXendit:
             str(aff["id"]),
         )
 
-        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=timezone.utc)
+        mock_now = datetime(2026, 2, 1, 2, 0, tzinfo=UTC)
         with patch("app.services.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = mock_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             await process_affiliate_payouts()
 
-        updated = await Database.fetchrow(
-            "SELECT status FROM payouts WHERE id = $1", payout["id"]
-        )
+        updated = await Database.fetchrow("SELECT status FROM payouts WHERE id = $1", payout["id"])
         assert updated["status"] == "scheduled"

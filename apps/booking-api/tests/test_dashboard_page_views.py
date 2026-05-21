@@ -6,13 +6,14 @@ Covers: default current-week window, week_offset shifts, property-
 timezone day boundaries, and the has_previous_data flag when there are
 no events in the prior 7-day window.
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-
 from app.database import Database
 from app.repositories.dashboard_repo import DashboardRepository
+
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
@@ -26,13 +27,17 @@ async def _insert_event(hotel_slug: str, when: datetime, event_type: str = "page
         INSERT INTO booking_events (hotel_slug, event_type, session_id, metadata, created_at)
         VALUES ($1, $2, $3, '{}'::jsonb, $4)
         """,
-        hotel_slug, event_type, "session-test", when,
+        hotel_slug,
+        event_type,
+        "session-test",
+        when,
     )
 
 
 async def _purge_events(hotel_slug: str):
     await Database.execute(
-        "DELETE FROM booking_events WHERE hotel_slug = $1", hotel_slug,
+        "DELETE FROM booking_events WHERE hotel_slug = $1",
+        hotel_slug,
     )
 
 
@@ -46,7 +51,10 @@ class TestPageViewsTimelineRepo:
             # one event per day in the current 7-day window
             for i in range(7):
                 day = today - timedelta(days=i)
-                await _insert_event(hotel["slug"], datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=12))
+                await _insert_event(
+                    hotel["slug"],
+                    datetime.combine(day, datetime.min.time(), tzinfo=UTC) + timedelta(hours=12),
+                )
 
             result = await DashboardRepository.get_page_views_timeline(hotel, week_offset=0)
 
@@ -70,7 +78,8 @@ class TestPageViewsTimelineRepo:
             for _ in range(3):
                 await _insert_event(
                     hotel["slug"],
-                    datetime.combine(past_day, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=10),
+                    datetime.combine(past_day, datetime.min.time(), tzinfo=UTC)
+                    + timedelta(hours=10),
                 )
 
             result = await DashboardRepository.get_page_views_timeline(hotel, week_offset=1)
@@ -95,17 +104,20 @@ class TestPageViewsTimelineRepo:
             # 5 events in current week, 2 events in previous week
             await _insert_event(
                 hotel["slug"],
-                datetime.combine(today - timedelta(days=2), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=12),
+                datetime.combine(today - timedelta(days=2), datetime.min.time(), tzinfo=UTC)
+                + timedelta(hours=12),
             )
             for _ in range(4):
                 await _insert_event(
                     hotel["slug"],
-                    datetime.combine(today - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=12),
+                    datetime.combine(today - timedelta(days=1), datetime.min.time(), tzinfo=UTC)
+                    + timedelta(hours=12),
                 )
             for _ in range(2):
                 await _insert_event(
                     hotel["slug"],
-                    datetime.combine(today - timedelta(days=10), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=12),
+                    datetime.combine(today - timedelta(days=10), datetime.min.time(), tzinfo=UTC)
+                    + timedelta(hours=12),
                 )
 
             result = await DashboardRepository.get_page_views_timeline(hotel, week_offset=0)
@@ -128,8 +140,10 @@ class TestPageViewsTimelineRepo:
             # An instant that is "yesterday" in UTC but "today" in NZ — i.e.
             # 11pm local two days ago in NZ would be ~10am UTC two days ago.
             # Instead, build it from the local side and convert:
-            local_noon_yesterday = datetime.combine(local_today - timedelta(days=1), datetime.min.time(), tzinfo=tz) + timedelta(hours=12)
-            await _insert_event(hotel["slug"], local_noon_yesterday.astimezone(timezone.utc))
+            local_noon_yesterday = datetime.combine(
+                local_today - timedelta(days=1), datetime.min.time(), tzinfo=tz
+            ) + timedelta(hours=12)
+            await _insert_event(hotel["slug"], local_noon_yesterday.astimezone(UTC))
 
             result = await DashboardRepository.get_page_views_timeline(hotel, week_offset=0)
             yesterday_iso = (local_today - timedelta(days=1)).isoformat()
@@ -150,8 +164,15 @@ class TestPageViewsTimelineEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         for key in (
-            "window_start", "window_end", "previous_window_start", "previous_window_end",
-            "buckets", "previous_buckets", "total", "previous_total", "has_previous_data",
+            "window_start",
+            "window_end",
+            "previous_window_start",
+            "previous_window_end",
+            "buckets",
+            "previous_buckets",
+            "total",
+            "previous_total",
+            "has_previous_data",
         ):
             assert key in body
         assert len(body["buckets"]) == 7

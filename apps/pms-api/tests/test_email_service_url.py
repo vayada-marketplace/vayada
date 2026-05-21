@@ -1,4 +1,5 @@
 """Unit tests for the guest booking email URL helpers."""
+
 from app.services.email_service import _my_booking_url
 
 

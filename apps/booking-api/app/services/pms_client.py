@@ -4,13 +4,12 @@ Forwards the user's bearer token + an explicit X-Hotel-Id so PMS can run
 its own ownership check on the targeted hotel — keeping the auth model
 the same as if the frontend had called PMS directly.
 """
+
 import logging
-from typing import Optional
 
 import httpx
 
 from app.config import settings
-
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ async def get_deletion_impact(auth_header: str, hotel_id: str) -> dict:
     return resp.json()
 
 
-async def delete_hotel(auth_header: str, hotel_id: str) -> Optional[dict]:
+async def delete_hotel(auth_header: str, hotel_id: str) -> dict | None:
     """Delete the PMS-side hotel row. Returns None on 204 success or
     when the row was already gone (404) — both are acceptable
     pre-conditions for the booking-engine cascade that follows."""

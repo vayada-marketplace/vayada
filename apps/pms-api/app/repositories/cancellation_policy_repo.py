@@ -1,12 +1,10 @@
-from typing import Optional
 from app.database import Database
 from app.utils import upsert_by_hotel_id
 
 
 class CancellationPolicyRepository:
-
     @staticmethod
-    async def get_by_hotel_id(hotel_id: str) -> Optional[dict]:
+    async def get_by_hotel_id(hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM cancellation_policies WHERE hotel_id = $1",
             hotel_id,

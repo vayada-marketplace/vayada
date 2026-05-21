@@ -1,8 +1,11 @@
 """
 Cloudflare for SaaS — Custom Hostname management.
 """
+
 import logging
+
 import httpx
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -45,7 +48,9 @@ async def create_custom_hostname(domain: str) -> dict:
             logger.error("Cloudflare create_custom_hostname failed: %s", errors)
             # 1406 = hostname already exists
             if 1406 in error_codes:
-                raise ValueError("This domain is already registered. Try removing and re-adding it.")
+                raise ValueError(
+                    "This domain is already registered. Try removing and re-adding it."
+                )
             msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
             raise RuntimeError(msg)
         return data["result"]

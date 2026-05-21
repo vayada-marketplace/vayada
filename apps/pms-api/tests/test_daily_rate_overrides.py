@@ -8,6 +8,7 @@ without it OTAs only saw the new rate the next time something else
 triggered a sync. These tests pin the resolver behavior so the override
 contract stays load-bearing across both sales channels.
 """
+
 from datetime import date
 from decimal import Decimal
 
@@ -75,7 +76,8 @@ def test_channex_push_uses_daily_override():
     # applied on top per the VAY-380 contract.
     room = _make_room(daily_rates={"2026-05-07": 1_100_000})
     entry = _build_restriction_entry(
-        room, date(2026, 5, 7),
+        room,
+        date(2026, 5, 7),
         plan_name="standard",
         markup_pct=Decimal(10),
         meal_plan_code=0,

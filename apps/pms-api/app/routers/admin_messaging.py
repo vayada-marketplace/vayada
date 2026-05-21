@@ -1,9 +1,9 @@
 """Hotel-facing inbox API: list threads, read thread, reply, attachments."""
-import logging
-from datetime import datetime, timezone
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+import logging
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.dependencies import require_hotel_admin
 from app.models.messaging import (
@@ -15,7 +15,6 @@ from app.models.messaging import (
     ThreadListResponse,
     UnreadCountResponse,
 )
-from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.repositories.messaging_repo import (
     MessageAttachmentRepository,
     MessageRepository,
@@ -32,16 +31,18 @@ router = APIRouter(prefix="/admin", tags=["admin-messaging"])
 # Channex's Messaging & Reviews app forwards a fixed set of media types to the
 # OTAs. Anything outside this list is silently dropped on the OTA side, so we
 # reject upfront with a clear error.
-ALLOWED_ATTACHMENT_CONTENT_TYPES: frozenset[str] = frozenset({
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/heic",
-    "image/heif",
-    "image/webp",
-    "image/gif",
-    "application/pdf",
-})
+ALLOWED_ATTACHMENT_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/heic",
+        "image/heif",
+        "image/webp",
+        "image/gif",
+        "application/pdf",
+    }
+)
 
 # Per-channel max attachment size. Booking.com's messaging API caps at ~10MB;
 # Airbnb tolerates up to 25MB. We use the smaller of the relevant cap so the
@@ -54,16 +55,20 @@ _PER_CHANNEL_MAX_ATTACHMENT_BYTES: dict[str, int] = {
 }
 
 
-def max_attachment_bytes_for_channel(channel: Optional[str]) -> int:
+def max_attachment_bytes_for_channel(channel: str | None) -> int:
     if not channel:
         return _DEFAULT_MAX_ATTACHMENT_BYTES
     return _PER_CHANNEL_MAX_ATTACHMENT_BYTES.get(
-        channel.lower(), _DEFAULT_MAX_ATTACHMENT_BYTES,
+        channel.lower(),
+        _DEFAULT_MAX_ATTACHMENT_BYTES,
     )
 
 
 def validate_attachment(
-    *, content_type: Optional[str], size_bytes: int, channel: Optional[str],
+    *,
+    content_type: str | None,
+    size_bytes: int,
+    channel: str | None,
 ) -> None:
     """Raise HTTPException if the file can't be forwarded to the OTA.
 
@@ -87,10 +92,7 @@ def validate_attachment(
         channel_label = channel or "this channel"
         raise HTTPException(
             status_code=413,
-            detail=(
-                f"Attachment is too large for {channel_label} "
-                f"(max {limit_mb} MB)."
-            ),
+            detail=(f"Attachment is too large for {channel_label} (max {limit_mb} MB)."),
         )
 
 
@@ -134,14 +136,17 @@ def _message_to_model(row: dict, attachments: list) -> Message:
 
 @router.get("/messaging/threads", response_model=ThreadListResponse)
 async def list_threads(
-    status: Optional[str] = Query(None, regex="^(open|closed|no_reply_needed)$"),
+    status: str | None = Query(None, regex="^(open|closed|no_reply_needed)$"),
     limit: int = Query(50, ge=1, le=100),
-    before: Optional[datetime] = None,
+    before: datetime | None = None,
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
     rows = await MessageThreadRepository.list_by_hotel(
-        hotel_id, status=status, limit=limit, before=before,
+        hotel_id,
+        status=status,
+        limit=limit,
+        before=before,
     )
     threads = [_thread_to_model(r) for r in rows]
     next_cursor = (
@@ -168,8 +173,7 @@ async def get_thread(
         attachments_by_msg.setdefault(str(att["message_id"]), []).append(att)
 
     messages = [
-        _message_to_model(m, attachments_by_msg.get(str(m["id"]), []))
-        for m in message_rows
+        _message_to_model(m, attachments_by_msg.get(str(m["id"]), [])) for m in message_rows
     ]
     return ThreadDetailResponse(
         thread=_thread_to_model(thread_row),
@@ -203,20 +207,31 @@ async def send_message(
         logger.info(
             "Sending Channex message: thread=%s channel=%s "
             "source_thread_id=%s attachment_id=%s body_len=%d (%d/%d)",
-            thread_id, channel, source_thread_id, attachment_id,
-            len(msg_body), idx + 1, len(attachments),
+            thread_id,
+            channel,
+            source_thread_id,
+            attachment_id,
+            len(msg_body),
+            idx + 1,
+            len(attachments),
         )
         try:
             channex_msg = await channex_service.post_thread_message(
-                api_key, source_thread_id,
-                message=msg_body, attachment_id=attachment_id,
+                api_key,
+                source_thread_id,
+                message=msg_body,
+                attachment_id=attachment_id,
             )
         except Exception as e:
             sent_so_far = idx
             logger.exception(
                 "Failed to send Channex message: thread=%s channel=%s "
                 "attachment_id=%s sent_before_failure=%d/%d",
-                thread_id, channel, attachment_id, sent_so_far, len(attachments),
+                thread_id,
+                channel,
+                attachment_id,
+                sent_so_far,
+                len(attachments),
             )
             if sent_so_far > 0:
                 detail = (
@@ -227,16 +242,18 @@ async def send_message(
                 detail = f"Channex send failed: {e}"
             raise HTTPException(status_code=502, detail=detail)
         logger.info(
-            "Channex message accepted: thread=%s channel=%s "
-            "channex_message_id=%s",
-            thread_id, channel, channex_msg.get("id"),
+            "Channex message accepted: thread=%s channel=%s channex_message_id=%s",
+            thread_id,
+            channel,
+            channex_msg.get("id"),
         )
 
         attrs = channex_msg.get("attributes") or {}
         sent_at_str = attrs.get("inserted_at")
         sent_at = (
             datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
-            if sent_at_str else datetime.now(timezone.utc)
+            if sent_at_str
+            else datetime.now(UTC)
         )
         inserted = await MessageRepository.insert_and_update_thread(
             thread_id=thread_id,
@@ -258,7 +275,9 @@ async def send_message(
         # All sends collided with prior records — return the latest existing.
         rows = await MessageRepository.list_by_thread(thread_id)
         if not rows:
-            raise HTTPException(status_code=500, detail="Send appeared to succeed but message not found")
+            raise HTTPException(
+                status_code=500, detail="Send appeared to succeed but message not found"
+            )
         last_inserted = rows[-1]
 
     atts = await MessageAttachmentRepository.list_by_message(str(last_inserted["id"]))
@@ -298,7 +317,11 @@ async def upload_thread_attachment(
         logger.exception(
             "Channex attachment upload failed: thread=%s channel=%s "
             "filename=%s content_type=%s size=%d",
-            thread_id, channel, file.filename, file.content_type, len(contents),
+            thread_id,
+            channel,
+            file.filename,
+            file.content_type,
+            len(contents),
         )
         raise HTTPException(status_code=502, detail=f"Upload failed: {e}")
 
@@ -306,7 +329,11 @@ async def upload_thread_attachment(
     logger.info(
         "Channex attachment uploaded: thread=%s channel=%s filename=%s "
         "content_type=%s size=%d attachment_id=%s",
-        thread_id, channel, file.filename, file.content_type, len(contents),
+        thread_id,
+        channel,
+        file.filename,
+        file.content_type,
+        len(contents),
         attachment_id,
     )
     return {"attachment_id": attachment_id}

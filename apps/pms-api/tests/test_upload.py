@@ -1,12 +1,15 @@
 """
 Tests for /upload/images endpoint.
 """
+
 import io
+
 import pytest
 from PIL import Image
+
 from tests.conftest import (
-    create_test_user,
     create_test_hotel,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -114,7 +117,9 @@ class TestImageUpload:
         img = resp.json()["images"][0]
         # Thumbnail should be generated (url present)
         assert img["thumbnail_url"] is not None
-        assert "thumb" in [u["key"] for u in mock_s3_operations["uploaded"] if "thumb" in u["key"]][0]
+        assert (
+            "thumb" in [u["key"] for u in mock_s3_operations["uploaded"] if "thumb" in u["key"]][0]
+        )
 
     async def test_upload_large_image_resized(self, client, cleanup_database, mock_s3_operations):
         """Images larger than 1920x1920 get resized down."""

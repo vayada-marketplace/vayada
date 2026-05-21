@@ -6,29 +6,26 @@ the number of physical room instances — inflating availability everywhere
 and letting a guest complete checkout for a room that can't be assigned,
 only to fail at the payment step.
 """
-import pytest
 
+import pytest
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
     create_test_hotel,
-    create_test_room_type,
     create_test_room,
     create_test_room_block,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
 
 async def _total_rooms(room_type_id: str) -> int:
-    return await Database.fetchval(
-        "SELECT total_rooms FROM room_types WHERE id = $1", room_type_id
-    )
+    return await Database.fetchval("SELECT total_rooms FROM room_types WHERE id = $1", room_type_id)
 
 
 class TestTotalRoomsDerived:
-    async def test_trigger_tracks_room_inserts_and_deletes(
-        self, client, cleanup_database
-    ):
+    async def test_trigger_tracks_room_inserts_and_deletes(self, client, cleanup_database):
         """The migration-074 trigger keeps total_rooms == COUNT(rooms)
         regardless of the stale value the row was created with."""
         user = await create_test_user()
@@ -36,9 +33,7 @@ class TestTotalRoomsDerived:
         # Deliberately stale starting value — no physical rooms exist yet.
         room = await create_test_room_type(str(hotel["id"]), total_rooms=99)
 
-        r1 = await create_test_room(
-            str(hotel["id"]), str(room["id"]), room_number="A1"
-        )
+        r1 = await create_test_room(str(hotel["id"]), str(room["id"]), room_number="A1")
         await create_test_room(str(hotel["id"]), str(room["id"]), room_number="A2")
         await create_test_room(str(hotel["id"]), str(room["id"]), room_number="A3")
         assert await _total_rooms(str(room["id"])) == 3
@@ -91,9 +86,7 @@ class TestTotalRoomsDerived:
         # six physical rooms are inserted below.
         room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
         for i in range(6):
-            await create_test_room(
-                str(hotel["id"]), str(room["id"]), room_number=f"PV{i}"
-            )
+            await create_test_room(str(hotel["id"]), str(room["id"]), room_number=f"PV{i}")
         assert await _total_rooms(str(room["id"])) == 6
 
         # Every physical room blocked across the stay window.

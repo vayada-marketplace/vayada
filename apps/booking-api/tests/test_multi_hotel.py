@@ -2,18 +2,19 @@
 Tests for multi-hotel support — GET /admin/hotels, X-Hotel-Id header routing,
 fallback behaviour, and cross-hotel isolation.
 """
+
 import json
 import uuid
 from unittest.mock import AsyncMock, patch
 
 from app.database import Database
+
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
-    get_auth_headers,
     generate_test_slug,
+    get_auth_headers,
 )
-
 
 # ── GET /admin/hotels ────────────────────────────────────────────
 
@@ -414,17 +415,21 @@ class TestCustomDomainNoHeaderFallback:
         domain = "www.villasoleagili.com"
         await Database.execute(
             "UPDATE booking_hotels SET custom_domain = $1 WHERE id = $2",
-            domain, hotel["id"],
+            domain,
+            hotel["id"],
         )
 
         cf_status = {"status": "active", "ssl_status": "active"}
-        with patch(
-            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
-            new=AsyncMock(return_value=cf_status),
-        ), patch(
-            "app.routers.admin.custom_domain.cloudflare_service.delete_custom_hostname",
-            new=AsyncMock(return_value=None),
-        ) as mock_delete:
+        with (
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+                new=AsyncMock(return_value=cf_status),
+            ),
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.delete_custom_hostname",
+                new=AsyncMock(return_value=None),
+            ) as mock_delete,
+        ):
             # Status must reflect the configured domain even with no header.
             status_resp = await client.get(
                 "/admin/settings/custom-domain/status",
@@ -446,6 +451,7 @@ class TestCustomDomainNoHeaderFallback:
 
         # DB mapping is gone; subsequent status reports not configured.
         cleared = await Database.fetchval(
-            "SELECT custom_domain FROM booking_hotels WHERE id = $1", hotel["id"],
+            "SELECT custom_domain FROM booking_hotels WHERE id = $1",
+            hotel["id"],
         )
         assert cleared is None

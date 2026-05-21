@@ -1,10 +1,9 @@
-from typing import Optional, List
 from datetime import date
+
 from app.database import Database
 
 
 class RoomBlockRepository:
-
     @staticmethod
     async def create(data: dict) -> dict:
         row = await Database.fetchrow(
@@ -26,9 +25,7 @@ class RoomBlockRepository:
         return dict(row)
 
     @staticmethod
-    async def list_by_hotel_in_range(
-        hotel_id: str, start_date: date, end_date: date
-    ) -> List[dict]:
+    async def list_by_hotel_in_range(hotel_id: str, start_date: date, end_date: date) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT rb.*, rt.name AS room_name, r.room_number AS room_number
@@ -47,10 +44,8 @@ class RoomBlockRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def get_by_id(block_id: str) -> Optional[dict]:
-        row = await Database.fetchrow(
-            "SELECT * FROM room_blocks WHERE id = $1", block_id
-        )
+    async def get_by_id(block_id: str) -> dict | None:
+        row = await Database.fetchrow("SELECT * FROM room_blocks WHERE id = $1", block_id)
         return dict(row) if row else None
 
     @staticmethod
@@ -58,8 +53,8 @@ class RoomBlockRepository:
         room_id: str,
         start_date: date,
         end_date: date,
-        exclude_block_id: Optional[str] = None,
-    ) -> Optional[dict]:
+        exclude_block_id: str | None = None,
+    ) -> dict | None:
         """Return the first existing block on `room_id` that overlaps [start, end)."""
         if exclude_block_id:
             row = await Database.fetchrow(
@@ -69,7 +64,10 @@ class RoomBlockRepository:
                   AND id <> $4
                 LIMIT 1
                 """,
-                room_id, start_date, end_date, exclude_block_id,
+                room_id,
+                start_date,
+                end_date,
+                exclude_block_id,
             )
         else:
             row = await Database.fetchrow(
@@ -78,12 +76,14 @@ class RoomBlockRepository:
                 WHERE room_id = $1 AND start_date < $3 AND end_date > $2
                 LIMIT 1
                 """,
-                room_id, start_date, end_date,
+                room_id,
+                start_date,
+                end_date,
             )
         return dict(row) if row else None
 
     @staticmethod
-    async def update(block_id: str, updates: dict) -> Optional[dict]:
+    async def update(block_id: str, updates: dict) -> dict | None:
         if not updates:
             return await RoomBlockRepository.get_by_id(block_id)
 
@@ -95,17 +95,12 @@ class RoomBlockRepository:
             values.append(val)
             idx += 1
 
-        query = (
-            f"UPDATE room_blocks SET {', '.join(set_clauses)} "
-            f"WHERE id = ${idx} RETURNING *"
-        )
+        query = f"UPDATE room_blocks SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *"
         values.append(block_id)
         row = await Database.fetchrow(query, *values)
         return dict(row) if row else None
 
     @staticmethod
     async def delete(block_id: str) -> bool:
-        result = await Database.execute(
-            "DELETE FROM room_blocks WHERE id = $1", block_id
-        )
+        result = await Database.execute("DELETE FROM room_blocks WHERE id = $1", block_id)
         return result == "DELETE 1"

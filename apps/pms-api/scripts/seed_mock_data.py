@@ -7,21 +7,29 @@ and sample bookings.
 Usage:
     python scripts/seed_mock_data.py
 """
+
+import asyncio
+import json
 import os
 import sys
-import json
-import asyncio
 import uuid
+from datetime import date
 from pathlib import Path
-from datetime import date, datetime, timedelta, timezone
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Ensure env vars are set for local dev
-os.environ.setdefault("DATABASE_URL", "postgresql://vayada_pms_user:vayada_pms_password@localhost:5436/vayada_pms_db")
-os.environ.setdefault("AUTH_DATABASE_URL", "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db")
-os.environ.setdefault("CORS_ORIGINS", "http://localhost:3002,http://localhost:3003,http://localhost:3004")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql://vayada_pms_user:vayada_pms_password@localhost:5436/vayada_pms_db"
+)
+os.environ.setdefault(
+    "AUTH_DATABASE_URL",
+    "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db",
+)
+os.environ.setdefault(
+    "CORS_ORIGINS", "http://localhost:3002,http://localhost:3003,http://localhost:3004"
+)
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_fake")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_fake")
@@ -53,9 +61,7 @@ async def seed():
     print()
 
     # ── 1. Create hotel user in auth DB ─────────────────────────
-    existing_user = await auth.fetchrow(
-        "SELECT id FROM users WHERE email = $1", HOTEL_USER_EMAIL
-    )
+    existing_user = await auth.fetchrow("SELECT id FROM users WHERE email = $1", HOTEL_USER_EMAIL)
     if existing_user:
         user_id = str(existing_user["id"])
         print(f"User already exists: {HOTEL_USER_EMAIL} ({user_id})")
@@ -77,9 +83,7 @@ async def seed():
         print(f"Created user: {HOTEL_USER_EMAIL} / Demo1234!  ({user_id})")
 
     # ── 2. Create hotel ─────────────────────────────────────────
-    existing_hotel = await pms.fetchrow(
-        "SELECT id FROM hotels WHERE slug = $1", HOTEL_SLUG
-    )
+    existing_hotel = await pms.fetchrow("SELECT id FROM hotels WHERE slug = $1", HOTEL_SLUG)
     if existing_hotel:
         hotel_id = str(existing_hotel["id"])
         print(f"Hotel already exists: {HOTEL_SLUG} ({hotel_id})")
@@ -99,15 +103,9 @@ async def seed():
         print(f"Created hotel: Demo Mountain Lodge ({hotel_id})")
 
     # ── 3. Delete old room types for this hotel (fresh seed) ────
-    await pms.execute(
-        "DELETE FROM bookings WHERE hotel_id = $1", hotel_id
-    )
-    await pms.execute(
-        "DELETE FROM room_blocks WHERE hotel_id = $1", hotel_id
-    )
-    await pms.execute(
-        "DELETE FROM room_types WHERE hotel_id = $1", hotel_id
-    )
+    await pms.execute("DELETE FROM bookings WHERE hotel_id = $1", hotel_id)
+    await pms.execute("DELETE FROM room_blocks WHERE hotel_id = $1", hotel_id)
+    await pms.execute("DELETE FROM room_types WHERE hotel_id = $1", hotel_id)
     print("Cleared existing room types and bookings")
     print()
 
@@ -146,7 +144,15 @@ async def seed():
             "base_rate": 120.00,
             "non_refundable_rate": 100.00,
             "bed_type": "Twin",
-            "amenities": ["WiFi", "TV", "Air Conditioning", "Private Bathroom", "Minibar", "Safe", "Balcony"],
+            "amenities": [
+                "WiFi",
+                "TV",
+                "Air Conditioning",
+                "Private Bathroom",
+                "Minibar",
+                "Safe",
+                "Balcony",
+            ],
             "features": ["Mountain View", "Balcony", "Blackout Curtains"],
             "total_rooms": 6,
             "sort_order": 2,
@@ -168,7 +174,18 @@ async def seed():
             "base_rate": 195.00,
             "non_refundable_rate": 165.00,
             "bed_type": "King",
-            "amenities": ["WiFi", "TV", "Air Conditioning", "Private Bathroom", "Minibar", "Safe", "Espresso Machine", "Bathrobe", "Slippers", "Terrace"],
+            "amenities": [
+                "WiFi",
+                "TV",
+                "Air Conditioning",
+                "Private Bathroom",
+                "Minibar",
+                "Safe",
+                "Espresso Machine",
+                "Bathrobe",
+                "Slippers",
+                "Terrace",
+            ],
             "features": ["Valley View", "Terrace", "Living Area", "Premium Toiletries"],
             "total_rooms": 4,
             "sort_order": 3,
@@ -191,7 +208,16 @@ async def seed():
             "base_rate": 160.00,
             "non_refundable_rate": 135.00,
             "bed_type": "King + Bunk",
-            "amenities": ["WiFi", "TV", "Air Conditioning", "Private Bathroom", "Mini Kitchen", "Bathtub", "Safe", "Crib Available"],
+            "amenities": [
+                "WiFi",
+                "TV",
+                "Air Conditioning",
+                "Private Bathroom",
+                "Mini Kitchen",
+                "Bathtub",
+                "Safe",
+                "Crib Available",
+            ],
             "features": ["Garden View", "Mini Kitchen", "Bathtub"],
             "total_rooms": 3,
             "sort_order": 4,
@@ -256,7 +282,9 @@ async def seed():
         )
         created_rooms.append(dict(row))
         override_count = len(rt["monthly_rates"])
-        print(f"  Created room type: {rt['name']}  (base: {rt['base_rate']} EUR, {override_count} monthly overrides)")
+        print(
+            f"  Created room type: {rt['name']}  (base: {rt['base_rate']} EUR, {override_count} monthly overrides)"
+        )
 
     print()
 
@@ -359,15 +387,29 @@ async def seed():
                 $11, $12, $13, $14, $15, $16
             ) RETURNING id
             """,
-            hotel_id, room_id, ref,
-            b["guest_first"], b["guest_last"], b["guest_email"], "+49123456789",
-            "", ci, co,
-            b["adults"], b["children"], nightly_rate, total, "EUR", b["status"],
+            hotel_id,
+            room_id,
+            ref,
+            b["guest_first"],
+            b["guest_last"],
+            b["guest_email"],
+            "+49123456789",
+            "",
+            ci,
+            co,
+            b["adults"],
+            b["children"],
+            nightly_rate,
+            total,
+            "EUR",
+            b["status"],
         )
         month_name = ci.strftime("%B")
-        print(f"  Booking: {b['guest_first']} {b['guest_last']} - {room['name']} "
-              f"({b['check_in']} to {b['check_out']}, {month_name}) "
-              f"@ {nightly_rate} EUR/night = {total} EUR  [{b['status']}]")
+        print(
+            f"  Booking: {b['guest_first']} {b['guest_last']} - {room['name']} "
+            f"({b['check_in']} to {b['check_out']}, {month_name}) "
+            f"@ {nightly_rate} EUR/night = {total} EUR  [{b['status']}]"
+        )
 
     print()
 
@@ -378,7 +420,11 @@ async def seed():
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (hotel_id) DO NOTHING
         """,
-        hotel_id, "percentage", 8.0, 2.0, True,
+        hotel_id,
+        "percentage",
+        8.0,
+        2.0,
+        True,
     )
 
     await pms.execute(
@@ -387,7 +433,9 @@ async def seed():
         VALUES ($1, $2, $3)
         ON CONFLICT (hotel_id) DO NOTHING
         """,
-        hotel_id, 7, 50.0,
+        hotel_id,
+        7,
+        50.0,
     )
     print("Created payment settings and cancellation policy")
 
@@ -398,14 +446,16 @@ async def seed():
     print("=" * 60)
     print("Seed complete!")
     print()
-    print(f"  PMS Admin:  http://localhost:3004")
+    print("  PMS Admin:  http://localhost:3004")
     print(f"  Login:      {HOTEL_USER_EMAIL} / Demo1234!")
     print(f"  Hotel slug: {HOTEL_SLUG}")
     print()
     print("  Room types with monthly pricing overrides:")
     for rt in room_types:
         n = len(rt["monthly_rates"])
-        print(f"    - {rt['name']}:  base {rt['base_rate']} EUR, {n} monthly override{'s' if n != 1 else ''}")
+        print(
+            f"    - {rt['name']}:  base {rt['base_rate']} EUR, {n} monthly override{'s' if n != 1 else ''}"
+        )
     print()
     print("  To see monthly pricing: Rooms > click any room > expand 'Monthly Pricing'")
     print("=" * 60)

@@ -1,6 +1,7 @@
 """
 Tests for /admin endpoints — profile, setup status, property settings, design settings.
 """
+
 from unittest.mock import AsyncMock, patch
 
 from tests.conftest import (
@@ -249,25 +250,30 @@ class TestFixedPlanProjection:
 
     def test_zero_rooms(self):
         from app.services.billing_service import compute_fixed_plan_projected_fee
+
         assert compute_fixed_plan_projected_fee(30, 1, 5, 0) == 30.0
 
     def test_included_count_only(self):
         from app.services.billing_service import compute_fixed_plan_projected_fee
+
         # 1 room included → 1 active room → no extras → base only
         assert compute_fixed_plan_projected_fee(30, 1, 5, 1) == 30.0
 
     def test_scales_with_extras(self):
         from app.services.billing_service import compute_fixed_plan_projected_fee
+
         # 8 rooms, 1 included → 7 extras × €5 = €35 + €30 base
         assert compute_fixed_plan_projected_fee(30, 1, 5, 8) == 65.0
 
     def test_no_negative_on_shrink(self):
         from app.services.billing_service import compute_fixed_plan_projected_fee
+
         # 2 included but 0 active → clamp to base, no refund
         assert compute_fixed_plan_projected_fee(30, 2, 5, 0) == 30.0
 
     def test_custom_rates(self):
         from app.services.billing_service import compute_fixed_plan_projected_fee
+
         # Larger hotel on a special deal
         assert compute_fixed_plan_projected_fee(100, 5, 3, 20) == 145.0
 
@@ -279,6 +285,7 @@ class TestBillingPlanSwitch:
         self, client, hotel_with_property
     ):
         from datetime import date
+
         user = hotel_with_property["user"]
         headers = get_auth_headers(user["token"])
 
@@ -297,9 +304,7 @@ class TestBillingPlanSwitch:
         expected_month = 1 if today.month == 12 else today.month + 1
         assert effective == date(expected_year, expected_month, 1)
 
-    async def test_clearing_pending_switch_clears_effective_date(
-        self, client, hotel_with_property
-    ):
+    async def test_clearing_pending_switch_clears_effective_date(self, client, hotel_with_property):
         user = hotel_with_property["user"]
         headers = get_auth_headers(user["token"])
 
@@ -377,19 +382,24 @@ class TestCustomDomainSettings:
         domain = "booking.example.com"
         hotel = {"id": "hotel-1"}
 
-        with patch(
-            "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
-            new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
-        ) as mock_update, patch(
-            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
-            new=AsyncMock(return_value={"status": "active", "ssl_status": "active"}),
-        ), patch(
-            "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
-            new=AsyncMock(),
-        ) as mock_create:
+        with (
+            patch(
+                "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
+                new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
+            ) as mock_update,
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+                new=AsyncMock(return_value={"status": "active", "ssl_status": "active"}),
+            ),
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
+                new=AsyncMock(),
+            ) as mock_create,
+        ):
             resp = await connect_custom_domain(
                 {"domain": domain},
                 user_id="user-1",
@@ -410,24 +420,29 @@ class TestCustomDomainSettings:
         domain = "booking-race.example.com"
         hotel = {"id": "hotel-1"}
 
-        with patch(
-            "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
-            new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
-        ) as mock_update, patch(
-            "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
-            new=AsyncMock(
-                side_effect=[
-                    None,
-                    {"status": "pending", "ssl_status": "initializing"},
-                ]
+        with (
+            patch(
+                "app.routers.admin.custom_domain.BookingHotelRepository.get_by_custom_domain",
+                new=AsyncMock(return_value=None),
             ),
-        ), patch(
-            "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
-            new=AsyncMock(side_effect=ValueError("This domain is already registered.")),
-        ) as mock_create:
+            patch(
+                "app.routers.admin.custom_domain.BookingHotelRepository.partial_update",
+                new=AsyncMock(return_value={**hotel, "custom_domain": domain}),
+            ) as mock_update,
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.get_hostname_status",
+                new=AsyncMock(
+                    side_effect=[
+                        None,
+                        {"status": "pending", "ssl_status": "initializing"},
+                    ]
+                ),
+            ),
+            patch(
+                "app.routers.admin.custom_domain.cloudflare_service.create_custom_hostname",
+                new=AsyncMock(side_effect=ValueError("This domain is already registered.")),
+            ) as mock_create,
+        ):
             resp = await connect_custom_domain(
                 {"domain": domain},
                 user_id="user-1",
@@ -485,9 +500,7 @@ class TestDeleteHotel:
         # Ownership check fires before we ever touch PMS
         mock_pms.assert_not_called()
 
-    async def test_delete_pms_failure_does_not_delete_booking(
-        self, client, hotel_with_property
-    ):
+    async def test_delete_pms_failure_does_not_delete_booking(self, client, hotel_with_property):
         user = hotel_with_property["user"]
         hotel = hotel_with_property["hotel"]
 

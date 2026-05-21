@@ -8,9 +8,10 @@ Split into three subrouters by resource:
 
 Each subrouter declares its own paths; this __init__ mounts them under /admin.
 """
+
 from fastapi import APIRouter
 
-from . import users, listings, collaborations
+from . import collaborations, listings, users
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 router.include_router(users.router)

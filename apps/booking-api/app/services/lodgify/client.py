@@ -10,15 +10,15 @@ connect time; the retry/backoff machinery is here because subsequent
 phases (rates/availability/booking write-back) need it and they
 should not re-invent the wrapper.
 """
+
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
 from app.config import settings
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class LodgifyAPIError(Exception):
     preserved so callers can branch on auth vs availability vs server
     error without re-parsing httpx exceptions."""
 
-    def __init__(self, status_code: int, detail: str, *, hotel_id: Optional[str] = None):
+    def __init__(self, status_code: int, detail: str, *, hotel_id: str | None = None):
         super().__init__(f"Lodgify {status_code}: {detail}")
         self.status_code = status_code
         self.detail = detail
@@ -64,10 +64,10 @@ class LodgifyClient:
         self,
         api_key: str,
         *,
-        hotel_id: Optional[str] = None,
+        hotel_id: str | None = None,
         retry: RetryPolicy = DEFAULT_RETRY,
-        base_url: Optional[str] = None,
-        timeout: Optional[float] = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
     ):
         if not api_key:
             raise ValueError("Lodgify API key is required")
@@ -84,10 +84,10 @@ class LodgifyClient:
             "Accept": "application/json",
         }
 
-    async def get(self, path: str, *, params: Optional[dict] = None) -> Any:
+    async def get(self, path: str, *, params: dict | None = None) -> Any:
         return await self._request("GET", path, params=params)
 
-    async def post(self, path: str, *, json: Optional[dict] = None) -> Any:
+    async def post(self, path: str, *, json: dict | None = None) -> Any:
         return await self._request("POST", path, json=json)
 
     async def _request(
@@ -95,24 +95,33 @@ class LodgifyClient:
         method: str,
         path: str,
         *,
-        params: Optional[dict] = None,
-        json: Optional[dict] = None,
+        params: dict | None = None,
+        json: dict | None = None,
     ) -> Any:
         url = f"{self._base_url}{path if path.startswith('/') else '/' + path}"
 
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(1, self._retry.max_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
                     resp = await client.request(
-                        method, url, headers=self._headers, params=params, json=json,
+                        method,
+                        url,
+                        headers=self._headers,
+                        params=params,
+                        json=json,
                     )
 
                 if resp.status_code == 429:
                     delay = _retry_after_seconds(resp, self._retry.rate_limit_fallback_seconds)
                     logger.warning(
                         "lodgify_rate_limited",
-                        extra={"hotel_id": self._hotel_id, "path": path, "delay": delay, "attempt": attempt},
+                        extra={
+                            "hotel_id": self._hotel_id,
+                            "path": path,
+                            "delay": delay,
+                            "attempt": attempt,
+                        },
                     )
                     if attempt < self._retry.max_attempts:
                         await asyncio.sleep(delay)
@@ -129,14 +138,22 @@ class LodgifyClient:
                 if resp.status_code in (401, 403):
                     logger.warning(
                         "lodgify_auth_failed",
-                        extra={"hotel_id": self._hotel_id, "path": path, "status": resp.status_code},
+                        extra={
+                            "hotel_id": self._hotel_id,
+                            "path": path,
+                            "status": resp.status_code,
+                        },
                     )
                     raise LodgifyAuthError(resp.status_code, resp.text, hotel_id=self._hotel_id)
 
                 if resp.status_code >= 400:
                     logger.warning(
                         "lodgify_client_error",
-                        extra={"hotel_id": self._hotel_id, "path": path, "status": resp.status_code},
+                        extra={
+                            "hotel_id": self._hotel_id,
+                            "path": path,
+                            "status": resp.status_code,
+                        },
                     )
                     raise LodgifyAPIError(resp.status_code, resp.text, hotel_id=self._hotel_id)
 
@@ -152,17 +169,26 @@ class LodgifyClient:
                 last_exc = exc
                 logger.warning(
                     "lodgify_transport_error",
-                    extra={"hotel_id": self._hotel_id, "path": path, "attempt": attempt, "error": str(exc)},
+                    extra={
+                        "hotel_id": self._hotel_id,
+                        "path": path,
+                        "attempt": attempt,
+                        "error": str(exc),
+                    },
                 )
                 if attempt < self._retry.max_attempts:
                     await asyncio.sleep(self._retry.base_delay_seconds * (2 ** (attempt - 1)))
                     continue
-                raise LodgifyAPIError(0, f"Lodgify transport error: {exc}", hotel_id=self._hotel_id) from exc
+                raise LodgifyAPIError(
+                    0, f"Lodgify transport error: {exc}", hotel_id=self._hotel_id
+                ) from exc
 
         # unreachable — every branch above either returns or raises — but keeps the type checker happy
         if last_exc:
             raise last_exc
-        raise LodgifyAPIError(0, "Lodgify request failed without producing a response", hotel_id=self._hotel_id)
+        raise LodgifyAPIError(
+            0, "Lodgify request failed without producing a response", hotel_id=self._hotel_id
+        )
 
 
 def _retry_after_seconds(resp: httpx.Response, fallback: float) -> float:

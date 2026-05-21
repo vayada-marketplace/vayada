@@ -1,13 +1,12 @@
 import base64
 import logging
-from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.dependencies import require_hotel_admin
 from app.config import settings
+from app.dependencies import require_hotel_admin
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,7 @@ router = APIRouter()
 
 class ImageUploadRequest(BaseModel):
     filename: str
-    content_type: Optional[str] = "image/jpeg"
+    content_type: str | None = "image/jpeg"
     data: str  # base64-encoded image
 
 

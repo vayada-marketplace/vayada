@@ -1,6 +1,7 @@
 """
 Tests for /admin/addons CRUD and /admin/settings/addons display settings.
 """
+
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,

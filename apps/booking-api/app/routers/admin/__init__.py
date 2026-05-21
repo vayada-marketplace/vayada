@@ -3,19 +3,21 @@ Admin routes — split into domain-focused sub-routers.
 
 All sub-routers share the /admin prefix via the combined `router`.
 """
+
 from fastapi import APIRouter
-from app.routers.admin.profile import router as profile_router
-from app.routers.admin.setup import router as setup_router
-from app.routers.admin.settings import router as settings_router
-from app.routers.admin.custom_domain import router as custom_domain_router
-from app.routers.admin.design import router as design_router
-from app.routers.admin.upload import router as upload_router
+
 from app.routers.admin.addons import router as addons_router
-from app.routers.admin.superadmin import router as superadmin_router
-from app.routers.admin.dashboard import router as dashboard_router
 from app.routers.admin.benefits import router as benefits_router
-from app.routers.admin.promo_codes import router as promo_codes_router
+from app.routers.admin.custom_domain import router as custom_domain_router
+from app.routers.admin.dashboard import router as dashboard_router
+from app.routers.admin.design import router as design_router
 from app.routers.admin.integrations import router as integrations_router
+from app.routers.admin.profile import router as profile_router
+from app.routers.admin.promo_codes import router as promo_codes_router
+from app.routers.admin.settings import router as settings_router
+from app.routers.admin.setup import router as setup_router
+from app.routers.admin.superadmin import router as superadmin_router
+from app.routers.admin.upload import router as upload_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 

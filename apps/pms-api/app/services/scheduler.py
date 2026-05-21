@@ -1,21 +1,23 @@
-import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings as app_settings
 from app.database import Database
-from app.repositories.booking_repo import BookingRepository
-from app.repositories.booking_draft_repo import BookingDraftRepository
-from app.repositories.payout_repo import PayoutRepository
-from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.booking_draft_repo import BookingDraftRepository
+from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.payout_repo import PayoutRepository
 from app.services import xendit_service
 from app.services.booking_service import expire_booking
+from app.services.channex.inbound import poll_bookings_for_hotel
+from app.services.channex.messaging import poll_messages_for_all_hotels
+from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.email_service import send_affiliate_payout_notification
 from app.services.payout_service import (
     dispatch_stripe_transfer,
@@ -23,9 +25,6 @@ from app.services.payout_service import (
     handle_payout_failure,
 )
 from app.services.xendit_service import XenditError
-from app.services.channex.inbound import poll_bookings_for_hotel
-from app.services.channex.messaging import poll_messages_for_all_hotels
-from app.services.channex.orchestrator import push_ari_for_hotel
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ scheduler = AsyncIOScheduler()
 
 async def expire_pending_bookings():
     """Find and expire bookings where host hasn't responded in time."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expired = await BookingRepository.list_expired_pending(now)
     for row in expired:
         booking_id = str(row["id"])
@@ -47,7 +46,7 @@ async def expire_pending_bookings():
 
 async def process_property_payouts():
     """Process due hotel payouts via Stripe Connect transfers / Xendit."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     due = await PayoutRepository.list_due_payouts(now)
 
     for payout in due:
@@ -60,20 +59,30 @@ async def process_property_payouts():
         try:
             settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
             if not settings:
-                logger.warning("No payment settings for hotel %s, skipping payout %s", hotel_id, payout_id)
+                logger.warning(
+                    "No payment settings for hotel %s, skipping payout %s", hotel_id, payout_id
+                )
                 continue
 
             provider = settings.get("payment_provider", "stripe")
             if provider == "vayada":
                 # vayada Payment: payouts are handled manually — skip auto-processing
-                logger.info("Skipping auto-payout %s for hotel %s (vayada provider, manual payout)", payout_id, hotel_id)
+                logger.info(
+                    "Skipping auto-payout %s for hotel %s (vayada provider, manual payout)",
+                    payout_id,
+                    hotel_id,
+                )
                 continue
 
             await PayoutRepository.update_status(payout_id, "processing")
 
             if provider == "xendit":
                 if not settings.get("xendit_account_number"):
-                    logger.warning("No Xendit bank details for hotel %s, skipping payout %s", hotel_id, payout_id)
+                    logger.warning(
+                        "No Xendit bank details for hotel %s, skipping payout %s",
+                        hotel_id,
+                        payout_id,
+                    )
                     await PayoutRepository.update_status(payout_id, "scheduled")
                     continue
                 xendit_id = await dispatch_xendit_payout(
@@ -86,10 +95,16 @@ async def process_property_payouts():
                     account_holder_name=settings["xendit_account_holder_name"],
                     description=f"Hotel payout for booking {payout.get('booking_reference', '')}",
                 )
-                logger.info("Submitted hotel payout %s to Xendit, xendit_id=%s", payout_id, xendit_id)
+                logger.info(
+                    "Submitted hotel payout %s to Xendit, xendit_id=%s", payout_id, xendit_id
+                )
             else:
                 if not settings.get("stripe_connect_account_id"):
-                    logger.warning("No Stripe Connect account for hotel %s, skipping payout %s", hotel_id, payout_id)
+                    logger.warning(
+                        "No Stripe Connect account for hotel %s, skipping payout %s",
+                        hotel_id,
+                        payout_id,
+                    )
                     await PayoutRepository.update_status(payout_id, "scheduled")
                     continue
                 transfer_id = await dispatch_stripe_transfer(
@@ -102,7 +117,9 @@ async def process_property_payouts():
                         "booking_id": str(payout["booking_id"]),
                     },
                 )
-                logger.info("Completed hotel payout %s via Stripe, transfer %s", payout_id, transfer_id)
+                logger.info(
+                    "Completed hotel payout %s via Stripe, transfer %s", payout_id, transfer_id
+                )
 
         except Exception as e:
             logger.error("Failed to process payout %s: %s", payout_id, e)
@@ -113,7 +130,7 @@ async def process_property_payouts():
 
 async def process_affiliate_payouts():
     """Monthly batch: process affiliate payouts via Stripe Connect / Xendit."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Process previous month
     if now.month == 1:
         month, year = 12, now.year - 1
@@ -128,14 +145,20 @@ async def process_affiliate_payouts():
         try:
             affiliate = await AffiliateRepository.get_by_id(affiliate_id)
             if not affiliate:
-                logger.warning("Affiliate %s not found, skipping payout %s", affiliate_id, payout_id)
+                logger.warning(
+                    "Affiliate %s not found, skipping payout %s", affiliate_id, payout_id
+                )
                 continue
 
             payment_method = affiliate.get("payment_method")
 
             if payment_method == "xendit":
                 if not affiliate.get("xendit_account_number"):
-                    logger.info("Affiliate %s missing Xendit bank details, skipping payout %s", affiliate_id, payout_id)
+                    logger.info(
+                        "Affiliate %s missing Xendit bank details, skipping payout %s",
+                        affiliate_id,
+                        payout_id,
+                    )
                     continue
                 await PayoutRepository.update_status(payout_id, "processing")
                 xendit_id = await dispatch_xendit_payout(
@@ -148,11 +171,19 @@ async def process_affiliate_payouts():
                     account_holder_name=affiliate["xendit_account_holder_name"],
                     description=f"Affiliate payout for booking {payout.get('booking_reference', '')}",
                 )
-                logger.info("Submitted affiliate payout %s to Xendit, xendit_id=%s", payout_id, xendit_id)
+                logger.info(
+                    "Submitted affiliate payout %s to Xendit, xendit_id=%s", payout_id, xendit_id
+                )
 
             elif payment_method == "stripe":
-                if not affiliate.get("stripe_connect_account_id") or not affiliate.get("stripe_connect_onboarded"):
-                    logger.info("Affiliate %s not Stripe-onboarded, skipping payout %s for manual handling", affiliate_id, payout_id)
+                if not affiliate.get("stripe_connect_account_id") or not affiliate.get(
+                    "stripe_connect_onboarded"
+                ):
+                    logger.info(
+                        "Affiliate %s not Stripe-onboarded, skipping payout %s for manual handling",
+                        affiliate_id,
+                        payout_id,
+                    )
                     continue
                 await PayoutRepository.update_status(payout_id, "processing")
                 transfer_id = await dispatch_stripe_transfer(
@@ -166,7 +197,9 @@ async def process_affiliate_payouts():
                         "affiliate_id": affiliate_id,
                     },
                 )
-                logger.info("Completed affiliate payout %s via Stripe, transfer %s", payout_id, transfer_id)
+                logger.info(
+                    "Completed affiliate payout %s via Stripe, transfer %s", payout_id, transfer_id
+                )
                 await send_affiliate_payout_notification(
                     affiliate_email=affiliate["email"],
                     affiliate_name=affiliate["full_name"],
@@ -177,7 +210,12 @@ async def process_affiliate_payouts():
 
             else:
                 # paypal / bank — skip for manual handling
-                logger.info("Affiliate %s uses %s, skipping payout %s for manual handling", affiliate_id, payment_method, payout_id)
+                logger.info(
+                    "Affiliate %s uses %s, skipping payout %s for manual handling",
+                    affiliate_id,
+                    payment_method,
+                    payout_id,
+                )
                 continue
 
         except Exception as e:
@@ -198,7 +236,9 @@ async def poll_xendit_processing_payouts():
             xendit_status = result["status"]
 
             if xendit_status == "SUCCEEDED":
-                await PayoutRepository.update_status(payout_id, "completed", xendit_payout_id=xendit_id)
+                await PayoutRepository.update_status(
+                    payout_id, "completed", xendit_payout_id=xendit_id
+                )
                 logger.info("Xendit poll: payout %s completed (xendit %s)", payout_id, xendit_id)
 
                 if payout.get("recipient_type") == "affiliate":
@@ -213,7 +253,12 @@ async def poll_xendit_processing_payouts():
                         )
             elif xendit_status in ("FAILED", "REVERSED"):
                 await PayoutRepository.update_status(payout_id, "failed")
-                logger.warning("Xendit poll: payout %s failed (xendit %s, status=%s)", payout_id, xendit_id, xendit_status)
+                logger.warning(
+                    "Xendit poll: payout %s failed (xendit %s, status=%s)",
+                    payout_id,
+                    xendit_id,
+                    xendit_status,
+                )
             else:
                 logger.debug("Xendit poll: payout %s still %s", payout_id, xendit_status)
         except XenditError as e:

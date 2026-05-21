@@ -3,11 +3,13 @@
 Simple migration runner for the shared auth database.
 Connects to database and runs all migration files in order.
 """
+
+import asyncio
 import os
 import sys
-import asyncio
-import asyncpg
 from pathlib import Path
+
+import asyncpg
 
 
 async def run_migrations():
@@ -30,7 +32,7 @@ async def run_migrations():
         sys.exit(1)
 
     print(f"Found {len(migration_files)} migration files")
-    print(f"Connecting to database...")
+    print("Connecting to database...")
     print()
 
     try:
@@ -59,7 +61,7 @@ async def run_migrations():
             )
 
         executed = await conn.fetch("SELECT filename FROM schema_migrations")
-        executed_filenames = {row['filename'] for row in executed}
+        executed_filenames = {row["filename"] for row in executed}
 
         for migration_file in migration_files:
             filename = migration_file.name
@@ -73,15 +75,18 @@ async def run_migrations():
             try:
                 sql = migration_file.read_text()
 
-                lines = [line for line in sql.split('\n')
-                         if line.strip() and not line.strip().startswith('--')]
-                sql_content = '\n'.join(lines).strip()
+                lines = [
+                    line
+                    for line in sql.split("\n")
+                    if line.strip() and not line.strip().startswith("--")
+                ]
+                sql_content = "\n".join(lines).strip()
 
                 if not sql_content:
                     print(f"Skipping {filename} (empty or comments only)")
                     await conn.execute(
                         "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
-                        filename
+                        filename,
                     )
                     print()
                     continue
@@ -89,8 +94,7 @@ async def run_migrations():
                 async with conn.transaction():
                     await conn.execute(sql)
                     await conn.execute(
-                        "INSERT INTO schema_migrations (filename) VALUES ($1)",
-                        filename
+                        "INSERT INTO schema_migrations (filename) VALUES ($1)", filename
                     )
 
                 print(f"Completed {filename}")

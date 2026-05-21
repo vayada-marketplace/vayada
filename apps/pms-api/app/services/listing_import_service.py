@@ -6,13 +6,13 @@ import httpx
 from firecrawl import FirecrawlApp
 
 from app.config import settings
-from app.image_processing import process_image, generate_thumbnail
+from app.image_processing import generate_thumbnail, process_image
 from app.models.listing_import import (
     ExtractedRoomType,
     ListingImportPreview,
 )
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.s3_service import upload_file_to_s3, generate_file_key
+from app.s3_service import generate_file_key, upload_file_to_s3
 from app.services.claude_service import extract_structured_data
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,9 @@ def detect_platform(url: str) -> str:
         return "booking"
     if "airbnb" in host:
         return "airbnb"
-    raise ValueError(f"Unsupported platform: {host}. Only Booking.com and Airbnb URLs are supported.")
+    raise ValueError(
+        f"Unsupported platform: {host}. Only Booking.com and Airbnb URLs are supported."
+    )
 
 
 async def scrape_listing(url: str) -> tuple[str, str]:

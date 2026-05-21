@@ -6,7 +6,6 @@ Pins the contract that the hotel-level ``enabled`` flag is the master switch
 
 from app.services.room_type_service import resolve_last_minute_discount
 
-
 HOTEL_ON = {
     "enabled": True,
     "tiers": [

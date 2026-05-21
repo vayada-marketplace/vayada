@@ -1,15 +1,16 @@
 import logging
 
 from fastapi import APIRouter, Depends, Query
-from app.dependencies import require_hotel_admin, require_current_hotel
-from app.repositories.dashboard_repo import DashboardRepository
+
+from app.dependencies import require_current_hotel
 from app.models.dashboard import (
-    StatsResponse,
     BookingsBySourceResponse,
     ConversionFunnelResponse,
-    SparklineResponse,
     PageViewsTimelineResponse,
+    SparklineResponse,
+    StatsResponse,
 )
+from app.repositories.dashboard_repo import DashboardRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ router = APIRouter()
 # (X-Hotel-Id header) instead of WHERE user_id LIMIT 1. Without this,
 # a user with multiple properties would always see stats for whichever
 # hotel happened to come back first in an unordered query.
+
 
 @router.get("/dashboard/stats", response_model=StatsResponse)
 async def get_dashboard_stats(

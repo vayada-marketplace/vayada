@@ -1,6 +1,5 @@
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
-from typing import List
 
 
 class Settings(BaseSettings):
@@ -13,7 +12,9 @@ class Settings(BaseSettings):
     # Database (PMS own DB)
     DATABASE_URL: str = Field(..., description="PMS PostgreSQL connection string")
     AUTH_DATABASE_URL: str = Field(..., description="Auth PostgreSQL connection string")
-    BOOKING_ENGINE_DATABASE_URL: str = Field("", description="Booking engine PostgreSQL connection string")
+    BOOKING_ENGINE_DATABASE_URL: str = Field(
+        "", description="Booking engine PostgreSQL connection string"
+    )
     DATABASE_POOL_MIN_SIZE: int = 2
     DATABASE_POOL_MAX_SIZE: int = 10
     DATABASE_COMMAND_TIMEOUT: int = 60
@@ -53,7 +54,14 @@ class Settings(BaseSettings):
 
     # Image Processing
     MAX_IMAGE_SIZE_MB: int = 50
-    ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/gif", "image/avif"]
+    ALLOWED_IMAGE_TYPES: list = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/jpg",
+        "image/gif",
+        "image/avif",
+    ]
     MAX_IMAGE_WIDTH: int = 4000
     MAX_IMAGE_HEIGHT: int = 4000
     IMAGE_RESIZE_WIDTH: int = 1920
@@ -62,7 +70,9 @@ class Settings(BaseSettings):
     THUMBNAIL_SIZE: int = 300
 
     # Booking Engine
-    BOOKING_ENGINE_API_URL: str = Field("http://localhost:8001", description="Booking engine backend URL for addon lookups")
+    BOOKING_ENGINE_API_URL: str = Field(
+        "http://localhost:8001", description="Booking engine backend URL for addon lookups"
+    )
 
     # Stripe
     STRIPE_SECRET_KEY: str = ""
@@ -104,7 +114,7 @@ class Settings(BaseSettings):
     )
 
     @property
-    def cors_origins_list(self) -> List[str]:
+    def cors_origins_list(self) -> list[str]:
         origins = [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
         seen = set()
         unique = []

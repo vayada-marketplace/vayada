@@ -1,27 +1,24 @@
 from datetime import datetime
-from typing import List, Optional
 
 from app.database import Database
 
 
 class MessageThreadRepository:
-
     @staticmethod
-    async def get_by_source_thread_id(
-        source: str, source_thread_id: str
-    ) -> Optional[dict]:
+    async def get_by_source_thread_id(source: str, source_thread_id: str) -> dict | None:
         row = await Database.fetchrow(
-            "SELECT * FROM message_threads "
-            "WHERE source = $1 AND source_thread_id = $2",
-            source, source_thread_id,
+            "SELECT * FROM message_threads WHERE source = $1 AND source_thread_id = $2",
+            source,
+            source_thread_id,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_id(thread_id: str, hotel_id: str) -> Optional[dict]:
+    async def get_by_id(thread_id: str, hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM message_threads WHERE id = $1 AND hotel_id = $2",
-            thread_id, hotel_id,
+            thread_id,
+            hotel_id,
         )
         return dict(row) if row else None
 
@@ -31,11 +28,11 @@ class MessageThreadRepository:
         hotel_id: str,
         source: str,
         source_thread_id: str,
-        channel: Optional[str],
-        guest_name: Optional[str],
-        guest_email: Optional[str],
-        source_booking_id: Optional[str],
-        booking_id: Optional[str],
+        channel: str | None,
+        guest_name: str | None,
+        guest_email: str | None,
+        source_booking_id: str | None,
+        booking_id: str | None,
         status: str = "open",
     ) -> dict:
         """Insert if missing, update mutable fields if present. Returns the row.
@@ -58,8 +55,15 @@ class MessageThreadRepository:
                 updated_at = now()
             RETURNING *
             """,
-            hotel_id, source, source_thread_id, channel,
-            guest_name, guest_email, source_booking_id, booking_id, status,
+            hotel_id,
+            source,
+            source_thread_id,
+            channel,
+            guest_name,
+            guest_email,
+            source_booking_id,
+            booking_id,
+            status,
         )
         return dict(row)
 
@@ -67,10 +71,10 @@ class MessageThreadRepository:
     async def list_by_hotel(
         hotel_id: str,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
-        before: Optional[datetime] = None,
-    ) -> List[dict]:
+        before: datetime | None = None,
+    ) -> list[dict]:
         if status and before:
             rows = await Database.fetch(
                 """
@@ -81,7 +85,10 @@ class MessageThreadRepository:
                 ORDER BY last_message_at DESC NULLS LAST
                 LIMIT $4
                 """,
-                hotel_id, status, before, limit,
+                hotel_id,
+                status,
+                before,
+                limit,
             )
         elif status:
             rows = await Database.fetch(
@@ -91,7 +98,9 @@ class MessageThreadRepository:
                 ORDER BY last_message_at DESC NULLS LAST
                 LIMIT $3
                 """,
-                hotel_id, status, limit,
+                hotel_id,
+                status,
+                limit,
             )
         elif before:
             rows = await Database.fetch(
@@ -101,7 +110,9 @@ class MessageThreadRepository:
                 ORDER BY last_message_at DESC NULLS LAST
                 LIMIT $3
                 """,
-                hotel_id, before, limit,
+                hotel_id,
+                before,
+                limit,
             )
         else:
             rows = await Database.fetch(
@@ -111,12 +122,13 @@ class MessageThreadRepository:
                 ORDER BY last_message_at DESC NULLS LAST
                 LIMIT $2
                 """,
-                hotel_id, limit,
+                hotel_id,
+                limit,
             )
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def update_status(thread_id: str, hotel_id: str, status: str) -> Optional[dict]:
+    async def update_status(thread_id: str, hotel_id: str, status: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE message_threads
@@ -124,12 +136,14 @@ class MessageThreadRepository:
             WHERE id = $1 AND hotel_id = $2
             RETURNING *
             """,
-            thread_id, hotel_id, status,
+            thread_id,
+            hotel_id,
+            status,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def mark_all_read(thread_id: str, hotel_id: str) -> Optional[dict]:
+    async def mark_all_read(thread_id: str, hotel_id: str) -> dict | None:
         """Zero unread_count and stamp read_at on every unread inbound message.
         Single CTE keeps both updates in one statement."""
         row = await Database.fetchrow(
@@ -147,7 +161,8 @@ class MessageThreadRepository:
             WHERE id = $1 AND hotel_id = $2
             RETURNING *
             """,
-            thread_id, hotel_id,
+            thread_id,
+            hotel_id,
         )
         return dict(row) if row else None
 
@@ -162,15 +177,12 @@ class MessageThreadRepository:
 
 
 class MessageRepository:
-
     @staticmethod
-    async def get_by_source_message_id(
-        thread_id: str, source_message_id: str
-    ) -> Optional[dict]:
+    async def get_by_source_message_id(thread_id: str, source_message_id: str) -> dict | None:
         row = await Database.fetchrow(
-            "SELECT * FROM messages "
-            "WHERE thread_id = $1 AND source_message_id = $2",
-            thread_id, source_message_id,
+            "SELECT * FROM messages WHERE thread_id = $1 AND source_message_id = $2",
+            thread_id,
+            source_message_id,
         )
         return dict(row) if row else None
 
@@ -180,15 +192,16 @@ class MessageRepository:
         thread_id: str,
         source_message_id: str,
         direction: str,
-        sender_name: Optional[str],
+        sender_name: str | None,
         body: str,
         sent_at: datetime,
-        raw_payload: Optional[dict] = None,
-    ) -> Optional[dict]:
+        raw_payload: dict | None = None,
+    ) -> dict | None:
         """Insert message + update parent thread's last_message_* and unread_count
         in one CTE. Returns None if a row with (thread_id, source_message_id)
         already existed (idempotent against webhook re-delivery)."""
         import json
+
         payload_json = json.dumps(raw_payload) if raw_payload is not None else None
         preview = (body or "")[:200]
         unread_delta = 1 if direction == "inbound" else 0
@@ -214,13 +227,20 @@ class MessageRepository:
             )
             SELECT * FROM inserted
             """,
-            thread_id, source_message_id, direction, sender_name,
-            body, sent_at, payload_json, preview, unread_delta,
+            thread_id,
+            source_message_id,
+            direction,
+            sender_name,
+            body,
+            sent_at,
+            payload_json,
+            preview,
+            unread_delta,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_thread(thread_id: str) -> List[dict]:
+    async def list_by_thread(thread_id: str) -> list[dict]:
         rows = await Database.fetch(
             "SELECT * FROM messages WHERE thread_id = $1 ORDER BY sent_at ASC",
             thread_id,
@@ -229,17 +249,16 @@ class MessageRepository:
 
 
 class MessageAttachmentRepository:
-
     @staticmethod
     async def add(
         *,
         message_id: str,
-        s3_key: Optional[str] = None,
-        source_url: Optional[str] = None,
-        filename: Optional[str] = None,
-        content_type: Optional[str] = None,
-        size_bytes: Optional[int] = None,
-        source_attachment_id: Optional[str] = None,
+        s3_key: str | None = None,
+        source_url: str | None = None,
+        filename: str | None = None,
+        content_type: str | None = None,
+        size_bytes: int | None = None,
+        source_attachment_id: str | None = None,
     ) -> dict:
         row = await Database.fetchrow(
             """
@@ -250,13 +269,18 @@ class MessageAttachmentRepository:
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             """,
-            message_id, s3_key, source_url, filename,
-            content_type, size_bytes, source_attachment_id,
+            message_id,
+            s3_key,
+            source_url,
+            filename,
+            content_type,
+            size_bytes,
+            source_attachment_id,
         )
         return dict(row)
 
     @staticmethod
-    async def list_by_message(message_id: str) -> List[dict]:
+    async def list_by_message(message_id: str) -> list[dict]:
         rows = await Database.fetch(
             "SELECT * FROM message_attachments WHERE message_id = $1 ORDER BY created_at ASC",
             message_id,
@@ -264,7 +288,7 @@ class MessageAttachmentRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def list_by_thread(thread_id: str) -> List[dict]:
+    async def list_by_thread(thread_id: str) -> list[dict]:
         rows = await Database.fetch(
             """
             SELECT a.* FROM message_attachments a

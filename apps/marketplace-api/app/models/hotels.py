@@ -1,56 +1,69 @@
 """
 Hotel-related Pydantic models
 """
-from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator, model_validator, ConfigDict
-from typing import List, Optional, Literal
-from datetime import datetime, date
+
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    HttpUrl,
+    field_validator,
+    model_validator,
+)
 
 from app.models.common import (
     CollaborationOfferingResponse,
     CreatorRequirementsResponse,
-    PlatformResponse,
 )
-
 
 # ============================================
 # PROFILE STATUS
 # ============================================
 
+
 class HotelProfileStatusHasDefaults(BaseModel):
     """Nested model for default value flags"""
+
     location: bool
 
 
 class HotelProfileStatusResponse(BaseModel):
     """Hotel profile status response model"""
+
     profile_complete: bool
-    missing_fields: List[str]
+    missing_fields: list[str]
     has_defaults: HotelProfileStatusHasDefaults
     missing_listings: bool
-    completion_steps: List[str]
+    completion_steps: list[str]
 
 
 # ============================================
 # PROFILE UPDATE
 # ============================================
 
+
 class UpdateHotelProfileRequest(BaseModel):
     """Request model for updating hotel profile (partial updates supported)"""
-    name: Optional[str] = Field(None, min_length=2)
-    location: Optional[str] = Field(None, min_length=1)
-    email: Optional[EmailStr] = None
-    about: Optional[str] = Field(None, min_length=10, max_length=5000)
-    website: Optional[HttpUrl] = None
-    phone: Optional[str] = None
-    picture: Optional[HttpUrl] = None
 
-    @field_validator('location')
+    name: str | None = Field(None, min_length=2)
+    location: str | None = Field(None, min_length=1)
+    email: EmailStr | None = None
+    about: str | None = Field(None, min_length=10, max_length=5000)
+    website: HttpUrl | None = None
+    phone: str | None = None
+    picture: HttpUrl | None = None
+
+    @field_validator("location")
     @classmethod
     def validate_location_not_default(cls, v):
         """Ensure location is not the default value"""
-        if v is not None and v.strip() == 'Not specified':
-            raise ValueError('Location must be updated from default value')
+        if v is not None and v.strip() == "Not specified":
+            raise ValueError("Location must be updated from default value")
         return v
 
 
@@ -58,8 +71,10 @@ class UpdateHotelProfileRequest(BaseModel):
 # PROFILE RESPONSE
 # ============================================
 
+
 class HotelProfileResponse(BaseModel):
     """Hotel profile response model"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -67,41 +82,55 @@ class HotelProfileResponse(BaseModel):
     name: str
     location: str
     email: str
-    about: Optional[str] = None
-    website: Optional[str] = None
-    phone: Optional[str] = None
-    picture: Optional[str] = None
+    about: str | None = None
+    website: str | None = None
+    phone: str | None = None
+    picture: str | None = None
     status: str
     created_at: datetime
     updated_at: datetime
-    listings: List[dict] = Field(default_factory=list)
+    listings: list[dict] = Field(default_factory=list)
 
 
 # ============================================
 # COLLABORATION OFFERING REQUEST
 # ============================================
 
+
 class CollaborationOfferingRequest(BaseModel):
     """Collaboration offering request model"""
-    collaborationType: Literal["Free Stay", "Paid", "Discount", "Affiliate"] = Field(alias="collaboration_type")
-    availabilityMonths: List[str] = Field(..., min_length=1, alias="availability_months")
-    platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
-    freeStayMinNights: Optional[int] = Field(None, gt=0, alias="free_stay_min_nights")
-    freeStayMaxNights: Optional[int] = Field(None, gt=0, alias="free_stay_max_nights")
-    paidMaxAmount: Optional[Decimal] = Field(None, gt=0, alias="paid_max_amount")
-    currency: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$', description="ISO 4217 currency code for paid offerings (defaults to USD server-side)")
-    discountPercentage: Optional[int] = Field(None, ge=1, le=100, alias="discount_percentage")
-    commissionPercentage: Optional[int] = Field(None, ge=1, le=100, alias="commission_percentage")
-    minFollowers: Optional[int] = Field(None, gt=0, alias="min_followers")
 
-    @model_validator(mode='after')
+    collaborationType: Literal["Free Stay", "Paid", "Discount", "Affiliate"] = Field(
+        alias="collaboration_type"
+    )
+    availabilityMonths: list[str] = Field(..., min_length=1, alias="availability_months")
+    platforms: list[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(
+        ..., min_length=1
+    )
+    freeStayMinNights: int | None = Field(None, gt=0, alias="free_stay_min_nights")
+    freeStayMaxNights: int | None = Field(None, gt=0, alias="free_stay_max_nights")
+    paidMaxAmount: Decimal | None = Field(None, gt=0, alias="paid_max_amount")
+    currency: str | None = Field(
+        None,
+        pattern=r"^[A-Z]{3}$",
+        description="ISO 4217 currency code for paid offerings (defaults to USD server-side)",
+    )
+    discountPercentage: int | None = Field(None, ge=1, le=100, alias="discount_percentage")
+    commissionPercentage: int | None = Field(None, ge=1, le=100, alias="commission_percentage")
+    minFollowers: int | None = Field(None, gt=0, alias="min_followers")
+
+    @model_validator(mode="after")
     def validate_type_specific_fields(self):
         """Validate type-specific fields are present"""
         if self.collaborationType == "Free Stay":
             if self.freeStayMinNights is None or self.freeStayMaxNights is None:
-                raise ValueError("Minimum and maximum number of nights are required for Free Stay collaborations.")
+                raise ValueError(
+                    "Minimum and maximum number of nights are required for Free Stay collaborations."
+                )
             if self.freeStayMaxNights < self.freeStayMinNights:
-                raise ValueError("Maximum number of nights must be greater than or equal to the minimum.")
+                raise ValueError(
+                    "Maximum number of nights must be greater than or equal to the minimum."
+                )
         elif self.collaborationType == "Paid":
             if self.paidMaxAmount is None:
                 raise ValueError("A maximum payment amount is required for Paid collaborations.")
@@ -110,7 +139,9 @@ class CollaborationOfferingRequest(BaseModel):
                 raise ValueError("A discount percentage is required for Discount collaborations.")
         elif self.collaborationType == "Affiliate":
             if self.commissionPercentage is None:
-                raise ValueError("A commission percentage is required for Affiliate collaborations.")
+                raise ValueError(
+                    "A commission percentage is required for Affiliate collaborations."
+                )
         return self
 
     model_config = ConfigDict(populate_by_name=True)
@@ -120,16 +151,22 @@ class CollaborationOfferingRequest(BaseModel):
 # CREATOR REQUIREMENTS REQUEST
 # ============================================
 
+
 class CreatorRequirementsRequest(BaseModel):
     """Creator requirements request model"""
-    platforms: List[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(..., min_length=1)
-    topCountries: Optional[List[str]] = Field(None, alias="target_countries", description="Top Countries of the audience")
-    targetAgeMin: Optional[int] = Field(None, ge=0, le=100, alias="target_age_min")
-    targetAgeMax: Optional[int] = Field(None, ge=0, le=100, alias="target_age_max")
-    targetAgeGroups: Optional[List[str]] = Field(None, alias="target_age_groups")
-    creatorTypes: Optional[List[Literal["Lifestyle", "Travel"]]] = Field(None, alias="creator_types")
 
-    @model_validator(mode='after')
+    platforms: list[Literal["Instagram", "TikTok", "YouTube", "Facebook"]] = Field(
+        ..., min_length=1
+    )
+    topCountries: list[str] | None = Field(
+        None, alias="target_countries", description="Top Countries of the audience"
+    )
+    targetAgeMin: int | None = Field(None, ge=0, le=100, alias="target_age_min")
+    targetAgeMax: int | None = Field(None, ge=0, le=100, alias="target_age_max")
+    targetAgeGroups: list[str] | None = Field(None, alias="target_age_groups")
+    creatorTypes: list[Literal["Lifestyle", "Travel"]] | None = Field(None, alias="creator_types")
+
+    @model_validator(mode="after")
     def validate_age_range(self):
         """Validate age range and derive min/max from groups if provided"""
         if self.targetAgeGroups:
@@ -177,14 +214,23 @@ class CreatorRequirementsRequest(BaseModel):
 # LISTING REQUESTS
 # ============================================
 
+
 class CreateListingRequest(BaseModel):
     """Request model for creating hotel listing"""
+
     name: str = Field(..., min_length=1)
     location: str = Field(..., min_length=1)
     description: str = Field(..., min_length=10)
-    accommodationType: Optional[Literal["Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"]] = Field(None, alias="accommodation_type")
-    images: List[str] = Field(default_factory=list)
-    collaborationOfferings: List[CollaborationOfferingRequest] = Field(..., min_length=1, alias="collaboration_offerings")
+    accommodationType: (
+        Literal[
+            "Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"
+        ]
+        | None
+    ) = Field(None, alias="accommodation_type")
+    images: list[str] = Field(default_factory=list)
+    collaborationOfferings: list[CollaborationOfferingRequest] = Field(
+        ..., min_length=1, alias="collaboration_offerings"
+    )
     creatorRequirements: CreatorRequirementsRequest = Field(alias="creator_requirements")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -192,13 +238,23 @@ class CreateListingRequest(BaseModel):
 
 class UpdateListingRequest(BaseModel):
     """Request model for updating hotel listing (partial updates supported)"""
-    name: Optional[str] = Field(None, min_length=1)
-    location: Optional[str] = Field(None, min_length=1)
-    description: Optional[str] = Field(None, min_length=10)
-    accommodationType: Optional[Literal["Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"]] = Field(None, alias="accommodation_type")
-    images: Optional[List[str]] = None
-    collaborationOfferings: Optional[List[CollaborationOfferingRequest]] = Field(None, alias="collaboration_offerings")
-    creatorRequirements: Optional[CreatorRequirementsRequest] = Field(None, alias="creator_requirements")
+
+    name: str | None = Field(None, min_length=1)
+    location: str | None = Field(None, min_length=1)
+    description: str | None = Field(None, min_length=10)
+    accommodationType: (
+        Literal[
+            "Hotel", "Boutiques Hotel", "City Hotel", "Luxury Hotel", "Apartment", "Villa", "Lodge"
+        ]
+        | None
+    ) = Field(None, alias="accommodation_type")
+    images: list[str] | None = None
+    collaborationOfferings: list[CollaborationOfferingRequest] | None = Field(
+        None, alias="collaboration_offerings"
+    )
+    creatorRequirements: CreatorRequirementsRequest | None = Field(
+        None, alias="creator_requirements"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -207,20 +263,26 @@ class UpdateListingRequest(BaseModel):
 # LISTING RESPONSE
 # ============================================
 
+
 class ListingResponse(BaseModel):
     """Listing response model"""
+
     id: str
     hotelProfileId: str = Field(alias="hotel_profile_id")
     name: str
     location: str
     description: str
-    accommodationType: Optional[str] = Field(None, alias="accommodation_type")
-    images: List[str]
+    accommodationType: str | None = Field(None, alias="accommodation_type")
+    images: list[str]
     status: str
     createdAt: datetime = Field(alias="created_at")
     updatedAt: datetime = Field(alias="updated_at")
-    collaborationOfferings: List[CollaborationOfferingResponse] = Field(alias="collaboration_offerings")
-    creatorRequirements: Optional[CreatorRequirementsResponse] = Field(None, alias="creator_requirements")
+    collaborationOfferings: list[CollaborationOfferingResponse] = Field(
+        alias="collaboration_offerings"
+    )
+    creatorRequirements: CreatorRequirementsResponse | None = Field(
+        None, alias="creator_requirements"
+    )
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
@@ -229,24 +291,27 @@ class ListingResponse(BaseModel):
 # CREATOR METRICS (for hotel collaboration views)
 # ============================================
 
+
 class CreatorPlatformDetail(BaseModel):
     """Detailed creator platform metrics"""
+
     name: str
     handle: str
     followers: int
     engagementRate: float = Field(alias="engagement_rate")
-    topCountries: Optional[List[dict]] = Field(None, alias="top_countries")
-    topAgeGroups: Optional[List[dict]] = Field(None, alias="top_age_groups")
-    genderSplit: Optional[dict] = Field(None, alias="gender_split")
+    topCountries: list[dict] | None = Field(None, alias="top_countries")
+    topAgeGroups: list[dict] | None = Field(None, alias="top_age_groups")
+    genderSplit: dict | None = Field(None, alias="gender_split")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class CreatorReview(BaseModel):
     """Review item for creator reputation"""
+
     id: str
     rating: int
-    comment: Optional[str]
+    comment: str | None
     organizationName: str = Field(alias="organization_name")
     createdAt: datetime = Field(alias="created_at")
 
@@ -255,9 +320,10 @@ class CreatorReview(BaseModel):
 
 class CreatorReputation(BaseModel):
     """Creator reputation metrics"""
+
     averageRating: float = Field(alias="average_rating")
     totalReviews: int = Field(alias="total_reviews")
-    reviews: List[CreatorReview] = Field(default_factory=list)
+    reviews: list[CreatorReview] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -266,40 +332,45 @@ class CreatorReputation(BaseModel):
 # COLLABORATION VIEWS (Hotel Perspective)
 # ============================================
 
+
 class HotelCollaborationListResponse(BaseModel):
     """Slim response for collaboration list view"""
+
     id: str
     initiatorType: str = Field(alias="initiator_type")
     isInitiator: bool = Field(alias="is_initiator")
     status: str
     createdAt: datetime = Field(alias="created_at")
-    whyGreatFit: Optional[str] = Field(None, alias="why_great_fit")
+    whyGreatFit: str | None = Field(None, alias="why_great_fit")
 
     # Creator Summary
     creatorId: str = Field(alias="creator_id")
     name: str = Field(alias="creator_name")
-    profilePicture: Optional[str] = Field(None, alias="creator_profile_picture")
-    handle: Optional[str] = Field(None, alias="primary_handle", description="Primary handle (highest followers)")
-    location: Optional[str] = Field(None, alias="creator_location")
+    profilePicture: str | None = Field(None, alias="creator_profile_picture")
+    handle: str | None = Field(
+        None, alias="primary_handle", description="Primary handle (highest followers)"
+    )
+    location: str | None = Field(None, alias="creator_location")
     totalFollowers: int = Field(0, alias="total_followers")
     avgEngagementRate: float = Field(0.0, alias="avg_engagement_rate")
-    activePlatform: Optional[str] = Field(None, alias="active_platform")
+    activePlatform: str | None = Field(None, alias="active_platform")
     isVerified: bool = Field(False, alias="is_verified")
-    platformDeliverables: List[dict] = Field(default_factory=list, alias="platform_deliverables")
-    travelDateFrom: Optional[date] = Field(None, alias="travel_date_from")
-    travelDateTo: Optional[date] = Field(None, alias="travel_date_to")
+    platformDeliverables: list[dict] = Field(default_factory=list, alias="platform_deliverables")
+    travelDateFrom: date | None = Field(None, alias="travel_date_from")
+    travelDateTo: date | None = Field(None, alias="travel_date_to")
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     """Detailed response for modal view (extends list response)"""
+
     # Extended Creator Analytics
-    platforms: List[CreatorPlatformDetail] = Field(default_factory=list)
-    reputation: Optional[CreatorReputation] = None
+    platforms: list[CreatorPlatformDetail] = Field(default_factory=list)
+    reputation: CreatorReputation | None = None
 
     # Request Specifics
-    portfolioLink: Optional[str] = Field(None, alias="portfolio_link")
+    portfolioLink: str | None = Field(None, alias="portfolio_link")
 
     # Other metadata (optional but useful)
     hotelId: str = Field(alias="hotel_id")
@@ -309,20 +380,20 @@ class HotelCollaborationDetailResponse(HotelCollaborationListResponse):
     listingLocation: str = Field(alias="listing_location")
 
     # Collaboration terms
-    collaborationType: Optional[str] = Field(None, alias="collaboration_type")
-    discountPercentage: Optional[int] = Field(None, alias="discount_percentage")
-    paidAmount: Optional[Decimal] = Field(None, alias="paid_amount")
-    currency: Optional[str] = Field(None, description="ISO 4217 currency code for paidAmount")
-    freeStayMinNights: Optional[int] = Field(None, alias="free_stay_min_nights")
-    freeStayMaxNights: Optional[int] = Field(None, alias="free_stay_max_nights")
-    preferredDateFrom: Optional[date] = Field(None, alias="preferred_date_from")
-    preferredDateTo: Optional[date] = Field(None, alias="preferred_date_to")
-    preferredMonths: Optional[List[str]] = Field(None, alias="preferred_months")
-    consent: Optional[bool] = None
+    collaborationType: str | None = Field(None, alias="collaboration_type")
+    discountPercentage: int | None = Field(None, alias="discount_percentage")
+    paidAmount: Decimal | None = Field(None, alias="paid_amount")
+    currency: str | None = Field(None, description="ISO 4217 currency code for paidAmount")
+    freeStayMinNights: int | None = Field(None, alias="free_stay_min_nights")
+    freeStayMaxNights: int | None = Field(None, alias="free_stay_max_nights")
+    preferredDateFrom: date | None = Field(None, alias="preferred_date_from")
+    preferredDateTo: date | None = Field(None, alias="preferred_date_to")
+    preferredMonths: list[str] | None = Field(None, alias="preferred_months")
+    consent: bool | None = None
 
     updatedAt: datetime = Field(alias="updated_at")
-    respondedAt: Optional[datetime] = Field(None, alias="responded_at")
-    cancelledAt: Optional[datetime] = Field(None, alias="cancelled_at")
-    completedAt: Optional[datetime] = Field(None, alias="completed_at")
+    respondedAt: datetime | None = Field(None, alias="responded_at")
+    cancelledAt: datetime | None = Field(None, alias="cancelled_at")
+    completedAt: datetime | None = Field(None, alias="completed_at")
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)

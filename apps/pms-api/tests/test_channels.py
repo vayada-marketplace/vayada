@@ -5,12 +5,12 @@ key per OTA. Channex sends the raw ``ota_name`` in inconsistent forms;
 ``app.channels`` collapses those onto the canonical key so consumers
 don't each re-implement the alias table.
 """
-import pytest
 
+import pytest
 from app.channels import channel_label, normalize_channel
 
-
 # ── normalize_channel ─────────────────────────────────────────────────
+
 
 @pytest.mark.parametrize(
     "raw, expected",

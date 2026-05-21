@@ -8,6 +8,7 @@ Covers:
   (sent → partial → paid).
 - Summary aggregation (revenue MTD + outstanding + overdue count).
 """
+
 from datetime import date, datetime, timedelta, timezone
 
 from tests.conftest import (
@@ -26,8 +27,10 @@ class TestListInvoices:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-08-01", check_out="2026-08-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
             guest_email="alice@example.com",
             status="confirmed",
         )
@@ -51,20 +54,26 @@ class TestListInvoices:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-08-01", check_out="2026-08-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
             guest_email="confirmed@example.com",
             status="confirmed",
         )
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-09-01", check_out="2026-09-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-09-01",
+            check_out="2026-09-05",
             guest_email="pending@example.com",
             status="pending",
         )
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-10-01", check_out="2026-10-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-10-01",
+            check_out="2026-10-05",
             guest_email="cancelled@example.com",
             status="cancelled",
         )
@@ -94,7 +103,8 @@ class TestListInvoices:
         hotel_a = await create_test_hotel(str(user_a["id"]))
         room_a = await create_test_room_type(str(hotel_a["id"]))
         await create_test_booking(
-            str(hotel_a["id"]), str(room_a["id"]),
+            str(hotel_a["id"]),
+            str(room_a["id"]),
             guest_email="hotel-a@example.com",
         )
 
@@ -116,8 +126,10 @@ class TestInvoiceDetail:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-08-01", check_out="2026-08-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
             nightly_rate=200.0,
             status="confirmed",
         )
@@ -137,14 +149,13 @@ class TestInvoiceDetail:
 
 
 class TestRecordPayment:
-    async def test_partial_then_full_payment_status_transitions(
-        self, client, cleanup_database
-    ):
+    async def test_partial_then_full_payment_status_transitions(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking_with_payment(
-            str(hotel["id"]), str(room["id"]),
+            str(hotel["id"]),
+            str(room["id"]),
             nightly_rate=250.0,
             status="confirmed",
             payment_method="pay_at_property",
@@ -192,8 +203,10 @@ class TestRecordPayment:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         booking = await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            nightly_rate=100.0, status="confirmed",
+            str(hotel["id"]),
+            str(room["id"]),
+            nightly_rate=100.0,
+            status="confirmed",
         )
         resp = await client.post(
             f"/admin/financials/invoices/{booking['id']}/payments",
@@ -212,17 +225,23 @@ class TestSummary:
         future_start = (date.today() + timedelta(days=30)).isoformat()
         future_end = (date.today() + timedelta(days=33)).isoformat()
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in=future_start, check_out=future_end,
-            nightly_rate=200.0, status="confirmed",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=200.0,
+            status="confirmed",
         )
         # Past stay, also unpaid → overdue.
         past_start = (date.today() - timedelta(days=30)).isoformat()
         past_end = (date.today() - timedelta(days=27)).isoformat()
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in=past_start, check_out=past_end,
-            nightly_rate=300.0, status="confirmed",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=past_start,
+            check_out=past_end,
+            nightly_rate=300.0,
+            status="confirmed",
             guest_email="past@example.com",
         )
 
@@ -252,16 +271,22 @@ class TestSummary:
         future_end = (date.today() + timedelta(days=33)).isoformat()
         # Confirmed → contributes 200 × 3 = 600 to revenue/outstanding.
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in=future_start, check_out=future_end,
-            nightly_rate=200.0, status="confirmed",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=200.0,
+            status="confirmed",
             guest_email="confirmed@example.com",
         )
         # Pending → must NOT contribute, even though total_amount is set.
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in=future_start, check_out=future_end,
-            nightly_rate=500.0, status="pending",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=500.0,
+            status="pending",
             guest_email="pending@example.com",
         )
 

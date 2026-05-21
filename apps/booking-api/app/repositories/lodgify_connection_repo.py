@@ -4,10 +4,8 @@ Encryption lives in app.integration_secrets; this layer just persists
 the already-encrypted blob. Keeping the cipher one layer up means the
 repo stays a thin SQL wrapper — easier to test, easier to reason about.
 """
-from typing import Optional
 
 from app.database import Database
-
 
 _COLUMNS = (
     "id, hotel_id, lodgify_property_id, lodgify_property_name, "
@@ -17,9 +15,8 @@ _COLUMNS_WITH_KEY = _COLUMNS + ", api_key_encrypted"
 
 
 class LodgifyConnectionRepository:
-
     @staticmethod
-    async def get_by_hotel_id(hotel_id: str, *, include_key: bool = False) -> Optional[dict]:
+    async def get_by_hotel_id(hotel_id: str, *, include_key: bool = False) -> dict | None:
         cols = _COLUMNS_WITH_KEY if include_key else _COLUMNS
         row = await Database.fetchrow(
             f"SELECT {cols} FROM lodgify_connections WHERE hotel_id = $1",
@@ -53,8 +50,11 @@ class LodgifyConnectionRepository:
                 updated_at = now()
             RETURNING {_COLUMNS}
             """,
-            hotel_id, api_key_encrypted, lodgify_property_id,
-            lodgify_property_name, last_validated_at,
+            hotel_id,
+            api_key_encrypted,
+            lodgify_property_id,
+            lodgify_property_name,
+            last_validated_at,
         )
         return dict(row)
 
@@ -84,5 +84,6 @@ class LodgifyConnectionRepository:
                 updated_at = now()
             WHERE hotel_id = $1
             """,
-            hotel_id, message,
+            hotel_id,
+            message,
         )

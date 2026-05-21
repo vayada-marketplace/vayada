@@ -2,13 +2,15 @@
 Tests for PATCH /admin/bookings/{id}/unassign-room — push an assigned booking
 back to the Unassigned row by clearing its room_id.
 """
+
 import json as _json
 
 from app.database import Database
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
     create_test_booking,
+    create_test_hotel,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -22,7 +24,9 @@ async def _unassign(client, token: str, booking_id: str):
 
 async def _set_room(booking_id, room_id):
     await Database.execute(
-        "UPDATE bookings SET room_id = $1 WHERE id = $2", room_id, booking_id,
+        "UPDATE bookings SET room_id = $1 WHERE id = $2",
+        room_id,
+        booking_id,
     )
 
 
@@ -35,8 +39,10 @@ class TestUnassignRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
         await _set_room(booking["id"], rooms[0]["id"])
@@ -47,14 +53,14 @@ class TestUnassignRoom:
 
         # DB row also cleared.
         row = await Database.fetchrow(
-            "SELECT room_id FROM bookings WHERE id = $1", booking["id"],
+            "SELECT room_id FROM bookings WHERE id = $1",
+            booking["id"],
         )
         assert row["room_id"] is None
 
         # Audit row written with from_room_id pointing at the prior assignment.
         ev = await Database.fetchrow(
-            "SELECT event_type, payload, actor_user_id FROM booking_events "
-            "WHERE booking_id = $1",
+            "SELECT event_type, payload, actor_user_id FROM booking_events WHERE booking_id = $1",
             booking["id"],
         )
         assert ev is not None
@@ -64,15 +70,19 @@ class TestUnassignRoom:
         assert payload["from_room_id"] == str(rooms[0]["id"])
 
     async def test_unassign_already_unassigned_rejected(
-        self, client, hotel_with_rooms,
+        self,
+        client,
+        hotel_with_rooms,
     ):
         user = hotel_with_rooms["user"]
         hotel = hotel_with_rooms["hotel"]
         rt = hotel_with_rooms["room"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
         # leave room_id NULL
@@ -88,8 +98,10 @@ class TestUnassignRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="cancelled",
         )
         await _set_room(booking["id"], rooms[0]["id"])
@@ -104,8 +116,10 @@ class TestUnassignRoom:
         rooms = hotel_with_rooms["rooms"]
 
         booking = await create_test_booking(
-            str(hotel["id"]), str(rt["id"]),
-            check_in="2026-06-01", check_out="2026-06-05",
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-05",
             status="confirmed",
         )
         await _set_room(booking["id"], rooms[0]["id"])

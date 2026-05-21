@@ -1,9 +1,8 @@
 """Channex multichannel inbox: webhook ingestion + safety-net polling."""
-import logging
-from datetime import datetime, timezone
-from typing import Optional
 
-from app.database import Database
+import logging
+from datetime import UTC, datetime
+
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.repositories.messaging_repo import (
     MessageAttachmentRepository,
@@ -15,7 +14,7 @@ from app.services import channex_service
 logger = logging.getLogger(__name__)
 
 
-def _normalize_provider(provider: str) -> Optional[str]:
+def _normalize_provider(provider: str) -> str | None:
     """Channex returns 'BookingCom' / 'AirBNB' / 'Expedia'. Map to internal keys
     (matches admin_channex._normalize_channex_application convention)."""
     if not provider:
@@ -35,23 +34,25 @@ def _direction_from_sender(sender: str) -> str:
     return "inbound" if (sender or "").lower() == "guest" else "outbound"
 
 
-def _parse_iso(ts: Optional[str]) -> datetime:
+def _parse_iso(ts: str | None) -> datetime:
     if not ts:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if ts.endswith("Z"):
         ts = ts[:-1] + "+00:00"
     try:
         return datetime.fromisoformat(ts)
     except ValueError:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
-async def _resolve_booking_id(hotel_id: str, channex_booking_id: Optional[str]) -> Optional[str]:
+async def _resolve_booking_id(hotel_id: str, channex_booking_id: str | None) -> str | None:
     if not channex_booking_id:
         return None
     from app.repositories.channex_mapping_repo import ChannexBookingMappingRepository
+
     mapping = await ChannexBookingMappingRepository.get_by_channex_id(
-        hotel_id, channex_booking_id,
+        hotel_id,
+        channex_booking_id,
     )
     return str(mapping["booking_id"]) if mapping else None
 
@@ -61,13 +62,14 @@ async def _ensure_thread(
     hotel_id: str,
     channex_thread_id: str,
     channex_property_id: str,
-    channex_booking_id: Optional[str] = None,
-    seed_attrs: Optional[dict] = None,
+    channex_booking_id: str | None = None,
+    seed_attrs: dict | None = None,
 ) -> dict:
     """Look up or create the local thread row, hydrating from Channex if the
     webhook payload doesn't include enough metadata."""
     existing = await MessageThreadRepository.get_by_source_thread_id(
-        "channex", channex_thread_id,
+        "channex",
+        channex_thread_id,
     )
     attrs = seed_attrs or {}
     if not attrs.get("title") or not attrs.get("provider"):
@@ -79,7 +81,8 @@ async def _ensure_thread(
         except Exception as e:
             logger.warning(
                 "Failed to fetch Channex thread %s metadata: %s",
-                channex_thread_id, e,
+                channex_thread_id,
+                e,
             )
 
     booking_id = await _resolve_booking_id(hotel_id, channex_booking_id)
@@ -92,7 +95,9 @@ async def _ensure_thread(
         guest_email=attrs.get("guest_email"),
         source_booking_id=channex_booking_id,
         booking_id=booking_id,
-        status="closed" if attrs.get("is_closed") else (existing or {}).get("status", "open") or "open",
+        status="closed"
+        if attrs.get("is_closed")
+        else (existing or {}).get("status", "open") or "open",
     )
 
 
@@ -115,9 +120,7 @@ async def process_inbound_message_event(payload: dict, top_level: dict) -> None:
     """Handle a single 'message' webhook event from Channex.
     `payload` is the inner `payload` object; `top_level` is the full envelope
     (we use it for property_id fallback)."""
-    channex_property_id = (
-        payload.get("property_id") or top_level.get("property_id")
-    )
+    channex_property_id = payload.get("property_id") or top_level.get("property_id")
     if not channex_property_id:
         logger.warning("Channex message event missing property_id, skipping")
         return
@@ -173,7 +176,8 @@ async def sync_threads_for_hotel(hotel_id: str) -> None:
 
     try:
         threads = await channex_service.list_message_threads(
-            api_key, property_id=property_id,
+            api_key,
+            property_id=property_id,
         )
     except Exception as e:
         logger.error("Failed to list Channex threads for hotel %s: %s", hotel_id, e)
@@ -216,11 +220,13 @@ async def sync_threads_for_hotel(hotel_id: str) -> None:
             )
             if inserted:
                 await _persist_attachments(
-                    str(inserted["id"]), m_attrs.get("attachments") or [],
+                    str(inserted["id"]),
+                    m_attrs.get("attachments") or [],
                 )
 
     await ChannexConnectionRepository.update_last_message_sync(
-        hotel_id, datetime.now(timezone.utc),
+        hotel_id,
+        datetime.now(UTC),
     )
 
 
@@ -233,5 +239,6 @@ async def poll_messages_for_all_hotels() -> None:
         except Exception as e:
             logger.error(
                 "Channex message sync failed for hotel %s: %s",
-                conn["hotel_id"], e,
+                conn["hotel_id"],
+                e,
             )

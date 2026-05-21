@@ -5,13 +5,14 @@ contract under test here is the router — auth, response shape, error
 mapping — not the upstream Lodgify validation logic (covered separately
 in test_lodgify_client.py).
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.models.lodgify import LodgifyConnectionStatus
 from app.services.lodgify.connection import LodgifyConnectError
+
 from tests.conftest import get_auth_headers
 
 
@@ -22,7 +23,7 @@ def connected_status():
         status="active",
         lodgify_property_id="42",
         lodgify_property_name="Beach Villa",
-        last_validated_at=datetime.now(timezone.utc),
+        last_validated_at=datetime.now(UTC),
         last_error=None,
     )
 
@@ -33,7 +34,6 @@ def disconnected_status():
 
 
 class TestLodgifyConnect:
-
     async def test_connect_success(self, client, hotel_with_property, connected_status):
         user = hotel_with_property["user"]
         hotel = hotel_with_property["hotel"]
@@ -96,7 +96,6 @@ class TestLodgifyConnect:
 
 
 class TestLodgifyStatus:
-
     async def test_status_when_disconnected(self, client, hotel_with_property, disconnected_status):
         user = hotel_with_property["user"]
         hotel = hotel_with_property["hotel"]
@@ -133,7 +132,6 @@ class TestLodgifyStatus:
 
 
 class TestLodgifyDisconnect:
-
     async def test_disconnect_204(self, client, hotel_with_property):
         user = hotel_with_property["user"]
         hotel = hotel_with_property["hotel"]

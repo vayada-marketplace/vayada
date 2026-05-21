@@ -1,14 +1,17 @@
 """
 Tests for public /api/hotels/{slug}/bookings endpoints (create + lookup).
 """
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
     create_test_booking,
+    create_test_hotel,
     create_test_payment_settings,
+    create_test_room_type,
+    create_test_user,
 )
 
 
@@ -155,8 +158,10 @@ class TestCreateBooking:
 
         # Book the only room
         await create_test_booking(
-            str(hotel["id"]), str(room["id"]),
-            check_in="2026-08-01", check_out="2026-08-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
         )
 
         # Try to book overlapping dates
@@ -223,12 +228,8 @@ class TestCreateBooking:
 
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
-        await create_test_payment_settings(
-            str(hotel["id"]), pay_at_property_enabled=True
-        )
-        await Database.execute(
-            "UPDATE hotels SET instant_book = true WHERE id = $1", hotel["id"]
-        )
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute("UPDATE hotels SET instant_book = true WHERE id = $1", hotel["id"])
 
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
@@ -280,9 +281,7 @@ class TestCreateBooking:
 
         hotel = hotel_with_rooms["hotel"]
         room = hotel_with_rooms["room"]
-        await create_test_payment_settings(
-            str(hotel["id"]), pay_at_property_enabled=True
-        )
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
 
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
@@ -313,23 +312,27 @@ class TestCreateBooking:
 
     async def test_create_booking_below_min_stay(self, client, cleanup_database):
         import json as _json
+
         from app.database import Database
 
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
 
-        seasons = [{
-            "name": "All year",
-            "tier": "Mid",
-            "from": "01-01",
-            "to": "12-31",
-            "rate": "150",
-            "minStay": 2,
-        }]
+        seasons = [
+            {
+                "name": "All year",
+                "tier": "Mid",
+                "from": "01-01",
+                "to": "12-31",
+                "rate": "150",
+                "minStay": 2,
+            }
+        ]
         await Database.execute(
             "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
-            _json.dumps(seasons), room["id"],
+            _json.dumps(seasons),
+            room["id"],
         )
 
         resp = await client.post(

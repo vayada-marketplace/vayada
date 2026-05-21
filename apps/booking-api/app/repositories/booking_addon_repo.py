@@ -1,14 +1,13 @@
 """
 Repository for booking_addons table (Database).
 """
+
 import json
-from typing import Optional
 
 from app.database import Database
 
 
 class BookingAddonRepository:
-
     @staticmethod
     async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         rows = await Database.fetch(
@@ -18,10 +17,11 @@ class BookingAddonRepository:
         return [dict(row) for row in rows]
 
     @staticmethod
-    async def get_by_id(addon_id: str, hotel_id: str) -> Optional[dict]:
+    async def get_by_id(addon_id: str, hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_addons WHERE id = $1 AND hotel_id = $2",
-            addon_id, hotel_id,
+            addon_id,
+            hotel_id,
         )
         return dict(row) if row else None
 
@@ -29,18 +29,18 @@ class BookingAddonRepository:
     async def create(
         hotel_id: str,
         name: str,
-        description: str = '',
+        description: str = "",
         price: float = 0,
-        currency: str = 'EUR',
-        category: str = 'experience',
-        image: str = '',
-        duration: Optional[str] = None,
-        per_person: Optional[bool] = None,
-        per_night: Optional[bool] = None,
-        location: Optional[str] = None,
-        max_guests: Optional[str] = None,
-        highlights: Optional[list[str]] = None,
-        included_items: Optional[list[str]] = None,
+        currency: str = "EUR",
+        category: str = "experience",
+        image: str = "",
+        duration: str | None = None,
+        per_person: bool | None = None,
+        per_night: bool | None = None,
+        location: str | None = None,
+        max_guests: str | None = None,
+        highlights: list[str] | None = None,
+        included_items: list[str] | None = None,
     ) -> dict:
         query = """
             INSERT INTO booking_addons
@@ -49,15 +49,26 @@ class BookingAddonRepository:
             RETURNING *
         """
         row = await Database.fetchrow(
-            query, hotel_id, name, description, price, currency, category, image,
-            duration, per_person, per_night,
-            location or '', max_guests or '',
-            json.dumps(highlights or []), json.dumps(included_items or []),
+            query,
+            hotel_id,
+            name,
+            description,
+            price,
+            currency,
+            category,
+            image,
+            duration,
+            per_person,
+            per_night,
+            location or "",
+            max_guests or "",
+            json.dumps(highlights or []),
+            json.dumps(included_items or []),
         )
         return dict(row)
 
     @staticmethod
-    async def update(addon_id: str, hotel_id: str, updates: dict) -> Optional[dict]:
+    async def update(addon_id: str, hotel_id: str, updates: dict) -> dict | None:
         if not updates:
             return None
 
@@ -85,6 +96,7 @@ class BookingAddonRepository:
     async def delete(addon_id: str, hotel_id: str) -> bool:
         result = await Database.execute(
             "DELETE FROM booking_addons WHERE id = $1 AND hotel_id = $2",
-            addon_id, hotel_id,
+            addon_id,
+            hotel_id,
         )
         return result == "DELETE 1"

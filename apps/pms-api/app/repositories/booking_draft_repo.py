@@ -1,8 +1,7 @@
 import json
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from app.database import Database
 from app.utils import generate_unique_code
@@ -21,14 +20,11 @@ DRAFT_TTL_MINUTES = 15
 
 
 class BookingDraftRepository:
-
     @staticmethod
     async def _ref_taken(ref: str) -> bool:
         # A reference must be globally unique across both real bookings
         # and live drafts so the row we materialize keeps the same code.
-        if await Database.fetchval(
-            "SELECT 1 FROM bookings WHERE booking_reference = $1", ref
-        ):
+        if await Database.fetchval("SELECT 1 FROM bookings WHERE booking_reference = $1", ref):
             return True
         if await Database.fetchval(
             "SELECT 1 FROM booking_drafts WHERE booking_reference = $1", ref
@@ -57,7 +53,7 @@ class BookingDraftRepository:
         payload: dict,
         ttl_minutes: int = DRAFT_TTL_MINUTES,
     ) -> dict:
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+        expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
         row = await Database.fetchrow(
             """
             INSERT INTO booking_drafts (
@@ -79,14 +75,12 @@ class BookingDraftRepository:
         return dict(row)
 
     @staticmethod
-    async def get_by_id(draft_id: str) -> Optional[dict]:
-        row = await Database.fetchrow(
-            "SELECT * FROM booking_drafts WHERE id = $1", draft_id
-        )
+    async def get_by_id(draft_id: str) -> dict | None:
+        row = await Database.fetchrow("SELECT * FROM booking_drafts WHERE id = $1", draft_id)
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_payment_intent(stripe_payment_intent_id: str) -> Optional[dict]:
+    async def get_by_payment_intent(stripe_payment_intent_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_drafts WHERE stripe_payment_intent_id = $1",
             stripe_payment_intent_id,
@@ -94,9 +88,7 @@ class BookingDraftRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def claim_for_materialization(
-        draft_id: str, booking_id: str
-    ) -> Optional[dict]:
+    async def claim_for_materialization(draft_id: str, booking_id: str) -> dict | None:
         """Atomically stamp materialized_booking_id on an unmaterialized
         draft. Exactly one concurrent caller wins; the rest get None and
         should resolve to the booking via the now-set link."""
@@ -114,9 +106,7 @@ class BookingDraftRepository:
 
     @staticmethod
     async def delete(draft_id: str) -> bool:
-        result = await Database.execute(
-            "DELETE FROM booking_drafts WHERE id = $1", draft_id
-        )
+        result = await Database.execute("DELETE FROM booking_drafts WHERE id = $1", draft_id)
         return result == "DELETE 1"
 
     @staticmethod
@@ -135,9 +125,7 @@ class BookingDraftRepository:
         return result == "DELETE 1"
 
     @staticmethod
-    async def count_active_for_stay(
-        room_type_id: str, check_in, check_out
-    ) -> int:
+    async def count_active_for_stay(room_type_id: str, check_in, check_out) -> int:
         """Sum number_of_rooms across non-expired drafts that overlap the
         given stay. These rooms are soft-held and must be subtracted from
         availability so a second guest can't book the same unit while the

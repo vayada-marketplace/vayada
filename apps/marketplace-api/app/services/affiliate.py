@@ -7,10 +7,10 @@ The marketplace and PMS run in separate databases; this service keeps
 the cross-DB write path in one place so it can't drift between the
 self-service collaborations router and the admin override.
 """
+
 import logging
 import secrets
 from decimal import Decimal
-from typing import Optional
 
 from app.config import settings
 from app.database import Database, PmsDatabase
@@ -19,7 +19,7 @@ from app.repositories.hotel_repo import HotelRepository
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_COMMISSION = Decimal('5.00')
+_DEFAULT_COMMISSION = Decimal("5.00")
 
 
 async def _fetch_creator_social_media(creator_id: str) -> str:
@@ -27,9 +27,7 @@ async def _fetch_creator_social_media(creator_id: str) -> str:
         "SELECT name, handle FROM creator_platforms WHERE creator_id = $1",
         creator_id,
     )
-    return ', '.join(
-        f"{r['name']}: @{r['handle']}" for r in rows if r.get('handle')
-    )
+    return ", ".join(f"{r['name']}: @{r['handle']}" for r in rows if r.get("handle"))
 
 
 class AffiliateProvisioningService:
@@ -39,10 +37,10 @@ class AffiliateProvisioningService:
         *,
         creator_id: str,
         hotel_id: str,
-        creator_email: Optional[str],
-        creator_name: Optional[str],
-        commission: Optional[Decimal],
-    ) -> Optional[str]:
+        creator_email: str | None,
+        creator_name: str | None,
+        commission: Decimal | None,
+    ) -> str | None:
         """Create a PMS affiliate row for the creator on the hotel and persist
         the affiliate link onto the collaboration. Returns the link or None.
 
@@ -53,15 +51,13 @@ class AffiliateProvisioningService:
             return None
 
         try:
-            hotel_profile = await HotelRepository.get_profile_by_id(
-                hotel_id, columns="user_id"
-            )
+            hotel_profile = await HotelRepository.get_profile_by_id(hotel_id, columns="user_id")
             if not hotel_profile:
                 return None
 
             pms_hotel = await PmsDatabase.fetchrow(
                 "SELECT id, slug FROM hotels WHERE user_id = $1",
-                hotel_profile['user_id'],
+                hotel_profile["user_id"],
             )
             if not pms_hotel:
                 return None
@@ -77,9 +73,10 @@ class AffiliateProvisioningService:
                 ) VALUES ($1, $2, $3, $4, $5, 'creator', $6, 'approved')
                 RETURNING id, referral_code
                 """,
-                pms_hotel['id'], referral_code,
-                creator_name or 'Unknown',
-                creator_email or '',
+                pms_hotel["id"],
+                referral_code,
+                creator_name or "Unknown",
+                creator_email or "",
                 social_media,
                 commission or _DEFAULT_COMMISSION,
             )
@@ -87,7 +84,7 @@ class AffiliateProvisioningService:
                 return None
 
             affiliate_link = settings.AFFILIATE_LINK_TEMPLATE.format(
-                slug=pms_hotel['slug'],
+                slug=pms_hotel["slug"],
                 referral_code=referral_code,
             )
             await Database.execute(
@@ -96,11 +93,11 @@ class AffiliateProvisioningService:
                 SET affiliate_referral_code = $1, affiliate_link = $2
                 WHERE id = $3
                 """,
-                referral_code, affiliate_link, collaboration_id,
+                referral_code,
+                affiliate_link,
+                collaboration_id,
             )
             return affiliate_link
         except Exception as e:
-            logger.error(
-                f"Failed to create affiliate for collaboration {collaboration_id}: {e}"
-            )
+            logger.error(f"Failed to create affiliate for collaboration {collaboration_id}: {e}")
             return None

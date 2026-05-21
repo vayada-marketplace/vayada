@@ -35,15 +35,13 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Dict, List, Tuple
 
 import asyncpg
-
 
 # All child tables with a FK(hotel_id) referencing hotels.id.
 # Generated from information_schema.table_constraints — if new FKs
 # are added to the PMS schema, this list MUST be updated before running.
-CHILD_TABLES: List[str] = [
+CHILD_TABLES: list[str] = [
     "affiliate_clicks",
     "affiliates",
     "bookings",
@@ -62,7 +60,7 @@ CHILD_TABLES: List[str] = [
 async def fetch_mapping(
     pms_conn: asyncpg.Connection,
     booking_conn: asyncpg.Connection,
-) -> Tuple[List[Tuple[str, str]], List[dict], List[dict]]:
+) -> tuple[list[tuple[str, str]], list[dict], list[dict]]:
     """
     Build the id mapping from PMS → booking_hotels.
 
@@ -78,7 +76,7 @@ async def fetch_mapping(
         "SELECT id, user_id, slug, name FROM booking_hotels ORDER BY created_at"
     )
 
-    booking_by_key: Dict[Tuple[str, str], dict] = {}
+    booking_by_key: dict[tuple[str, str], dict] = {}
     for r in booking_rows:
         key = (str(r["user_id"]), r["slug"])
         if key in booking_by_key:
@@ -88,18 +86,17 @@ async def fetch_mapping(
             )
         booking_by_key[key] = dict(r)
 
-    pms_by_key: Dict[Tuple[str, str], dict] = {}
+    pms_by_key: dict[tuple[str, str], dict] = {}
     for r in pms_rows:
         key = (str(r["user_id"]), r["slug"])
         if key in pms_by_key:
             raise RuntimeError(
-                f"PMS hotels has duplicate (user_id, slug): {key} — "
-                "manual reconciliation required"
+                f"PMS hotels has duplicate (user_id, slug): {key} — manual reconciliation required"
             )
         pms_by_key[key] = dict(r)
 
-    mapping: List[Tuple[str, str]] = []
-    pms_orphans: List[dict] = []
+    mapping: list[tuple[str, str]] = []
+    pms_orphans: list[dict] = []
     for key, pms_row in pms_by_key.items():
         bh = booking_by_key.get(key)
         if bh is None:
@@ -113,7 +110,7 @@ async def fetch_mapping(
 
 async def reconcile_orphans(
     booking_conn: asyncpg.Connection,
-    orphans: List[dict],
+    orphans: list[dict],
 ) -> None:
     """
     Create a matching booking_hotels row for each PMS orphan.
@@ -148,7 +145,7 @@ async def reconcile_orphans(
 
 async def run_migration(
     pms_conn: asyncpg.Connection,
-    mapping: List[Tuple[str, str]],
+    mapping: list[tuple[str, str]],
 ) -> None:
     """Execute the full migration inside a single transaction."""
     async with pms_conn.transaction():
@@ -182,9 +179,7 @@ async def run_migration(
         # this statement will be a no-op and the UPDATE below will fail
         # the FK check — which is what we want, a loud failure.
         for table in CHILD_TABLES:
-            await pms_conn.execute(
-                f"ALTER TABLE {table} DROP CONSTRAINT {table}_hotel_id_fkey"
-            )
+            await pms_conn.execute(f"ALTER TABLE {table} DROP CONSTRAINT {table}_hotel_id_fkey")
 
         # Update child tables first, parent last. Order matters for
         # clarity even though we're inside a transaction with FKs
@@ -266,9 +261,7 @@ async def main() -> None:
 
     try:
         print("Fetching hotels from both databases...")
-        mapping, pms_orphans, booking_orphans = await fetch_mapping(
-            pms_conn, booking_conn
-        )
+        mapping, pms_orphans, booking_orphans = await fetch_mapping(pms_conn, booking_conn)
 
         print(f"  Initial mappable hotels: {len(mapping)}")
         print(f"  PMS orphans (no booking_hotels match): {len(pms_orphans)}")
@@ -281,32 +274,22 @@ async def main() -> None:
                 "matching booking_hotels rows (same id, user_id, slug, name)..."
             )
             for o in pms_orphans[:10]:
-                print(
-                    f"  will stub id={o['id']} slug={o['slug']} "
-                    f"name={o['name']!r}"
-                )
+                print(f"  will stub id={o['id']} slug={o['slug']} name={o['name']!r}")
             if len(pms_orphans) > 10:
                 print(f"  ... and {len(pms_orphans) - 10} more")
 
             if args.execute:
                 await reconcile_orphans(booking_conn, pms_orphans)
                 # Re-fetch the mapping now that the orphans have partners
-                mapping, still_orphaned, _ = await fetch_mapping(
-                    pms_conn, booking_conn
-                )
+                mapping, still_orphaned, _ = await fetch_mapping(pms_conn, booking_conn)
                 if still_orphaned:
                     raise RuntimeError(
                         f"After reconciliation, {len(still_orphaned)} PMS orphans "
                         "still lack a booking_hotels row. Check INSERT logs."
                     )
-                print(
-                    f"  Reconciled. New mapping size: {len(mapping)}"
-                )
+                print(f"  Reconciled. New mapping size: {len(mapping)}")
             else:
-                print(
-                    "  (dry-run: would reconcile these, "
-                    "pass --execute to actually INSERT)"
-                )
+                print("  (dry-run: would reconcile these, pass --execute to actually INSERT)")
 
         if booking_orphans:
             print()
@@ -321,7 +304,9 @@ async def main() -> None:
         already_unified = sum(1 for old, new in mapping if old == new)
         to_change = len(mapping) - already_unified
         print()
-        print(f"Mapping summary: {to_change} ids to change, {already_unified} already unified (noop)")
+        print(
+            f"Mapping summary: {to_change} ids to change, {already_unified} already unified (noop)"
+        )
 
         print()
         print("Sample mapping (first 5):")

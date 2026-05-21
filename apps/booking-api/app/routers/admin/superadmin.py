@@ -1,15 +1,14 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
 
-from app.dependencies import require_superadmin
 from app.auth import hash_password
-from app.repositories.user_repo import UserRepository
-from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.database import Database
+from app.dependencies import require_superadmin
 from app.models.utils import slugify
+from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.repositories.user_repo import UserRepository
 from app.services.billing_service import (
     compute_fixed_plan_projected_fee,
     count_active_rooms,
@@ -22,7 +21,7 @@ router = APIRouter()
 
 class SuperadminCreateHotelRequest(BaseModel):
     user_id: str
-    name: Optional[str] = ""
+    name: str | None = ""
 
 
 class SuperadminSetPasswordRequest(BaseModel):
@@ -61,7 +60,7 @@ _PERCENT_FIELDS = {
 }
 
 
-async def _serialize_hotel_billing(hotel: dict, owner: Optional[dict]) -> dict:
+async def _serialize_hotel_billing(hotel: dict, owner: dict | None) -> dict:
     hotel_id = str(hotel["id"])
     room_count = await count_active_rooms(hotel_id)
     fixed_base = float(hotel.get("fixed_base_fee") or 30)
@@ -207,19 +206,19 @@ async def superadmin_commission_history(
     )
     history = []
     for row in rows:
-        admin = await UserRepository.get_by_id(
-            str(row["admin_user_id"]), columns="id, name, email"
+        admin = await UserRepository.get_by_id(str(row["admin_user_id"]), columns="id, name, email")
+        history.append(
+            {
+                "id": str(row["id"]),
+                "admin_user_id": str(row["admin_user_id"]),
+                "admin_name": admin["name"] if admin else "",
+                "admin_email": admin["email"] if admin else "",
+                "old_value": float(row["old_value"]),
+                "new_value": float(row["new_value"]),
+                "note": row["note"],
+                "changed_at": row["changed_at"].isoformat(),
+            }
         )
-        history.append({
-            "id": str(row["id"]),
-            "admin_user_id": str(row["admin_user_id"]),
-            "admin_name": admin["name"] if admin else "",
-            "admin_email": admin["email"] if admin else "",
-            "old_value": float(row["old_value"]),
-            "new_value": float(row["new_value"]),
-            "note": row["note"],
-            "changed_at": row["changed_at"].isoformat(),
-        })
     return history
 
 

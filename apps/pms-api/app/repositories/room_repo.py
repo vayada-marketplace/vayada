@@ -1,7 +1,7 @@
 import logging
 import re
 from collections import Counter
-from typing import Optional, List, Iterable, Tuple
+from collections.abc import Iterable
 
 import asyncpg
 
@@ -11,9 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class RoomRepository:
-
     @staticmethod
-    async def list_by_hotel_id(hotel_id: str) -> List[dict]:
+    async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         # Primary key is r.sort_order so the user-visible order on the
         # PMS Calendar (driven by the "Reorder rooms" mode) wins. Default
         # sort_order=0 means rooms that have never been reordered fall
@@ -41,9 +40,7 @@ class RoomRepository:
         return int(row["max_so"]) if row else 0
 
     @staticmethod
-    async def bulk_set_sort_order(
-        hotel_id: str, ordered_ids: Iterable[Tuple[str, int]]
-    ) -> None:
+    async def bulk_set_sort_order(hotel_id: str, ordered_ids: Iterable[tuple[str, int]]) -> None:
         """Atomically rewrite sort_order for a hotel's rooms.
 
         ordered_ids is an iterable of (room_id, sort_order) pairs. The
@@ -97,9 +94,7 @@ class RoomRepository:
         # POSIX-regex special chars that need escaping inside the anchored
         # pattern. Backslash first so we don't double-escape later additions.
         special = r"\.^$*+?()[]{}|"
-        escaped_old = "".join(
-            ("\\" + c) if c in special else c for c in old_name
-        )
+        escaped_old = "".join(("\\" + c) if c in special else c for c in old_name)
         pattern = f"^{escaped_old}( [0-9]+)?$"
         try:
             result = await Database.execute(
@@ -121,7 +116,9 @@ class RoomRepository:
             logger.warning(
                 "Skipped renaming auto-named rooms for room_type %s "
                 "(%r -> %r): would collide with existing room numbers",
-                room_type_id, old_name, new_name,
+                room_type_id,
+                old_name,
+                new_name,
             )
             return 0
         # asyncpg returns "UPDATE <n>" for executes that affect rows.
@@ -192,7 +189,7 @@ class RoomRepository:
         # as a deliberate type name) are preserved, and only a trailing
         # " <integer>" is treated as the auto-numbered suffix.
         prefix_re = re.compile(r"^(.*?)( [0-9]+)?$")
-        candidates: List[Tuple[str, str, str, str]] = []
+        candidates: list[tuple[str, str, str, str]] = []
         for r in rooms:
             number = r["room_number"]
             m = prefix_re.match(number)
@@ -212,7 +209,7 @@ class RoomRepository:
         prefix_counts = Counter(c[2] for c in candidates)
         only_room_in_type = len(rooms) == 1
 
-        renames: List[Tuple[str, str, str]] = []
+        renames: list[tuple[str, str, str]] = []
         for room_id, old_number, prefix, suffix in candidates:
             shared = prefix_counts[prefix] >= 2
             if not (shared or only_room_in_type):
@@ -240,12 +237,15 @@ class RoomRepository:
                 logger.warning(
                     "Skipped healing room %s (%r -> %r): would collide with "
                     "an existing room_number in hotel %s",
-                    room_id, old_number, new_number, hotel_id,
+                    room_id,
+                    old_number,
+                    new_number,
+                    hotel_id,
                 )
         return renamed
 
     @staticmethod
-    async def list_for_room_type(room_type_id: str) -> List[dict]:
+    async def list_for_room_type(room_type_id: str) -> list[dict]:
         """List active rooms of a type with the sort key the calendar uses.
 
         Returned rows carry id and sort_order so the auto-rearrange solver
@@ -268,7 +268,7 @@ class RoomRepository:
         return [dict(r) for r in rows]
 
     @staticmethod
-    async def get_by_id(room_id: str) -> Optional[dict]:
+    async def get_by_id(room_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             SELECT r.*, rt.name AS room_type_name
@@ -305,7 +305,7 @@ class RoomRepository:
         return await RoomRepository.get_by_id(str(row["id"]))
 
     @staticmethod
-    async def update(room_id: str, updates: dict) -> Optional[dict]:
+    async def update(room_id: str, updates: dict) -> dict | None:
         if not updates:
             return await RoomRepository.get_by_id(room_id)
 
@@ -318,10 +318,7 @@ class RoomRepository:
             idx += 1
 
         set_clauses.append("updated_at = now()")
-        query = (
-            f"UPDATE rooms SET {', '.join(set_clauses)} "
-            f"WHERE id = ${idx} RETURNING *"
-        )
+        query = f"UPDATE rooms SET {', '.join(set_clauses)} WHERE id = ${idx} RETURNING *"
         values.append(room_id)
         row = await Database.fetchrow(query, *values)
         if not row:
@@ -330,7 +327,5 @@ class RoomRepository:
 
     @staticmethod
     async def delete(room_id: str) -> bool:
-        result = await Database.execute(
-            "DELETE FROM rooms WHERE id = $1", room_id
-        )
+        result = await Database.execute("DELETE FROM rooms WHERE id = $1", room_id)
         return result == "DELETE 1"

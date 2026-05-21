@@ -7,7 +7,6 @@ hold copies of the same multi-table transaction. The admin copy silently
 dropped `creator_types` from listing_creator_requirements; centralizing
 the writes here removes that drift.
 """
-from typing import List, Optional
 
 from app.database import Database
 from app.models.common import (
@@ -23,12 +22,11 @@ from app.repositories.hotel_repo import HotelRepository
 
 
 class ListingService:
-
     @staticmethod
     async def get_with_details(
         listing_id: str,
         hotel_profile_id: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Fetch listing + offerings + requirements, or None if listing missing."""
         listing = await HotelRepository.get_listing(listing_id, hotel_profile_id)
         if not listing:
@@ -46,7 +44,7 @@ class ListingService:
         hotel_profile_id: str,
         request: CreateListingRequest,
         *,
-        initial_status: Optional[str] = None,
+        initial_status: str | None = None,
     ) -> dict:
         """Create listing, offerings, and requirements atomically."""
         pool = await Database.get_pool()
@@ -61,20 +59,30 @@ class ListingService:
                         RETURNING id, hotel_profile_id, name, location, description, accommodation_type, images,
                                   status, created_at, updated_at
                         """,
-                        hotel_profile_id, request.name, request.location, request.description,
-                        request.accommodationType, request.images, initial_status,
+                        hotel_profile_id,
+                        request.name,
+                        request.location,
+                        request.description,
+                        request.accommodationType,
+                        request.images,
+                        initial_status,
                     )
                     listing = dict(listing_row)
                 else:
                     listing = await HotelRepository.create_listing(
-                        hotel_profile_id, request.name, request.location, request.description,
-                        request.accommodationType, request.images, conn=conn,
+                        hotel_profile_id,
+                        request.name,
+                        request.location,
+                        request.description,
+                        request.accommodationType,
+                        request.images,
+                        conn=conn,
                     )
-                    listing.setdefault('hotel_profile_id', hotel_profile_id)
+                    listing.setdefault("hotel_profile_id", hotel_profile_id)
 
-                listing_id = listing['id']
+                listing_id = listing["id"]
 
-                offerings: List[dict] = []
+                offerings: list[dict] = []
                 for offering in request.collaborationOfferings:
                     o = await HotelRepository.create_offering(
                         listing_id,
@@ -90,7 +98,7 @@ class ListingService:
                         offering.minFollowers,
                         conn=conn,
                     )
-                    o.setdefault('listing_id', listing_id)
+                    o.setdefault("listing_id", listing_id)
                     offerings.append(o)
 
                 requirements = await HotelRepository.create_requirements(
@@ -103,7 +111,7 @@ class ListingService:
                     request.creatorRequirements.creatorTypes or [],
                     conn=conn,
                 )
-                requirements.setdefault('listing_id', listing_id)
+                requirements.setdefault("listing_id", listing_id)
 
         return {
             "listing": listing,
@@ -120,7 +128,7 @@ class ListingService:
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                update_fields: List[str] = []
+                update_fields: list[str] = []
                 update_values: list = []
                 pc = 1
 
@@ -195,61 +203,67 @@ class ListingService:
 def build_listing_response(
     data: dict,
     *,
-    hotel_profile_id: Optional[str] = None,
+    hotel_profile_id: str | None = None,
 ) -> ListingResponse:
     """Assemble a ListingResponse from {listing, offerings, requirements}."""
     listing = data["listing"]
-    listing_id = listing['id']
+    listing_id = listing["id"]
 
     offerings_response = [
-        CollaborationOfferingResponse.model_validate({
-            "id": str(o['id']),
-            "listing_id": str(o.get('listing_id', listing_id)),
-            "collaboration_type": o['collaboration_type'],
-            "availability_months": o['availability_months'],
-            "platforms": o['platforms'],
-            "free_stay_min_nights": o['free_stay_min_nights'],
-            "free_stay_max_nights": o['free_stay_max_nights'],
-            "paid_max_amount": o['paid_max_amount'],
-            "currency": o.get('currency'),
-            "discount_percentage": o['discount_percentage'],
-            "commission_percentage": o.get('commission_percentage'),
-            "min_followers": o.get('min_followers'),
-            "created_at": o['created_at'],
-            "updated_at": o['updated_at'],
-        })
+        CollaborationOfferingResponse.model_validate(
+            {
+                "id": str(o["id"]),
+                "listing_id": str(o.get("listing_id", listing_id)),
+                "collaboration_type": o["collaboration_type"],
+                "availability_months": o["availability_months"],
+                "platforms": o["platforms"],
+                "free_stay_min_nights": o["free_stay_min_nights"],
+                "free_stay_max_nights": o["free_stay_max_nights"],
+                "paid_max_amount": o["paid_max_amount"],
+                "currency": o.get("currency"),
+                "discount_percentage": o["discount_percentage"],
+                "commission_percentage": o.get("commission_percentage"),
+                "min_followers": o.get("min_followers"),
+                "created_at": o["created_at"],
+                "updated_at": o["updated_at"],
+            }
+        )
         for o in data["offerings"]
     ]
 
     requirements = data.get("requirements")
     requirements_response = None
     if requirements:
-        requirements_response = CreatorRequirementsResponse.model_validate({
-            "id": str(requirements['id']),
-            "listing_id": str(requirements.get('listing_id', listing_id)),
-            "platforms": requirements['platforms'],
-            "target_countries": requirements['target_countries'],
-            "target_age_min": requirements['target_age_min'],
-            "target_age_max": requirements['target_age_max'],
-            "target_age_groups": requirements['target_age_groups'],
-            "creator_types": requirements.get('creator_types'),
-            "created_at": requirements['created_at'],
-            "updated_at": requirements['updated_at'],
-        })
+        requirements_response = CreatorRequirementsResponse.model_validate(
+            {
+                "id": str(requirements["id"]),
+                "listing_id": str(requirements.get("listing_id", listing_id)),
+                "platforms": requirements["platforms"],
+                "target_countries": requirements["target_countries"],
+                "target_age_min": requirements["target_age_min"],
+                "target_age_max": requirements["target_age_max"],
+                "target_age_groups": requirements["target_age_groups"],
+                "creator_types": requirements.get("creator_types"),
+                "created_at": requirements["created_at"],
+                "updated_at": requirements["updated_at"],
+            }
+        )
 
-    effective_profile_id = hotel_profile_id or listing.get('hotel_profile_id')
+    effective_profile_id = hotel_profile_id or listing.get("hotel_profile_id")
 
-    return ListingResponse.model_validate({
-        "id": str(listing_id),
-        "hotel_profile_id": str(effective_profile_id),
-        "name": listing['name'],
-        "location": listing['location'],
-        "description": listing.get('description'),
-        "accommodation_type": listing['accommodation_type'],
-        "images": listing.get('images') or [],
-        "status": listing['status'],
-        "created_at": listing['created_at'],
-        "updated_at": listing['updated_at'],
-        "collaboration_offerings": offerings_response,
-        "creator_requirements": requirements_response,
-    })
+    return ListingResponse.model_validate(
+        {
+            "id": str(listing_id),
+            "hotel_profile_id": str(effective_profile_id),
+            "name": listing["name"],
+            "location": listing["location"],
+            "description": listing.get("description"),
+            "accommodation_type": listing["accommodation_type"],
+            "images": listing.get("images") or [],
+            "status": listing["status"],
+            "created_at": listing["created_at"],
+            "updated_at": listing["updated_at"],
+            "collaboration_offerings": offerings_response,
+            "creator_requirements": requirements_response,
+        }
+    )

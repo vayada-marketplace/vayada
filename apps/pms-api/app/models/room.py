@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
 
 
 def to_camel(string: str) -> str:
@@ -20,11 +19,11 @@ class RoomCreate(BaseModel):
 class RoomUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    room_type_id: Optional[str] = None
-    room_number: Optional[str] = None
-    floor: Optional[str] = None
-    status: Optional[str] = None
-    sort_order: Optional[int] = None
+    room_type_id: str | None = None
+    room_number: str | None = None
+    floor: str | None = None
+    status: str | None = None
+    sort_order: int | None = None
 
 
 class RoomResponse(BaseModel):
@@ -45,4 +44,4 @@ class RoomResponse(BaseModel):
 class RoomReorder(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    ordered_room_ids: List[str]
+    ordered_room_ids: list[str]

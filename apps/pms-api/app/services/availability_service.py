@@ -7,9 +7,9 @@ unavailable-dates, channex availability push) keep their own loops because
 each one needs distinct loop-body logic (operating periods, exclude-block,
 local-only blocks).
 """
+
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
 
 from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.room_type_repo import RoomTypeRepository
@@ -47,7 +47,7 @@ def compute_stay_pricing(
     room_type: dict,
     check_in: date,
     check_out: date,
-    adults: Optional[int] = None,
+    adults: int | None = None,
     rate_type: str = "flexible",
 ) -> StayPricing:
     """Resolve nightly rates for a stay (seasons, weekend, occupancy,
@@ -63,9 +63,7 @@ def compute_stay_pricing(
     nightly_rates: list[float] = []
     for i in range(nights):
         night_date = check_in + timedelta(days=i)
-        resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(
-            room_type, night_date, adults
-        )
+        resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room_type, night_date, adults)
         if rate_type == "nonrefundable":
             night_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
         else:

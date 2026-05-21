@@ -1,6 +1,7 @@
 """
 Tests for /admin/superadmin endpoints — check, list hotels, create hotel, set password.
 """
+
 from tests.conftest import (
     create_test_booking_hotel,
     create_test_user,
@@ -13,6 +14,7 @@ class TestSuperadminCheck:
         user = await create_test_user()
         # Promote to superadmin
         from app.database import AuthDatabase
+
         await AuthDatabase.execute(
             "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
         )
@@ -39,9 +41,8 @@ class TestSuperadminCheck:
 async def _make_superadmin(user):
     """Promote a test user to superadmin."""
     from app.database import AuthDatabase
-    await AuthDatabase.execute(
-        "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
-    )
+
+    await AuthDatabase.execute("UPDATE users SET is_superadmin = true WHERE id = $1", user["id"])
 
 
 class TestSuperadminListHotels:
@@ -271,7 +272,9 @@ class TestSuperadminCommissionOverride:
         assert history_resp.status_code == 200
         assert len(history_resp.json()) == 1
 
-    async def test_commission_history_requires_superadmin(self, client, hotel_user, cleanup_database):
+    async def test_commission_history_requires_superadmin(
+        self, client, hotel_user, cleanup_database
+    ):
         owner = await create_test_user()
         hotel = await create_test_booking_hotel(str(owner["id"]))
         resp = await client.get(

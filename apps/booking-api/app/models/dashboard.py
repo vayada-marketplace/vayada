@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import Optional
 
 
 class StatsResponse(BaseModel):
@@ -11,8 +10,8 @@ class StatsResponse(BaseModel):
     avg_nightly_rate_previous: float
     page_views: int
     page_views_previous: int
-    next_arrival: Optional[str] = None
-    live_since: Optional[str] = None
+    next_arrival: str | None = None
+    live_since: str | None = None
 
 
 class SourceBreakdown(BaseModel):

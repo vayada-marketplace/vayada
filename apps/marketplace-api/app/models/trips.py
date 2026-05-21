@@ -1,83 +1,88 @@
 """
 Trip and External Collaboration Pydantic models
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List, Literal
-from datetime import date, datetime
 
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 # ============================================
 # TRIP MODELS
 # ============================================
 
+
 class CreateTripRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    location: Optional[str] = Field(None, max_length=300)
+    location: str | None = Field(None, max_length=300)
     start_date: date
     end_date: date
-    notes: Optional[str] = Field(None, max_length=2000)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class UpdateTripRequest(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    location: Optional[str] = Field(None, max_length=300)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    notes: Optional[str] = Field(None, max_length=2000)
+    name: str | None = Field(None, min_length=1, max_length=200)
+    location: str | None = Field(None, max_length=300)
+    start_date: date | None = None
+    end_date: date | None = None
+    notes: str | None = Field(None, max_length=2000)
 
 
 class TripResponse(BaseModel):
     id: str
     creator_id: str
     name: str
-    location: Optional[str] = None
+    location: str | None = None
     start_date: date
     end_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
     created_at: datetime
     updated_at: datetime
-    external_collaborations: List['ExternalCollaborationResponse'] = []
+    external_collaborations: list["ExternalCollaborationResponse"] = []
 
 
 # ============================================
 # EXTERNAL COLLABORATION MODELS
 # ============================================
 
+
 class CreateExternalCollaborationRequest(BaseModel):
-    trip_id: Optional[str] = None
+    trip_id: str | None = None
     title: str = Field(..., min_length=1, max_length=200)
-    hotel_name: Optional[str] = Field(None, max_length=200)
-    location: Optional[str] = Field(None, max_length=300)
-    collaboration_type: Optional[Literal['Custom / External', 'Paid', 'Free Stay']] = Field(default='Custom / External')
+    hotel_name: str | None = Field(None, max_length=200)
+    location: str | None = Field(None, max_length=300)
+    collaboration_type: Literal["Custom / External", "Paid", "Free Stay"] | None = Field(
+        default="Custom / External"
+    )
     start_date: date
     end_date: date
-    deliverables: Optional[str] = Field(None, max_length=1000)
-    notes: Optional[str] = Field(None, max_length=2000)
+    deliverables: str | None = Field(None, max_length=1000)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class UpdateExternalCollaborationRequest(BaseModel):
-    trip_id: Optional[str] = None
-    title: Optional[str] = Field(None, min_length=1, max_length=200)
-    hotel_name: Optional[str] = Field(None, max_length=200)
-    location: Optional[str] = Field(None, max_length=300)
-    collaboration_type: Optional[Literal['Custom / External', 'Paid', 'Free Stay']] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    deliverables: Optional[str] = Field(None, max_length=1000)
-    notes: Optional[str] = Field(None, max_length=2000)
+    trip_id: str | None = None
+    title: str | None = Field(None, min_length=1, max_length=200)
+    hotel_name: str | None = Field(None, max_length=200)
+    location: str | None = Field(None, max_length=300)
+    collaboration_type: Literal["Custom / External", "Paid", "Free Stay"] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    deliverables: str | None = Field(None, max_length=1000)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class ExternalCollaborationResponse(BaseModel):
     id: str
     creator_id: str
-    trip_id: Optional[str] = None
+    trip_id: str | None = None
     title: str
-    hotel_name: Optional[str] = None
-    location: Optional[str] = None
-    collaboration_type: Optional[str] = None
+    hotel_name: str | None = None
+    location: str | None = None
+    collaboration_type: str | None = None
     start_date: date
     end_date: date
-    deliverables: Optional[str] = None
-    notes: Optional[str] = None
+    deliverables: str | None = None
+    notes: str | None = None
     created_at: datetime
     updated_at: datetime

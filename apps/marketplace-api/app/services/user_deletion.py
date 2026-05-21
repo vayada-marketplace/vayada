@@ -16,22 +16,23 @@ Postgres clusters with no 2PC). Order matters:
 If you need stronger guarantees, switch to a soft-delete + reaper job
 or wrap the two databases in 2PC.
 """
+
 import logging
 
 from app.database import Database
-from app.s3_service import delete_all_objects_in_prefix
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
 from app.repositories.user_repo import UserRepository
+from app.s3_service import delete_all_objects_in_prefix
 
 logger = logging.getLogger(__name__)
 
 
 async def _delete_user_images(user_id: str, user_type: str) -> dict:
     """Delete the S3 folder owned by this user. Best-effort."""
-    if user_type == 'creator':
+    if user_type == "creator":
         prefix = f"creators/{user_id}/"
-    elif user_type == 'hotel':
+    elif user_type == "hotel":
         prefix = f"listings/{user_id}/"
     else:
         logger.warning(f"Unknown user type {user_type}, skipping image deletion")
@@ -47,7 +48,6 @@ async def _delete_user_images(user_id: str, user_type: str) -> dict:
 
 
 class UserDeletionService:
-
     @staticmethod
     async def delete(user_id: str, user_type: str) -> dict:
         """Delete S3 → marketplace → auth, in that order. Returns image stats."""
@@ -57,33 +57,29 @@ class UserDeletionService:
         pool = await Database.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                if user_type == 'creator':
+                if user_type == "creator":
                     creator = await CreatorRepository.get_by_user_id(
                         user_id, columns="id", conn=conn
                     )
                     if creator:
-                        await CreatorRepository.delete_platforms(creator['id'], conn=conn)
-                        await conn.execute(
-                            "DELETE FROM creators WHERE id = $1", creator['id']
-                        )
-                elif user_type == 'hotel':
+                        await CreatorRepository.delete_platforms(creator["id"], conn=conn)
+                        await conn.execute("DELETE FROM creators WHERE id = $1", creator["id"])
+                elif user_type == "hotel":
                     hotel = await HotelRepository.get_profile_by_user_id(
                         user_id, columns="id", conn=conn
                     )
                     if hotel:
                         listings = await HotelRepository.get_listings_by_profile_id(
-                            hotel['id'], columns="id", conn=conn
+                            hotel["id"], columns="id", conn=conn
                         )
                         for listing in listings:
-                            await HotelRepository.delete_offerings(listing['id'], conn=conn)
-                            await HotelRepository.delete_requirements(listing['id'], conn=conn)
+                            await HotelRepository.delete_offerings(listing["id"], conn=conn)
+                            await HotelRepository.delete_requirements(listing["id"], conn=conn)
                         await conn.execute(
                             "DELETE FROM hotel_listings WHERE hotel_profile_id = $1",
-                            hotel['id'],
+                            hotel["id"],
                         )
-                        await conn.execute(
-                            "DELETE FROM hotel_profiles WHERE id = $1", hotel['id']
-                        )
+                        await conn.execute("DELETE FROM hotel_profiles WHERE id = $1", hotel["id"])
 
         # Auth side. If this fails, the marketplace rows are already gone
         # and the orphan auth row remains until a retry/manual cleanup.

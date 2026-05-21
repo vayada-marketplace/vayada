@@ -1,6 +1,6 @@
 import secrets
 import string
-from typing import Optional, List
+
 from app.database import Database
 from app.repositories.affiliate_payout_settings_repo import AffiliatePayoutSettingsRepository
 from app.utils import generate_unique_code
@@ -33,18 +33,21 @@ _PAYOUT_COLUMNS = """
 
 
 class AffiliateRepository:
-
     @staticmethod
     async def create(hotel_id: str, data: dict) -> dict:
         # Generate unique referral code
         async def code_exists(code: str) -> bool:
-            return bool(await Database.fetchval(
-                "SELECT 1 FROM affiliates WHERE hotel_id = $1 AND referral_code = $2",
-                hotel_id,
-                code,
-            ))
+            return bool(
+                await Database.fetchval(
+                    "SELECT 1 FROM affiliates WHERE hotel_id = $1 AND referral_code = $2",
+                    hotel_id,
+                    code,
+                )
+            )
 
-        code = await generate_unique_code(_make_referral_code, code_exists, entity_name="referral code")
+        code = await generate_unique_code(
+            _make_referral_code, code_exists, entity_name="referral code"
+        )
 
         row = await Database.fetchrow(
             f"""
@@ -75,7 +78,7 @@ class AffiliateRepository:
         return dict(row)
 
     @staticmethod
-    async def get_by_code(hotel_id: str, referral_code: str) -> Optional[dict]:
+    async def get_by_code(hotel_id: str, referral_code: str) -> dict | None:
         row = await Database.fetchrow(
             f"""
             SELECT a.*,
@@ -94,7 +97,7 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_id(affiliate_id: str) -> Optional[dict]:
+    async def get_by_id(affiliate_id: str) -> dict | None:
         row = await Database.fetchrow(
             f"""
             SELECT a.*,
@@ -112,7 +115,7 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def list_by_user_id(user_id: str) -> List[dict]:
+    async def list_by_user_id(user_id: str) -> list[dict]:
         """List all affiliate records linked to a given auth user."""
         rows = await Database.fetch(
             f"""
@@ -154,10 +157,10 @@ class AffiliateRepository:
     async def list_by_hotel_id(
         hotel_id: str,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict]:
+    ) -> list[dict]:
         conditions = ["a.hotel_id = $1"]
         args: list = [hotel_id]
         idx = 2
@@ -208,8 +211,8 @@ class AffiliateRepository:
     async def record_click(
         affiliate_id: str,
         hotel_id: str,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         await Database.execute(
             """
@@ -223,9 +226,7 @@ class AffiliateRepository:
         )
 
     @staticmethod
-    async def count_by_hotel_id(
-        hotel_id: str, *, status: Optional[str] = None
-    ) -> int:
+    async def count_by_hotel_id(hotel_id: str, *, status: str | None = None) -> int:
         if status:
             count = await Database.fetchval(
                 "SELECT COUNT(*) FROM affiliates WHERE hotel_id = $1 AND status = $2",
@@ -239,7 +240,7 @@ class AffiliateRepository:
         return count or 0
 
     @staticmethod
-    async def update_status(affiliate_id: str, new_status: str) -> Optional[dict]:
+    async def update_status(affiliate_id: str, new_status: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE affiliates SET status = $2, updated_at = now()
@@ -253,8 +254,8 @@ class AffiliateRepository:
 
     @staticmethod
     async def set_commission_override(
-        affiliate_id: str, commission_pct: Optional[float]
-    ) -> Optional[dict]:
+        affiliate_id: str, commission_pct: float | None
+    ) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE affiliates SET commission_pct_override = $2, updated_at = now()
@@ -267,7 +268,7 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_effective_commission_pct(affiliate_id: str) -> Optional[float]:
+    async def get_effective_commission_pct(affiliate_id: str) -> float | None:
         """Return the affiliate's effective commission (override, else hotel default)."""
         row = await Database.fetchrow(
             """
@@ -282,7 +283,7 @@ class AffiliateRepository:
         return float(row["effective_pct"]) if row else None
 
     @staticmethod
-    async def update_stripe_connect(affiliate_id: str, account_id: str) -> Optional[dict]:
+    async def update_stripe_connect(affiliate_id: str, account_id: str) -> dict | None:
         """Set the Stripe Connect account on the affiliate row, and flip the
         canonical payment_method to 'stripe' for the owning user."""
         row = await Database.fetchrow(
@@ -304,7 +305,7 @@ class AffiliateRepository:
         return dict(row)
 
     @staticmethod
-    async def mark_stripe_onboarded(stripe_connect_account_id: str) -> Optional[dict]:
+    async def mark_stripe_onboarded(stripe_connect_account_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
             UPDATE affiliates
@@ -317,7 +318,7 @@ class AffiliateRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_stripe_account_id(account_id: str) -> Optional[dict]:
+    async def get_by_stripe_account_id(account_id: str) -> dict | None:
         row = await Database.fetchrow(
             f"""
             SELECT a.*, {_PAYOUT_COLUMNS}
@@ -335,19 +336,15 @@ class AffiliateRepository:
         channel_code: str,
         account_number: str,
         account_holder_name: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Write Xendit bank details to the canonical payout settings for
         the owning user. The affiliate row is unchanged — these fields no
         longer live there."""
-        affiliate = await Database.fetchrow(
-            "SELECT * FROM affiliates WHERE id = $1", affiliate_id
-        )
+        affiliate = await Database.fetchrow("SELECT * FROM affiliates WHERE id = $1", affiliate_id)
         if not affiliate:
             return None
         if not affiliate["user_id"]:
-            raise ValueError(
-                "Affiliate has no linked user_id; cannot save payout settings"
-            )
+            raise ValueError("Affiliate has no linked user_id; cannot save payout settings")
         await AffiliatePayoutSettingsRepository.upsert(
             str(affiliate["user_id"]),
             {

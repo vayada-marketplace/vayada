@@ -1,18 +1,17 @@
 import asyncio
 import logging
-from typing import List
 from datetime import date, timedelta
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.dependencies import require_hotel_admin
-from app.services.channex_sync_service import push_availability_for_room_type
-from app.utils import get_hotel_id
 from app.database import Database
-from app.repositories.room_type_repo import RoomTypeRepository
+from app.dependencies import require_hotel_admin
+from app.models.room_block import RoomBlockCreate, RoomBlockResponse, RoomBlockUpdate
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
-from app.models.room_block import RoomBlockCreate, RoomBlockUpdate, RoomBlockResponse
+from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.channex_sync_service import push_availability_for_room_type
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +35,19 @@ async def _check_block_availability(
         booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
         # Sum blocks overlapping this day, optionally excluding one block (for updates)
         if exclude_block_id:
-            blocked = await Database.fetchval(
-                """
+            blocked = (
+                await Database.fetchval(
+                    """
                 SELECT COALESCE(SUM(blocked_count), 0) FROM room_blocks
                 WHERE room_type_id = $1 AND start_date < $3 AND end_date > $2 AND id <> $4
                 """,
-                room_type_id, current, next_day, exclude_block_id,
-            ) or 0
+                    room_type_id,
+                    current,
+                    next_day,
+                    exclude_block_id,
+                )
+                or 0
+            )
         else:
             blocked = await RoomTypeRepository.count_blocked(room_type_id, current, next_day)
         if booked + blocked + new_blocked_count > total_rooms:
@@ -53,7 +58,7 @@ async def _check_block_availability(
         current = next_day
 
 
-@router.post("/room-blocks", response_model=List[RoomBlockResponse], status_code=201)
+@router.post("/room-blocks", response_model=list[RoomBlockResponse], status_code=201)
 async def create_room_block(
     data: RoomBlockCreate,
     user_id: str = Depends(require_hotel_admin),
@@ -66,9 +71,7 @@ async def create_room_block(
         raise HTTPException(status_code=404, detail="Room type not found")
 
     if data.end_date <= data.start_date:
-        raise HTTPException(
-            status_code=400, detail="end_date must be after start_date"
-        )
+        raise HTTPException(status_code=400, detail="end_date must be after start_date")
 
     room_ids = list(dict.fromkeys(data.room_ids))  # dedupe, preserve order
     if len(room_ids) > room_type["total_rooms"]:
@@ -103,9 +106,7 @@ async def create_room_block(
 
     # Per-room conflict: a specific room can't already have an overlapping block
     for rid in room_ids:
-        conflict = await RoomBlockRepository.find_room_conflict(
-            rid, data.start_date, data.end_date
-        )
+        conflict = await RoomBlockRepository.find_room_conflict(rid, data.start_date, data.end_date)
         if conflict:
             raise HTTPException(
                 status_code=400,
@@ -133,8 +134,10 @@ async def create_room_block(
     # Push updated availability to Channex (once for the whole range)
     asyncio.create_task(
         push_availability_for_room_type(
-            hotel_id, data.room_type_id,
-            start_date=data.start_date, end_date=data.end_date,
+            hotel_id,
+            data.room_type_id,
+            start_date=data.start_date,
+            end_date=data.end_date,
         )
     )
 
@@ -144,7 +147,8 @@ async def create_room_block(
             room_type_id=str(block["room_type_id"]),
             room_id=str(block["room_id"]) if block.get("room_id") else None,
             room_number=rooms_by_id[str(block["room_id"])]["room_number"]
-            if block.get("room_id") else None,
+            if block.get("room_id")
+            else None,
             start_date=str(block["start_date"]),
             end_date=str(block["end_date"]),
             blocked_count=block["blocked_count"],
@@ -188,7 +192,10 @@ async def update_room_block(
     # another block on the same room
     if block.get("room_id"):
         conflict = await RoomBlockRepository.find_room_conflict(
-            str(block["room_id"]), new_start, new_end, exclude_block_id=block_id,
+            str(block["room_id"]),
+            new_start,
+            new_end,
+            exclude_block_id=block_id,
         )
         if conflict:
             raise HTTPException(
@@ -211,8 +218,10 @@ async def update_room_block(
     sync_end = max(block["end_date"], new_end)
     asyncio.create_task(
         push_availability_for_room_type(
-            hotel_id, str(block["room_type_id"]),
-            start_date=sync_start, end_date=sync_end,
+            hotel_id,
+            str(block["room_type_id"]),
+            start_date=sync_start,
+            end_date=sync_end,
         )
     )
 
@@ -243,7 +252,9 @@ async def delete_room_block(
     # Push updated availability to Channex
     asyncio.create_task(
         push_availability_for_room_type(
-            hotel_id, str(block["room_type_id"]),
-            start_date=block["start_date"], end_date=block["end_date"],
+            hotel_id,
+            str(block["room_type_id"]),
+            start_date=block["start_date"],
+            end_date=block["end_date"],
         )
     )

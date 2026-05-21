@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
 
 from app.models.utils import to_camel
 
@@ -8,16 +7,16 @@ class RoomTypeCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     name: str
-    description: str = ''
-    short_description: str = ''
+    description: str = ""
+    short_description: str = ""
     max_occupancy: int = 2
     size: int = 0
     base_rate: float = 0
-    currency: str = 'EUR'
-    amenities: List[str] = []
-    images: List[str] = []
-    bed_type: str = ''
-    features: List[str] = []
+    currency: str = "EUR"
+    amenities: list[str] = []
+    images: list[str] = []
+    bed_type: str = ""
+    features: list[str] = []
     total_rooms: int = 2
     is_active: bool = True
     sort_order: int = 0
@@ -26,20 +25,20 @@ class RoomTypeCreate(BaseModel):
 class RoomTypeUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    name: Optional[str] = None
-    description: Optional[str] = None
-    short_description: Optional[str] = None
-    max_occupancy: Optional[int] = None
-    size: Optional[int] = None
-    base_rate: Optional[float] = None
-    currency: Optional[str] = None
-    amenities: Optional[List[str]] = None
-    images: Optional[List[str]] = None
-    bed_type: Optional[str] = None
-    features: Optional[List[str]] = None
-    total_rooms: Optional[int] = None
-    is_active: Optional[bool] = None
-    sort_order: Optional[int] = None
+    name: str | None = None
+    description: str | None = None
+    short_description: str | None = None
+    max_occupancy: int | None = None
+    size: int | None = None
+    base_rate: float | None = None
+    currency: str | None = None
+    amenities: list[str] | None = None
+    images: list[str] | None = None
+    bed_type: str | None = None
+    features: list[str] | None = None
+    total_rooms: int | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -54,10 +53,10 @@ class RoomTypeAdminResponse(BaseModel):
     size: int
     base_rate: float
     currency: str
-    amenities: List[str]
-    images: List[str]
+    amenities: list[str]
+    images: list[str]
     bed_type: str
-    features: List[str]
+    features: list[str]
     total_rooms: int
     is_active: bool
     sort_order: int

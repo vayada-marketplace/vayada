@@ -22,6 +22,7 @@ Usage:
     PMS_DATABASE_URL=postgresql://... \\
         python scripts/backfill_benefits_from_pms.py
 """
+
 import asyncio
 import json
 import os
@@ -82,7 +83,9 @@ async def backfill():
                 )
             if not target:
                 skipped_no_match += 1
-                print(f"  ⊘ no booking_hotels match for pms.hotels.id={pms_row['id']} slug={pms_row['slug']}")
+                print(
+                    f"  ⊘ no booking_hotels match for pms.hotels.id={pms_row['id']} slug={pms_row['slug']}"
+                )
                 continue
 
             existing = _parse_jsonb(target["benefits"])

@@ -1,8 +1,9 @@
 """
 Tests for /admin/upload/images — image upload proxy.
 """
+
 import base64
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import (
     create_test_user,

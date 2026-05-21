@@ -1,21 +1,22 @@
 """
 Tests for collaboration management endpoints.
 """
+
 import logging
-from unittest.mock import patch, AsyncMock
+from datetime import date, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import AsyncClient
-from datetime import date, timedelta
-
 from app.database import Database
+from httpx import AsyncClient
+
 from tests.conftest import (
-    get_auth_headers,
+    create_test_collaboration,
     create_test_creator,
     create_test_hotel,
     create_test_listing,
-    create_test_collaboration,
     create_test_platform,
+    get_auth_headers,
 )
 
 
@@ -44,13 +45,13 @@ class TestCreateCollaboration:
                         "platform": "Instagram",
                         "deliverables": [
                             {"type": "Reel", "quantity": 2, "status": "pending"},
-                            {"type": "Story", "quantity": 5, "status": "pending"}
-                        ]
+                            {"type": "Story", "quantity": 5, "status": "pending"},
+                        ],
                     }
                 ],
-                "consent": True
+                "consent": True,
             },
-            headers=get_auth_headers(test_creator_verified["token"])
+            headers=get_auth_headers(test_creator_verified["token"]),
         )
 
         assert response.status_code == 201
@@ -81,13 +82,11 @@ class TestCreateCollaboration:
                 "platform_deliverables": [
                     {
                         "platform": "TikTok",
-                        "deliverables": [
-                            {"type": "Video", "quantity": 3, "status": "pending"}
-                        ]
+                        "deliverables": [{"type": "Video", "quantity": 3, "status": "pending"}],
                     }
-                ]
+                ],
             },
-            headers=get_auth_headers(test_hotel_verified["token"])
+            headers=get_auth_headers(test_hotel_verified["token"]),
         )
 
         assert response.status_code == 201
@@ -114,14 +113,12 @@ class TestCreateCollaboration:
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
-                        "deliverables": [
-                            {"type": "Post", "quantity": 5, "status": "pending"}
-                        ]
+                        "deliverables": [{"type": "Post", "quantity": 5, "status": "pending"}],
                     }
                 ],
-                "consent": True
+                "consent": True,
             },
-            headers=get_auth_headers(test_creator_verified["token"])
+            headers=get_auth_headers(test_creator_verified["token"]),
         )
 
         assert response.status_code == 201
@@ -149,14 +146,12 @@ class TestCreateCollaboration:
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
-                        "deliverables": [
-                            {"type": "Story", "quantity": 10, "status": "pending"}
-                        ]
+                        "deliverables": [{"type": "Story", "quantity": 10, "status": "pending"}],
                     }
                 ],
-                "consent": True
+                "consent": True,
             },
-            headers=get_auth_headers(test_creator_verified["token"])
+            headers=get_auth_headers(test_creator_verified["token"]),
         )
 
         assert response.status_code == 201
@@ -181,11 +176,11 @@ class TestCreateCollaboration:
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
-                        "deliverables": [{"type": "Post", "quantity": 1, "status": "pending"}]
+                        "deliverables": [{"type": "Post", "quantity": 1, "status": "pending"}],
                     }
-                ]
+                ],
             },
-            headers=get_auth_headers(test_creator_verified["token"])
+            headers=get_auth_headers(test_creator_verified["token"]),
         )
 
         # API may return 403 (forbidden), 400 (bad request), or 422 (validation error) for this scenario
@@ -195,9 +190,7 @@ class TestCreateCollaboration:
 class TestRespondToCollaboration:
     """Tests for POST /collaborations/{id}/respond"""
 
-    async def test_accept_collaboration(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_accept_collaboration(self, client: AsyncClient, test_collaboration):
         """Test accepting a collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -205,23 +198,21 @@ class TestRespondToCollaboration:
         response = await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted", "response_message": "We'd love to work with you!"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "negotiating"  # Moves to negotiating first
 
-    async def test_decline_collaboration(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_decline_collaboration(self, client: AsyncClient, test_collaboration):
         """Test declining a collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "declined", "response_message": "Not a good fit right now"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -238,28 +229,26 @@ class TestRespondToCollaboration:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         # Try to respond again
         response = await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "declined"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 400
 
-    async def test_initiator_cannot_respond(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_initiator_cannot_respond(self, client: AsyncClient, test_collaboration):
         """Test initiator cannot respond to their own collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 403
@@ -268,9 +257,7 @@ class TestRespondToCollaboration:
 class TestUpdateCollaborationTerms:
     """Tests for PUT /collaborations/{id}/terms"""
 
-    async def test_update_collaboration_type(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_update_collaboration_type(self, client: AsyncClient, test_collaboration):
         """Test updating collaboration type."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -278,16 +265,13 @@ class TestUpdateCollaborationTerms:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         response = await client.put(
             f"/collaborations/{collab_id}/terms",
-            json={
-                "collaboration_type": "Paid",
-                "paid_amount": 3000
-            },
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            json={"collaboration_type": "Paid", "paid_amount": 3000},
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -296,9 +280,7 @@ class TestUpdateCollaborationTerms:
         # paid_amount returned as string from Decimal
         assert float(data["paid_amount"]) == 3000
 
-    async def test_update_nights(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_update_nights(self, client: AsyncClient, test_collaboration):
         """Test updating stay nights."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -306,15 +288,13 @@ class TestUpdateCollaborationTerms:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         response = await client.put(
             f"/collaborations/{collab_id}/terms",
-            json={
-                "stay_nights": 5
-            },
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            json={"stay_nights": 5},
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -322,9 +302,7 @@ class TestUpdateCollaborationTerms:
         assert data["free_stay_min_nights"] == 5
         assert data["free_stay_max_nights"] == 5
 
-    async def test_update_dates(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_update_dates(self, client: AsyncClient, test_collaboration):
         """Test updating travel dates."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -332,7 +310,7 @@ class TestUpdateCollaborationTerms:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         new_from = str(date.today() + timedelta(days=45))
@@ -340,20 +318,15 @@ class TestUpdateCollaborationTerms:
 
         response = await client.put(
             f"/collaborations/{collab_id}/terms",
-            json={
-                "travel_date_from": new_from,
-                "travel_date_to": new_to
-            },
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            json={"travel_date_from": new_from, "travel_date_to": new_to},
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["travel_date_from"] == new_from
 
-    async def test_update_resets_agreement(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_update_resets_agreement(self, client: AsyncClient, test_collaboration):
         """Test that updating terms resets the other party's agreement."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -361,14 +334,14 @@ class TestUpdateCollaborationTerms:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         # Hotel updates terms
         response = await client.put(
             f"/collaborations/{collab_id}/terms",
             json={"stay_nights": 7},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -377,9 +350,7 @@ class TestUpdateCollaborationTerms:
         assert data["hotel_agreed_at"] is not None
         assert data["creator_agreed_at"] is None
 
-    async def test_update_deliverables(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_update_deliverables(self, client: AsyncClient, test_collaboration):
         """Test updating deliverables."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -387,7 +358,7 @@ class TestUpdateCollaborationTerms:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         response = await client.put(
@@ -396,13 +367,11 @@ class TestUpdateCollaborationTerms:
                 "platform_deliverables": [
                     {
                         "platform": "TikTok",
-                        "deliverables": [
-                            {"type": "Video", "quantity": 5, "status": "pending"}
-                        ]
+                        "deliverables": [{"type": "Video", "quantity": 5, "status": "pending"}],
                     }
                 ]
             },
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -414,9 +383,7 @@ class TestUpdateCollaborationTerms:
 class TestApproveCollaboration:
     """Tests for POST /collaborations/{id}/approve"""
 
-    async def test_single_approval(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_single_approval(self, client: AsyncClient, test_collaboration):
         """Test single party approval."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -424,13 +391,13 @@ class TestApproveCollaboration:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         # Creator approves
         response = await client.post(
             f"/collaborations/{collab_id}/approve",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -439,9 +406,7 @@ class TestApproveCollaboration:
         # Hotel already agreed when accepting
         assert data["status"] == "accepted"  # Both agreed
 
-    async def test_double_approval_finalizes(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_double_approval_finalizes(self, client: AsyncClient, test_collaboration):
         """Test that double approval finalizes collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -449,19 +414,19 @@ class TestApproveCollaboration:
         await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         # Creator approves
         await client.post(
             f"/collaborations/{collab_id}/approve",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         # Verify collaboration is accepted
         collab = await Database.fetchrow(
             "SELECT status FROM collaborations WHERE id = $1",
-            test_collaboration["collaboration"]["id"]
+            test_collaboration["collaboration"]["id"],
         )
         assert collab["status"] == "accepted"
 
@@ -473,8 +438,7 @@ class TestApproveCollaboration:
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
-            f"/collaborations/{collab_id}/approve",
-            headers=get_auth_headers(other_creator["token"])
+            f"/collaborations/{collab_id}/approve", headers=get_auth_headers(other_creator["token"])
         )
 
         assert response.status_code == 403
@@ -483,16 +447,14 @@ class TestApproveCollaboration:
 class TestCancelCollaboration:
     """Tests for POST /collaborations/{id}/cancel"""
 
-    async def test_creator_cancels(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_creator_cancels(self, client: AsyncClient, test_collaboration):
         """Test creator cancelling collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={"reason": "Change of plans"},
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -500,39 +462,33 @@ class TestCancelCollaboration:
         assert data["status"] == "cancelled"
         assert data["cancelled_at"] is not None
 
-    async def test_hotel_cancels(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_hotel_cancels(self, client: AsyncClient, test_collaboration):
         """Test hotel cancelling collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={"reason": "Fully booked"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "cancelled"
 
-    async def test_cancel_without_reason(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_cancel_without_reason(self, client: AsyncClient, test_collaboration):
         """Test cancelling without providing reason."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={},
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
 
-    async def test_cannot_cancel_already_cancelled(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_cannot_cancel_already_cancelled(self, client: AsyncClient, test_collaboration):
         """Test cannot cancel already cancelled collaboration."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
@@ -540,14 +496,14 @@ class TestCancelCollaboration:
         await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={},
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         # Try to cancel again
         response = await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 400
@@ -562,7 +518,7 @@ class TestCancelCollaboration:
         response = await client.post(
             f"/collaborations/{collab_id}/cancel",
             json={},
-            headers=get_auth_headers(other_creator["token"])
+            headers=get_auth_headers(other_creator["token"]),
         )
 
         assert response.status_code == 403
@@ -571,21 +527,19 @@ class TestCancelCollaboration:
 class TestToggleDeliverable:
     """Tests for POST /collaborations/{id}/deliverables/{did}/toggle"""
 
-    async def test_toggle_deliverable_status(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_toggle_deliverable_status(self, client: AsyncClient, test_collaboration):
         """Test toggling deliverable completion status."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         # Get deliverable ID
         deliverable = await Database.fetchrow(
             "SELECT id FROM collaboration_deliverables WHERE collaboration_id = $1 LIMIT 1",
-            test_collaboration["collaboration"]["id"]
+            test_collaboration["collaboration"]["id"],
         )
 
         response = await client.post(
             f"/collaborations/{collab_id}/deliverables/{deliverable['id']}/toggle",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -599,27 +553,25 @@ class TestToggleDeliverable:
                     deliverable_found = True
         assert deliverable_found
 
-    async def test_toggle_deliverable_back(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_toggle_deliverable_back(self, client: AsyncClient, test_collaboration):
         """Test toggling deliverable back to pending."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         deliverable = await Database.fetchrow(
             "SELECT id FROM collaboration_deliverables WHERE collaboration_id = $1 LIMIT 1",
-            test_collaboration["collaboration"]["id"]
+            test_collaboration["collaboration"]["id"],
         )
 
         # Toggle to completed
         await client.post(
             f"/collaborations/{collab_id}/deliverables/{deliverable['id']}/toggle",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         # Toggle back to pending
         response = await client.post(
             f"/collaborations/{collab_id}/deliverables/{deliverable['id']}/toggle",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 200
@@ -629,33 +581,29 @@ class TestToggleDeliverable:
                 if d["id"] == str(deliverable["id"]):
                     assert d["status"] == "pending"
 
-    async def test_toggle_deliverable_not_found(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_toggle_deliverable_not_found(self, client: AsyncClient, test_collaboration):
         """Test toggling non-existent deliverable."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.post(
             f"/collaborations/{collab_id}/deliverables/00000000-0000-0000-0000-000000000000/toggle",
-            headers=get_auth_headers(test_collaboration["creator"]["token"])
+            headers=get_auth_headers(test_collaboration["creator"]["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_hotel_can_toggle_deliverable(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_hotel_can_toggle_deliverable(self, client: AsyncClient, test_collaboration):
         """Test hotel can toggle deliverable."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         deliverable = await Database.fetchrow(
             "SELECT id FROM collaboration_deliverables WHERE collaboration_id = $1 LIMIT 1",
-            test_collaboration["collaboration"]["id"]
+            test_collaboration["collaboration"]["id"],
         )
 
         response = await client.post(
             f"/collaborations/{collab_id}/deliverables/{deliverable['id']}/toggle",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -664,49 +612,41 @@ class TestToggleDeliverable:
 class TestCollaborationNotFound:
     """Tests for collaboration not found scenarios"""
 
-    async def test_respond_not_found(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_respond_not_found(self, client: AsyncClient, test_hotel):
         """Test responding to non-existent collaboration."""
         response = await client.post(
             "/collaborations/00000000-0000-0000-0000-000000000000/respond",
             json={"status": "accepted"},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_update_terms_not_found(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_update_terms_not_found(self, client: AsyncClient, test_creator):
         """Test updating terms for non-existent collaboration."""
         response = await client.put(
             "/collaborations/00000000-0000-0000-0000-000000000000/terms",
             json={"stay_nights": 5},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_approve_not_found(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_approve_not_found(self, client: AsyncClient, test_creator):
         """Test approving non-existent collaboration."""
         response = await client.post(
             "/collaborations/00000000-0000-0000-0000-000000000000/approve",
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_cancel_not_found(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_cancel_not_found(self, client: AsyncClient, test_creator):
         """Test cancelling non-existent collaboration."""
         response = await client.post(
             "/collaborations/00000000-0000-0000-0000-000000000000/cancel",
             json={},
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 404
@@ -725,8 +665,7 @@ class TestMarketplaceAdminNotifications:
     """
 
     async def test_admin_notified_on_collaboration_create(
-        self, client: AsyncClient, test_creator_verified, test_hotel_verified,
-        mock_send_email
+        self, client: AsyncClient, test_creator_verified, test_hotel_verified, mock_send_email
     ):
         """An influencer creating a request notifies the marketplace admin."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
@@ -745,25 +684,21 @@ class TestMarketplaceAdminNotifications:
                 "platform_deliverables": [
                     {
                         "platform": "Instagram",
-                        "deliverables": [
-                            {"type": "Reel", "quantity": 2, "status": "pending"}
-                        ]
+                        "deliverables": [{"type": "Reel", "quantity": 2, "status": "pending"}],
                     }
                 ],
-                "consent": True
+                "consent": True,
             },
-            headers=get_auth_headers(test_creator_verified["token"])
+            headers=get_auth_headers(test_creator_verified["token"]),
         )
 
         assert response.status_code == 201
         admin_mails = [
-            m for m in mock_send_email
-            if m["to"] == ADMIN_EMAIL
-            and m["subject"] == "[Marketplace] New collaboration request"
+            m
+            for m in mock_send_email
+            if m["to"] == ADMIN_EMAIL and m["subject"] == "[Marketplace] New collaboration request"
         ]
-        assert len(admin_mails) == 1, (
-            f"expected one admin notification, got {mock_send_email}"
-        )
+        assert len(admin_mails) == 1, f"expected one admin notification, got {mock_send_email}"
 
     async def test_admin_notified_on_hotel_response(
         self, client: AsyncClient, test_collaboration, mock_send_email
@@ -774,31 +709,32 @@ class TestMarketplaceAdminNotifications:
         response = await client.post(
             f"/collaborations/{collab_id}/respond",
             json={"status": "accepted", "response_message": "Let's do it!"},
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
         admin_mails = [
-            m for m in mock_send_email
+            m
+            for m in mock_send_email
             if m["to"] == ADMIN_EMAIL
             and m["subject"] == "[Marketplace] Hotel accepted collaboration request"
         ]
-        assert len(admin_mails) == 1, (
-            f"expected one admin notification, got {mock_send_email}"
-        )
+        assert len(admin_mails) == 1, f"expected one admin notification, got {mock_send_email}"
 
     async def test_admin_notification_failure_does_not_break_create(
-        self, client: AsyncClient, test_creator_verified, test_hotel_verified,
-        caplog
+        self, client: AsyncClient, test_creator_verified, test_hotel_verified, caplog
     ):
         """A failed admin send is logged loudly but never 500s the request."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         # send_email returns False (e.g. EMAIL_ENABLED off / SMTP misconfig).
-        with patch(
-            "app.services.notifications.send_email",
-            new=AsyncMock(return_value=False),
-        ), caplog.at_level(logging.ERROR, logger="app.services.notifications"):
+        with (
+            patch(
+                "app.services.notifications.send_email",
+                new=AsyncMock(return_value=False),
+            ),
+            caplog.at_level(logging.ERROR, logger="app.services.notifications"),
+        ):
             response = await client.post(
                 "/collaborations",
                 json={
@@ -813,20 +749,17 @@ class TestMarketplaceAdminNotifications:
                     "platform_deliverables": [
                         {
                             "platform": "Instagram",
-                            "deliverables": [
-                                {"type": "Reel", "quantity": 2, "status": "pending"}
-                            ]
+                            "deliverables": [{"type": "Reel", "quantity": 2, "status": "pending"}],
                         }
                     ],
-                    "consent": True
+                    "consent": True,
                 },
-                headers=get_auth_headers(test_creator_verified["token"])
+                headers=get_auth_headers(test_creator_verified["token"]),
             )
 
         assert response.status_code == 201
         assert any(
-            "was NOT delivered" in r.message and ADMIN_EMAIL in r.message
-            for r in caplog.records
+            "was NOT delivered" in r.message and ADMIN_EMAIL in r.message for r in caplog.records
         ), f"expected a loud failure log, got {[r.message for r in caplog.records]}"
 
     async def test_admin_notification_exception_does_not_break_respond(
@@ -835,18 +768,20 @@ class TestMarketplaceAdminNotifications:
         """An exception in the admin send is swallowed + logged, not propagated."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
-        with patch(
-            "app.services.notifications.send_email",
-            new=AsyncMock(side_effect=RuntimeError("smtp boom")),
-        ), caplog.at_level(logging.ERROR, logger="app.services.notifications"):
+        with (
+            patch(
+                "app.services.notifications.send_email",
+                new=AsyncMock(side_effect=RuntimeError("smtp boom")),
+            ),
+            caplog.at_level(logging.ERROR, logger="app.services.notifications"),
+        ):
             response = await client.post(
                 f"/collaborations/{collab_id}/respond",
                 json={"status": "declined", "response_message": "Not now"},
-                headers=get_auth_headers(test_collaboration["hotel"]["token"])
+                headers=get_auth_headers(test_collaboration["hotel"]["token"]),
             )
 
         assert response.status_code == 200
-        assert any(
-            "raised" in r.message and ADMIN_EMAIL in r.message
-            for r in caplog.records
-        ), f"expected a loud failure log, got {[r.message for r in caplog.records]}"
+        assert any("raised" in r.message and ADMIN_EMAIL in r.message for r in caplog.records), (
+            f"expected a loud failure log, got {[r.message for r in caplog.records]}"
+        )

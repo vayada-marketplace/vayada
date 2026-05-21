@@ -1,10 +1,9 @@
 from pydantic import BaseModel
-from typing import List, Optional
 
 
 class ImageUploadResponse(BaseModel):
     url: str
-    thumbnail_url: Optional[str] = None
+    thumbnail_url: str | None = None
     key: str
     width: int
     height: int
@@ -13,5 +12,5 @@ class ImageUploadResponse(BaseModel):
 
 
 class MultipleImageUploadResponse(BaseModel):
-    images: List[ImageUploadResponse]
+    images: list[ImageUploadResponse]
     total: int

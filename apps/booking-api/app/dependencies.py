@@ -1,18 +1,19 @@
 """
 Dependencies for FastAPI routes
 """
-from typing import Optional
-from fastapi import HTTPException, status, Depends, Header, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.auth import AUTH_COOKIE_NAME
 from app.config import settings
 from app.jwt_utils import decode_access_token, is_token_expired
-from app.repositories.user_repo import UserRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.repositories.user_repo import UserRepository
 
 
 async def require_internal_key(
-    x_internal_key: Optional[str] = Header(default=None),
+    x_internal_key: str | None = Header(default=None),
 ) -> None:
     """Gate server-to-server endpoints behind ``INTERNAL_API_KEY``. When the
     setting is empty, the gate is open for backward-compat — operators can
@@ -27,14 +28,13 @@ async def require_internal_key(
             detail="Invalid or missing internal API key",
         )
 
+
 # auto_error=False so we can fall back to the cookie when the
 # Authorization header is absent.
 security = HTTPBearer(auto_error=False)
 
 
-def _extract_token(
-    credentials: Optional[HTTPAuthorizationCredentials], request: Request
-) -> str:
+def _extract_token(credentials: HTTPAuthorizationCredentials | None, request: Request) -> str:
     """Pull the access token from the Authorization header if present,
     else from the AUTH_COOKIE_NAME cookie. Raises 401 when neither is
     available."""
@@ -51,7 +51,7 @@ def _extract_token(
 
 
 async def _authenticate(
-    credentials: Optional[HTTPAuthorizationCredentials],
+    credentials: HTTPAuthorizationCredentials | None,
     request: Request,
     columns: str = "id, type, status",
 ) -> dict:
@@ -89,14 +89,14 @@ async def _authenticate(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if user['status'] in ('rejected', 'suspended'):
+    if user["status"] in ("rejected", "suspended"):
         status_messages = {
-            'rejected': "Your account has been rejected. Please contact support.",
-            'suspended': "Your account has been suspended. Please contact support.",
+            "rejected": "Your account has been rejected. Please contact support.",
+            "suspended": "Your account has been suspended. Please contact support.",
         }
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=status_messages[user['status']],
+            detail=status_messages[user["status"]],
         )
 
     return user
@@ -104,21 +104,21 @@ async def _authenticate(
 
 async def get_current_user_id(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> str:
     user = await _authenticate(credentials, request)
-    return str(user['id'])
+    return str(user["id"])
 
 
 async def get_current_user_with_admin_flag(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> dict:
     user = await _authenticate(credentials, request, columns="id, type, status, is_superadmin")
     return {
-        "user_id": str(user['id']),
-        "type": user['type'],
-        "is_superadmin": bool(user.get('is_superadmin', False)),
+        "user_id": str(user["id"]),
+        "type": user["type"],
+        "is_superadmin": bool(user.get("is_superadmin", False)),
     }
 
 
@@ -127,7 +127,7 @@ async def require_hotel_admin(
 ) -> str:
     if user_info["is_superadmin"]:
         return user_info["user_id"]
-    if user_info["type"] != 'hotel':
+    if user_info["type"] != "hotel":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This endpoint is only available for hotel administrators",
@@ -139,7 +139,7 @@ async def get_current_hotel(
     request: Request,
     user_info: dict = Depends(get_current_user_with_admin_flag),
     user_id: str = Depends(require_hotel_admin),
-) -> Optional[dict]:
+) -> dict | None:
     """
     Resolve hotel context from X-Hotel-Id header.
     Falls back to first hotel if header is absent (backwards compat).
@@ -170,7 +170,7 @@ async def get_current_hotel(
 
 
 async def require_current_hotel(
-    hotel: Optional[dict] = Depends(get_current_hotel),
+    hotel: dict | None = Depends(get_current_hotel),
 ) -> dict:
     if not hotel:
         raise HTTPException(

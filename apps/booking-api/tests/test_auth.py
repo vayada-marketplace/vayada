@@ -1,10 +1,11 @@
 """
 Tests for /auth endpoints — register, login, token validation, password management.
 """
-import jwt as pyjwt
 
+import jwt as pyjwt
 from app.config import settings
 from app.database import AuthDatabase
+
 from tests.conftest import (
     create_expired_jwt_token,
     create_test_user,
@@ -47,9 +48,7 @@ class TestRegister:
         )
         body = resp.json()
         token = body["access_token"]
-        decoded = pyjwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-        )
+        decoded = pyjwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         assert decoded["sub"] == body["id"]
         assert decoded["email"] == email
 
@@ -190,9 +189,7 @@ class TestLogin:
         assert "Invalid email or password" in resp.json()["detail"]
 
     async def test_login_suspended_user(self, client, cleanup_database):
-        user = await create_test_user(
-            password="SuspendedPass123!", user_status="suspended"
-        )
+        user = await create_test_user(password="SuspendedPass123!", user_status="suspended")
         resp = await client.post(
             "/auth/login",
             json={"email": user["email"], "password": "SuspendedPass123!"},
@@ -368,6 +365,7 @@ class TestChangePassword:
 class TestChangeEmail:
     async def test_change_email_success(self, client, cleanup_database):
         from unittest.mock import AsyncMock, patch
+
         user = await create_test_user(password="MyPass123!")
         new_email = generate_test_email()
         with patch("app.routers.auth.send_email", new_callable=AsyncMock, return_value=True):
@@ -382,6 +380,7 @@ class TestChangeEmail:
 
         # Retrieve the token from the database and verify the email change
         from app.database import AuthDatabase
+
         row = await AuthDatabase.fetchrow(
             "SELECT token FROM email_change_tokens WHERE user_id = $1 AND used = false ORDER BY created_at DESC LIMIT 1",
             user["id"],

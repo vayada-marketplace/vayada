@@ -25,7 +25,6 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +38,7 @@ _NEW_BOOKING_SENTINEL = "__new_booking__"
 @dataclass(frozen=True)
 class RoomSlot:
     """One room of the target room type."""
+
     room_id: str
     sort_order: int = 0
 
@@ -51,8 +51,9 @@ class BookingSlot:
     (and movable). `movable=False` pins the booking to its current room — used
     for guests who have already checked in or checked out.
     """
+
     booking_id: str
-    original_room_id: Optional[str]
+    original_room_id: str | None
     check_in: date
     check_out: date
     movable: bool = True
@@ -61,7 +62,7 @@ class BookingSlot:
 @dataclass(frozen=True)
 class Move:
     booking_id: str
-    from_room_id: Optional[str]
+    from_room_id: str | None
     to_room_id: str
 
 
@@ -85,7 +86,7 @@ def plan_assignment(
     *,
     timeout_seconds: float = 0.5,
     max_nodes: int = 50_000,
-) -> Optional[AssignmentPlan]:
+) -> AssignmentPlan | None:
     """Return a packing that places the new booking, or None if infeasible.
 
     `timeout_seconds` and `max_nodes` cap the search so a pathological input
@@ -134,8 +135,7 @@ def plan_assignment(
 
     for i, rid in enumerate(room_ids):
         if not any(
-            _overlaps(new_check_in, new_check_out, ci, co)
-            for ci, co in current_intervals[i]
+            _overlaps(new_check_in, new_check_out, ci, co) for ci, co in current_intervals[i]
         ):
             return AssignmentPlan(new_booking_room_id=rid, moves=[])
 
@@ -155,16 +155,14 @@ def plan_assignment(
         key=lambda b: (b.check_in, b.check_out, b.booking_id),
     )
 
-    occupancy: list[list[tuple[date, date]]] = [
-        list(intervals) for intervals in pinned_intervals
-    ]
+    occupancy: list[list[tuple[date, date]]] = [list(intervals) for intervals in pinned_intervals]
     assignment: dict[str, int] = {}
 
     deadline = time.monotonic() + timeout_seconds
     nodes = [0]
 
-    best_moves: list[Optional[int]] = [None]
-    best_assignment: list[Optional[dict[str, int]]] = [None]
+    best_moves: list[int | None] = [None]
+    best_assignment: list[dict[str, int] | None] = [None]
 
     def count_moves(asn: dict[str, int]) -> int:
         moves = 0
@@ -172,9 +170,7 @@ def plan_assignment(
             current_idx = asn.get(b.booking_id)
             if current_idx is None:
                 continue
-            original_idx = (
-                room_index.get(b.original_room_id) if b.original_room_id else None
-            )
+            original_idx = room_index.get(b.original_room_id) if b.original_room_id else None
             if current_idx != original_idx:
                 moves += 1
         return moves
@@ -194,9 +190,7 @@ def plan_assignment(
             return
 
         b = to_place[k]
-        original_idx = (
-            room_index.get(b.original_room_id) if b.original_room_id else None
-        )
+        original_idx = room_index.get(b.original_room_id) if b.original_room_id else None
         # Try the original room first (free move), then everything else in
         # sort order. The first complete solution found is usually close to
         # optimal because of this ordering.
@@ -211,10 +205,7 @@ def plan_assignment(
             nodes[0] += 1
             if budget_exhausted():
                 return
-            if any(
-                _overlaps(b.check_in, b.check_out, ci, co)
-                for ci, co in occupancy[i]
-            ):
+            if any(_overlaps(b.check_in, b.check_out, ci, co) for ci, co in occupancy[i]):
                 continue
             move_cost = 0
             if original_idx is not None and i != original_idx:
@@ -235,9 +226,7 @@ def plan_assignment(
     moves: list[Move] = []
     for b in movable_existing:
         new_idx = asn[b.booking_id]
-        original_idx = (
-            room_index.get(b.original_room_id) if b.original_room_id else None
-        )
+        original_idx = room_index.get(b.original_room_id) if b.original_room_id else None
         if new_idx != original_idx:
             moves.append(
                 Move(
@@ -274,8 +263,8 @@ async def find_assignment_for_window(
     check_out: date,
     *,
     auto_rearrange_enabled: bool,
-    exclude_booking_id: Optional[str] = None,
-) -> Optional[AssignmentResult]:
+    exclude_booking_id: str | None = None,
+) -> AssignmentResult | None:
     """Find a room for a new (or unassigned) booking, optionally shuffling.
 
     Returns None if no room is free directly and either auto-rearrange is off
@@ -299,8 +288,7 @@ async def find_assignment_for_window(
     )
 
     room_slots = [
-        RoomSlot(room_id=str(r["id"]), sort_order=r.get("sort_order") or 0)
-        for r in rooms
+        RoomSlot(room_id=str(r["id"]), sort_order=r.get("sort_order") or 0) for r in rooms
     ]
     booking_slots: list[BookingSlot] = []
     for b in overlapping:
@@ -325,7 +313,10 @@ async def find_assignment_for_window(
         )
 
     plan = plan_assignment(
-        room_slots, booking_slots, check_in, check_out,
+        room_slots,
+        booking_slots,
+        check_in,
+        check_out,
     )
     if plan is None:
         return None
@@ -344,7 +335,7 @@ async def resolve_assignment(
     room_type_id: str,
     check_in: date,
     check_out: date,
-) -> tuple[Optional[str], list[Move]]:
+) -> tuple[str | None, list[Move]]:
     """Direct fit, or — if the hotel opted in — a rearrangement plan.
 
     Returns (target_room_id, moves_to_apply). target_room_id is None when no
@@ -375,7 +366,7 @@ async def resolve_room_assignments(
     check_in: date,
     check_out: date,
     count: int,
-) -> tuple[Optional[str], list[str], list[Move]]:
+) -> tuple[str | None, list[str], list[Move]]:
     """Pick the physical rooms for a booking of `count` rooms (VAY-403).
 
     Returns (primary_room_id, extra_room_ids, moves_to_apply):
@@ -397,13 +388,11 @@ async def resolve_room_assignments(
     far riskier than leaving a room unassigned for staff to place.
     """
     if count <= 1:
-        room_id, moves = await resolve_assignment(
-            hotel_id, room_type_id, check_in, check_out
-        )
+        room_id, moves = await resolve_assignment(hotel_id, room_type_id, check_in, check_out)
         return room_id, [], moves
 
-    from app.repositories.room_repo import RoomRepository
     from app.repositories.booking_room_repo import BookingRoomRepository
+    from app.repositories.room_repo import RoomRepository
 
     rooms = await RoomRepository.list_for_room_type(room_type_id)
     if not rooms:
@@ -437,9 +426,7 @@ async def apply_moves_atomic(moves: list[Move]) -> None:
         return
     from app.repositories.booking_repo import BookingRepository
 
-    await BookingRepository.apply_room_moves(
-        [(m.booking_id, m.to_room_id) for m in moves]
-    )
+    await BookingRepository.apply_room_moves([(m.booking_id, m.to_room_id) for m in moves])
 
 
 async def try_place_unassigned_after_cancellation(
@@ -521,7 +508,7 @@ async def record_auto_rearrange(
     moves: list[Move],
     triggered_by_booking_id: str,
     triggered_by_guest_name: str,
-    actor_user_id: Optional[str] = None,
+    actor_user_id: str | None = None,
 ) -> None:
     """Write one summary event on the triggering booking + one per moved
     booking. The summary event is what the calendar reads to render the
@@ -563,5 +550,6 @@ async def record_auto_rearrange(
     )
     logger.info(
         "Auto-rearranged %d booking(s) to place %s",
-        len(moves), triggered_by_booking_id,
+        len(moves),
+        triggered_by_booking_id,
     )

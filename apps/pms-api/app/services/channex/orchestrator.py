@@ -1,16 +1,16 @@
 """Channex sync orchestration — full-hotel and per-booking ARI dispatch."""
+
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_mapping_repo import (
-    ChannexConnectionRepository,
-    ChannexRoomTypeMappingRepository,
-    ChannexRatePlanMappingRepository,
     ChannexChannelMarkupRepository,
+    ChannexConnectionRepository,
+    ChannexRatePlanMappingRepository,
+    ChannexRoomTypeMappingRepository,
 )
-
 from app.services.channex.ari_push import (
     push_availability_for_room_type,
     push_restrictions_for_rate_plan,
@@ -32,7 +32,8 @@ async def push_ari_for_hotel(hotel_id: str) -> None:
         for rp in rate_plans:
             channel = rp.get("channel", "direct")
             await push_restrictions_for_rate_plan(
-                hotel_id, room_type_id,
+                hotel_id,
+                room_type_id,
                 str(rp["channex_rate_plan_id"]),
                 plan_name=rp.get("plan_name", "standard"),
                 channel=channel,
@@ -40,9 +41,7 @@ async def push_ari_for_hotel(hotel_id: str) -> None:
                 meal_plan_code=int(rp.get("meal_plan_code") or 0),
             )
 
-    await ChannexConnectionRepository.update_last_ari_sync(
-        hotel_id, datetime.now(timezone.utc)
-    )
+    await ChannexConnectionRepository.update_last_ari_sync(hotel_id, datetime.now(UTC))
     logger.info("Full ARI sync completed for hotel %s", hotel_id)
 
 
@@ -61,7 +60,8 @@ async def push_ari_for_booking(booking_id: str) -> None:
             return
 
         await push_availability_for_room_type(
-            hotel_id, room_type_id,
+            hotel_id,
+            room_type_id,
             start_date=booking["check_in"],
             end_date=booking["check_out"],
         )

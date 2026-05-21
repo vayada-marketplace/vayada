@@ -1,20 +1,22 @@
 """
 Admin listing-CRUD endpoints. Thin wrappers around ListingService.
 """
+
 import logging
 
-from fastapi import APIRouter, HTTPException, status as http_status, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import status as http_status
 
 from app.dependencies import get_admin_user
-from app.s3_service import delete_file_from_s3, extract_key_from_url
-from app.repositories.user_repo import UserRepository
-from app.repositories.hotel_repo import HotelRepository
-from app.services.listings import ListingService, build_listing_response
 from app.models.hotels import (
     CreateListingRequest,
-    UpdateListingRequest,
     ListingResponse,
+    UpdateListingRequest,
 )
+from app.repositories.hotel_repo import HotelRepository
+from app.repositories.user_repo import UserRepository
+from app.s3_service import delete_file_from_s3, extract_key_from_url
+from app.services.listings import ListingService, build_listing_response
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +27,17 @@ async def _resolve_admin_hotel_profile_id(user_id: str) -> str:
     """Look up a hotel user's profile id, raising matching 4xx errors for the admin endpoints."""
     user = await UserRepository.get_by_id(user_id, columns="id, type")
     if not user:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user["type"] != "hotel":
         raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    if user['type'] != 'hotel':
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="User is not a hotel"
+            status_code=http_status.HTTP_400_BAD_REQUEST, detail="User is not a hotel"
         )
     hotel_profile = await HotelRepository.get_profile_by_user_id(user_id, columns="id")
     if not hotel_profile:
         raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Hotel profile not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Hotel profile not found"
         )
-    return str(hotel_profile['id'])
+    return str(hotel_profile["id"])
 
 
 @router.post(
@@ -49,9 +46,7 @@ async def _resolve_admin_hotel_profile_id(user_id: str) -> str:
     status_code=http_status.HTTP_201_CREATED,
 )
 async def create_hotel_listing(
-    user_id: str,
-    request: CreateListingRequest,
-    admin_id: str = Depends(get_admin_user)
+    user_id: str, request: CreateListingRequest, admin_id: str = Depends(get_admin_user)
 ):
     """Create a listing for an existing hotel user (admin endpoint)."""
     try:
@@ -65,15 +60,12 @@ async def create_hotel_listing(
         raise
     except ValueError as e:
         logger.error(f"Value error creating listing: {str(e)}")
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Error creating listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create listing"
+            detail="Failed to create listing",
         )
 
 
@@ -86,7 +78,7 @@ async def update_hotel_listing(
     user_id: str,
     listing_id: str,
     request: UpdateListingRequest,
-    admin_id: str = Depends(get_admin_user)
+    admin_id: str = Depends(get_admin_user),
 ):
     """Update a hotel listing (admin endpoint). Partial updates supported."""
     try:
@@ -95,8 +87,7 @@ async def update_hotel_listing(
         existing = await ListingService.get_with_details(listing_id, hotel_profile_id)
         if existing is None:
             raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Listing not found"
+                status_code=http_status.HTTP_404_NOT_FOUND, detail="Listing not found"
             )
 
         await ListingService.update(listing_id, request)
@@ -109,15 +100,12 @@ async def update_hotel_listing(
         raise
     except ValueError as e:
         logger.error(f"Value error updating listing: {str(e)}")
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update listing"
+            detail="Failed to update listing",
         )
 
 
@@ -126,9 +114,7 @@ async def update_hotel_listing(
     status_code=http_status.HTTP_200_OK,
 )
 async def delete_hotel_listing(
-    user_id: str,
-    listing_id: str,
-    admin_id: str = Depends(get_admin_user)
+    user_id: str, listing_id: str, admin_id: str = Depends(get_admin_user)
 ):
     """Delete a hotel listing and its S3 images (admin endpoint)."""
     try:
@@ -139,14 +125,13 @@ async def delete_hotel_listing(
         )
         if not listing:
             raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Listing not found"
+                status_code=http_status.HTTP_404_NOT_FOUND, detail="Listing not found"
             )
 
         deleted_images = 0
         failed_images = 0
-        if listing['images']:
-            for image_url in listing['images']:
+        if listing["images"]:
+            for image_url in listing["images"]:
                 if image_url:
                     s3_key = extract_key_from_url(image_url)
                     if s3_key:
@@ -155,8 +140,8 @@ async def delete_hotel_listing(
                         else:
                             failed_images += 1
                         # Thumbnail key: foo.jpg -> foo_thumb.jpg
-                        if '.' in s3_key:
-                            parts = s3_key.rsplit('.', 1)
+                        if "." in s3_key:
+                            parts = s3_key.rsplit(".", 1)
                             thumbnail_key = f"{parts[0]}_thumb.{parts[1]}"
                             if await delete_file_from_s3(thumbnail_key):
                                 deleted_images += 1
@@ -171,7 +156,7 @@ async def delete_hotel_listing(
             "message": "Listing deleted successfully",
             "deleted_listing": {
                 "id": listing_id,
-                "name": listing['name'],
+                "name": listing["name"],
             },
             "images_deleted": deleted_images,
             "images_failed": failed_images,
@@ -183,5 +168,5 @@ async def delete_hotel_listing(
         logger.error(f"Error deleting listing: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete listing"
+            detail="Failed to delete listing",
         )

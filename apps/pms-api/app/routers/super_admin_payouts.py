@@ -3,13 +3,13 @@ vayada-staff-only routes for tracking and recording manual affiliate
 payouts. These endpoints are NOT scoped to a single hotel — they
 operate across the entire platform and require `users.is_superadmin`.
 """
+
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from app.database import AuthDatabase, Database
+from app.database import Database
 from app.dependencies import require_super_admin
 
 logger = logging.getLogger(__name__)
@@ -38,13 +38,13 @@ class AffiliatePayoutSummary(BaseModel):
     bank_swift_bic: str = ""
     bank_name: str = ""
     bank_country: str = ""
-    stripe_connect_account_id: Optional[str] = None
+    stripe_connect_account_id: str | None = None
     stripe_connect_onboarded: bool = False
     outstanding_amount: float
     paid_amount: float
     currency: str
     unpaid_count: int
-    last_paid_at: Optional[str] = None
+    last_paid_at: str | None = None
 
 
 class BookingPayoutLine(BaseModel):
@@ -60,10 +60,10 @@ class BookingPayoutLine(BaseModel):
     commission: float
     currency: str
     status: str
-    scheduled_for: Optional[str] = None
-    completed_at: Optional[str] = None
-    payment_method: Optional[str] = None
-    external_reference: Optional[str] = None
+    scheduled_for: str | None = None
+    completed_at: str | None = None
+    payment_method: str | None = None
+    external_reference: str | None = None
 
 
 class PayoutHistoryEntry(BaseModel):
@@ -71,8 +71,8 @@ class PayoutHistoryEntry(BaseModel):
 
     completed_at: str
     payment_method: str
-    external_reference: Optional[str] = None
-    notes: Optional[str] = None
+    external_reference: str | None = None
+    notes: str | None = None
     amount: float
     currency: str
     booking_count: int
@@ -82,8 +82,8 @@ class MarkPaidRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     payment_method: str  # 'manual_bank' | 'manual_paypal' | 'wise' | 'stripe' | 'other'
-    external_reference: Optional[str] = None
-    notes: Optional[str] = None
+    external_reference: str | None = None
+    notes: str | None = None
 
 
 @router.get("/affiliate-payouts")
@@ -150,28 +150,30 @@ async def list_affiliate_payouts(
 
     summaries = []
     for r in rows:
-        summaries.append(AffiliatePayoutSummary(
-            affiliate_id=str(r["affiliate_id"]),
-            full_name=r["full_name"],
-            email=r["email"],
-            hotel_id=str(r["hotel_id"]),
-            hotel_name=r["hotel_name"],
-            hotel_slug=r["hotel_slug"],
-            payment_method=r["payment_method"] or "",
-            paypal_email=r["paypal_email"] or "",
-            bank_account_holder=r["bank_account_holder"] or "",
-            bank_iban=r["bank_iban"] or "",
-            bank_swift_bic=r["bank_swift_bic"] or "",
-            bank_name=r["bank_name"] or "",
-            bank_country=r["bank_country"] or "",
-            stripe_connect_account_id=r["stripe_connect_account_id"],
-            stripe_connect_onboarded=bool(r["stripe_connect_onboarded"]),
-            outstanding_amount=float(r["outstanding_amount"]),
-            paid_amount=float(r["paid_amount"]),
-            currency=r["currency"],
-            unpaid_count=int(r["unpaid_count"]),
-            last_paid_at=r["last_paid_at"].isoformat() if r["last_paid_at"] else None,
-        ))
+        summaries.append(
+            AffiliatePayoutSummary(
+                affiliate_id=str(r["affiliate_id"]),
+                full_name=r["full_name"],
+                email=r["email"],
+                hotel_id=str(r["hotel_id"]),
+                hotel_name=r["hotel_name"],
+                hotel_slug=r["hotel_slug"],
+                payment_method=r["payment_method"] or "",
+                paypal_email=r["paypal_email"] or "",
+                bank_account_holder=r["bank_account_holder"] or "",
+                bank_iban=r["bank_iban"] or "",
+                bank_swift_bic=r["bank_swift_bic"] or "",
+                bank_name=r["bank_name"] or "",
+                bank_country=r["bank_country"] or "",
+                stripe_connect_account_id=r["stripe_connect_account_id"],
+                stripe_connect_onboarded=bool(r["stripe_connect_onboarded"]),
+                outstanding_amount=float(r["outstanding_amount"]),
+                paid_amount=float(r["paid_amount"]),
+                currency=r["currency"],
+                unpaid_count=int(r["unpaid_count"]),
+                last_paid_at=r["last_paid_at"].isoformat() if r["last_paid_at"] else None,
+            )
+        )
     return {"affiliates": summaries}
 
 
@@ -320,9 +322,7 @@ async def mark_affiliate_paid(
     stamping the manual payment method, reference, and notes. Returns
     the affiliate id, the total amount marked paid, and the row count.
     """
-    affiliate = await Database.fetchrow(
-        "SELECT id FROM affiliates WHERE id = $1", affiliate_id
-    )
+    affiliate = await Database.fetchrow("SELECT id FROM affiliates WHERE id = $1", affiliate_id)
     if not affiliate:
         raise HTTPException(status_code=404, detail="Affiliate not found")
 

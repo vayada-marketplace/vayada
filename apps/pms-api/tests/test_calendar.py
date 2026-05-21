@@ -1,12 +1,13 @@
 """
 Tests for GET /admin/calendar endpoint.
 """
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
-    create_test_room_type,
     create_test_booking,
+    create_test_hotel,
     create_test_room_block,
+    create_test_room_type,
+    create_test_user,
     get_auth_headers,
 )
 
@@ -62,8 +63,10 @@ class TestCalendar:
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]))
         await create_test_room_block(
-            str(hotel["id"]), str(room["id"]),
-            start_date="2026-07-01", end_date="2026-07-05",
+            str(hotel["id"]),
+            str(room["id"]),
+            start_date="2026-07-01",
+            end_date="2026-07-05",
             reason="Renovation",
         )
 

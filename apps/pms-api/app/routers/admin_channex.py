@@ -1,36 +1,35 @@
 import asyncio
 import logging
-from typing import List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import settings
+from app.database import Database
 from app.dependencies import require_hotel_admin, require_super_admin
-from app.utils import get_hotel_id
-from app.repositories.channex_mapping_repo import (
-    ChannexConnectionRepository,
-    ChannexRoomTypeMappingRepository,
-    ChannexRatePlanMappingRepository,
-    ChannexChannelMarkupRepository,
-    MARKUP_CHANNELS,
-)
-from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepository
 from app.models.channex import (
-    ChannexRoomTypeMappingResponse,
-    ChannexRatePlanMappingResponse,
-    ChannexSyncStatusResponse,
     ChannelMarkup,
     ChannelMarkupsResponse,
     ChannelMarkupsUpdateRequest,
+    ChannexRatePlanMappingResponse,
+    ChannexRoomTypeMappingResponse,
+    ChannexSyncStatusResponse,
     ConnectedChannel,
     ConnectedChannelsResponse,
 )
-from app.database import Database
+from app.repositories.channex_mapping_repo import (
+    MARKUP_CHANNELS,
+    ChannexChannelMarkupRepository,
+    ChannexConnectionRepository,
+    ChannexRatePlanMappingRepository,
+    ChannexRoomTypeMappingRepository,
+)
+from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepository
 from app.services import channex_service
-from app.services.channex_service import ChannexAPIError
-from app.services.channex.provisioning import provision_property
-from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.channex.inbound import poll_bookings_for_hotel
+from app.services.channex.orchestrator import push_ari_for_hotel
+from app.services.channex.provisioning import provision_property
+from app.services.channex_service import ChannexAPIError
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +54,7 @@ def _normalize_channex_application(app: str) -> str:
 
 # ── Enable / Disable ─────────────────────────────────────────────────
 
+
 @router.post("/channex/enable")
 async def channex_enable(
     user_id: str = Depends(require_hotel_admin),
@@ -70,7 +70,10 @@ async def channex_enable(
     # Check if already enabled
     existing = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if existing and existing["is_active"] and existing.get("channex_property_id"):
-        return {"status": "already_enabled", "channex_property_id": str(existing["channex_property_id"])}
+        return {
+            "status": "already_enabled",
+            "channex_property_id": str(existing["channex_property_id"]),
+        }
 
     # Verify platform API key works
     api_key = channex_service.get_platform_api_key()
@@ -116,6 +119,7 @@ async def channex_disable(
 
 # ── Status overview ──────────────────────────────────────────────────
 
+
 @router.get("/channex/status", response_model=ChannexSyncStatusResponse)
 async def channex_status(
     user_id: str = Depends(require_hotel_admin),
@@ -147,6 +151,7 @@ async def channex_status(
 
 # ── Re-provision (when new room types are added) ─────────────────────
 
+
 @router.post("/channex/provision")
 async def channex_provision(
     user_id: str = Depends(require_hotel_admin),
@@ -177,47 +182,57 @@ async def channex_provision(
 
 # ── Mappings ─────────────────────────────────────────────────────────
 
+
 @router.get(
     "/channex/room-type-mappings",
-    response_model=List[ChannexRoomTypeMappingResponse],
+    response_model=list[ChannexRoomTypeMappingResponse],
 )
 async def channex_list_room_type_mappings(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRoomTypeMappingRepository.list_by_hotel_id(hotel_id)
-    return [ChannexRoomTypeMappingResponse(
-        id=str(m["id"]), hotel_id=str(m["hotel_id"]),
-        room_type_id=str(m["room_type_id"]),
-        room_type_name=m.get("room_type_name"),
-        channex_room_type_id=str(m["channex_room_type_id"]),
-        created_at=m["created_at"].isoformat(),
-    ) for m in mappings]
+    return [
+        ChannexRoomTypeMappingResponse(
+            id=str(m["id"]),
+            hotel_id=str(m["hotel_id"]),
+            room_type_id=str(m["room_type_id"]),
+            room_type_name=m.get("room_type_name"),
+            channex_room_type_id=str(m["channex_room_type_id"]),
+            created_at=m["created_at"].isoformat(),
+        )
+        for m in mappings
+    ]
 
 
 @router.get(
     "/channex/rate-plan-mappings",
-    response_model=List[ChannexRatePlanMappingResponse],
+    response_model=list[ChannexRatePlanMappingResponse],
 )
 async def channex_list_rate_plan_mappings(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRatePlanMappingRepository.list_by_hotel_id(hotel_id)
-    return [ChannexRatePlanMappingResponse(
-        id=str(m["id"]), hotel_id=str(m["hotel_id"]),
-        room_type_id=str(m["room_type_id"]),
-        channex_rate_plan_id=str(m["channex_rate_plan_id"]),
-        channex_room_type_id=str(m["channex_room_type_id"]),
-        sell_mode=m["sell_mode"],
-        plan_name=m.get("plan_name") or "standard",
-        channel=m.get("channel") or "direct",
-        meal_plan_code=int(m.get("meal_plan_code") or 0),
-        created_at=m["created_at"].isoformat(),
-    ) for m in mappings]
+    return [
+        ChannexRatePlanMappingResponse(
+            id=str(m["id"]),
+            hotel_id=str(m["hotel_id"]),
+            room_type_id=str(m["room_type_id"]),
+            channex_rate_plan_id=str(m["channex_rate_plan_id"]),
+            channex_room_type_id=str(m["channex_room_type_id"]),
+            sell_mode=m["sell_mode"],
+            plan_name=m.get("plan_name") or "standard",
+            channel=m.get("channel") or "direct",
+            meal_plan_code=int(m.get("meal_plan_code") or 0),
+            created_at=m["created_at"].isoformat(),
+        )
+        for m in mappings
+    ]
 
 
 # ── ARI Sync ─────────────────────────────────────────────────────────
+
 
 @router.post("/channex/sync-ari")
 async def channex_sync_ari(
@@ -236,6 +251,7 @@ async def channex_sync_ari(
 
 # ── Booking Sync ─────────────────────────────────────────────────────
 
+
 @router.post("/channex/sync-bookings")
 async def channex_sync_bookings(
     user_id: str = Depends(require_hotel_admin),
@@ -252,6 +268,7 @@ async def channex_sync_bookings(
 
 
 # ── Connected channels ───────────────────────────────────────────────
+
 
 @router.get("/channex/channels", response_model=ConnectedChannelsResponse)
 async def channex_list_channels(
@@ -277,7 +294,7 @@ async def channex_list_channels(
         logger.exception("Failed to list Channex channels for hotel %s", hotel_id)
         return ConnectedChannelsResponse(channels=[])
 
-    channels: List[ConnectedChannel] = []
+    channels: list[ConnectedChannel] = []
     for item in raw:
         attrs = item.get("attributes", item) or {}
         application = attrs.get("application") or attrs.get("app") or ""
@@ -286,16 +303,19 @@ async def channex_list_channels(
         is_active = attrs.get("is_active", True)
         if is_active is False:
             continue
-        channels.append(ConnectedChannel(
-            key=_normalize_channex_application(application),
-            application=application,
-            title=attrs.get("title"),
-            is_active=bool(is_active),
-        ))
+        channels.append(
+            ConnectedChannel(
+                key=_normalize_channex_application(application),
+                application=application,
+                title=attrs.get("title"),
+                is_active=bool(is_active),
+            )
+        )
     return ConnectedChannelsResponse(channels=channels)
 
 
 # ── Channel markups ──────────────────────────────────────────────────
+
 
 @router.get("/channex/markups", response_model=ChannelMarkupsResponse)
 async def channex_get_markups(
@@ -307,8 +327,7 @@ async def channex_get_markups(
     rows = await ChannexChannelMarkupRepository.list_by_hotel_id(hotel_id)
     by_channel = {r["channel"]: r["markup_pct"] for r in rows}
     markups = [
-        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0))
-        for ch in MARKUP_CHANNELS
+        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0)) for ch in MARKUP_CHANNELS
     ]
     return ChannelMarkupsResponse(markups=markups)
 
@@ -356,13 +375,13 @@ async def channex_update_markups(
     rows = await ChannexChannelMarkupRepository.list_by_hotel_id(hotel_id)
     by_channel = {r["channel"]: r["markup_pct"] for r in rows}
     markups = [
-        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0))
-        for ch in MARKUP_CHANNELS
+        ChannelMarkup(channel=ch, markup_pct=by_channel.get(ch, 0)) for ch in MARKUP_CHANNELS
     ]
     return ChannelMarkupsResponse(markups=markups)
 
 
 # ── Channel IFrame ───────────────────────────────────────────────────
+
 
 @router.post("/channex/iframe-url")
 async def channex_iframe_url(
@@ -480,7 +499,9 @@ async def channex_webhook_events_summary(
                 "ok": r["ok"],
                 "failed": r["failed"],
                 "ignored": r["ignored"],
-                "last_received_at": r["last_received_at"].isoformat() if r["last_received_at"] else None,
+                "last_received_at": r["last_received_at"].isoformat()
+                if r["last_received_at"]
+                else None,
             }
             for r in rows
         ],
@@ -522,7 +543,8 @@ async def channex_webhook_setup(
     if match:
         try:
             updated = await channex_service.update_webhook(
-                api_key, match["id"],
+                api_key,
+                match["id"],
                 {
                     "event_mask": "message",
                     "is_global": True,

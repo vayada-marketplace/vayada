@@ -1,14 +1,13 @@
 """
 Repository for booking_promo_codes table (Database).
 """
-from typing import Optional
+
 from datetime import date
 
 from app.database import Database
 
 
 class PromoCodeRepository:
-
     @staticmethod
     async def list_by_hotel_id(hotel_id: str) -> list[dict]:
         rows = await Database.fetch(
@@ -18,18 +17,20 @@ class PromoCodeRepository:
         return [dict(row) for row in rows]
 
     @staticmethod
-    async def get_by_id(promo_id: str, hotel_id: str) -> Optional[dict]:
+    async def get_by_id(promo_id: str, hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_promo_codes WHERE id = $1 AND hotel_id = $2",
-            promo_id, hotel_id,
+            promo_id,
+            hotel_id,
         )
         return dict(row) if row else None
 
     @staticmethod
-    async def get_by_code(code: str, hotel_id: str) -> Optional[dict]:
+    async def get_by_code(code: str, hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM booking_promo_codes WHERE code = $1 AND hotel_id = $2",
-            code.upper(), hotel_id,
+            code.upper(),
+            hotel_id,
         )
         return dict(row) if row else None
 
@@ -37,12 +38,12 @@ class PromoCodeRepository:
     async def create(
         hotel_id: str,
         code: str,
-        discount_type: str = 'percentage',
+        discount_type: str = "percentage",
         discount_value: float = 0,
-        valid_from: Optional[date] = None,
-        valid_until: Optional[date] = None,
+        valid_from: date | None = None,
+        valid_until: date | None = None,
         is_active: bool = True,
-        max_uses: Optional[int] = None,
+        max_uses: int | None = None,
     ) -> dict:
         query = """
             INSERT INTO booking_promo_codes
@@ -51,13 +52,20 @@ class PromoCodeRepository:
             RETURNING *
         """
         row = await Database.fetchrow(
-            query, hotel_id, code.upper(), discount_type, discount_value,
-            valid_from, valid_until, is_active, max_uses,
+            query,
+            hotel_id,
+            code.upper(),
+            discount_type,
+            discount_value,
+            valid_from,
+            valid_until,
+            is_active,
+            max_uses,
         )
         return dict(row)
 
     @staticmethod
-    async def update(promo_id: str, hotel_id: str, updates: dict) -> Optional[dict]:
+    async def update(promo_id: str, hotel_id: str, updates: dict) -> dict | None:
         if not updates:
             return None
 
@@ -85,7 +93,8 @@ class PromoCodeRepository:
     async def delete(promo_id: str, hotel_id: str) -> bool:
         result = await Database.execute(
             "DELETE FROM booking_promo_codes WHERE id = $1 AND hotel_id = $2",
-            promo_id, hotel_id,
+            promo_id,
+            hotel_id,
         )
         return result == "DELETE 1"
 

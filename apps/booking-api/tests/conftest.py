@@ -1,11 +1,18 @@
 """
 Pytest fixtures and configuration for booking engine backend tests.
 """
+
 import os
 
 # Set environment variables BEFORE importing any app modules
-os.environ.setdefault("DATABASE_URL", "postgresql://vayada_booking_user:vayada_booking_password@localhost:5434/vayada_booking_db")
-os.environ.setdefault("AUTH_DATABASE_URL", "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://vayada_booking_user:vayada_booking_password@localhost:5434/vayada_booking_db",
+)
+os.environ.setdefault(
+    "AUTH_DATABASE_URL",
+    "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db",
+)
 os.environ.setdefault("MARKETPLACE_DATABASE_URL", "")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000,http://localhost:3003")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
@@ -14,18 +21,18 @@ os.environ.setdefault("ENVIRONMENT", "test")
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Dict, Optional
 from unittest.mock import patch
 
 import bcrypt
 import jwt
 import pytest
-from httpx import ASGITransport, AsyncClient
-
 from app.config import settings
 from app.database import AuthDatabase, Database
 from app.main import app
+from httpx import ASGITransport, AsyncClient
 
 # Test data patterns for cleanup
 TEST_EMAIL_PATTERN = "betest%@example.com"
@@ -71,31 +78,19 @@ async def cleanup_database(init_database):
     # Delete booking_hotels by user_id (translations cascade via FK)
     if test_user_ids:
         for uid in test_user_ids:
-            await Database.execute(
-                "DELETE FROM booking_hotels WHERE user_id = $1", uid
-            )
+            await Database.execute("DELETE FROM booking_hotels WHERE user_id = $1", uid)
 
     # Also delete any booking_hotels matching slug pattern
-    await Database.execute(
-        "DELETE FROM booking_hotels WHERE slug LIKE $1", TEST_SLUG_PATTERN
-    )
+    await Database.execute("DELETE FROM booking_hotels WHERE slug LIKE $1", TEST_SLUG_PATTERN)
 
     # Clean auth data
     if test_user_ids:
         async with auth_pool.acquire() as conn:
             for uid in test_user_ids:
-                await conn.execute(
-                    "DELETE FROM consent_history WHERE user_id = $1", uid
-                )
-                await conn.execute(
-                    "DELETE FROM password_reset_tokens WHERE user_id = $1", uid
-                )
-                await conn.execute(
-                    "DELETE FROM email_change_tokens WHERE user_id = $1", uid
-                )
-            await conn.execute(
-                "DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN
-            )
+                await conn.execute("DELETE FROM consent_history WHERE user_id = $1", uid)
+                await conn.execute("DELETE FROM password_reset_tokens WHERE user_id = $1", uid)
+                await conn.execute("DELETE FROM email_change_tokens WHERE user_id = $1", uid)
+            await conn.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
 
 
 @pytest.fixture(autouse=True)
@@ -135,9 +130,7 @@ def create_jwt_token(
     """Create a JWT token matching what the booking engine issues."""
     from app.jwt_utils import create_access_token
 
-    return create_access_token(
-        data={"sub": user_id, "email": email, "type": user_type}
-    )
+    return create_access_token(data={"sub": user_id, "email": email, "type": user_type})
 
 
 def create_expired_jwt_token(
@@ -149,13 +142,13 @@ def create_expired_jwt_token(
         "sub": user_id,
         "email": email,
         "type": "hotel",
-        "exp": datetime.now(timezone.utc) - timedelta(hours=1),
-        "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+        "exp": datetime.now(UTC) - timedelta(hours=1),
+        "iat": datetime.now(UTC) - timedelta(hours=2),
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def get_auth_headers(token: str) -> Dict[str, str]:
+def get_auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -163,12 +156,12 @@ def get_auth_headers(token: str) -> Dict[str, str]:
 
 
 async def create_test_user(
-    email: Optional[str] = None,
+    email: str | None = None,
     password: str = "TestPassword123!",
     name: str = "Test Hotel User",
     user_type: str = "hotel",
     user_status: str = "verified",
-) -> Dict:
+) -> dict:
     """Create a test user in the auth database."""
     email = email or generate_test_email()
     password_hash = hash_password(password)
@@ -195,7 +188,7 @@ async def create_test_user(
 async def create_test_booking_hotel(
     user_id: str,
     name: str = "Test Hotel",
-    slug: Optional[str] = None,
+    slug: str | None = None,
     description: str = "A test hotel description",
     location: str = "Test City",
     country: str = "Test Country",
@@ -209,7 +202,7 @@ async def create_test_booking_hotel(
     branding_primary_color: str = "#336699",
     branding_accent_color: str = "#FF6600",
     branding_font_pairing: str = "Inter / Merriweather",
-) -> Dict:
+) -> dict:
     """Create a booking hotel in the booking database with all required columns."""
     slug = slug or generate_test_slug()
     row = await Database.fetchrow(

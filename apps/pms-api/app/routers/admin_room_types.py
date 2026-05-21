@@ -2,26 +2,25 @@ import asyncio
 import json
 import logging
 from datetime import date
-from typing import List
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import Database
 from app.dependencies import require_hotel_admin
+from app.models.room_type import (
+    MonthlyRate,
+    RoomTypeAdminResponse,
+    RoomTypeCreate,
+    RoomTypeUpdate,
+)
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
+from app.repositories.room_repo import RoomRepository
+from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.channex.provisioning import provision_property
 from app.services.channex_sync_service import push_cancellation_policy_for_room_type
 from app.services.hotel_identity_service import get_currency as get_be_currency
-from app.utils import parse_jsonb, get_hotel_id
-from app.database import Database
-from app.repositories.room_type_repo import RoomTypeRepository
-from app.repositories.room_repo import RoomRepository
-from app.models.room_type import (
-    RoomTypeCreate,
-    RoomTypeUpdate,
-    RoomTypeAdminResponse,
-    MonthlyRate,
-)
+from app.utils import get_hotel_id, parse_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +79,15 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         partial_refund_tiers=parse_jsonb(room.get("partial_refund_tiers", [])),
         non_refundable_enabled=room.get("non_refundable_enabled", False),
         non_refundable_discount=room.get("non_refundable_discount", 5),
-        non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
-        last_minute_discount=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("last_minute_discount"))),
+        non_refundable_cancellation_policy=room.get("non_refundable_cancellation_policy")
+        or "Non-refundable from booking",
+        last_minute_discount=(lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(room.get("last_minute_discount"))
+        ),
         minimum_advance_days=room.get("minimum_advance_days") or 0,
-        rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(parse_jsonb(room.get("rate_payment_methods"))),
+        rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(room.get("rate_payment_methods"))
+        ),
         meal_plans=parse_jsonb(room.get("meal_plans", [])),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
@@ -106,15 +110,18 @@ async def _auto_create_rooms(
         return
     prefix = f"{room_type_name} "
     like_pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    max_num = await Database.fetchval(
-        """
+    max_num = (
+        await Database.fetchval(
+            """
         SELECT COALESCE(MAX(NULLIF(regexp_replace(room_number, '^.*[^0-9]', ''), '')::int), 0)
         FROM rooms
         WHERE hotel_id = $1 AND room_number LIKE $2 ESCAPE '\\'
         """,
-        hotel_id,
-        like_pattern,
-    ) or 0
+            hotel_id,
+            like_pattern,
+        )
+        or 0
+    )
     for i in range(count):
         room_number = f"{prefix}{max_num + i + 1}"
         try:
@@ -131,11 +138,13 @@ async def _auto_create_rooms(
         except Exception as e:
             logger.warning(
                 "Failed to auto-create room %s for room_type %s: %s",
-                room_number, room_type_id, e,
+                room_number,
+                room_type_id,
+                e,
             )
 
 
-@router.get("/room-types", response_model=List[RoomTypeAdminResponse])
+@router.get("/room-types", response_model=list[RoomTypeAdminResponse])
 async def list_room_types(user_id: str = Depends(require_hotel_admin)):
     hotel_id = await get_hotel_id(user_id)
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id)
@@ -158,7 +167,9 @@ async def create_room_type(
 
     if payload.get("monthly_rates"):
         payload["monthly_rates"] = {
-            k: v.model_dump(exclude_none=True) if hasattr(v, "model_dump") else {kk: vv for kk, vv in v.items() if vv is not None}
+            k: v.model_dump(exclude_none=True)
+            if hasattr(v, "model_dump")
+            else {kk: vv for kk, vv in v.items() if vv is not None}
             for k, v in payload["monthly_rates"].items()
         }
     else:
@@ -242,14 +253,19 @@ async def update_room_type(
     new_name = updates.get("name")
     if new_name is not None and new_name != existing["name"]:
         await RoomRepository.rename_auto_named(
-            hotel_id, room_type_id, existing["name"], new_name,
+            hotel_id,
+            room_type_id,
+            existing["name"],
+            new_name,
         )
     # Even on a no-op save, sweep stale auto-names left over from a
     # rename that happened before the on-rename fix shipped (VAY-322).
     # A hotel admin re-saving the type — without changing anything — is
     # enough to repair the broken state.
     await RoomRepository.heal_stale_room_names(
-        hotel_id, room_type_id, room["name"],
+        hotel_id,
+        room_type_id,
+        room["name"],
     )
 
     cancel_fields = {
@@ -259,9 +275,7 @@ async def update_room_type(
         "partial_refund_tiers",
     }
     if cancel_fields & updates.keys():
-        asyncio.create_task(
-            push_cancellation_policy_for_room_type(hotel_id, room_type_id)
-        )
+        asyncio.create_task(push_cancellation_policy_for_room_type(hotel_id, room_type_id))
 
     # Meal plans drive which rate-plan variants exist on Channex
     # (e.g. "BDC Standard (Breakfast)"). Re-provision so newly added meal
@@ -277,9 +291,7 @@ async def update_room_type(
     # exclude it here to avoid a duplicate push.
     rate_affecting = _RATE_AFFECTING_FIELDS & updates.keys()
     if rate_affecting:
-        asyncio.create_task(
-            _push_ari_after_rate_change(hotel_id, sorted(rate_affecting))
-        )
+        asyncio.create_task(_push_ari_after_rate_change(hotel_id, sorted(rate_affecting)))
 
     return _room_to_admin(room)
 
@@ -287,23 +299,23 @@ async def update_room_type(
 # Fields that change what OTAs should see — a write to any of these has to
 # trigger a Channex ARI push. Kept narrow on purpose: cosmetic fields like
 # name/description don't belong here.
-_RATE_AFFECTING_FIELDS = frozenset({
-    "base_rate",
-    "non_refundable_rate",
-    "non_refundable_enabled",
-    "non_refundable_discount",
-    "monthly_rates",
-    "daily_rates",
-    "operating_periods",
-    "seasons",
-    "weekend_surcharge",
-    "minimum_advance_days",
-})
+_RATE_AFFECTING_FIELDS = frozenset(
+    {
+        "base_rate",
+        "non_refundable_rate",
+        "non_refundable_enabled",
+        "non_refundable_discount",
+        "monthly_rates",
+        "daily_rates",
+        "operating_periods",
+        "seasons",
+        "weekend_surcharge",
+        "minimum_advance_days",
+    }
+)
 
 
-async def _push_ari_after_rate_change(
-    hotel_id: str, changed_fields: list[str]
-) -> None:
+async def _push_ari_after_rate_change(hotel_id: str, changed_fields: list[str]) -> None:
     # Hotels without an active Channex connection should be silent no-ops
     # (per the VAY-391 "no Channel Manager connected" edge case).
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -339,7 +351,9 @@ async def _resync_channex_after_meal_plan_change(hotel_id: str) -> None:
         )
 
 
-@router.post("/room-types/{room_type_id}/duplicate", response_model=RoomTypeAdminResponse, status_code=201)
+@router.post(
+    "/room-types/{room_type_id}/duplicate", response_model=RoomTypeAdminResponse, status_code=201
+)
 async def duplicate_room_type(
     room_type_id: str,
     user_id: str = Depends(require_hotel_admin),
@@ -361,7 +375,9 @@ async def duplicate_room_type(
         "bathrooms": existing.get("bathrooms", 1),
         "size": existing["size"],
         "base_rate": float(existing["base_rate"]),
-        "non_refundable_rate": float(existing["non_refundable_rate"]) if existing.get("non_refundable_rate") is not None else None,
+        "non_refundable_rate": float(existing["non_refundable_rate"])
+        if existing.get("non_refundable_rate") is not None
+        else None,
         "currency": existing["currency"],
         "amenities": parse_jsonb(existing["amenities"]),
         "images": parse_jsonb(existing["images"]),
@@ -384,9 +400,14 @@ async def duplicate_room_type(
         "partial_refund_tiers": parse_jsonb(existing.get("partial_refund_tiers", [])),
         "non_refundable_discount": existing.get("non_refundable_discount", 5),
         "non_refundable_enabled": existing.get("non_refundable_enabled", False),
-        "non_refundable_cancellation_policy": existing.get("non_refundable_cancellation_policy") or "Non-refundable from booking",
-        "last_minute_discount": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("last_minute_discount"))),
-        "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(parse_jsonb(existing.get("rate_payment_methods"))),
+        "non_refundable_cancellation_policy": existing.get("non_refundable_cancellation_policy")
+        or "Non-refundable from booking",
+        "last_minute_discount": (lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(existing.get("last_minute_discount"))
+        ),
+        "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(existing.get("rate_payment_methods"))
+        ),
         "meal_plans": parse_jsonb(existing.get("meal_plans", [])),
     }
     room = await RoomTypeRepository.create(hotel_id, clone_data)

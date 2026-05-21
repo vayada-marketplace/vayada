@@ -1,33 +1,29 @@
 """
 Tests for admin management endpoints.
 """
+
 import pytest
+from app.database import AuthDatabase, Database
 from httpx import AsyncClient
 
-from app.database import Database, AuthDatabase
 from tests.conftest import (
-    get_auth_headers,
+    create_test_admin,
+    create_test_collaboration,
     create_test_creator,
     create_test_hotel,
-    create_test_admin,
     create_test_listing,
     create_test_platform,
-    create_test_collaboration,
     generate_test_email,
+    get_auth_headers,
 )
 
 
 class TestGetUsers:
     """Tests for GET /admin/users"""
 
-    async def test_get_users_success(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_get_users_success(self, client: AsyncClient, test_admin, test_creator):
         """Test getting users list."""
-        response = await client.get(
-            "/admin/users",
-            headers=get_auth_headers(test_admin["token"])
-        )
+        response = await client.get("/admin/users", headers=get_auth_headers(test_admin["token"]))
 
         assert response.status_code == 200
         data = response.json()
@@ -44,8 +40,7 @@ class TestGetUsers:
             await create_test_creator()
 
         response = await client.get(
-            "/admin/users?page=1&page_size=3",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?page=1&page_size=3", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -58,8 +53,7 @@ class TestGetUsers:
     ):
         """Test filtering users by type."""
         response = await client.get(
-            "/admin/users?type=creator",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?type=creator", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -75,8 +69,7 @@ class TestGetUsers:
         await create_test_creator(status="pending")
 
         response = await client.get(
-            "/admin/users?status=verified",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?status=verified", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -91,28 +84,20 @@ class TestGetUsers:
         await create_test_creator(name="Unique Name Creator")
 
         response = await client.get(
-            "/admin/users?search=Unique Name",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?search=Unique Name", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
         data = response.json()
         assert any("Unique Name" in u["name"] for u in data["users"])
 
-    async def test_get_users_not_admin(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_get_users_not_admin(self, client: AsyncClient, test_creator):
         """Test that non-admin cannot access users list."""
-        response = await client.get(
-            "/admin/users",
-            headers=get_auth_headers(test_creator["token"])
-        )
+        response = await client.get("/admin/users", headers=get_auth_headers(test_creator["token"]))
 
         assert response.status_code == 403
 
-    async def test_get_users_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_get_users_no_auth(self, client: AsyncClient):
         """Test that unauthenticated request is rejected."""
         response = await client.get("/admin/users")
 
@@ -126,12 +111,12 @@ class TestGetUsers:
         picture_url = "https://example.com/creator.jpg"
         await Database.execute(
             "UPDATE creators SET profile_picture = $1 WHERE user_id = $2",
-            picture_url, creator["user"]["id"]
+            picture_url,
+            creator["user"]["id"],
         )
 
         response = await client.get(
-            "/admin/users?type=creator",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?type=creator", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -148,12 +133,12 @@ class TestGetUsers:
         picture_url = "https://example.com/hotel.jpg"
         await Database.execute(
             "UPDATE hotel_profiles SET picture = $1 WHERE user_id = $2",
-            picture_url, hotel["user"]["id"]
+            picture_url,
+            hotel["user"]["id"],
         )
 
         response = await client.get(
-            "/admin/users?type=hotel",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?type=hotel", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -170,17 +155,16 @@ class TestGetUsers:
         override_url = "https://example.com/admin-override.jpg"
         creator_picture_url = "https://example.com/creator.jpg"
         await AuthDatabase.execute(
-            "UPDATE users SET avatar = $1 WHERE id = $2",
-            override_url, creator["user"]["id"]
+            "UPDATE users SET avatar = $1 WHERE id = $2", override_url, creator["user"]["id"]
         )
         await Database.execute(
             "UPDATE creators SET profile_picture = $1 WHERE user_id = $2",
-            creator_picture_url, creator["user"]["id"]
+            creator_picture_url,
+            creator["user"]["id"],
         )
 
         response = await client.get(
-            "/admin/users?type=creator",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/users?type=creator", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -200,8 +184,7 @@ class TestGetUserDetails:
         user_id = str(test_creator_verified["user"]["id"])
 
         response = await client.get(
-            f"/admin/users/{user_id}",
-            headers=get_auth_headers(test_admin["token"])
+            f"/admin/users/{user_id}", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -211,15 +194,12 @@ class TestGetUserDetails:
         assert "profile" in data
         assert data["profile"]["platforms"] is not None
 
-    async def test_get_hotel_details(
-        self, client: AsyncClient, test_admin, test_hotel_verified
-    ):
+    async def test_get_hotel_details(self, client: AsyncClient, test_admin, test_hotel_verified):
         """Test getting hotel user details with listings."""
         user_id = str(test_hotel_verified["user"]["id"])
 
         response = await client.get(
-            f"/admin/users/{user_id}",
-            headers=get_auth_headers(test_admin["token"])
+            f"/admin/users/{user_id}", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -229,13 +209,11 @@ class TestGetUserDetails:
         assert "profile" in data
         assert "listings" in data["profile"]
 
-    async def test_get_user_not_found(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_get_user_not_found(self, client: AsyncClient, test_admin):
         """Test getting non-existent user."""
         response = await client.get(
             "/admin/users/00000000-0000-0000-0000-000000000000",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 404
@@ -244,9 +222,7 @@ class TestGetUserDetails:
 class TestCreateUser:
     """Tests for POST /admin/users"""
 
-    async def test_create_creator(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_create_creator(self, client: AsyncClient, test_admin):
         """Test creating a creator user."""
         email = generate_test_email("admin_created")
 
@@ -261,10 +237,10 @@ class TestCreateUser:
                 "emailVerified": True,
                 "creatorProfile": {
                     "location": "New York, USA",
-                    "shortDescription": "Professional content creator"
-                }
+                    "shortDescription": "Professional content creator",
+                },
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
@@ -273,9 +249,7 @@ class TestCreateUser:
         assert data["type"] == "creator"
         assert data["status"] == "verified"
 
-    async def test_create_hotel_with_listings(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_create_hotel_with_listings(self, client: AsyncClient, test_admin):
         """Test creating a hotel user with listings."""
         email = generate_test_email("admin_hotel")
 
@@ -303,26 +277,22 @@ class TestCreateUser:
                                     "availabilityMonths": ["January", "February"],
                                     "platforms": ["Instagram"],
                                     "freeStayMinNights": 3,
-                                    "freeStayMaxNights": 5
+                                    "freeStayMaxNights": 5,
                                 }
                             ],
-                            "creatorRequirements": {
-                                "platforms": ["Instagram"]
-                            }
+                            "creatorRequirements": {"platforms": ["Instagram"]},
                         }
-                    ]
-                }
+                    ],
+                },
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert data["type"] == "hotel"
 
-    async def test_create_user_duplicate_email(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_create_user_duplicate_email(self, client: AsyncClient, test_admin, test_creator):
         """Test creating user with duplicate email."""
         response = await client.post(
             "/admin/users",
@@ -330,17 +300,15 @@ class TestCreateUser:
                 "email": test_creator["user"]["email"],
                 "password": "SecurePassword123!",
                 "name": "Duplicate User",
-                "type": "creator"
+                "type": "creator",
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 400
         assert "already registered" in response.json()["detail"].lower()
 
-    async def test_create_user_with_platforms(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_create_user_with_platforms(self, client: AsyncClient, test_admin):
         """Test creating creator with platforms."""
         email = generate_test_email("with_platforms")
 
@@ -358,12 +326,12 @@ class TestCreateUser:
                             "name": "Instagram",
                             "handle": "@admintest",
                             "followers": 100000,
-                            "engagementRate": 4.5
+                            "engagementRate": 4.5,
                         }
-                    ]
-                }
+                    ],
+                },
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
@@ -372,25 +340,21 @@ class TestCreateUser:
 class TestUpdateUser:
     """Tests for PUT /admin/users/{user_id}"""
 
-    async def test_update_user_status(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_update_user_status(self, client: AsyncClient, test_admin, test_creator):
         """Test updating user status."""
         user_id = str(test_creator["user"]["id"])
 
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"status": "verified"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "verified"
 
-    async def test_update_user_email(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_update_user_email(self, client: AsyncClient, test_admin, test_creator):
         """Test updating user email."""
         user_id = str(test_creator["user"]["id"])
         new_email = generate_test_email("updated")
@@ -398,35 +362,31 @@ class TestUpdateUser:
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"email": new_email},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == new_email
 
-    async def test_update_user_not_found(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_update_user_not_found(self, client: AsyncClient, test_admin):
         """Test updating non-existent user."""
         response = await client.put(
             "/admin/users/00000000-0000-0000-0000-000000000000",
             json={"name": "Test"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_admin_cannot_modify_own_status(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_admin_cannot_modify_own_status(self, client: AsyncClient, test_admin):
         """Test that admin cannot modify their own status."""
         admin_id = str(test_admin["user"]["id"])
 
         response = await client.put(
             f"/admin/users/{admin_id}",
             json={"status": "suspended"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 400
@@ -456,13 +416,13 @@ class TestCreatorApprovalNotification:
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"status": "verified"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
         assert response.status_code == 200
 
         notifs = await Database.fetch(
             "SELECT type, title, body, link_url FROM notifications WHERE user_id = $1",
-            creator["user"]["id"]
+            creator["user"]["id"],
         )
         assert len(notifs) == 1
         assert notifs[0]["type"] == "creator_approved"
@@ -486,17 +446,18 @@ class TestCreatorApprovalNotification:
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"status": "verified"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
         assert response.status_code == 200
 
         # Give any spurious background email a chance to land
         import asyncio
+
         await asyncio.sleep(0.05)
 
         notifs = await Database.fetch(
             "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
-            creator["user"]["id"]
+            creator["user"]["id"],
         )
         assert len(notifs) == 0
         approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
@@ -523,7 +484,7 @@ class TestCreatorApprovalNotification:
 
         notifs = await Database.fetch(
             "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
-            creator["user"]["id"]
+            creator["user"]["id"],
         )
         assert len(notifs) == 1
 
@@ -541,16 +502,17 @@ class TestCreatorApprovalNotification:
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"status": "verified"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
         assert response.status_code == 200
 
         import asyncio
+
         await asyncio.sleep(0.05)
 
         notifs = await Database.fetch(
             "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
-            hotel["user"]["id"]
+            hotel["user"]["id"],
         )
         assert len(notifs) == 0
 
@@ -564,16 +526,17 @@ class TestCreatorApprovalNotification:
         response = await client.put(
             f"/admin/users/{user_id}",
             json={"status": "rejected"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
         assert response.status_code == 200
 
         import asyncio
+
         await asyncio.sleep(0.05)
 
         notifs = await Database.fetch(
             "SELECT id FROM notifications WHERE user_id = $1 AND type = 'creator_approved'",
-            creator["user"]["id"]
+            creator["user"]["id"],
         )
         assert len(notifs) == 0
         approval_emails = [e for e in mock_send_email if e["to"] == creator["user"]["email"]]
@@ -591,8 +554,7 @@ class TestDeleteUser:
         user_id = str(creator["user"]["id"])
 
         response = await client.delete(
-            f"/admin/users/{user_id}",
-            headers=get_auth_headers(test_admin["token"])
+            f"/admin/users/{user_id}", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -601,8 +563,7 @@ class TestDeleteUser:
 
         # Verify user is deleted
         user = await AuthDatabase.fetchrow(
-            "SELECT id FROM users WHERE id = $1",
-            creator["user"]["id"]
+            "SELECT id FROM users WHERE id = $1", creator["user"]["id"]
         )
         assert user is None
 
@@ -615,39 +576,32 @@ class TestDeleteUser:
         user_id = str(creator["user"]["id"])
 
         response = await client.delete(
-            f"/admin/users/{user_id}",
-            headers=get_auth_headers(test_admin["token"])
+            f"/admin/users/{user_id}", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
 
         # Verify related data is deleted
         creator_profile = await Database.fetchrow(
-            "SELECT id FROM creators WHERE user_id = $1",
-            creator["user"]["id"]
+            "SELECT id FROM creators WHERE user_id = $1", creator["user"]["id"]
         )
         assert creator_profile is None
 
-    async def test_delete_user_not_found(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_delete_user_not_found(self, client: AsyncClient, test_admin):
         """Test deleting non-existent user."""
         response = await client.delete(
             "/admin/users/00000000-0000-0000-0000-000000000000",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 404
 
-    async def test_admin_cannot_delete_self(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_admin_cannot_delete_self(self, client: AsyncClient, test_admin):
         """Test that admin cannot delete themselves."""
         admin_id = str(test_admin["user"]["id"])
 
         response = await client.delete(
-            f"/admin/users/{admin_id}",
-            headers=get_auth_headers(test_admin["token"])
+            f"/admin/users/{admin_id}", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 400
@@ -656,9 +610,7 @@ class TestDeleteUser:
 class TestUpdateCreatorProfile:
     """Tests for PUT /admin/users/{user_id}/profile/creator"""
 
-    async def test_update_creator_profile(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_update_creator_profile(self, client: AsyncClient, test_admin, test_creator):
         """Test updating creator profile."""
         user_id = str(test_creator["user"]["id"])
 
@@ -667,9 +619,9 @@ class TestUpdateCreatorProfile:
             json={
                 "name": "Updated Creator Name",
                 "location": "San Francisco, USA",
-                "shortDescription": "Updated description"
+                "shortDescription": "Updated description",
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
@@ -691,11 +643,11 @@ class TestUpdateCreatorProfile:
                         "name": "TikTok",
                         "handle": "@admin_updated",
                         "followers": 200000,
-                        "engagementRate": 5.5
+                        "engagementRate": 5.5,
                     }
                 ]
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
@@ -703,16 +655,14 @@ class TestUpdateCreatorProfile:
         assert len(data["platforms"]) == 1
         assert data["platforms"][0]["name"] == "TikTok"
 
-    async def test_update_creator_wrong_type(
-        self, client: AsyncClient, test_admin, test_hotel
-    ):
+    async def test_update_creator_wrong_type(self, client: AsyncClient, test_admin, test_hotel):
         """Test updating creator profile for hotel user."""
         user_id = str(test_hotel["user"]["id"])
 
         response = await client.put(
             f"/admin/users/{user_id}/profile/creator",
             json={"name": "Test"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 400
@@ -721,9 +671,7 @@ class TestUpdateCreatorProfile:
 class TestUpdateHotelProfile:
     """Tests for PUT /admin/users/{user_id}/profile/hotel"""
 
-    async def test_update_hotel_profile(
-        self, client: AsyncClient, test_admin, test_hotel
-    ):
+    async def test_update_hotel_profile(self, client: AsyncClient, test_admin, test_hotel):
         """Test updating hotel profile."""
         user_id = str(test_hotel["user"]["id"])
 
@@ -732,9 +680,9 @@ class TestUpdateHotelProfile:
             json={
                 "name": "Updated Hotel Name",
                 "location": "Barcelona, Spain",
-                "about": "Updated description"
+                "about": "Updated description",
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
@@ -742,16 +690,14 @@ class TestUpdateHotelProfile:
         assert data["name"] == "Updated Hotel Name"
         assert data["location"] == "Barcelona, Spain"
 
-    async def test_update_hotel_wrong_type(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_update_hotel_wrong_type(self, client: AsyncClient, test_admin, test_creator):
         """Test updating hotel profile for creator user."""
         user_id = str(test_creator["user"]["id"])
 
         response = await client.put(
             f"/admin/users/{user_id}/profile/hotel",
             json={"name": "Test"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 400
@@ -760,9 +706,7 @@ class TestUpdateHotelProfile:
 class TestAdminCreateListing:
     """Tests for POST /admin/users/{user_id}/listings"""
 
-    async def test_create_listing(
-        self, client: AsyncClient, test_admin, test_hotel
-    ):
+    async def test_create_listing(self, client: AsyncClient, test_admin, test_hotel):
         """Test admin creating listing for hotel."""
         user_id = str(test_hotel["user"]["id"])
 
@@ -779,23 +723,19 @@ class TestAdminCreateListing:
                         "availabilityMonths": ["March", "April"],
                         "platforms": ["Instagram"],
                         "freeStayMinNights": 4,
-                        "freeStayMaxNights": 7
+                        "freeStayMaxNights": 7,
                     }
                 ],
-                "creatorRequirements": {
-                    "platforms": ["Instagram"]
-                }
+                "creatorRequirements": {"platforms": ["Instagram"]},
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "Admin Created Listing"
 
-    async def test_create_listing_wrong_type(
-        self, client: AsyncClient, test_admin, test_creator
-    ):
+    async def test_create_listing_wrong_type(self, client: AsyncClient, test_admin, test_creator):
         """Test creating listing for non-hotel user."""
         user_id = str(test_creator["user"]["id"])
 
@@ -812,12 +752,12 @@ class TestAdminCreateListing:
                         "availabilityMonths": ["May"],
                         "platforms": ["Instagram"],
                         "freeStayMinNights": 2,
-                        "freeStayMaxNights": 5
+                        "freeStayMaxNights": 5,
                     }
                 ],
-                "creatorRequirements": {"platforms": ["Instagram"]}
+                "creatorRequirements": {"platforms": ["Instagram"]},
             },
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 400
@@ -826,36 +766,29 @@ class TestAdminCreateListing:
 class TestAdminUpdateListing:
     """Tests for PUT /admin/users/{user_id}/listings/{listing_id}"""
 
-    async def test_update_listing(
-        self, client: AsyncClient, test_admin, test_hotel_verified
-    ):
+    async def test_update_listing(self, client: AsyncClient, test_admin, test_hotel_verified):
         """Test admin updating listing."""
         user_id = str(test_hotel_verified["user"]["id"])
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.put(
             f"/admin/users/{user_id}/listings/{listing_id}",
-            json={
-                "name": "Admin Updated Listing",
-                "description": "Updated by admin"
-            },
-            headers=get_auth_headers(test_admin["token"])
+            json={"name": "Admin Updated Listing", "description": "Updated by admin"},
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Admin Updated Listing"
 
-    async def test_update_listing_not_found(
-        self, client: AsyncClient, test_admin, test_hotel
-    ):
+    async def test_update_listing_not_found(self, client: AsyncClient, test_admin, test_hotel):
         """Test updating non-existent listing."""
         user_id = str(test_hotel["user"]["id"])
 
         response = await client.put(
             f"/admin/users/{user_id}/listings/00000000-0000-0000-0000-000000000000",
             json={"name": "Test"},
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 404
@@ -864,31 +797,27 @@ class TestAdminUpdateListing:
 class TestAdminDeleteListing:
     """Tests for DELETE /admin/users/{user_id}/listings/{listing_id}"""
 
-    async def test_delete_listing(
-        self, client: AsyncClient, test_admin, test_hotel_verified
-    ):
+    async def test_delete_listing(self, client: AsyncClient, test_admin, test_hotel_verified):
         """Test admin deleting listing."""
         user_id = str(test_hotel_verified["user"]["id"])
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.delete(
             f"/admin/users/{user_id}/listings/{listing_id}",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["deleted_listing"]["id"] == listing_id
 
-    async def test_delete_listing_not_found(
-        self, client: AsyncClient, test_admin, test_hotel
-    ):
+    async def test_delete_listing_not_found(self, client: AsyncClient, test_admin, test_hotel):
         """Test deleting non-existent listing."""
         user_id = str(test_hotel["user"]["id"])
 
         response = await client.delete(
             f"/admin/users/{user_id}/listings/00000000-0000-0000-0000-000000000000",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 404
@@ -897,13 +826,10 @@ class TestAdminDeleteListing:
 class TestAdminGetCollaborations:
     """Tests for GET /admin/collaborations"""
 
-    async def test_get_collaborations(
-        self, client: AsyncClient, test_admin, test_collaboration
-    ):
+    async def test_get_collaborations(self, client: AsyncClient, test_admin, test_collaboration):
         """Test getting all collaborations."""
         response = await client.get(
-            "/admin/collaborations",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/collaborations", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -917,7 +843,7 @@ class TestAdminGetCollaborations:
         """Test collaborations pagination."""
         response = await client.get(
             "/admin/collaborations?page=1&page_size=10",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
@@ -929,8 +855,7 @@ class TestAdminGetCollaborations:
     ):
         """Test filtering collaborations by status."""
         response = await client.get(
-            "/admin/collaborations?status=pending",
-            headers=get_auth_headers(test_admin["token"])
+            "/admin/collaborations?status=pending", headers=get_auth_headers(test_admin["token"])
         )
 
         assert response.status_code == 200
@@ -946,7 +871,7 @@ class TestAdminGetCollaborations:
 
         response = await client.get(
             f"/admin/collaborations?search={creator_name}",
-            headers=get_auth_headers(test_admin["token"])
+            headers=get_auth_headers(test_admin["token"]),
         )
 
         assert response.status_code == 200
@@ -1009,9 +934,7 @@ class TestAdminRespondToCollaboration:
         )
         assert response.status_code == 400
 
-    async def test_admin_respond_not_found(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_admin_respond_not_found(self, client: AsyncClient, test_admin):
         response = await client.post(
             "/admin/collaborations/00000000-0000-0000-0000-000000000000/respond",
             json={"status": "accepted"},
@@ -1076,9 +999,7 @@ class TestAdminApproveCollaboration:
         )
         assert collab["status"] == "accepted"
 
-    async def test_admin_approve_not_found(
-        self, client: AsyncClient, test_admin
-    ):
+    async def test_admin_approve_not_found(self, client: AsyncClient, test_admin):
         response = await client.post(
             "/admin/collaborations/00000000-0000-0000-0000-000000000000/approve",
             headers=get_auth_headers(test_admin["token"]),
@@ -1089,25 +1010,15 @@ class TestAdminApproveCollaboration:
 class TestAdminAuthorization:
     """Tests for admin authorization"""
 
-    async def test_creator_cannot_access_admin(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_creator_cannot_access_admin(self, client: AsyncClient, test_creator):
         """Test that creator cannot access admin endpoints."""
-        response = await client.get(
-            "/admin/users",
-            headers=get_auth_headers(test_creator["token"])
-        )
+        response = await client.get("/admin/users", headers=get_auth_headers(test_creator["token"]))
 
         assert response.status_code == 403
 
-    async def test_hotel_cannot_access_admin(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_hotel_cannot_access_admin(self, client: AsyncClient, test_hotel):
         """Test that hotel cannot access admin endpoints."""
-        response = await client.get(
-            "/admin/users",
-            headers=get_auth_headers(test_hotel["token"])
-        )
+        response = await client.get("/admin/users", headers=get_auth_headers(test_hotel["token"]))
 
         assert response.status_code == 403
 
@@ -1115,22 +1026,15 @@ class TestAdminAuthorization:
         self, client: AsyncClient, cleanup_database, init_database
     ):
         """Test that suspended admin cannot access endpoints."""
-        from tests.conftest import create_test_user
         from app.jwt_utils import create_access_token
 
-        admin_user = await create_test_user(
-            user_type="admin",
-            status="suspended"
-        )
-        token = create_access_token({
-            "sub": str(admin_user["id"]),
-            "email": admin_user["email"],
-            "type": "admin"
-        })
+        from tests.conftest import create_test_user
 
-        response = await client.get(
-            "/admin/users",
-            headers=get_auth_headers(token)
+        admin_user = await create_test_user(user_type="admin", status="suspended")
+        token = create_access_token(
+            {"sub": str(admin_user["id"]), "email": admin_user["email"], "type": "admin"}
         )
+
+        response = await client.get("/admin/users", headers=get_auth_headers(token))
 
         assert response.status_code == 403

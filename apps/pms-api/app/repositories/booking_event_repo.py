@@ -1,10 +1,9 @@
 import json
-from typing import Optional
+
 from app.database import Database
 
 
 class BookingEventRepository:
-
     @staticmethod
     async def record(
         *,
@@ -12,7 +11,7 @@ class BookingEventRepository:
         hotel_id: str,
         event_type: str,
         payload: dict,
-        actor_user_id: Optional[str] = None,
+        actor_user_id: str | None = None,
     ) -> dict:
         row = await Database.fetchrow(
             """

@@ -3,11 +3,12 @@
 Simple migration runner for RDS PostgreSQL
 Connects to database and runs all migration files in order
 """
-import os
-import sys
+
 import asyncio
-import asyncpg
+import sys
 from pathlib import Path
+
+import asyncpg
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,7 +33,7 @@ async def run_migrations():
         sys.exit(1)
 
     print(f"📁 Found {len(migration_files)} migration files")
-    print(f"🔗 Connecting to database...")
+    print("🔗 Connecting to database...")
     print()
 
     try:
@@ -52,7 +53,7 @@ async def run_migrations():
 
         # Get already executed migrations
         executed = await conn.fetch("SELECT filename FROM schema_migrations")
-        executed_filenames = {row['filename'] for row in executed}
+        executed_filenames = {row["filename"] for row in executed}
 
         # Run migrations
         for migration_file in migration_files:
@@ -70,9 +71,12 @@ async def run_migrations():
 
                 # Remove comments and check if there's actual SQL
                 # Split by lines, remove comment-only lines and empty lines
-                lines = [line for line in sql.split('\n')
-                         if line.strip() and not line.strip().startswith('--')]
-                sql_content = '\n'.join(lines).strip()
+                lines = [
+                    line
+                    for line in sql.split("\n")
+                    if line.strip() and not line.strip().startswith("--")
+                ]
+                sql_content = "\n".join(lines).strip()
 
                 # Skip empty migrations (only whitespace/comments)
                 if not sql_content:
@@ -80,7 +84,7 @@ async def run_migrations():
                     # Still mark as executed
                     await conn.execute(
                         "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
-                        filename
+                        filename,
                     )
                     print()
                     continue
@@ -89,8 +93,7 @@ async def run_migrations():
                 async with conn.transaction():
                     await conn.execute(sql)
                     await conn.execute(
-                        "INSERT INTO schema_migrations (filename) VALUES ($1)",
-                        filename
+                        "INSERT INTO schema_migrations (filename) VALUES ($1)", filename
                     )
 
                 print(f"✅ Completed {filename}")
@@ -112,7 +115,7 @@ async def run_migrations():
         sys.exit(1)
     except Exception as e:
         print(f"❌ Database connection error: {e}")
-        print(f"   Check your DATABASE_URL in .env file")
+        print("   Check your DATABASE_URL in .env file")
         sys.exit(1)
 
 

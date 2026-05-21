@@ -11,8 +11,6 @@ Usage:
 
 import asyncio
 import os
-import sys
-import uuid
 
 import asyncpg
 import bcrypt
@@ -170,7 +168,7 @@ async def main():
 
         count = await conn.fetchval("SELECT COUNT(*) FROM users")
         print(f"\nDone. {created} created, {skipped} skipped, {count} total user(s) in auth DB.")
-        print(f"\nCredentials:")
+        print("\nCredentials:")
         print(f"  Admin:  admin@vayada.com / {ADMIN_PASSWORD}")
         print(f"  Mock:   *@mock.com / {MOCK_PASSWORD}")
     finally:

@@ -5,9 +5,9 @@ Background email tasks need a strong reference set, otherwise asyncio's GC
 can collect a fire-and-forget task before SMTP completes (cause of the
 VAY-241 missed admin notifications regression).
 """
+
 import asyncio
 import logging
-from typing import Optional
 
 from app.email_service import send_email
 from app.repositories.creator_repo import CreatorRepository
@@ -82,23 +82,23 @@ async def notify_marketplace_admin_sync(subject: str, html_body: str) -> bool:
 
 async def get_party_email_and_name(
     party: str,
-    creator_id: Optional[str] = None,
-    hotel_id: Optional[str] = None,
+    creator_id: str | None = None,
+    hotel_id: str | None = None,
 ) -> tuple:
     """Resolve (email, name) for a collaboration party ('creator' or 'hotel')."""
     try:
         if party == "creator" and creator_id:
             creator = await CreatorRepository.get_by_id(creator_id, columns="user_id")
             if creator:
-                user = await UserRepository.get_by_id(creator['user_id'], columns="email, name")
+                user = await UserRepository.get_by_id(creator["user_id"], columns="email, name")
                 if user:
-                    return user['email'], user['name']
+                    return user["email"], user["name"]
         elif party == "hotel" and hotel_id:
             hotel = await HotelRepository.get_profile_by_id(hotel_id, columns="user_id, name")
             if hotel:
-                user = await UserRepository.get_by_id(hotel['user_id'], columns="email, name")
+                user = await UserRepository.get_by_id(hotel["user_id"], columns="email, name")
                 if user:
-                    return user['email'], hotel['name']
+                    return user["email"], hotel["name"]
     except Exception as e:
         logger.error(f"Failed to resolve {party} email: {e}")
     return None, None

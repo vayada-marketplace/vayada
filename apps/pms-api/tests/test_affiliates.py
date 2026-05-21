@@ -1,13 +1,13 @@
 """
 Tests for affiliate endpoints — public registration + admin management.
 """
+
 from tests.conftest import (
-    create_test_user,
-    create_test_hotel,
     create_test_affiliate,
+    create_test_hotel,
+    create_test_user,
     get_auth_headers,
 )
-
 
 # ── Public affiliate registration ────────────────────────────────
 
@@ -62,14 +62,10 @@ class TestAffiliateRegistration:
         hotel = await create_test_hotel(str(user["id"]))
 
         payload = {"fullName": "First", "email": "dupe@test.com"}
-        resp1 = await client.post(
-            f"/api/hotels/{hotel['slug']}/affiliates", json=payload
-        )
+        resp1 = await client.post(f"/api/hotels/{hotel['slug']}/affiliates", json=payload)
         assert resp1.status_code == 201
 
-        resp2 = await client.post(
-            f"/api/hotels/{hotel['slug']}/affiliates", json=payload
-        )
+        resp2 = await client.post(f"/api/hotels/{hotel['slug']}/affiliates", json=payload)
         assert resp2.status_code == 409
 
     async def test_register_affiliate_unknown_hotel(self, client, init_database):
@@ -451,9 +447,7 @@ class TestAdminAffiliateCommission:
         # Reverts to hotel default (5.0)
         assert body["effectiveCommissionPct"] == 5.0
 
-    async def test_commission_tracks_hotel_default_when_no_override(
-        self, client, cleanup_database
-    ):
+    async def test_commission_tracks_hotel_default_when_no_override(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         await create_test_affiliate(str(hotel["id"]))

@@ -1,6 +1,7 @@
 """Custom-domain management — connect, disconnect, status. Wraps
 Cloudflare for SaaS so the property-settings router doesn't carry the
 hostname-provisioning concern."""
+
 import logging
 import re
 
@@ -14,9 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_DOMAIN_RE = re.compile(
-    r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"
-)
+_DOMAIN_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$")
 
 
 def _status_response(domain: str, cf_status: dict | None) -> dict:
@@ -40,7 +39,9 @@ async def connect_custom_domain(
     # Check not already taken by another hotel
     existing = await BookingHotelRepository.get_by_custom_domain(domain)
     if existing and str(existing["id"]) != str(hotel["id"]):
-        raise HTTPException(status_code=409, detail="This domain is already in use by another property")
+        raise HTTPException(
+            status_code=409, detail="This domain is already in use by another property"
+        )
 
     # If already connected to this hotel, just return current status
     if existing and str(existing["id"]) == str(hotel["id"]):
@@ -110,7 +111,12 @@ async def get_custom_domain_status(
 
     status = await cloudflare_service.get_hostname_status(current_domain)
     if not status:
-        return {"configured": True, "domain": current_domain, "status": "unknown", "ssl_status": "unknown"}
+        return {
+            "configured": True,
+            "domain": current_domain,
+            "status": "unknown",
+            "ssl_status": "unknown",
+        }
 
     return {
         "configured": True,

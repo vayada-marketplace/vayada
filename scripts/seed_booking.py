@@ -52,9 +52,16 @@ HOTELS = [
             "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=800&q=80",
         ],
         "amenities": [
-            "Free WiFi", "Spa & Wellness", "Restaurant", "Bar & Lounge",
-            "Fitness Center", "Room Service", "Concierge", "Airport Shuttle",
-            "Ski Storage", "Mountain Views",
+            "Free WiFi",
+            "Spa & Wellness",
+            "Restaurant",
+            "Bar & Lounge",
+            "Fitness Center",
+            "Room Service",
+            "Concierge",
+            "Airport Shuttle",
+            "Ski Storage",
+            "Mountain Views",
         ],
         "check_in_time": "15:00",
         "check_out_time": "11:00",
@@ -85,9 +92,16 @@ HOTELS = [
             "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800&q=80",
         ],
         "amenities": [
-            "Free WiFi", "Private Beach", "Infinity Pool", "Fine Dining",
-            "Spa & Wellness", "Room Service", "Valet Parking", "Concierge",
-            "Boat Tours", "Sea Views",
+            "Free WiFi",
+            "Private Beach",
+            "Infinity Pool",
+            "Fine Dining",
+            "Spa & Wellness",
+            "Room Service",
+            "Valet Parking",
+            "Concierge",
+            "Boat Tours",
+            "Sea Views",
         ],
         "check_in_time": "14:00",
         "check_out_time": "12:00",
@@ -118,8 +132,14 @@ HOTELS = [
             "https://images.unsplash.com/photo-1445019980597-93fa8acb246c?w=800&q=80",
         ],
         "amenities": [
-            "Free WiFi", "Fireplace Lounge", "Restaurant", "Hiking Trails",
-            "Kayak Rental", "Free Parking", "Pet Friendly", "Loch Views",
+            "Free WiFi",
+            "Fireplace Lounge",
+            "Restaurant",
+            "Hiking Trails",
+            "Kayak Rental",
+            "Free Parking",
+            "Pet Friendly",
+            "Loch Views",
         ],
         "check_in_time": "16:00",
         "check_out_time": "10:00",
@@ -162,9 +182,16 @@ GERMAN_TRANSLATIONS = [
         "country": "Osterreich",
         "contact_address": "Alpengasse 12, 6020 Innsbruck, Osterreich",
         "amenities": [
-            "Kostenloses WLAN", "Spa & Wellness", "Restaurant", "Bar & Lounge",
-            "Fitnesscenter", "Zimmerservice", "Concierge", "Flughafentransfer",
-            "Skiaufbewahrung", "Bergblick",
+            "Kostenloses WLAN",
+            "Spa & Wellness",
+            "Restaurant",
+            "Bar & Lounge",
+            "Fitnesscenter",
+            "Zimmerservice",
+            "Concierge",
+            "Flughafentransfer",
+            "Skiaufbewahrung",
+            "Bergblick",
         ],
     },
     {
@@ -176,9 +203,16 @@ GERMAN_TRANSLATIONS = [
         "country": "Italien",
         "contact_address": "Via Costiera Amalfitana 88, 84011 Amalfi, Italien",
         "amenities": [
-            "Kostenloses WLAN", "Privatstrand", "Infinity-Pool", "Gourmetkuche",
-            "Spa & Wellness", "Zimmerservice", "Parkservice", "Concierge",
-            "Bootstouren", "Meerblick",
+            "Kostenloses WLAN",
+            "Privatstrand",
+            "Infinity-Pool",
+            "Gourmetkuche",
+            "Spa & Wellness",
+            "Zimmerservice",
+            "Parkservice",
+            "Concierge",
+            "Bootstouren",
+            "Meerblick",
         ],
     },
     {
@@ -190,8 +224,14 @@ GERMAN_TRANSLATIONS = [
         "country": "Vereinigtes Konigreich",
         "contact_address": "12 Lochside Road, Inverness IV3 8LA, Schottland",
         "amenities": [
-            "Kostenloses WLAN", "Kamin-Lounge", "Restaurant", "Wanderwege",
-            "Kajakverleih", "Kostenlose Parkplatze", "Haustierfreundlich", "Seeblick",
+            "Kostenloses WLAN",
+            "Kamin-Lounge",
+            "Restaurant",
+            "Wanderwege",
+            "Kajakverleih",
+            "Kostenlose Parkplatze",
+            "Haustierfreundlich",
+            "Seeblick",
         ],
     },
 ]
@@ -208,7 +248,13 @@ ROOM_TYPES = {
             "size": 28,
             "base_rate": 120,
             "currency": "EUR",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Heated Bathroom Floor", "Safe"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Heated Bathroom Floor",
+                "Safe",
+            ],
             "images": ["https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800&q=80"],
             "bed_type": "Queen Bed",
             "features": ["Mountain View", "Balcony", "Non-smoking"],
@@ -223,7 +269,14 @@ ROOM_TYPES = {
             "size": 38,
             "base_rate": 180,
             "currency": "EUR",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Nespresso Machine", "Bathrobe & Slippers", "Safe"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Nespresso Machine",
+                "Bathrobe & Slippers",
+                "Safe",
+            ],
             "images": ["https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800&q=80"],
             "bed_type": "King Bed",
             "features": ["Panoramic View", "Sitting Area", "Rain Shower", "Balcony"],
@@ -238,7 +291,15 @@ ROOM_TYPES = {
             "size": 52,
             "base_rate": 280,
             "currency": "EUR",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Nespresso Machine", "Bathrobe & Slippers", "Safe", "Bluetooth Speaker"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Nespresso Machine",
+                "Bathrobe & Slippers",
+                "Safe",
+                "Bluetooth Speaker",
+            ],
             "images": ["https://images.unsplash.com/photo-1591088398332-8a7791972843?w=800&q=80"],
             "bed_type": "King Bed",
             "features": ["Private Terrace", "Fireplace", "Living Area", "Panoramic View"],
@@ -253,7 +314,16 @@ ROOM_TYPES = {
             "size": 95,
             "base_rate": 520,
             "currency": "EUR",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Nespresso Machine", "Bathrobe & Slippers", "Safe", "Bluetooth Speaker", "Butler Service"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Nespresso Machine",
+                "Bathrobe & Slippers",
+                "Safe",
+                "Bluetooth Speaker",
+                "Butler Service",
+            ],
             "images": ["https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&q=80"],
             "bed_type": "King Bed + Sofa Bed",
             "features": ["Rooftop Terrace", "Private Spa Bath", "Butler Service", "360° Views"],
@@ -285,7 +355,14 @@ ROOM_TYPES = {
             "size": 42,
             "base_rate": 380,
             "currency": "USD",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Nespresso Machine", "Bathrobe & Slippers", "Safe"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Nespresso Machine",
+                "Bathrobe & Slippers",
+                "Safe",
+            ],
             "images": ["https://images.unsplash.com/photo-1602002418816-5c0aeef426aa?w=800&q=80"],
             "bed_type": "King Bed",
             "features": ["Large Terrace", "Sun Loungers", "Sea View", "Marble Bathroom"],
@@ -300,10 +377,24 @@ ROOM_TYPES = {
             "size": 85,
             "base_rate": 750,
             "currency": "USD",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Minibar", "Nespresso Machine", "Bathrobe & Slippers", "Safe", "Bluetooth Speaker", "Dedicated Concierge"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Minibar",
+                "Nespresso Machine",
+                "Bathrobe & Slippers",
+                "Safe",
+                "Bluetooth Speaker",
+                "Dedicated Concierge",
+            ],
             "images": ["https://images.unsplash.com/photo-1631049421450-348ccd7f8949?w=800&q=80"],
             "bed_type": "King Bed + Sofa Bed",
-            "features": ["Plunge Pool", "Wrap-around Terrace", "Living Room", "Dedicated Concierge"],
+            "features": [
+                "Plunge Pool",
+                "Wrap-around Terrace",
+                "Living Room",
+                "Dedicated Concierge",
+            ],
             "total_rooms": 2,
             "sort_order": 2,
         },
@@ -332,7 +423,13 @@ ROOM_TYPES = {
             "size": 30,
             "base_rate": 120,
             "currency": "GBP",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Tea & Coffee Making", "Hairdryer", "Binoculars"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Tea & Coffee Making",
+                "Hairdryer",
+                "Binoculars",
+            ],
             "images": ["https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&q=80"],
             "bed_type": "King Bed",
             "features": ["Loch View", "Window Seat", "Underfloor Heating"],
@@ -347,7 +444,14 @@ ROOM_TYPES = {
             "size": 48,
             "base_rate": 195,
             "currency": "GBP",
-            "amenities": ["Free WiFi", "Flat-screen TV", "Tea & Coffee Making", "Hairdryer", "Binoculars", "Bathrobe & Slippers"],
+            "amenities": [
+                "Free WiFi",
+                "Flat-screen TV",
+                "Tea & Coffee Making",
+                "Hairdryer",
+                "Binoculars",
+                "Bathrobe & Slippers",
+            ],
             "images": ["https://images.unsplash.com/photo-1602343168585-a27d3b7a1299?w=800&q=80"],
             "bed_type": "King Bed + Day Bed",
             "features": ["Private Deck", "Wood-burning Stove", "Loch View", "Sitting Area"],
@@ -483,9 +587,7 @@ async def main():
         for hotel in HOTELS:
             email = hotel.get("user_email")
             if email:
-                row = await auth_conn.fetchrow(
-                    "SELECT id FROM users WHERE email = $1", email
-                )
+                row = await auth_conn.fetchrow("SELECT id FROM users WHERE email = $1", email)
                 if row:
                     user_ids[email] = str(row["id"])
                 else:
@@ -624,9 +726,7 @@ async def main():
                 print(f"  WARNING: room type '{b['room_name']}' not found for {slug}")
                 continue
 
-            hotel_row = await pms_conn.fetchrow(
-                "SELECT id FROM hotels WHERE slug = $1", slug
-            )
+            hotel_row = await pms_conn.fetchrow("SELECT id FROM hotels WHERE slug = $1", slug)
             if not hotel_row:
                 continue
 
@@ -659,12 +759,16 @@ async def main():
                 rt["currency"],
                 b["status"],
             )
-            print(f"  Seeded booking: {b['booking_reference']} ({b['guest_first_name']} {b['guest_last_name']})")
+            print(
+                f"  Seeded booking: {b['booking_reference']} ({b['guest_first_name']} {b['guest_last_name']})"
+            )
 
         rt_count = await pms_conn.fetchval("SELECT COUNT(*) FROM room_types")
         bk_count = await pms_conn.fetchval("SELECT COUNT(*) FROM bookings")
         pms_hotel_count = await pms_conn.fetchval("SELECT COUNT(*) FROM hotels")
-        print(f"\nPMS DB: {pms_hotel_count} hotel(s), {rt_count} room type(s), {bk_count} booking(s).")
+        print(
+            f"\nPMS DB: {pms_hotel_count} hotel(s), {rt_count} room type(s), {bk_count} booking(s)."
+        )
     finally:
         await conn.close()
         await auth_conn.close()

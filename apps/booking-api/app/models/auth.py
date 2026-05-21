@@ -1,20 +1,22 @@
 """
 Authentication-related Pydantic models
 """
+
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
-    name: Optional[str] = Field(None, description="User's name (optional, defaults to email prefix)")
+    name: str | None = Field(None, description="User's name (optional, defaults to email prefix)")
     # GDPR consent fields
     terms_accepted: bool = Field(..., description="Must accept Terms of Service")
     privacy_accepted: bool = Field(..., description="Must accept Privacy Policy")
     marketing_consent: bool = Field(default=False, description="Optional marketing consent")
-    terms_version: Optional[str] = Field(default=None, description="Version of Terms accepted")
-    privacy_version: Optional[str] = Field(default=None, description="Version of Privacy Policy accepted")
+    terms_version: str | None = Field(default=None, description="Version of Terms accepted")
+    privacy_version: str | None = Field(
+        default=None, description="Version of Privacy Policy accepted"
+    )
 
 
 class RegisterResponse(BaseModel):
@@ -50,9 +52,9 @@ class LoginResponse(BaseModel):
 class TokenValidationResponse(BaseModel):
     valid: bool
     expired: bool
-    user_id: Optional[str] = None
-    email: Optional[str] = None
-    type: Optional[str] = None
+    user_id: str | None = None
+    email: str | None = None
+    type: str | None = None
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -61,7 +63,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ForgotPasswordResponse(BaseModel):
     message: str
-    token: Optional[str] = None  # Only returned in DEBUG mode when email fails
+    token: str | None = None  # Only returned in DEBUG mode when email fails
 
 
 class ResetPasswordRequest(BaseModel):
@@ -75,7 +77,9 @@ class ResetPasswordResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=8, description="New password must be at least 8 characters")
+    new_password: str = Field(
+        ..., min_length=8, description="New password must be at least 8 characters"
+    )
 
 
 class ChangePasswordResponse(BaseModel):
@@ -89,7 +93,7 @@ class ChangeEmailRequest(BaseModel):
 
 class ChangeEmailResponse(BaseModel):
     message: str
-    email: Optional[str] = None
+    email: str | None = None
 
 
 class VerifyEmailChangeRequest(BaseModel):

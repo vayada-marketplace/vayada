@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
 
 from app.models.utils import to_camel
 
@@ -14,11 +13,11 @@ class AddonResponse(BaseModel):
     currency: str
     category: str
     image: str
-    duration: Optional[str] = None
-    per_person: Optional[bool] = None
-    per_night: Optional[bool] = None
-    location: str = ''
-    max_guests: str = ''
+    duration: str | None = None
+    per_person: bool | None = None
+    per_night: bool | None = None
+    location: str = ""
+    max_guests: str = ""
     highlights: list[str] = []
     included_items: list[str] = []
 
@@ -27,36 +26,36 @@ class CreateAddonRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     name: str
-    description: str = ''
+    description: str = ""
     price: float
-    currency: str = 'EUR'
-    category: str = 'experience'
-    image: str = ''
-    duration: Optional[str] = None
-    per_person: Optional[bool] = None
-    per_night: Optional[bool] = None
-    location: Optional[str] = None
-    max_guests: Optional[str] = None
-    highlights: Optional[list[str]] = None
-    included_items: Optional[list[str]] = None
+    currency: str = "EUR"
+    category: str = "experience"
+    image: str = ""
+    duration: str | None = None
+    per_person: bool | None = None
+    per_night: bool | None = None
+    location: str | None = None
+    max_guests: str | None = None
+    highlights: list[str] | None = None
+    included_items: list[str] | None = None
 
 
 class UpdateAddonRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    name: Optional[str] = None
-    description: Optional[str] = None
-    price: Optional[float] = None
-    currency: Optional[str] = None
-    category: Optional[str] = None
-    image: Optional[str] = None
-    duration: Optional[str] = None
-    per_person: Optional[bool] = None
-    per_night: Optional[bool] = None
-    location: Optional[str] = None
-    max_guests: Optional[str] = None
-    highlights: Optional[list[str]] = None
-    included_items: Optional[list[str]] = None
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+    currency: str | None = None
+    category: str | None = None
+    image: str | None = None
+    duration: str | None = None
+    per_person: bool | None = None
+    per_night: bool | None = None
+    location: str | None = None
+    max_guests: str | None = None
+    highlights: list[str] | None = None
+    included_items: list[str] | None = None
 
 
 class AddonSettingsResponse(BaseModel):
@@ -69,5 +68,5 @@ class AddonSettingsResponse(BaseModel):
 class AddonSettingsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    show_addons_step: Optional[bool] = None
-    group_addons_by_category: Optional[bool] = None
+    show_addons_step: bool | None = None
+    group_addons_by_category: bool | None = None

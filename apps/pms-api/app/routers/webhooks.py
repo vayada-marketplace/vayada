@@ -1,27 +1,24 @@
 import hmac
-import hashlib
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
-from app.services import stripe_service
-from app.repositories.payment_repo import PaymentRepository
-from app.repositories.booking_repo import BookingRepository
-from app.repositories.booking_draft_repo import BookingDraftRepository
-from app.repositories.payout_repo import PayoutRepository
-from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
 from app.repositories.affiliate_repo import AffiliateRepository
+from app.repositories.booking_draft_repo import BookingDraftRepository
+from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_webhook_event_repo import ChannexWebhookEventRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.payment_repo import PaymentRepository
+from app.repositories.payout_repo import PayoutRepository
+from app.services import stripe_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
 
 
-async def _materialize_or_get_booking_for_pi(
-    pi_id: str, payment_status: str
-) -> dict | None:
+async def _materialize_or_get_booking_for_pi(pi_id: str, payment_status: str) -> dict | None:
     """Resolve the booking that a Stripe webhook pertains to.
 
     With VAY-388 the booking row may not exist yet at the time the first
@@ -74,9 +71,7 @@ async def stripe_webhook(request: Request):
             payment = await PaymentRepository.get_by_stripe_pi(pi_id)
             if payment and payment["status"] != "authorized":
                 await PaymentRepository.update_status(str(payment["id"]), "authorized")
-            await BookingRepository.update_payment_status(
-                str(booking["id"]), "authorized"
-            )
+            await BookingRepository.update_payment_status(str(booking["id"]), "authorized")
             logger.info("Payment authorized via webhook: %s", pi_id)
 
     elif event_type == "payment_intent.succeeded":
@@ -87,7 +82,12 @@ async def stripe_webhook(request: Request):
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
 
         if booking and payment:
-            card = data.get("charges", {}).get("data", [{}])[0].get("payment_method_details", {}).get("card", {})
+            card = (
+                data.get("charges", {})
+                .get("data", [{}])[0]
+                .get("payment_method_details", {})
+                .get("card", {})
+            )
             if payment["status"] != "captured":
                 await PaymentRepository.update_status(
                     str(payment["id"]),
@@ -105,23 +105,25 @@ async def stripe_webhook(request: Request):
             # already captured.
             if booking["status"] == "pending":
                 from app.database import Database
+
                 hotel_row = await Database.fetchrow(
                     "SELECT instant_book FROM hotels WHERE id = $1",
                     booking["hotel_id"],
                 )
                 if hotel_row and hotel_row.get("instant_book"):
                     from app.services.booking_service import _finalize_accepted_booking
+
                     try:
                         await _finalize_accepted_booking(booking_id, capture_card=False)
                     except Exception as e:
-                        logger.error(
-                            "Instant-book finalize failed for %s: %s", booking_id, e
-                        )
+                        logger.error("Instant-book finalize failed for %s: %s", booking_id, e)
 
             # Send payment confirmation email to guest
             if booking.get("guest_email"):
                 import asyncio
+
                 from app.services.email_service import send_guest_payment_confirmed
+
                 asyncio.create_task(
                     send_guest_payment_confirmed(
                         booking["guest_email"],
@@ -152,9 +154,7 @@ async def stripe_webhook(request: Request):
         payment = await PaymentRepository.get_by_stripe_pi(pi_id)
         if payment:
             await PaymentRepository.update_status(str(payment["id"]), "failed")
-            await BookingRepository.update_payment_status(
-                str(payment["booking_id"]), "failed"
-            )
+            await BookingRepository.update_payment_status(str(payment["booking_id"]), "failed")
             logger.info("Payment failed via webhook: %s", pi_id)
 
     elif event_type == "account.updated":
@@ -164,6 +164,7 @@ async def stripe_webhook(request: Request):
         if charges_enabled:
             # Mark hotel as onboarded
             from app.database import Database
+
             row = await Database.fetchrow(
                 "SELECT hotel_id FROM hotel_payment_settings WHERE stripe_connect_account_id = $1",
                 account_id,
@@ -198,6 +199,7 @@ async def xendit_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid callback token")
 
     import json
+
     data = json.loads(payload)
     event_type = data.get("event")
 
@@ -243,6 +245,7 @@ async def xendit_webhook(request: Request):
 
     elif event_type == "payout.failed" or status == "FAILED":
         from app.database import Database
+
         row = await Database.fetchrow(
             "SELECT id FROM payouts WHERE xendit_payout_id = $1",
             xendit_payout_id,
@@ -280,6 +283,7 @@ async def _handle_invoice_callback(data: dict):
         booking = await BookingRepository.get_by_id(booking_id)
         if booking:
             from app.database import Database
+
             hotel = await Database.fetchrow(
                 "SELECT contact_email, instant_book FROM hotels WHERE id = $1",
                 booking["hotel_id"],
@@ -287,15 +291,15 @@ async def _handle_invoice_callback(data: dict):
             if hotel and hotel.get("instant_book") and booking["status"] == "pending":
                 # Skip the request flow; finalize and email guest+host as accepted.
                 from app.services.booking_service import _finalize_accepted_booking
+
                 try:
                     await _finalize_accepted_booking(booking_id, capture_card=False)
                 except Exception as e:
-                    logger.error(
-                        "Instant-book finalize failed for %s: %s", booking_id, e
-                    )
+                    logger.error("Instant-book finalize failed for %s: %s", booking_id, e)
             elif hotel:
                 # Request flow — notify host to accept/reject
                 from app.services.email_service import send_booking_request_notification
+
                 asyncio.create_task(
                     send_booking_request_notification(hotel["contact_email"], booking)
                 )
@@ -303,7 +307,12 @@ async def _handle_invoice_callback(data: dict):
         # Send payment confirmation email to guest
         if booking and booking.get("guest_email"):
             from app.services.email_service import send_guest_payment_confirmed
-            xendit_label = f"{payment_method}/{payment_channel}" if payment_channel else (payment_method or "xendit")
+
+            xendit_label = (
+                f"{payment_method}/{payment_channel}"
+                if payment_channel
+                else (payment_method or "xendit")
+            )
             asyncio.create_task(
                 send_guest_payment_confirmed(
                     booking["guest_email"],
@@ -315,7 +324,10 @@ async def _handle_invoice_callback(data: dict):
 
         logger.info(
             "Xendit invoice paid: %s method=%s channel=%s booking=%s",
-            xendit_invoice_id, payment_method, payment_channel, booking_id,
+            xendit_invoice_id,
+            payment_method,
+            payment_channel,
+            booking_id,
         )
 
     elif invoice_status == "EXPIRED":
@@ -346,6 +358,7 @@ async def channex_webhook(request: Request):
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
     import json
+
     payload = await request.body()
     try:
         event = json.loads(payload)
@@ -372,6 +385,7 @@ async def channex_webhook(request: Request):
 
     if event_type == "message":
         from app.services.channex.messaging import process_inbound_message_event
+
         ok, err = True, None
         try:
             await process_inbound_message_event(event_payload, event)

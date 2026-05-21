@@ -1,6 +1,5 @@
 """Response shape for GET /admin/calendar — the rooms-eye view of bookings,
 blocks, and room types over a date range. Frontend expects camelCase keys."""
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -42,8 +41,8 @@ class CalendarBooking(_CamelModel):
     check_in: str
     check_out: str
     status: str
-    room_id: Optional[str] = None
-    room_number: Optional[str] = None
+    room_id: str | None = None
+    room_number: str | None = None
     channel: str = "direct"
     booking_reference: str
     # VAY-403: a multi-room booking emits one entry per assigned room so
@@ -57,17 +56,17 @@ class CalendarBooking(_CamelModel):
 class CalendarBlock(_CamelModel):
     id: str
     room_type_id: str
-    room_id: Optional[str] = None
-    room_number: Optional[str] = None
+    room_id: str | None = None
+    room_number: str | None = None
     start_date: str
     end_date: str
     blocked_count: int
-    reason: Optional[str] = None
+    reason: str | None = None
     created_at: str
 
 
 class CalendarResponse(_CamelModel):
-    room_types: List[CalendarRoomType] = []
-    rooms: List[CalendarRoom] = []
-    bookings: List[CalendarBooking] = []
-    blocks: List[CalendarBlock] = []
+    room_types: list[CalendarRoomType] = []
+    rooms: list[CalendarRoom] = []
+    bookings: list[CalendarBooking] = []
+    blocks: list[CalendarBlock] = []

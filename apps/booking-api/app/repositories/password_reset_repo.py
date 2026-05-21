@@ -1,24 +1,25 @@
 """
 Repository for password_reset_tokens table (AuthDatabase).
 """
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 from app.database import AuthDatabase
 
 
 class PasswordResetRepository:
-
     @staticmethod
     async def create(user_id: str, token: str, expires_in_hours: int = 1) -> None:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
         await AuthDatabase.execute(
             "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)",
-            user_id, token, expires_at,
+            user_id,
+            token,
+            expires_at,
         )
 
     @staticmethod
-    async def get_valid_token(token: str) -> Optional[dict]:
+    async def get_valid_token(token: str) -> dict | None:
         query = """
             SELECT prt.id, prt.user_id, prt.expires_at, prt.used, u.email, u.status
             FROM password_reset_tokens prt

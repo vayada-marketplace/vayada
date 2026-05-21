@@ -1,10 +1,10 @@
 import asyncpg
-from typing import Optional
+
 from app.config import settings
 
 
 class Database:
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
 
     @classmethod
     async def get_pool(cls) -> asyncpg.Pool:
@@ -49,7 +49,7 @@ class Database:
 
 
 class AuthDatabase:
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
 
     @classmethod
     async def get_pool(cls) -> asyncpg.Pool:
@@ -88,7 +88,7 @@ class AuthDatabase:
 
 
 class BookingEngineDatabase:
-    _pool: Optional[asyncpg.Pool] = None
+    _pool: asyncpg.Pool | None = None
 
     @classmethod
     async def get_pool(cls) -> asyncpg.Pool:

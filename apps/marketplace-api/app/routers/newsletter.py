@@ -1,12 +1,14 @@
 """
 Newsletter preferences routes
 """
+
+import logging
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+
 from app.dependencies import get_current_user_id
 from app.repositories.newsletter_repo import NewsletterRepository
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +17,12 @@ router = APIRouter(prefix="/newsletter", tags=["newsletter"])
 
 class NewsletterPreferencesResponse(BaseModel):
     enabled: bool
-    country_filter: Optional[List[str]] = None
+    country_filter: list[str] | None = None
 
 
 class UpdateNewsletterPreferencesRequest(BaseModel):
-    enabled: Optional[bool] = None
-    country_filter: Optional[List[str]] = None
+    enabled: bool | None = None
+    country_filter: list[str] | None = None
 
 
 @router.get("/preferences", response_model=NewsletterPreferencesResponse)
@@ -30,8 +32,8 @@ async def get_newsletter_preferences(user_id: str = Depends(get_current_user_id)
     if prefs is None:
         return NewsletterPreferencesResponse(enabled=True, country_filter=None)
     return NewsletterPreferencesResponse(
-        enabled=prefs['enabled'],
-        country_filter=prefs['country_filter'],
+        enabled=prefs["enabled"],
+        country_filter=prefs["country_filter"],
     )
 
 
@@ -54,6 +56,6 @@ async def update_newsletter_preferences(
         clear_country_filter=clear_country,
     )
     return NewsletterPreferencesResponse(
-        enabled=prefs['enabled'],
-        country_filter=prefs['country_filter'],
+        enabled=prefs["enabled"],
+        country_filter=prefs["country_filter"],
     )

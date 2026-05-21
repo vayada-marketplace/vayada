@@ -1,35 +1,36 @@
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.dependencies import require_hotel_admin
 from app.database import AuthDatabase
-from app.utils import get_hotel_id, parse_jsonb
-from app.repositories.hotel_repo import HotelRepository
-from app.services import hotel_identity_service
+from app.dependencies import require_hotel_admin
 from app.models.hotel import (
-    HotelRegister,
-    HotelResponse,
-    HotelDeletionImpactResponse,
-    HotelDetailsResponse,
-    HotelBenefitsUpdate,
-    HotelBenefitsResponse,
-    GuestFormSettingsResponse,
-    GuestFormSettingsUpdate,
     CalendarSettingsResponse,
     CalendarSettingsUpdate,
+    GuestFormSettingsResponse,
+    GuestFormSettingsUpdate,
+    HotelBenefitsResponse,
+    HotelBenefitsUpdate,
+    HotelDeletionImpactResponse,
+    HotelDetailsResponse,
+    HotelRegister,
+    HotelResponse,
     SetupStatusResponse,
 )
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
-from app.services import channex_service
+from app.repositories.hotel_repo import HotelRepository
+from app.services import channex_service, hotel_identity_service
+from app.utils import get_hotel_id, parse_jsonb
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _hotel_response(row: dict, slug: str = None, name: str = None, contact_email: str = None) -> HotelResponse:
+def _hotel_response(
+    row: dict, slug: str = None, name: str = None, contact_email: str = None
+) -> HotelResponse:
     """Build a HotelResponse from a basic-shape row, optionally overriding
     fields with values the caller is about to write."""
     return HotelResponse(
@@ -105,12 +106,18 @@ async def register_hotel(
                 or existing["contact_email"] != data.contact_email
             ):
                 await HotelRepository.update_basic(
-                    str(existing["id"]), data.slug, data.name, data.contact_email,
+                    str(existing["id"]),
+                    data.slug,
+                    data.name,
+                    data.contact_email,
                 )
             return _hotel_response(existing, data.slug, data.name, data.contact_email)
 
         row = await HotelRepository.create(
-            data.slug, data.name, data.contact_email, user_id,
+            data.slug,
+            data.name,
+            data.contact_email,
+            user_id,
             hotel_id=data.booking_hotel_id,
         )
         return _hotel_response(row)
@@ -121,13 +128,17 @@ async def register_hotel(
         "register_hotel called without booking_hotel_id for user_id=%s slug=%s. "
         "This is the legacy single-hotel path and will be removed; callers "
         "must be updated to pass booking_hotel_id.",
-        user_id, data.slug,
+        user_id,
+        data.slug,
     )
     existing = await HotelRepository.get_oldest_for_user(user_id)
     if existing:
         if existing["slug"] != data.slug or existing["name"] != data.name:
             await HotelRepository.update_basic(
-                str(existing["id"]), data.slug, data.name, data.contact_email,
+                str(existing["id"]),
+                data.slug,
+                data.name,
+                data.contact_email,
             )
         return _hotel_response(existing, data.slug, data.name, data.contact_email)
 
@@ -208,12 +219,15 @@ async def delete_hotel(user_id: str = Depends(require_hotel_admin)):
         try:
             api_key = channex_service.get_platform_api_key()
             await channex_service.delete_property(
-                api_key, connection["channex_property_id"], force=True,
+                api_key,
+                connection["channex_property_id"],
+                force=True,
             )
         except Exception as e:
             logger.warning(
                 "Channex deprovision failed for hotel %s during delete (continuing): %s",
-                hotel_id, e,
+                hotel_id,
+                e,
             )
 
     deleted = await HotelRepository.delete(hotel_id)
@@ -258,12 +272,16 @@ async def get_setup_status(
                 if user and user["name"]:
                     import re
                     import uuid
-                    base_slug = re.sub(r'[^a-z0-9]+', '-', user["name"].lower()).strip('-')
+
+                    base_slug = re.sub(r"[^a-z0-9]+", "-", user["name"].lower()).strip("-")
                     slug = base_slug or "hotel"
                     # Append short suffix to avoid slug collisions
                     slug = f"{slug}-{uuid.uuid4().hex[:6]}"
                     oldest = await HotelRepository.create(
-                        slug, user["name"], user["email"], user_id,
+                        slug,
+                        user["name"],
+                        user["email"],
+                        user_id,
                     )
             except Exception as e:
                 logger.error(f"Auto-register hotel failed for user {user_id}: {e}")
@@ -349,9 +367,5 @@ async def update_calendar_settings(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
-    await HotelRepository.set_auto_rearrange_enabled(
-        hotel_id, data.auto_rearrange_enabled
-    )
-    return CalendarSettingsResponse(
-        auto_rearrange_enabled=data.auto_rearrange_enabled
-    )
+    await HotelRepository.set_auto_rearrange_enabled(hotel_id, data.auto_rearrange_enabled)
+    return CalendarSettingsResponse(auto_rearrange_enabled=data.auto_rearrange_enabled)

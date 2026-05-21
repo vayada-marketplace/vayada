@@ -1,5 +1,4 @@
-from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -26,7 +25,7 @@ class InvoiceListItem(BaseModel):
     guest_email: str
     check_in: str
     check_out: str
-    room_number: Optional[str] = None
+    room_number: str | None = None
     room_name: str
     currency: str
     total_amount: float
@@ -39,9 +38,9 @@ class InvoiceListItem(BaseModel):
 class InvoiceListResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    invoices: List[InvoiceListItem]
+    invoices: list[InvoiceListItem]
     total: int
-    counts: Dict[str, int]
+    counts: dict[str, int]
     limit: int
     offset: int
 
@@ -62,7 +61,7 @@ class InvoicePayment(BaseModel):
     method_label: str
     amount: float
     currency: str
-    reference: Optional[str] = None
+    reference: str | None = None
     status: str
     recorded_at: str
 
@@ -78,16 +77,16 @@ class InvoiceDetail(BaseModel):
     guest_last_name: str
     guest_email: str
     guest_phone: str
-    room_number: Optional[str] = None
+    room_number: str | None = None
     room_name: str
     check_in: str
     check_out: str
     nights: int
     currency: str
-    charges: List[InvoiceCharge]
+    charges: list[InvoiceCharge]
     subtotal: float
     total_amount: float
-    payments: List[InvoicePayment]
+    payments: list[InvoicePayment]
     amount_paid: float
     balance_due: float
     status: InvoiceStatus
@@ -99,11 +98,11 @@ class RecordPaymentRequest(BaseModel):
 
     amount: float = Field(gt=0)
     payment_method: ManualPaymentMethod
-    reference: Optional[str] = None
+    reference: str | None = None
 
     @field_validator("reference")
     @classmethod
-    def trim_reference(cls, v: Optional[str]) -> Optional[str]:
+    def trim_reference(cls, v: str | None) -> str | None:
         if v is None:
             return v
         v = v.strip()
@@ -114,7 +113,7 @@ class FinancialsSummary(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     revenue_mtd: float
-    revenue_mtd_delta_pct: Optional[float] = None
+    revenue_mtd_delta_pct: float | None = None
     outstanding: float
     overdue_count: int
     currency: str
@@ -133,7 +132,7 @@ class PaymentLedgerEntry(BaseModel):
     method_label: str
     amount: float
     currency: str
-    reference: Optional[str] = None
+    reference: str | None = None
     status: str
     recorded_at: str
 
@@ -141,7 +140,7 @@ class PaymentLedgerEntry(BaseModel):
 class PaymentLedgerResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    payments: List[PaymentLedgerEntry]
+    payments: list[PaymentLedgerEntry]
     total: int
     limit: int
     offset: int

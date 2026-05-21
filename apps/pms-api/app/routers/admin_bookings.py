@@ -1,38 +1,49 @@
 import asyncio
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.dependencies import require_hotel_admin
-from app.utils import get_hotel_id
-from app.repositories.room_type_repo import RoomTypeRepository
-from app.repositories.booking_repo import BookingRepository
-from app.repositories.booking_event_repo import BookingEventRepository
-from app.repositories.room_repo import RoomRepository
-from app.repositories.payout_repo import PayoutRepository
-from app.models.booking import BookingAdminResponse, BookingStatusUpdate, BookingDetailsUpdate, AdminBookingCreate, BookingRoomAssign, BookingRoomSwap, AssignedRoom
-from app.repositories.booking_room_repo import BookingRoomRepository
+from app.models.booking import (
+    AdminBookingCreate,
+    AssignedRoom,
+    BookingAdminResponse,
+    BookingDetailsUpdate,
+    BookingRoomAssign,
+    BookingRoomSwap,
+    BookingStatusUpdate,
+)
 from app.models.payment import PayoutResponse
-from app.services.email_service import send_guest_confirmation, send_guest_cancellation, send_guest_admin_booking_confirmed
-from app.services.booking_service import host_accept_booking, host_reject_booking
+from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
+from app.repositories.booking_event_repo import BookingEventRepository
+from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_room_repo import BookingRoomRepository
+from app.repositories.payout_repo import PayoutRepository
+from app.repositories.room_repo import RoomRepository
+from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.booking_change_service import (
     approve_change as approve_booking_change,
+)
+from app.services.booking_change_service import (
     decline_change as decline_booking_change,
 )
-from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
+from app.services.booking_service import host_accept_booking, host_reject_booking
 from app.services.channex_sync_service import push_availability_for_room_type
+from app.services.email_service import (
+    send_guest_admin_booking_confirmed,
+    send_guest_cancellation,
+    send_guest_confirmation,
+)
 from app.services.room_assignment import try_place_unassigned_after_cancellation
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin-bookings"])
 
 
-def _booking_to_admin(
-    b: dict, extra_rooms: Optional[list] = None
-) -> BookingAdminResponse:
+def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminResponse:
     ci = b["check_in"]
     co = b["check_out"]
     nights = (co - ci).days
@@ -127,18 +138,14 @@ async def create_admin_booking(
 
     # Validate dates
     if data.check_out <= data.check_in:
-        raise HTTPException(
-            status_code=400, detail="check_out must be after check_in"
-        )
+        raise HTTPException(status_code=400, detail="check_out must be after check_in")
 
     # Check room availability
     available = await BookingRepository.is_room_available(
         data.room_id, data.check_in, data.check_out
     )
     if not available:
-        raise HTTPException(
-            status_code=409, detail="Room is not available for the selected dates"
-        )
+        raise HTTPException(status_code=409, detail="Room is not available for the selected dates")
 
     # Get room type for pricing
     room_type = await RoomTypeRepository.get_by_id(str(room["room_type_id"]))
@@ -179,8 +186,10 @@ async def create_admin_booking(
     # Push updated availability to Channex (only affected dates)
     asyncio.create_task(
         push_availability_for_room_type(
-            hotel_id, str(room["room_type_id"]),
-            start_date=data.check_in, end_date=data.check_out,
+            hotel_id,
+            str(room["room_type_id"]),
+            start_date=data.check_in,
+            end_date=data.check_out,
         )
     )
 
@@ -195,8 +204,8 @@ async def create_admin_booking(
 
 @router.get("/bookings")
 async def list_bookings(
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),
@@ -218,10 +227,7 @@ async def list_bookings(
         extras_by_booking.setdefault(str(er["booking_id"]), []).append(er)
 
     return {
-        "bookings": [
-            _booking_to_admin(b, extras_by_booking.get(str(b["id"])))
-            for b in bookings
-        ],
+        "bookings": [_booking_to_admin(b, extras_by_booking.get(str(b["id"]))) for b in bookings],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -264,7 +270,8 @@ async def update_booking_details(
         new_end = data.check_out or old_end
         asyncio.create_task(
             push_availability_for_room_type(
-                hotel_id, str(booking["room_type_id"]),
+                hotel_id,
+                str(booking["room_type_id"]),
                 start_date=min(old_start, new_start),
                 end_date=max(old_end, new_end),
             )
@@ -280,9 +287,7 @@ async def update_booking_status(
     user_id: str = Depends(require_hotel_admin),
 ):
     if data.status not in ("confirmed", "cancelled"):
-        raise HTTPException(
-            status_code=400, detail="Status must be 'confirmed' or 'cancelled'"
-        )
+        raise HTTPException(status_code=400, detail="Status must be 'confirmed' or 'cancelled'")
 
     hotel_id = await get_hotel_id(user_id)
     booking = await BookingRepository.get_by_id(booking_id)
@@ -295,20 +300,18 @@ async def update_booking_status(
     # Push availability to Channex (only affected dates)
     asyncio.create_task(
         push_availability_for_room_type(
-            hotel_id, str(booking["room_type_id"]),
-            start_date=booking["check_in"], end_date=booking["check_out"],
+            hotel_id,
+            str(booking["room_type_id"]),
+            start_date=booking["check_in"],
+            end_date=booking["check_out"],
         )
     )
 
     # Fire-and-forget: notify guest of status change
     if data.status == "confirmed":
-        asyncio.create_task(
-            send_guest_confirmation(updated["guest_email"], updated)
-        )
+        asyncio.create_task(send_guest_confirmation(updated["guest_email"], updated))
     elif data.status == "cancelled":
-        asyncio.create_task(
-            send_guest_cancellation(updated["guest_email"], updated)
-        )
+        asyncio.create_task(send_guest_cancellation(updated["guest_email"], updated))
         # VAY-397: cancellation may have freed a slot that an unassigned
         # booking can take. Fire-and-forget so the admin doesn't wait.
         if booking.get("room_id"):
@@ -423,9 +426,7 @@ async def move_booking_to_room(
     if from_room_id == primary_room_id:
         await BookingRepository.assign_room(booking_id, data.room_id)
     else:
-        await BookingRoomRepository.reassign_extra_room(
-            booking_id, from_room_id, data.room_id
-        )
+        await BookingRoomRepository.reassign_extra_room(booking_id, from_room_id, data.room_id)
     await BookingEventRepository.record(
         booking_id=booking_id,
         hotel_id=hotel_id,
@@ -597,7 +598,10 @@ async def swap_booking_rooms(
     # ones moving.
     excluded = [booking_id, data.partner_booking_id]
     source_room_ok = await BookingRepository.is_room_available_excluding(
-        new_source_room_id, source["check_in"], source["check_out"], excluded,
+        new_source_room_id,
+        source["check_in"],
+        source["check_out"],
+        excluded,
     )
     if not source_room_ok:
         raise HTTPException(
@@ -605,7 +609,10 @@ async def swap_booking_rooms(
             detail="Target room for source booking has a conflict",
         )
     partner_room_ok = await BookingRepository.is_room_available_excluding(
-        new_partner_room_id, partner["check_in"], partner["check_out"], excluded,
+        new_partner_room_id,
+        partner["check_in"],
+        partner["check_out"],
+        excluded,
     )
     if not partner_room_ok:
         raise HTTPException(
@@ -615,8 +622,10 @@ async def swap_booking_rooms(
 
     # Atomic two-row update.
     await BookingRepository.swap_room_assignments(
-        booking_id, new_source_room_id,
-        data.partner_booking_id, new_partner_room_id,
+        booking_id,
+        new_source_room_id,
+        data.partner_booking_id,
+        new_partner_room_id,
     )
 
     # Audit: one event per booking, each pointing at the other.
@@ -676,6 +685,7 @@ async def accept_booking(
 
 class RejectBookingRequest(BaseModel):
     reason: str | None = None
+
 
 @router.post("/bookings/{booking_id}/reject", response_model=BookingAdminResponse)
 async def reject_booking(
@@ -785,7 +795,9 @@ async def admin_decline_change_request(
         raise HTTPException(status_code=404, detail="No pending change request")
     try:
         cr = await decline_booking_change(
-            str(pending["id"]), reason=body.reason, hotel_id=hotel_id,
+            str(pending["id"]),
+            reason=body.reason,
+            hotel_id=hotel_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -797,7 +809,7 @@ async def admin_decline_change_request(
 
 @router.get("/payouts")
 async def list_payouts(
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(require_hotel_admin),

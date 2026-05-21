@@ -1,24 +1,23 @@
 import logging
-from typing import List
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies import require_hotel_admin
-from app.utils import get_hotel_id
-from app.repositories.room_type_repo import RoomTypeRepository
+from app.models.calendar import (
+    CalendarBlock,
+    CalendarBooking,
+    CalendarResponse,
+    CalendarRoom,
+    CalendarRoomType,
+)
+from app.models.room import RoomCreate, RoomReorder, RoomResponse, RoomUpdate
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_room_repo import BookingRoomRepository
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
-from app.models.room import RoomCreate, RoomReorder, RoomUpdate, RoomResponse
-from app.models.calendar import (
-    CalendarResponse,
-    CalendarRoomType,
-    CalendarRoom,
-    CalendarBooking,
-    CalendarBlock,
-)
+from app.repositories.room_type_repo import RoomTypeRepository
+from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ def _room_to_response(r: dict) -> RoomResponse:
     )
 
 
-@router.get("/rooms", response_model=List[RoomResponse])
+@router.get("/rooms", response_model=list[RoomResponse])
 async def list_rooms(user_id: str = Depends(require_hotel_admin)):
     hotel_id = await get_hotel_id(user_id)
     rooms = await RoomRepository.list_by_hotel_id(hotel_id)
@@ -129,7 +128,9 @@ async def update_room(
 
     updates = data.model_dump(exclude_unset=True)
     if "status" in updates and updates["status"] not in (
-        "available", "maintenance", "out_of_order"
+        "available",
+        "maintenance",
+        "out_of_order",
     ):
         raise HTTPException(
             status_code=400,
@@ -248,11 +249,7 @@ async def get_calendar(
             )
             for r in rooms
         ],
-        bookings=[
-            entry
-            for b in bookings
-            for entry in _calendar_entries(b)
-        ],
+        bookings=[entry for b in bookings for entry in _calendar_entries(b)],
         blocks=[
             CalendarBlock(
                 id=str(bl["id"]),

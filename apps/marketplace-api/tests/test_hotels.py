@@ -1,18 +1,20 @@
 """
 Tests for hotel profile and listing endpoints.
 """
-import pytest
-from httpx import AsyncClient
+
 from io import BytesIO
+
+import pytest
+from app.database import Database
+from httpx import AsyncClient
 from PIL import Image
 
-from app.database import Database
 from tests.conftest import (
-    get_auth_headers,
-    create_test_hotel,
-    create_test_creator,
-    create_test_listing,
     create_test_collaboration,
+    create_test_creator,
+    create_test_hotel,
+    create_test_listing,
+    get_auth_headers,
 )
 
 
@@ -28,13 +30,10 @@ def create_test_image() -> bytes:
 class TestGetHotelProfileStatus:
     """Tests for GET /hotels/me/profile-status"""
 
-    async def test_profile_status_complete(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_profile_status_complete(self, client: AsyncClient, test_hotel_verified):
         """Test profile status for complete hotel profile."""
         response = await client.get(
-            "/hotels/me/profile-status",
-            headers=get_auth_headers(test_hotel_verified["token"])
+            "/hotels/me/profile-status", headers=get_auth_headers(test_hotel_verified["token"])
         )
 
         assert response.status_code == 200
@@ -43,13 +42,10 @@ class TestGetHotelProfileStatus:
         assert len(data["missing_fields"]) == 0
         assert data["missing_listings"] is False
 
-    async def test_profile_status_incomplete(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_profile_status_incomplete(self, client: AsyncClient, test_hotel):
         """Test profile status for incomplete hotel profile."""
         response = await client.get(
-            "/hotels/me/profile-status",
-            headers=get_auth_headers(test_hotel["token"])
+            "/hotels/me/profile-status", headers=get_auth_headers(test_hotel["token"])
         )
 
         assert response.status_code == 200
@@ -65,28 +61,22 @@ class TestGetHotelProfileStatus:
         hotel = await create_test_hotel(location="Not specified")
 
         response = await client.get(
-            "/hotels/me/profile-status",
-            headers=get_auth_headers(hotel["token"])
+            "/hotels/me/profile-status", headers=get_auth_headers(hotel["token"])
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["has_defaults"]["location"] is True
 
-    async def test_profile_status_wrong_user_type(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_profile_status_wrong_user_type(self, client: AsyncClient, test_creator):
         """Test profile status as creator user."""
         response = await client.get(
-            "/hotels/me/profile-status",
-            headers=get_auth_headers(test_creator["token"])
+            "/hotels/me/profile-status", headers=get_auth_headers(test_creator["token"])
         )
 
         assert response.status_code == 403
 
-    async def test_profile_status_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_profile_status_no_auth(self, client: AsyncClient):
         """Test profile status without authentication."""
         response = await client.get("/hotels/me/profile-status")
 
@@ -96,14 +86,9 @@ class TestGetHotelProfileStatus:
 class TestGetHotelProfile:
     """Tests for GET /hotels/me"""
 
-    async def test_get_profile_success(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_get_profile_success(self, client: AsyncClient, test_hotel):
         """Test getting hotel profile."""
-        response = await client.get(
-            "/hotels/me",
-            headers=get_auth_headers(test_hotel["token"])
-        )
+        response = await client.get("/hotels/me", headers=get_auth_headers(test_hotel["token"]))
 
         assert response.status_code == 200
         data = response.json()
@@ -111,13 +96,10 @@ class TestGetHotelProfile:
         assert data["email"] == test_hotel["user"]["email"]
         assert "listings" in data
 
-    async def test_get_profile_with_listings(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_get_profile_with_listings(self, client: AsyncClient, test_hotel_verified):
         """Test getting profile with listings."""
         response = await client.get(
-            "/hotels/me",
-            headers=get_auth_headers(test_hotel_verified["token"])
+            "/hotels/me", headers=get_auth_headers(test_hotel_verified["token"])
         )
 
         assert response.status_code == 200
@@ -128,9 +110,7 @@ class TestGetHotelProfile:
         assert "collaboration_offerings" in listing
         assert "creator_requirements" in listing
 
-    async def test_get_profile_no_auth(
-        self, client: AsyncClient
-    ):
+    async def test_get_profile_no_auth(self, client: AsyncClient):
         """Test getting profile without authentication."""
         response = await client.get("/hotels/me")
 
@@ -140,18 +120,16 @@ class TestGetHotelProfile:
 class TestUpdateHotelProfile:
     """Tests for PUT /hotels/me"""
 
-    async def test_update_profile_json(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_update_profile_json(self, client: AsyncClient, test_hotel):
         """Test updating profile with JSON body."""
         response = await client.put(
             "/hotels/me",
             json={
                 "name": "Updated Hotel Name",
                 "location": "Rome, Italy",
-                "about": "A beautiful hotel in Rome"
+                "about": "A beautiful hotel in Rome",
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 200
@@ -160,20 +138,15 @@ class TestUpdateHotelProfile:
         assert data["location"] == "Rome, Italy"
         assert data["about"] == "A beautiful hotel in Rome"
 
-    async def test_update_profile_multipart(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_update_profile_multipart(self, client: AsyncClient, test_hotel):
         """Test updating profile with multipart form data including picture."""
         image_data = create_test_image()
 
         response = await client.put(
             "/hotels/me",
-            data={
-                "name": "Hotel with Picture",
-                "location": "Barcelona, Spain"
-            },
+            data={"name": "Hotel with Picture", "location": "Barcelona, Spain"},
             files={"picture": ("hotel.jpg", image_data, "image/jpeg")},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 200
@@ -185,10 +158,7 @@ class TestUpdateHotelProfile:
         self, client: AsyncClient, cleanup_database, init_database, mock_send_email
     ):
         """Test that completion email is sent when profile becomes complete."""
-        hotel = await create_test_hotel(
-            about=None,
-            profile_complete=False
-        )
+        hotel = await create_test_hotel(about=None, profile_complete=False)
 
         # Add a listing to complete the profile
         await create_test_listing(hotel_profile_id=str(hotel["hotel"]["id"]))
@@ -196,23 +166,18 @@ class TestUpdateHotelProfile:
         # Complete the profile
         response = await client.put(
             "/hotels/me",
-            json={
-                "about": "Complete description",
-                "website": "https://hotel.example.com"
-            },
-            headers=get_auth_headers(hotel["token"])
+            json={"about": "Complete description", "website": "https://hotel.example.com"},
+            headers=get_auth_headers(hotel["token"]),
         )
 
         assert response.status_code == 200
 
-    async def test_update_profile_partial(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_update_profile_partial(self, client: AsyncClient, test_hotel):
         """Test partial profile update."""
         response = await client.put(
             "/hotels/me",
             json={"phone": "+1234567890"},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 200
@@ -221,17 +186,14 @@ class TestUpdateHotelProfile:
         # Other fields should remain unchanged
         assert data["name"] == test_hotel["hotel"]["name"]
 
-    async def test_update_email(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_update_email(self, client: AsyncClient, test_hotel):
         """Test updating email."""
         from tests.conftest import generate_test_email
+
         new_email = generate_test_email("newemail")
 
         response = await client.put(
-            "/hotels/me",
-            json={"email": new_email},
-            headers=get_auth_headers(test_hotel["token"])
+            "/hotels/me", json={"email": new_email}, headers=get_auth_headers(test_hotel["token"])
         )
 
         assert response.status_code == 200
@@ -242,9 +204,7 @@ class TestUpdateHotelProfile:
 class TestCreateHotelListing:
     """Tests for POST /hotels/me/listings"""
 
-    async def test_create_listing_success(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_success(self, client: AsyncClient, test_hotel):
         """Test creating a listing."""
         response = await client.post(
             "/hotels/me/listings",
@@ -260,16 +220,16 @@ class TestCreateHotelListing:
                         "availabilityMonths": ["January", "February", "March"],
                         "platforms": ["Instagram", "TikTok"],
                         "freeStayMinNights": 3,
-                        "freeStayMaxNights": 7
+                        "freeStayMaxNights": 7,
                     }
                 ],
                 "creatorRequirements": {
                     "platforms": ["Instagram"],
                     "topCountries": ["USA", "UK"],
-                    "targetAgeGroups": ["25-34"]
-                }
+                    "targetAgeGroups": ["25-34"],
+                },
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
@@ -278,9 +238,7 @@ class TestCreateHotelListing:
         assert len(data["collaboration_offerings"]) == 1
         assert data["creator_requirements"] is not None
 
-    async def test_create_listing_with_paid_offering(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_with_paid_offering(self, client: AsyncClient, test_hotel):
         """Test creating listing with paid collaboration."""
         response = await client.post(
             "/hotels/me/listings",
@@ -294,14 +252,12 @@ class TestCreateHotelListing:
                         "collaborationType": "Paid",
                         "availabilityMonths": ["April", "May", "June"],
                         "platforms": ["Instagram"],
-                        "paidMaxAmount": 5000
+                        "paidMaxAmount": 5000,
                     }
                 ],
-                "creatorRequirements": {
-                    "platforms": ["Instagram"]
-                }
+                "creatorRequirements": {"platforms": ["Instagram"]},
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
@@ -311,9 +267,7 @@ class TestCreateHotelListing:
         # paid_max_amount returned as string from decimal
         assert float(offering["paid_max_amount"]) == 5000
 
-    async def test_create_listing_missing_fields(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_missing_fields(self, client: AsyncClient, test_hotel):
         """Test creating listing with missing required fields."""
         response = await client.post(
             "/hotels/me/listings",
@@ -321,14 +275,12 @@ class TestCreateHotelListing:
                 "name": "Incomplete Listing"
                 # Missing other required fields
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 422
 
-    async def test_create_listing_wrong_user_type(
-        self, client: AsyncClient, test_creator
-    ):
+    async def test_create_listing_wrong_user_type(self, client: AsyncClient, test_creator):
         """Test creating listing as creator."""
         response = await client.post(
             "/hotels/me/listings",
@@ -343,12 +295,12 @@ class TestCreateHotelListing:
                         "availabilityMonths": ["January"],
                         "platforms": ["Instagram"],
                         "freeStayMinNights": 2,
-                        "freeStayMaxNights": 5
+                        "freeStayMaxNights": 5,
                     }
                 ],
-                "creatorRequirements": {"platforms": ["Instagram"]}
+                "creatorRequirements": {"platforms": ["Instagram"]},
             },
-            headers=get_auth_headers(test_creator["token"])
+            headers=get_auth_headers(test_creator["token"]),
         )
 
         assert response.status_code == 403
@@ -357,28 +309,21 @@ class TestCreateHotelListing:
 class TestUpdateHotelListing:
     """Tests for PUT /hotels/me/listings/{listing_id}"""
 
-    async def test_update_listing_success(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_update_listing_success(self, client: AsyncClient, test_hotel_verified):
         """Test updating a listing."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.put(
             f"/hotels/me/listings/{listing_id}",
-            json={
-                "name": "Updated Listing Name",
-                "description": "Updated description"
-            },
-            headers=get_auth_headers(test_hotel_verified["token"])
+            json={"name": "Updated Listing Name", "description": "Updated description"},
+            headers=get_auth_headers(test_hotel_verified["token"]),
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Listing Name"
 
-    async def test_update_listing_offerings(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_update_listing_offerings(self, client: AsyncClient, test_hotel_verified):
         """Test updating listing collaboration offerings."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
@@ -390,11 +335,11 @@ class TestUpdateHotelListing:
                         "collaborationType": "Discount",
                         "availabilityMonths": ["July", "August"],
                         "platforms": ["Instagram"],
-                        "discountPercentage": 50
+                        "discountPercentage": 50,
                     }
                 ]
             },
-            headers=get_auth_headers(test_hotel_verified["token"])
+            headers=get_auth_headers(test_hotel_verified["token"]),
         )
 
         assert response.status_code == 200
@@ -412,19 +357,17 @@ class TestUpdateHotelListing:
         response = await client.put(
             f"/hotels/me/listings/{listing_id}",
             json={"name": "Hacked Name"},
-            headers=get_auth_headers(other_hotel["token"])
+            headers=get_auth_headers(other_hotel["token"]),
         )
 
         assert response.status_code == 404  # Not found because it doesn't belong to them
 
-    async def test_update_listing_not_found(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_update_listing_not_found(self, client: AsyncClient, test_hotel):
         """Test updating non-existent listing."""
         response = await client.put(
             "/hotels/me/listings/00000000-0000-0000-0000-000000000000",
             json={"name": "Test"},
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 404
@@ -433,15 +376,13 @@ class TestUpdateHotelListing:
 class TestDeleteHotelListing:
     """Tests for DELETE /hotels/me/listings/{listing_id}"""
 
-    async def test_delete_listing_success(
-        self, client: AsyncClient, test_hotel_verified
-    ):
+    async def test_delete_listing_success(self, client: AsyncClient, test_hotel_verified):
         """Test deleting a listing."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.delete(
             f"/hotels/me/listings/{listing_id}",
-            headers=get_auth_headers(test_hotel_verified["token"])
+            headers=get_auth_headers(test_hotel_verified["token"]),
         )
 
         assert response.status_code == 204
@@ -449,17 +390,15 @@ class TestDeleteHotelListing:
         # Verify listing is deleted
         listing = await Database.fetchrow(
             "SELECT id FROM hotel_listings WHERE id = $1",
-            test_hotel_verified["listing"]["listing"]["id"]
+            test_hotel_verified["listing"]["listing"]["id"],
         )
         assert listing is None
 
-    async def test_delete_listing_not_found(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_delete_listing_not_found(self, client: AsyncClient, test_hotel):
         """Test deleting non-existent listing."""
         response = await client.delete(
             "/hotels/me/listings/00000000-0000-0000-0000-000000000000",
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 404
@@ -472,8 +411,7 @@ class TestDeleteHotelListing:
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.delete(
-            f"/hotels/me/listings/{listing_id}",
-            headers=get_auth_headers(other_hotel["token"])
+            f"/hotels/me/listings/{listing_id}", headers=get_auth_headers(other_hotel["token"])
         )
 
         assert response.status_code == 404
@@ -482,13 +420,11 @@ class TestDeleteHotelListing:
 class TestGetHotelCollaborations:
     """Tests for GET /hotels/me/collaborations"""
 
-    async def test_get_collaborations_list(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_get_collaborations_list(self, client: AsyncClient, test_collaboration):
         """Test getting hotel collaborations list."""
         response = await client.get(
             "/hotels/me/collaborations",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -502,7 +438,7 @@ class TestGetHotelCollaborations:
         """Test filtering collaborations by status."""
         response = await client.get(
             "/hotels/me/collaborations?status=pending",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -518,7 +454,7 @@ class TestGetHotelCollaborations:
 
         response = await client.get(
             f"/hotels/me/collaborations?listing_id={listing_id}",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -531,7 +467,7 @@ class TestGetHotelCollaborations:
         """Test filtering collaborations by initiator."""
         response = await client.get(
             "/hotels/me/collaborations?initiated_by=creator",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -539,13 +475,10 @@ class TestGetHotelCollaborations:
         for collab in data:
             assert collab["initiator_type"] == "creator"
 
-    async def test_get_collaborations_empty(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_get_collaborations_empty(self, client: AsyncClient, test_hotel):
         """Test getting collaborations when none exist."""
         response = await client.get(
-            "/hotels/me/collaborations",
-            headers=get_auth_headers(test_hotel["token"])
+            "/hotels/me/collaborations", headers=get_auth_headers(test_hotel["token"])
         )
 
         assert response.status_code == 200
@@ -556,15 +489,13 @@ class TestGetHotelCollaborations:
 class TestGetHotelCollaborationDetail:
     """Tests for GET /hotels/me/collaborations/{collaboration_id}"""
 
-    async def test_get_collaboration_detail(
-        self, client: AsyncClient, test_collaboration
-    ):
+    async def test_get_collaboration_detail(self, client: AsyncClient, test_collaboration):
         """Test getting collaboration detail."""
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.get(
             f"/hotels/me/collaborations/{collab_id}",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -583,8 +514,7 @@ class TestGetHotelCollaborationDetail:
         collab_id = str(test_collaboration["collaboration"]["id"])
 
         response = await client.get(
-            f"/hotels/me/collaborations/{collab_id}",
-            headers=get_auth_headers(other_hotel["token"])
+            f"/hotels/me/collaborations/{collab_id}", headers=get_auth_headers(other_hotel["token"])
         )
 
         assert response.status_code == 404
@@ -597,7 +527,7 @@ class TestGetHotelCollaborationDetail:
 
         response = await client.get(
             f"/hotels/me/collaborations/{collab_id}",
-            headers=get_auth_headers(test_collaboration["hotel"]["token"])
+            headers=get_auth_headers(test_collaboration["hotel"]["token"]),
         )
 
         assert response.status_code == 200
@@ -610,9 +540,7 @@ class TestGetHotelCollaborationDetail:
 class TestListingCollaborationOfferings:
     """Tests for listing collaboration offerings"""
 
-    async def test_create_listing_multiple_offerings(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_multiple_offerings(self, client: AsyncClient, test_hotel):
         """Test creating listing with multiple collaboration offerings."""
         response = await client.post(
             "/hotels/me/listings",
@@ -627,29 +555,25 @@ class TestListingCollaborationOfferings:
                         "availabilityMonths": ["March", "April"],
                         "platforms": ["Instagram"],
                         "freeStayMinNights": 3,
-                        "freeStayMaxNights": 5
+                        "freeStayMaxNights": 5,
                     },
                     {
                         "collaborationType": "Paid",
                         "availabilityMonths": ["May", "June"],
                         "platforms": ["TikTok"],
-                        "paidMaxAmount": 2000
-                    }
+                        "paidMaxAmount": 2000,
+                    },
                 ],
-                "creatorRequirements": {
-                    "platforms": ["Instagram", "TikTok"]
-                }
+                "creatorRequirements": {"platforms": ["Instagram", "TikTok"]},
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
         data = response.json()
         assert len(data["collaboration_offerings"]) == 2
 
-    async def test_create_listing_with_availability_months(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_with_availability_months(self, client: AsyncClient, test_hotel):
         """Test creating listing with availability months."""
         response = await client.post(
             "/hotels/me/listings",
@@ -664,14 +588,12 @@ class TestListingCollaborationOfferings:
                         "platforms": ["Instagram"],
                         "availabilityMonths": ["December", "January", "February"],
                         "freeStayMinNights": 5,
-                        "freeStayMaxNights": 10
+                        "freeStayMaxNights": 10,
                     }
                 ],
-                "creatorRequirements": {
-                    "platforms": ["Instagram"]
-                }
+                "creatorRequirements": {"platforms": ["Instagram"]},
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
@@ -743,9 +665,7 @@ class TestListingCollaborationOfferings:
 class TestCreatorRequirements:
     """Tests for listing creator requirements"""
 
-    async def test_create_listing_with_age_requirements(
-        self, client: AsyncClient, test_hotel
-    ):
+    async def test_create_listing_with_age_requirements(self, client: AsyncClient, test_hotel):
         """Test creating listing with age range requirements."""
         response = await client.post(
             "/hotels/me/listings",
@@ -760,17 +680,17 @@ class TestCreatorRequirements:
                         "availabilityMonths": ["July", "August"],
                         "platforms": ["TikTok"],
                         "freeStayMinNights": 2,
-                        "freeStayMaxNights": 4
+                        "freeStayMaxNights": 4,
                     }
                 ],
                 "creatorRequirements": {
                     "platforms": ["TikTok"],
                     "targetAgeMin": 18,
                     "targetAgeMax": 30,
-                    "targetAgeGroups": ["18-24", "25-34"]
-                }
+                    "targetAgeGroups": ["18-24", "25-34"],
+                },
             },
-            headers=get_auth_headers(test_hotel["token"])
+            headers=get_auth_headers(test_hotel["token"]),
         )
 
         assert response.status_code == 201
