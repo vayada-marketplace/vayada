@@ -42,13 +42,9 @@ For broken links, Docusaurus is configured with `onBrokenLinks: 'throw'`, so mis
 
 The site is deployed as a static bundle to S3 + CloudFront. Infra is in `infra/docs.tf`; the bucket is `s3://vayada-docs` and the public URL is `https://docs.vayada.com`.
 
-```bash
-./deploy.sh           # build, sync to S3, invalidate CloudFront
-```
+**Automatic** (default): a push to `main` that touches `docs/docs/`, `docs/src/`, `docs/static/`, `docs/docusaurus.config.ts`, `docs/sidebars.ts`, or `docs/package.json` triggers `.github/workflows/deploy-docs.yml`, which builds, syncs to S3, and invalidates CloudFront via the OIDC deploy role.
 
-Requires AWS credentials with access to the docs S3 bucket and the CloudFront distribution (the distribution ID is read from `terraform output` in `infra/`).
-
-This is currently a manual deploy. Migrating it to a GitHub Actions workflow with path filters (matching the pattern in `docs/engineering/monorepo-deploy-workflows.md`) is a known follow-up.
+**Manual** (fallback): `./deploy.sh` does the same thing locally. Requires AWS credentials with S3 + CloudFront permissions; the distribution ID is read from `terraform output` in `infra/`. Use this if the workflow is broken or you need to deploy from a non-`main` branch.
 
 ## Maintenance
 
