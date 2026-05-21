@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "seed:users": "node scripts/seed-mock-users.js"
   },
   "dependencies": {
