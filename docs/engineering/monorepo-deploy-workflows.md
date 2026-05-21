@@ -35,7 +35,7 @@ The initial migration preserves existing deployment targets:
 
 - existing ECR repository names
 - existing ECS clusters, services, task families, and App Runner image behavior
-- existing static AWS credential secret names: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+- GitHub OIDC authentication through `arn:aws:iam::269416271598:role/vayada-github-actions-deploy`
 - existing frontend build arguments and backend test setup
 
 The only intended behavior change is that workflows now run from the monorepo
@@ -45,7 +45,7 @@ root and use app-specific path filters.
 
 Before merging the monorepo migration branch:
 
-1. Configure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on `vayada-marketplace/vayada`.
+1. Confirm the AWS IAM role trust policy allows `repo:vayada-marketplace/vayada:ref:refs/heads/main`.
 2. Confirm `actionlint .github/workflows/*.yml` passes.
 3. Manually run one low-risk frontend workflow with `workflow_dispatch`.
 4. Manually run one backend workflow with tests using `workflow_dispatch`.
@@ -65,6 +65,8 @@ Rollback options before old workflows are disabled:
 3. Re-run the previous successful GitHub Actions deployment in the old app repo.
 4. If the monorepo migration branch has not merged, keep it unmerged and continue
    from the existing standalone app repositories.
+5. If OIDC role assumption fails, fix or temporarily revert the affected workflow
+   to the old app repo deploy path while the trust policy or role permissions are corrected.
 
 After old workflows are disabled, rollback requires either re-enabling the old
 workflow in the standalone app repo or reverting the monorepo workflow change.

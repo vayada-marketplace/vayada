@@ -10,6 +10,10 @@ on:
       - 'packages/**'
       - '.github/workflows/deploy-pms-api.yml'
 
+permissions:
+  id-token: write
+  contents: read
+
 concurrency:
   group: deploy-pms-api-${{ github.ref }}
   cancel-in-progress: false
@@ -177,8 +181,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
