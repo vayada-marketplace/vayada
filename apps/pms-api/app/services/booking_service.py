@@ -1,0 +1,1613 @@
+import asyncio
+import json
+import logging
+import math
+import uuid
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
+
+import httpx
+
+from app.config import settings
+from app.database import Database
+from app.repositories.room_type_repo import RoomTypeRepository
+from app.repositories.booking_repo import BookingRepository
+from app.repositories.booking_draft_repo import BookingDraftRepository
+from app.repositories.payment_repo import PaymentRepository
+from app.repositories.payout_repo import PayoutRepository
+from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.cancellation_policy_repo import CancellationPolicyRepository
+from app.repositories.affiliate_repo import AffiliateRepository
+from app.models.booking import BookingCreate, BookingResponse
+from app.services import stripe_service, xendit_service
+from app.services.availability_service import compute_stay_pricing, remaining_for_stay
+from app.services.currency_service import get_exchange_rate
+from app.services.occupancy import room_allows_guest_mix
+from app.services.payout_service import calculate_split, fetch_billing_config, schedule_payouts
+from app.services.room_type_service import resolve_last_minute_discount
+from app.services.channex.ari_push import push_availability_for_room_type
+from app.services.channex.orchestrator import push_ari_for_booking
+from app.services.channex.outbound import handle_vayada_cancellation as channex_handle_cancellation
+from app.services.room_assignment import (
+    apply_moves_atomic,
+    record_auto_rearrange,
+    resolve_assignment,
+    resolve_room_assignments,
+    try_place_unassigned_after_cancellation,
+)
+from app.services.email_service import (
+    send_booking_request_notification,
+    send_guest_booking_requested,
+    send_guest_booking_accepted,
+    send_guest_booking_rejected,
+    send_guest_booking_expired,
+    send_host_booking_withdrawn,
+    send_guest_cancellation_refund,
+    send_guest_booking_withdrawn,
+    send_host_booking_accepted,
+    send_host_booking_rejected,
+    send_host_guest_cancelled,
+    send_host_booking_expired,
+)
+from app.utils import get_hotel_id
+
+logger = logging.getLogger(__name__)
+
+HOST_RESPONSE_HOURS = 24
+
+
+def _nights(check_in: date, check_out: date) -> int:
+    return (check_out - check_in).days
+
+
+def _booking_to_response(booking: dict) -> BookingResponse:
+    ci = booking["check_in"]
+    co = booking["check_out"]
+    deadline = booking.get("host_response_deadline")
+    return BookingResponse(
+        id=str(booking["id"]),
+        booking_reference=booking["booking_reference"],
+        hotel_name=booking["hotel_name"],
+        room_name=booking["room_name"],
+        guest_first_name=booking["guest_first_name"],
+        guest_last_name=booking["guest_last_name"],
+        guest_email=booking["guest_email"],
+        check_in=str(ci),
+        check_out=str(co),
+        nights=_nights(ci, co),
+        adults=booking["adults"],
+        children=booking["children"],
+        nightly_rate=float(booking["nightly_rate"]),
+        number_of_rooms=int(booking.get("number_of_rooms") or 1),
+        total_amount=float(booking["total_amount"]),
+        addon_total=float(booking.get("addon_total") or 0),
+        currency=booking["currency"],
+        status=booking["status"],
+        payment_method=booking.get("payment_method"),
+        payment_status=booking.get("payment_status"),
+        host_response_deadline=deadline.isoformat() if deadline else None,
+        created_at=booking["created_at"].isoformat(),
+    )
+
+
+@dataclass
+class BookingPricing:
+    """Resolved totals for a booking: nightly rate (post-discount), per-stay
+    room cost, addons, promo + last-minute discount, and the final amount."""
+    nightly_rate: float
+    room_total: float
+    addon_total: float
+    addon_names: list[str] = field(default_factory=list)
+    promo_code: Optional[str] = None
+    promo_discount: float = 0.0
+    last_minute_discount_pct: int = 0
+    last_minute_discount_amount: float = 0.0
+    total_amount: float = 0.0
+
+
+@dataclass
+class PaymentOutcome:
+    """Result of dispatching the chosen payment method."""
+    client_secret: Optional[str] = None
+    xendit_invoice_url: Optional[str] = None
+
+
+async def _assign_room_unit(
+    room_type_id: str, check_in: date, check_out: date
+) -> Optional[str]:
+    """Pick the lowest-numbered available room unit for the stay window.
+    Returns the room id, or None if every unit is booked.
+
+    Direct-fit only — does not rearrange existing bookings. Callers that
+    want the auto-rearrange behavior should use `resolve_assignment`
+    instead, which respects the hotel's `auto_rearrange_enabled` toggle.
+    """
+    row = await Database.fetchrow(
+        """
+        SELECT r.id FROM rooms r
+        WHERE r.room_type_id = $1
+          AND r.status = 'available'
+          AND r.id NOT IN (
+            SELECT b.room_id FROM bookings b
+            WHERE b.room_id IS NOT NULL
+              AND b.status IN ('pending', 'confirmed')
+              AND b.check_in < $3
+              AND b.check_out > $2
+          )
+        ORDER BY r.sort_order,
+                 (COALESCE(NULLIF(regexp_replace(r.room_number, '[^0-9].*', '', 'g'), ''), '0'))::int,
+                 r.room_number
+        LIMIT 1
+        """,
+        room_type_id, check_in, check_out,
+    )
+    return str(row["id"]) if row else None
+
+
+
+
+async def _fetch_hotel_addons(slug: str) -> list[dict]:
+    """Fetch the hotel's addons from the booking-engine API.
+    Returns an empty list on any failure (logged)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/addons"
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.warning("Failed to fetch addons for %s: %s", slug, e)
+        return []
+
+
+async def _validate_promo_code(slug: str, code: str) -> dict:
+    """Validate a promo code against the booking-engine API.
+    Returns the API response, or ``{"valid": False}`` on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/validate-promo",
+                params={"code": code},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.warning("Failed to validate promo for %s: %s", slug, e)
+        return {"valid": False}
+
+
+async def _increment_promo_use(slug: str, code: str) -> None:
+    """Best-effort: bump the promo's use count after a successful booking."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{settings.BOOKING_ENGINE_API_URL}/api/hotels/{slug}/increment-promo",
+                params={"code": code},
+            )
+    except Exception as e:
+        logger.warning("Failed to increment promo use count: %s", e)
+
+
+async def _compute_addon_total(
+    slug: str,
+    addon_ids: list[str],
+    addon_quantities: dict,
+    room_currency: str,
+    adults: int,
+    nights: int,
+    addon_dates: dict | None = None,
+) -> tuple[float, list[str]]:
+    """Sum the addon prices for a stay, converting to ``room_currency`` so the
+    booking total matches what the guest saw at checkout. Returns
+    (total, addon_names).
+
+    Pricing rules (VAY-360):
+    - perPerson: multiply by ``addon_quantities[id]`` (the number of guests
+      opting in, clamped to ``adults``). Defaults to ``adults`` for legacy
+      bookings that didn't send a quantity.
+    - perNight: multiply by the number of selected dates from
+      ``addon_dates[id]`` (clamped to ``nights``). Falls back to
+      ``addon_quantities[id]`` and finally to ``nights`` for legacy bookings.
+    - Both flags: both modifiers compose, so price = unit × people × days.
+    - Neither flag: per-booking; multiply by ``addon_quantities[id]`` (default 1).
+    """
+    if not addon_ids:
+        return 0.0, []
+
+    all_addons = await _fetch_hotel_addons(slug)
+    addon_map = {a["id"]: a for a in all_addons}
+    room_currency = room_currency.upper()
+    rate_cache: dict = {}
+    addon_total = 0.0
+    addon_names: list[str] = []
+    addon_dates = addon_dates or {}
+
+    for aid in addon_ids:
+        addon = addon_map.get(aid)
+        if not addon:
+            continue
+        addon_names.append(addon.get("name", "Unknown"))
+        price = float(addon["price"])
+        per_person = bool(addon.get("perPerson"))
+        per_night = bool(addon.get("perNight"))
+
+        if per_person:
+            people = addon_quantities.get(aid, adults)
+            people = max(1, min(int(people), max(1, adults)))
+            price *= people
+
+        if per_night:
+            dates = addon_dates.get(aid) or []
+            if dates:
+                days = max(1, min(len(dates), nights))
+            else:
+                days = int(addon_quantities.get(aid, nights)) if not per_person else nights
+                days = max(1, min(days, nights))
+            price *= days
+
+        if not per_person and not per_night:
+            qty = max(1, int(addon_quantities.get(aid, 1)))
+            price *= qty
+
+        addon_currency = (addon.get("currency") or room_currency).upper()
+        if addon_currency != room_currency:
+            if addon_currency not in rate_cache:
+                try:
+                    rate_cache[addon_currency] = await get_exchange_rate(
+                        addon_currency, room_currency
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to fetch addon exchange rate %s -> %s: %s",
+                        addon_currency, room_currency, e,
+                    )
+                    rate_cache[addon_currency] = 1.0
+            price = price * rate_cache[addon_currency]
+        addon_total += price
+
+    return round(addon_total, 2), addon_names
+
+
+async def _compute_booking_pricing(
+    slug: str,
+    data: BookingCreate,
+    hotel: dict,
+    room: dict,
+    nights: int,
+) -> BookingPricing:
+    """Resolve the full pricing surface for a booking: nightly rates,
+    addons, promo code, and last-minute-discount stacking. Pure-ish: only
+    side effect is best-effort HTTP fetches to booking-engine, all of
+    which fail open."""
+    pricing = compute_stay_pricing(
+        room, data.check_in, data.check_out, data.adults, data.rate_type
+    )
+    room_total = round(pricing.room_total * data.number_of_rooms, 2)
+
+    # Last-minute discount based on days before check-in
+    days_before = (data.check_in - date.today()).days
+    hotel_lm_raw = hotel.get("last_minute_discount")
+    hotel_lm_config = json.loads(hotel_lm_raw) if isinstance(hotel_lm_raw, str) else hotel_lm_raw if hotel_lm_raw else None
+    room_lm_raw = room.get("last_minute_discount")
+    room_lm_config = json.loads(room_lm_raw) if isinstance(room_lm_raw, str) else room_lm_raw if room_lm_raw else None
+    lm_pct = resolve_last_minute_discount(hotel_lm_config, room_lm_config, days_before) or 0
+    lm_discount_amount = 0.0
+    if lm_pct > 0:
+        lm_discount_amount = round(room_total * (lm_pct / 100), 2)
+        room_total = round(room_total - lm_discount_amount, 2)
+
+    nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
+
+    # Addons
+    addon_total, addon_names = await _compute_addon_total(
+        slug,
+        data.addon_ids or [],
+        data.addon_quantities or {},
+        room.get("currency") or "EUR",
+        data.adults,
+        nights,
+        data.addon_dates or {},
+    )
+
+    subtotal = room_total + addon_total
+
+    # Promo
+    promo_code_str: Optional[str] = None
+    promo_discount = 0.0
+    if data.promo_code:
+        promo_result = await _validate_promo_code(slug, data.promo_code)
+        if promo_result.get("valid"):
+            promo_code_str = promo_result["code"]
+            discount_type = promo_result["discountType"]
+            discount_value = float(promo_result["discountValue"])
+            if discount_type == "percentage":
+                promo_discount = round(subtotal * (discount_value / 100), 2)
+            else:
+                promo_discount = min(discount_value, subtotal)
+
+    # Promo vs last-minute stacking — keep only the larger discount unless
+    # the hotel opted in via stackWithPromo.
+    stack_with_promo = (hotel_lm_config or {}).get("stackWithPromo", False)
+    if not stack_with_promo and lm_discount_amount > 0 and promo_discount > 0:
+        if promo_discount > lm_discount_amount:
+            # Promo wins — undo the last-minute discount.
+            room_total = round(room_total + lm_discount_amount, 2)
+            nightly_rate = round(room_total / (nights * data.number_of_rooms), 2)
+            subtotal = room_total + addon_total
+            lm_pct = 0
+            lm_discount_amount = 0.0
+        else:
+            # Last-minute wins — drop promo.
+            promo_discount = 0.0
+            promo_code_str = None
+
+    total_amount = round(subtotal - promo_discount, 2)
+
+    return BookingPricing(
+        nightly_rate=nightly_rate,
+        room_total=room_total,
+        addon_total=addon_total,
+        addon_names=addon_names,
+        promo_code=promo_code_str,
+        promo_discount=promo_discount,
+        last_minute_discount_pct=lm_pct,
+        last_minute_discount_amount=lm_discount_amount,
+        total_amount=total_amount,
+    )
+
+
+async def _resolve_card_provider(
+    hotel_settings: Optional[dict],
+) -> tuple[str, Optional[str]]:
+    """Return (provider, stripe_account). For ``stripe`` Connect we also
+    return the connected-account id; for ``vayada`` (platform) we return
+    None for the account. Raises ValueError when the hotel hasn't
+    finished onboarding so the booking-engine surfaces the same UX
+    message it has always shown."""
+    provider = (
+        hotel_settings.get("payment_provider", "stripe") if hotel_settings else "stripe"
+    )
+    if provider == "vayada":
+        return provider, None
+
+    stripe_account: Optional[str] = None
+    if hotel_settings and hotel_settings.get("stripe_connect_account_id"):
+        if hotel_settings.get("stripe_connect_onboarded"):
+            stripe_account = hotel_settings["stripe_connect_account_id"]
+
+    if not stripe_account:
+        # Don't silently downgrade to pay-at-property: the guest picked
+        # "card" specifically. If /payment-settings gating is doing its
+        # job this branch is unreachable from the UI.
+        raise ValueError(
+            "This hotel has not finished setting up online payments. "
+            "Please contact the hotel or choose another payment method."
+        )
+    return provider, stripe_account
+
+
+async def _create_card_payment_intent_for_draft(
+    *,
+    hotel_id: str,
+    hotel_settings: Optional[dict],
+    currency: str,
+    total_amount: float,
+    capture_method: str,
+    booking_reference: str,
+) -> tuple[str, str]:
+    """Create a Stripe PaymentIntent for a booking that hasn't been
+    persisted yet (VAY-388). Returns (payment_intent_id, client_secret).
+
+    Metadata carries ``booking_reference`` instead of ``booking_id``;
+    the webhook + confirm-authorization paths use the PI id to look up
+    the draft and materialize the booking lazily.
+    """
+    provider, stripe_account = await _resolve_card_provider(hotel_settings)
+    amount_cents = int(math.ceil(total_amount * 100))
+    metadata = {
+        "booking_reference": booking_reference,
+        "hotel_id": hotel_id,
+        "vayada_payment_kind": "draft",
+    }
+
+    if provider == "vayada":
+        pi = await stripe_service.create_payment_intent(
+            amount=amount_cents,
+            currency=currency,
+            metadata=metadata,
+            capture_method=capture_method,
+        )
+    else:
+        pi = await stripe_service.create_payment_intent(
+            amount=amount_cents,
+            currency=currency,
+            metadata=metadata,
+            stripe_account=stripe_account,
+            capture_method=capture_method,
+        )
+    return pi["id"], pi["client_secret"]
+
+
+def _booking_draft_payload(
+    *,
+    data: BookingCreate,
+    hotel_id: str,
+    room: dict,
+    pricing: BookingPricing,
+    affiliate_id: Optional[str],
+    payment_method: str,
+    deadline: Optional[datetime],
+) -> dict:
+    """Snapshot every field needed to materialize the booking later. Stored
+    as JSONB on the draft so the materializer never has to re-resolve
+    pricing or addons."""
+    return {
+        "hotel_id": hotel_id,
+        "room_type_id": data.room_type_id,
+        "guest_first_name": data.guest_first_name,
+        "guest_last_name": data.guest_last_name,
+        "guest_email": data.guest_email,
+        "guest_phone": data.guest_phone,
+        "guest_country": data.guest_country,
+        "special_requests": data.special_requests,
+        "estimated_arrival_time": data.estimated_arrival_time,
+        "number_of_guests": data.number_of_guests,
+        "check_in": data.check_in.isoformat(),
+        "check_out": data.check_out.isoformat(),
+        "adults": data.adults,
+        "children": data.children,
+        "nightly_rate": pricing.nightly_rate,
+        "number_of_rooms": data.number_of_rooms,
+        "total_amount": pricing.total_amount,
+        "currency": room["currency"],
+        "referral_code": data.referral_code,
+        "affiliate_id": affiliate_id,
+        "payment_method": payment_method,
+        "host_response_deadline": deadline.isoformat() if deadline else None,
+        "rate_type": data.rate_type,
+        "addon_ids": data.addon_ids or [],
+        "addon_names": pricing.addon_names,
+        "addon_total": pricing.addon_total,
+        "addon_quantities": data.addon_quantities or {},
+        "addon_dates": data.addon_dates or {},
+        "promo_code": pricing.promo_code,
+        "promo_discount": pricing.promo_discount,
+        "last_minute_discount_percent": pricing.last_minute_discount_pct,
+        "last_minute_discount_amount": pricing.last_minute_discount_amount,
+    }
+
+
+def _draft_preview_response(
+    *,
+    draft_id: str,
+    booking_reference: str,
+    hotel: dict,
+    room: dict,
+    data: BookingCreate,
+    pricing: BookingPricing,
+    deadline: Optional[datetime],
+) -> dict:
+    """Booking-shaped placeholder returned to the frontend before the real
+    row exists. The fields that the booking-engine reads on the payment
+    page (totals, dates, hotel/room name) are filled; PMS-only fields
+    (status, payment_status) are left as the moral equivalent of pending
+    so the UI doesn't render confirmed-state copy by mistake."""
+    return {
+        "id": "",
+        "bookingReference": booking_reference,
+        "hotelName": hotel["name"],
+        "roomName": room["name"],
+        "guestFirstName": data.guest_first_name,
+        "guestLastName": data.guest_last_name,
+        "guestEmail": data.guest_email,
+        "checkIn": data.check_in.isoformat(),
+        "checkOut": data.check_out.isoformat(),
+        "nights": _nights(data.check_in, data.check_out),
+        "adults": data.adults,
+        "children": data.children,
+        "nightlyRate": pricing.nightly_rate,
+        "numberOfRooms": data.number_of_rooms,
+        "totalAmount": pricing.total_amount,
+        "addonTotal": pricing.addon_total,
+        "currency": room["currency"],
+        "status": "draft",
+        "paymentMethod": "card",
+        "paymentStatus": "unpaid",
+        "hostResponseDeadline": deadline.isoformat() if deadline else None,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "draftId": draft_id,
+    }
+
+
+async def _create_booking_draft(
+    *,
+    slug: str,
+    data: BookingCreate,
+    hotel: dict,
+    hotel_id: str,
+    room: dict,
+    pricing: BookingPricing,
+    affiliate_id: Optional[str],
+    hotel_settings: Optional[dict],
+    deadline: Optional[datetime],
+    capture_method: str,
+    instant_book: bool,
+) -> dict:
+    """Card-path branch of create_booking_request. Skips the booking row
+    entirely (no inventory commit, no Channex push, no host email) and
+    leaves a soft-hold draft + Stripe PaymentIntent that can be
+    materialized once the guest authorizes the card.
+
+    The draft itself is what holds inventory (see availability_service)
+    and the booking_reference is generated upfront so emails sent on
+    materialization can refer to a stable code.
+    """
+    booking_reference = await BookingDraftRepository.generate_reference()
+    pi_id, client_secret = await _create_card_payment_intent_for_draft(
+        hotel_id=hotel_id,
+        hotel_settings=hotel_settings,
+        currency=room["currency"],
+        total_amount=pricing.total_amount,
+        capture_method=capture_method,
+        booking_reference=booking_reference,
+    )
+
+    payload = _booking_draft_payload(
+        data=data,
+        hotel_id=hotel_id,
+        room=room,
+        pricing=pricing,
+        affiliate_id=affiliate_id,
+        payment_method="card",
+        deadline=deadline,
+    )
+
+    draft = await BookingDraftRepository.create(
+        hotel_id=hotel_id,
+        room_type_id=data.room_type_id,
+        check_in=data.check_in,
+        check_out=data.check_out,
+        number_of_rooms=data.number_of_rooms,
+        booking_reference=booking_reference,
+        stripe_payment_intent_id=pi_id,
+        payload=payload,
+    )
+
+    if pricing.promo_code:
+        await _increment_promo_use(slug, pricing.promo_code)
+
+    preview = _draft_preview_response(
+        draft_id=str(draft["id"]),
+        booking_reference=booking_reference,
+        hotel=hotel,
+        room=room,
+        data=data,
+        pricing=pricing,
+        deadline=deadline,
+    )
+    return {
+        "booking": preview,
+        "clientSecret": client_secret,
+        "xenditInvoiceUrl": None,
+        "paymentMethod": "card",
+        "draftId": str(draft["id"]),
+        "bookingReference": booking_reference,
+        "instantBook": instant_book,
+    }
+
+
+async def materialize_draft(
+    draft: dict,
+    *,
+    payment_status: str,
+) -> Optional[dict]:
+    """Atomically convert a soft-hold draft into a real booking + payment row.
+
+    ``payment_status`` is the new payments.status (typically "authorized"
+    for the request flow, "captured" for instant-book). The atomic claim
+    stamps the new booking_id onto the draft (rather than DELETEing it),
+    so a second caller — sequential retry or webhook racing
+    confirm-authorization — can resolve back to the same booking via
+    ``draft.materialized_booking_id``.
+
+    Returns the booking row on success, None if another caller already
+    materialized this draft.
+    """
+    # Atomic claim — pre-allocate the booking id and stamp it on the
+    # draft. Exactly one concurrent caller wins; the rest see no rows
+    # and fall through to the existing get-by-stripe-pi resolution.
+    # The draft row is intentionally NOT deleted — keeping it (with the
+    # link set) lets a sequential retry of confirm-authorization resolve
+    # back to the same booking instead of 400-ing.
+    new_booking_id = str(uuid.uuid4())
+    claimed = await BookingDraftRepository.claim_for_materialization(
+        str(draft["id"]), new_booking_id
+    )
+    if not claimed:
+        return None
+
+    payload = claimed["payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+
+    booking_data = dict(payload)
+    booking_data["id"] = new_booking_id
+    booking_data["check_in"] = date.fromisoformat(booking_data["check_in"])
+    booking_data["check_out"] = date.fromisoformat(booking_data["check_out"])
+    deadline_str = booking_data.get("host_response_deadline")
+    booking_data["host_response_deadline"] = (
+        datetime.fromisoformat(deadline_str) if deadline_str else None
+    )
+    booking_data["payment_status"] = (
+        "authorized" if payment_status in ("authorized", "captured") else payment_status
+    )
+    booking_data["status"] = "pending"
+
+    # The draft already pre-allocated a reference; reuse it so the
+    # PaymentIntent metadata + any guest-side links stay consistent.
+    booking_data["booking_reference"] = claimed["booking_reference"]
+
+    # Last-mile race: by the time we materialize, another booking may
+    # have taken the room (legitimate or not). Prefer assigning a unit,
+    # fall back to leaving room_id NULL — host can reassign manually.
+    # VAY-397: if no direct fit and the hotel has auto-rearrange on,
+    # `resolve_assignment` returns a packing that moves existing future
+    # bookings to free a slot.
+    # VAY-403: a card multi-room booking must claim one physical room per
+    # booked room here too, otherwise only the first is blocked.
+    room_id, extra_room_ids, rearrange_moves = await resolve_room_assignments(
+        booking_data["hotel_id"],
+        booking_data["room_type_id"],
+        booking_data["check_in"],
+        booking_data["check_out"],
+        int(booking_data.get("number_of_rooms") or 1),
+    )
+    if rearrange_moves:
+        # Apply moves before INSERT so the target room is genuinely free
+        # at insert time — keeps the bookings table free of any transient
+        # double-assignment between INSERT and move-apply.
+        await apply_moves_atomic(rearrange_moves)
+    if room_id:
+        booking_data["room_id"] = room_id
+    if extra_room_ids:
+        booking_data["extra_room_ids"] = extra_room_ids
+
+    booking_row = await BookingRepository.create(booking_data)
+    booking_id = str(booking_row["id"])
+
+    if rearrange_moves:
+        await record_auto_rearrange(
+            hotel_id=booking_data["hotel_id"],
+            moves=rearrange_moves,
+            triggered_by_booking_id=booking_id,
+            triggered_by_guest_name=(
+                f"{booking_data.get('guest_first_name', '')} "
+                f"{booking_data.get('guest_last_name', '')}"
+            ).strip() or "guest",
+        )
+
+    await PaymentRepository.create(
+        booking_id=booking_id,
+        amount=float(booking_data["total_amount"]),
+        currency=booking_data["currency"],
+        payment_method="card",
+        stripe_pi_id=claimed["stripe_payment_intent_id"],
+    )
+    if payment_status == "authorized":
+        payment = await PaymentRepository.get_by_stripe_pi(
+            claimed["stripe_payment_intent_id"]
+        )
+        if payment:
+            await PaymentRepository.update_status(str(payment["id"]), "authorized")
+    elif payment_status == "captured":
+        payment = await PaymentRepository.get_by_stripe_pi(
+            claimed["stripe_payment_intent_id"]
+        )
+        if payment:
+            await PaymentRepository.update_status(str(payment["id"]), "captured")
+
+    booking = await BookingRepository.get_by_id(booking_id)
+
+    # Side effects equivalent to what create_booking_request used to do
+    # at row-insert time, but now correctly delayed until Stripe
+    # confirms there's a real commitment behind the booking.
+    asyncio.create_task(
+        send_guest_booking_requested(booking_data["guest_email"], booking)
+    )
+    asyncio.create_task(
+        push_availability_for_room_type(
+            booking_data["hotel_id"], booking_data["room_type_id"]
+        )
+    )
+    if booking_data.get("host_response_deadline"):
+        # Request flow — host needs to accept/reject. Instant-book skips
+        # this; the caller will run _finalize_accepted_booking instead.
+        hotel = await Database.fetchrow(
+            "SELECT contact_email FROM hotels WHERE id = $1",
+            booking_data["hotel_id"],
+        )
+        if hotel:
+            asyncio.create_task(
+                send_booking_request_notification(hotel["contact_email"], booking)
+            )
+
+    return booking
+
+
+async def _create_xendit_payment(
+    booking_id: str,
+    booking_reference: str,
+    hotel: dict,
+    hotel_id: str,
+    currency: str,
+    total_amount: float,
+    guest_email: str,
+) -> str:
+    """Create a Xendit invoice, store the payment record, and return the
+    hosted-checkout URL. Cleans up the booking on Xendit failure."""
+    try:
+        invoice = await xendit_service.create_invoice(
+            external_id=f"booking-{booking_id}",
+            amount=total_amount,
+            currency=currency,
+            payer_email=guest_email,
+            description=f"Booking {booking_reference} at {hotel['name']}",
+            success_redirect_url=(
+                f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/booking/"
+                f"{booking_id}/confirmation"
+            ),
+            failure_redirect_url=(
+                f"{settings.BOOKING_ENGINE_URL}/{hotel['slug']}/payment?failed=true"
+            ),
+            metadata={"booking_id": booking_id, "hotel_id": hotel_id},
+        )
+    except Exception:
+        await Database.execute("DELETE FROM bookings WHERE id = $1", booking_id)
+        raise
+
+    await PaymentRepository.create(
+        booking_id=booking_id,
+        amount=total_amount,
+        currency=currency,
+        payment_method="xendit",
+        xendit_invoice_id=invoice["id"],
+        xendit_invoice_url=invoice["invoice_url"],
+    )
+    return invoice["invoice_url"]
+
+
+async def _process_payment_method(
+    payment_method: str,
+    booking_id: str,
+    booking_row: dict,
+    hotel: dict,
+    hotel_id: str,
+    hotel_settings: Optional[dict],
+    currency: str,
+    total_amount: float,
+    guest_email: str,
+    use_request_flow: bool,
+    capture_method: str,
+) -> PaymentOutcome:
+    """Dispatch the payment-method-specific work after the booking row
+    exists. Xendit raises (and cleans up) on provider failure;
+    bank-transfer and pay-at-property always succeed but trigger emails.
+
+    The card path is intentionally absent here — VAY-388 defers the
+    booking row entirely until the Stripe PaymentIntent succeeds, so
+    create_booking_request returns early with a draft handle and never
+    reaches this dispatcher when payment_method == 'card'.
+    """
+    outcome = PaymentOutcome()
+
+    if payment_method == "xendit":
+        outcome.xendit_invoice_url = await _create_xendit_payment(
+            booking_id, booking_row["booking_reference"],
+            hotel, hotel_id, currency, total_amount, guest_email,
+        )
+
+    elif payment_method == "bank_transfer":
+        # Bank transfer — guest transfers directly, hotel verifies manually.
+        # Always uses the request flow (no money has moved, so we cannot
+        # auto-confirm even when the hotel has instant-book on).
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="bank_transfer",
+        )
+        await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
+        booking = await BookingRepository.get_by_id(booking_id)
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
+    else:
+        # Pay at property
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="pay_at_property",
+        )
+        await BookingRepository.update_payment_status(booking_id, "pay_at_property")
+        if use_request_flow:
+            booking = await BookingRepository.get_by_id(booking_id)
+            asyncio.create_task(
+                send_booking_request_notification(hotel["contact_email"], booking)
+            )
+        else:
+            # Instant-book: confirm right away. _finalize_accepted_booking
+            # sends the host + guest "accepted" emails.
+            await _finalize_accepted_booking(booking_id, capture_card=False)
+
+    return outcome
+
+
+async def create_booking_request(slug: str, data: BookingCreate) -> dict:
+    """New guest-facing flow: validates + prices + creates booking +
+    dispatches payment. Returns booking data + provider-specific
+    handles (Stripe client_secret or Xendit invoice URL)."""
+    # ── Validate hotel + room ──────────────────────────────────────
+    hotel = await Database.fetchrow(
+        "SELECT id, name, contact_email, last_minute_discount, instant_book "
+        "FROM hotels WHERE slug = $1",
+        slug,
+    )
+    if not hotel:
+        raise ValueError("Hotel not found")
+    hotel_id = str(hotel["id"])
+    instant_book = bool(hotel.get("instant_book"))
+
+    room = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise ValueError("Room type not found")
+    if not room["is_active"]:
+        raise ValueError("Room type is not available")
+    if not room_allows_guest_mix(room, data.adults, data.children):
+        raise ValueError("Guest mix exceeds this room's occupancy limits")
+
+    # ── Validate stay window (availability, nights, min-stay, advance) ──
+    available = await remaining_for_stay(
+        data.room_type_id, room["total_rooms"], data.check_in, data.check_out
+    )
+    if available < data.number_of_rooms:
+        raise ValueError("Not enough rooms available for the selected dates")
+
+    nights = _nights(data.check_in, data.check_out)
+    if nights <= 0:
+        raise ValueError("Check-out must be after check-in")
+
+    seasons = RoomTypeRepository._parse_seasons(room)
+    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
+    if min_stay and nights < min_stay:
+        raise ValueError(
+            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
+        )
+
+    min_advance = room.get("minimum_advance_days") or 0
+    if min_advance > 0:
+        days_until_checkin = (data.check_in - date.today()).days
+        if days_until_checkin < min_advance:
+            raise ValueError(
+                f"This room requires booking at least {min_advance} days in advance"
+            )
+
+    # ── Validate payment method against the rate's allow-list ──────
+    rate_methods_raw = room.get("rate_payment_methods")
+    if rate_methods_raw:
+        rate_methods = json.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
+        allowed = rate_methods.get(data.rate_type) if isinstance(rate_methods, dict) else None
+        if allowed is not None and data.payment_method not in allowed:
+            raise ValueError(
+                f"Payment method '{data.payment_method}' is not allowed for the "
+                f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
+            )
+
+    # ── Compute pricing (rooms + addons + promo + last-minute discount) ──
+    pricing = await _compute_booking_pricing(slug, data, hotel, room, nights)
+
+    # ── Resolve affiliate ──────────────────────────────────────────
+    affiliate_id = None
+    if data.referral_code:
+        affiliate = await Database.fetchrow(
+            "SELECT id FROM affiliates "
+            "WHERE hotel_id = $1 AND referral_code = $2 AND status = 'approved'",
+            hotel_id, data.referral_code,
+        )
+        if affiliate:
+            affiliate_id = str(affiliate["id"])
+
+    # ── Validate hotel-level payment-method enablement ─────────────
+    payment_method = data.payment_method
+    hotel_settings = None
+    if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
+        hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    if payment_method == "pay_at_property":
+        if not hotel_settings or not hotel_settings["pay_at_property_enabled"]:
+            raise ValueError("Pay at property is not enabled for this hotel")
+    elif payment_method == "xendit":
+        if not hotel_settings or not hotel_settings.get("xendit_payments_enabled"):
+            raise ValueError("Xendit payments are not enabled for this hotel")
+    elif payment_method == "bank_transfer":
+        if not hotel_settings or not hotel_settings.get("bank_transfer"):
+            raise ValueError("Bank transfer is not enabled for this hotel")
+
+    # Bank transfer is the only path that always stays in the request flow,
+    # even when instant_book is on — there's no money yet, so we can't
+    # auto-confirm.
+    use_request_flow = (not instant_book) or payment_method == "bank_transfer"
+    deadline = (
+        datetime.now(timezone.utc) + timedelta(hours=HOST_RESPONSE_HOURS)
+        if use_request_flow else None
+    )
+    capture_method = "manual" if use_request_flow else "automatic"
+
+    # ── Card path: defer the booking row until Stripe authorizes ──
+    # VAY-388: an unauthorized card-payment booking must not exist in
+    # the PMS or block inventory. We persist a soft-hold draft instead
+    # and let the webhook (or confirm-authorization) materialize it.
+    if payment_method == "card":
+        return await _create_booking_draft(
+            slug=slug,
+            data=data,
+            hotel=hotel,
+            hotel_id=hotel_id,
+            room=room,
+            pricing=pricing,
+            affiliate_id=affiliate_id,
+            hotel_settings=hotel_settings,
+            deadline=deadline,
+            capture_method=capture_method,
+            instant_book=instant_book,
+        )
+
+    # ── Persist booking row + auto-assign a room unit ──────────────
+    booking_data = {
+        "hotel_id": hotel_id,
+        "room_type_id": data.room_type_id,
+        "guest_first_name": data.guest_first_name,
+        "guest_last_name": data.guest_last_name,
+        "guest_email": data.guest_email,
+        "guest_phone": data.guest_phone,
+        "guest_country": data.guest_country,
+        "special_requests": data.special_requests,
+        "estimated_arrival_time": data.estimated_arrival_time,
+        "number_of_guests": data.number_of_guests,
+        "check_in": data.check_in,
+        "check_out": data.check_out,
+        "adults": data.adults,
+        "children": data.children,
+        "nightly_rate": pricing.nightly_rate,
+        "number_of_rooms": data.number_of_rooms,
+        "total_amount": pricing.total_amount,
+        "currency": room["currency"],
+        "referral_code": data.referral_code,
+        "affiliate_id": affiliate_id,
+        "payment_method": payment_method,
+        "payment_status": "unpaid",
+        "host_response_deadline": deadline,
+        "rate_type": data.rate_type,
+        "addon_ids": data.addon_ids or [],
+        "addon_names": pricing.addon_names,
+        "addon_total": pricing.addon_total,
+        "addon_quantities": data.addon_quantities or {},
+        "addon_dates": data.addon_dates or {},
+        "promo_code": pricing.promo_code,
+        "promo_discount": pricing.promo_discount,
+        "last_minute_discount_percent": pricing.last_minute_discount_pct,
+        "last_minute_discount_amount": pricing.last_minute_discount_amount,
+    }
+    # VAY-397: same auto-rearrange path as the draft-materialize flow.
+    # VAY-403: assign one physical room per booked room, not just one.
+    room_id, extra_room_ids, rearrange_moves = await resolve_room_assignments(
+        hotel_id, data.room_type_id, data.check_in, data.check_out,
+        data.number_of_rooms,
+    )
+    if rearrange_moves:
+        await apply_moves_atomic(rearrange_moves)
+    if room_id:
+        booking_data["room_id"] = room_id
+    if extra_room_ids:
+        booking_data["extra_room_ids"] = extra_room_ids
+
+    booking_row = await BookingRepository.create(booking_data)
+    booking_id = str(booking_row["id"])
+
+    if rearrange_moves:
+        await record_auto_rearrange(
+            hotel_id=hotel_id,
+            moves=rearrange_moves,
+            triggered_by_booking_id=booking_id,
+            triggered_by_guest_name=(
+                f"{data.guest_first_name} {data.guest_last_name}".strip()
+                or "guest"
+            ),
+        )
+
+    if pricing.promo_code:
+        await _increment_promo_use(slug, pricing.promo_code)
+
+    # ── Dispatch the chosen payment method ─────────────────────────
+    outcome = await _process_payment_method(
+        payment_method=payment_method,
+        booking_id=booking_id,
+        booking_row=booking_row,
+        hotel=hotel,
+        hotel_id=hotel_id,
+        hotel_settings=hotel_settings,
+        currency=room["currency"],
+        total_amount=pricing.total_amount,
+        guest_email=data.guest_email,
+        use_request_flow=use_request_flow,
+        capture_method=capture_method,
+    )
+
+    # ── Build response + side effects ──────────────────────────────
+    booking = await BookingRepository.get_by_id(booking_id)
+    response = _booking_to_response(booking)
+
+    # Guest "request received" email only for the request flow;
+    # _finalize_accepted_booking sends the equivalent under instant-book.
+    if use_request_flow:
+        asyncio.create_task(
+            send_guest_booking_requested(data.guest_email, booking)
+        )
+
+    # Push updated availability to Channex so OTAs reflect the reduced inventory
+    asyncio.create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
+
+    return {
+        "booking": response.model_dump(by_alias=True),
+        "clientSecret": outcome.client_secret,
+        "xenditInvoiceUrl": outcome.xendit_invoice_url,
+        "paymentMethod": payment_method,
+    }
+
+
+async def confirm_payment_authorized(handle: str) -> dict:
+    """Called by the booking-engine after Stripe.confirmPayment resolves.
+
+    ``handle`` is either a soft-hold draft id (VAY-388 card flow) or a
+    legacy booking id. The draft path materializes the booking
+    synchronously so the frontend can redirect to the confirmation page
+    without polling; the booking-id path keeps working for callers that
+    haven't been migrated yet (no current production caller, but tests
+    and external integrations may still send a booking id).
+
+    Idempotent on both branches: a second call after the Stripe webhook
+    already materialized the draft returns the same booking.
+    """
+    draft = await BookingDraftRepository.get_by_id(handle)
+    if draft:
+        # Already materialized (sequential retry, or webhook beat us
+        # and we're the second caller) — return the linked booking.
+        if draft.get("materialized_booking_id"):
+            booking = await BookingRepository.get_by_id(
+                str(draft["materialized_booking_id"])
+            )
+            if booking is None:
+                raise ValueError("Booking not found")
+            return _booking_to_response(booking).model_dump(by_alias=True)
+
+        booking = await materialize_draft(draft, payment_status="authorized")
+        if booking is None:
+            # Lost the claim to a concurrent caller — load the booking
+            # that the winner just created (link is now set on the draft).
+            refetched = await BookingDraftRepository.get_by_id(handle)
+            if refetched and refetched.get("materialized_booking_id"):
+                booking = await BookingRepository.get_by_id(
+                    str(refetched["materialized_booking_id"])
+                )
+            if booking is None:
+                payment = await PaymentRepository.get_by_stripe_pi(
+                    draft["stripe_payment_intent_id"]
+                )
+                if not payment:
+                    raise ValueError("Booking materialization failed")
+                booking = await BookingRepository.get_by_id(str(payment["booking_id"]))
+        return _booking_to_response(booking).model_dump(by_alias=True)
+
+    booking = await BookingRepository.get_by_id(handle)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["payment_status"] == "authorized":
+        # Webhook beat us to it — same idempotent shape.
+        return _booking_to_response(booking).model_dump(by_alias=True)
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+
+    payment = await PaymentRepository.get_by_booking_id(handle)
+    if payment:
+        await PaymentRepository.update_status(str(payment["id"]), "authorized")
+
+    await BookingRepository.update_payment_status(handle, "authorized")
+
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+
+    booking = await BookingRepository.get_by_id(handle)
+    return _booking_to_response(booking).model_dump(by_alias=True)
+
+
+async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = True) -> dict:
+    """Shared accept path: capture payment if needed, compute split, schedule
+    payouts, mark booking confirmed, send accepted-emails, push Channex.
+
+    Used by host_accept_booking (request flow) and by the instant-book branch
+    in create_booking_request / payment webhooks. ``capture_card=False`` skips
+    the manual Stripe capture step (e.g. when the PaymentIntent was created
+    with automatic capture and Stripe captured at confirm time).
+    """
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+
+    hotel_id = str(booking["hotel_id"])
+    payment_method = booking.get("payment_method", "card")
+
+    if payment_method == "card" and capture_card:
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            await stripe_service.capture_payment_intent(
+                payment["stripe_payment_intent_id"]
+            )
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
+            )
+    elif payment_method == "xendit":
+        # Xendit Invoice payments are already captured when guest pays —
+        # just make sure the row reflects that.
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment["status"] != "captured":
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(timezone.utc)
+            )
+
+    billing = await fetch_billing_config(hotel_id)
+
+    has_affiliate = booking.get("affiliate_id") is not None
+    affiliate_commission_pct = 0.0
+    affiliate_id = None
+    if has_affiliate:
+        affiliate_id = str(booking["affiliate_id"])
+        effective = await AffiliateRepository.get_effective_commission_pct(affiliate_id)
+        if effective is not None:
+            affiliate_commission_pct = effective
+
+    total_amount = float(booking["total_amount"])
+    split = calculate_split(
+        total_amount,
+        plan=billing["active_plan"],
+        channel=booking.get("channel", "direct"),
+        booking_engine_fee_pct=billing["booking_engine_fee_pct"],
+        channel_manager_fee_pct=billing["channel_manager_fee_pct"],
+        affiliate_platform_fee_pct=billing["affiliate_platform_fee_pct"],
+        has_affiliate=has_affiliate,
+        effective_affiliate_commission_pct=affiliate_commission_pct,
+    )
+
+    if payment_method in ("card", "xendit"):
+        new_payment_status = "captured"
+    else:
+        new_payment_status = "pay_at_property"
+    await BookingRepository.update_booking_accepted(
+        booking_id,
+        platform_fee=split["platform_fee"],
+        affiliate_commission=split["affiliate_commission"],
+        property_payout=split["property_payout"],
+        payment_status=new_payment_status,
+    )
+
+    if payment_method in ("card", "xendit"):
+        await schedule_payouts(
+            booking_id=booking_id,
+            hotel_id=hotel_id,
+            total_amount=total_amount,
+            currency=booking["currency"],
+            affiliate_id=affiliate_id,
+            affiliate_commission=split["affiliate_commission"],
+            property_payout=split["property_payout"],
+            check_out=booking["check_out"],
+        )
+
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_booking_accepted(updated["guest_email"], updated)
+    )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_accepted(hotel["contact_email"], updated)
+        )
+
+    asyncio.create_task(push_ari_for_booking(booking_id))
+
+    return updated
+
+
+def _schedule_unassigned_sweep(booking: dict) -> None:
+    """Fire-and-forget the auto-place sweep after a cancellation.
+
+    Only meaningful when the cancelled booking had a room — a previously
+    Unassigned booking that just cancelled didn't free any slot. The sweep
+    itself is a no-op when the hotel has the toggle off (VAY-397).
+    """
+    if not booking or not booking.get("room_id"):
+        return
+    asyncio.create_task(
+        try_place_unassigned_after_cancellation(
+            str(booking["hotel_id"]),
+            str(booking["room_type_id"]),
+            booking["check_in"],
+            booking["check_out"],
+        )
+    )
+
+
+async def host_accept_booking(booking_id: str, user_id: str) -> dict:
+    """Host accepts a pending booking — captures payment if card."""
+    hotel_id = await _get_hotel_id_for_user(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+    return await _finalize_accepted_booking(booking_id, capture_card=True)
+
+
+async def host_reject_booking(booking_id: str, user_id: str, reason: str | None = None) -> dict:
+    """Host rejects a pending booking — releases hold if card, expires invoice if xendit."""
+    hotel_id = await _get_hotel_id_for_user(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+
+    # Release payment hold / expire invoice
+    payment = await PaymentRepository.get_by_booking_id(booking_id)
+    if booking.get("payment_method") == "card":
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "xendit":
+        if payment and payment.get("xendit_invoice_id"):
+            try:
+                await xendit_service.expire_invoice(payment["xendit_invoice_id"])
+            except Exception as e:
+                logger.warning("Failed to expire Xendit invoice for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+    await PayoutRepository.cancel_by_booking(booking_id)
+
+    # Notify guest, host, and ops
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_booking_rejected(updated["guest_email"], updated, reason=reason)
+    )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_rejected(hotel["contact_email"], updated, reason=reason)
+        )
+
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
+
+    return updated
+
+
+async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
+    """Guest withdraws a pending booking request."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "pending":
+        raise ValueError("Booking is not in pending state")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    # Release payment hold if card
+    if booking.get("payment_method") == "card":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+    await Database.execute(
+        "UPDATE bookings SET guest_withdrawn = true WHERE id = $1", booking_id
+    )
+
+    # Notify host and guest
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    updated = await BookingRepository.get_by_id(booking_id)
+    if hotel:
+        asyncio.create_task(
+            send_host_booking_withdrawn(hotel["contact_email"], updated)
+        )
+    asyncio.create_task(
+        send_guest_booking_withdrawn(updated["guest_email"], updated)
+    )
+
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
+
+    return updated
+
+
+def _parse_partial_refund_tiers(raw) -> list[dict]:
+    """Decode partial_refund_tiers from a DB row (string or list)."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    else:
+        decoded = raw
+    if not isinstance(decoded, list):
+        return []
+    return [t for t in decoded if isinstance(t, dict)]
+
+
+def _resolve_tier_refund(tiers: list[dict], days_until: int) -> tuple[float, int]:
+    """Pick the highest tier the cancellation still meets.
+
+    Tiers are stored sorted descending by min_days_before_check_in (the
+    Pydantic validator and the migration both enforce this), so the first
+    matching tier is the right one. Returns (refund_percent, threshold_days)
+    where threshold_days is the matched tier's min_days_before_check_in (0
+    when no tier matches, used only for display).
+    """
+    for tier in tiers:
+        threshold = tier.get("min_days_before_check_in", tier.get("minDaysBeforeCheckIn"))
+        percent = tier.get("refund_percent", tier.get("refundPercent"))
+        if threshold is None or percent is None:
+            continue
+        try:
+            t_days = int(threshold)
+            t_pct = int(percent)
+        except (TypeError, ValueError):
+            continue
+        if days_until >= t_days:
+            return float(t_pct), t_days
+    return 0.0, 0
+
+
+async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
+    """Compute (refund_amount, refund_pct, free_days_for_display) for a booking.
+
+    Non-refundable rate plans always return 0 refund — the guest accepted that
+    in exchange for the discounted price. For flexible bookings with the room's
+    flexible_cancellation_type set to 'partial_refund', the room's tiered
+    schedule (or, when empty, the legacy single-tier window/percent) overrides
+    the hotel-wide cancellation policy. Otherwise the hotel-wide policy applies.
+    """
+    hotel_id = str(booking["hotel_id"])
+    policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
+    free_days = policy["free_cancellation_days"] if policy else 7
+    partial_pct = float(policy["partial_refund_pct"]) if policy else 0.0
+
+    if booking.get("rate_type") == "nonrefundable":
+        return 0.0, 0.0, free_days
+
+    check_in = booking["check_in"]
+    days_until = (check_in - date.today()).days
+    total_amount = float(booking["total_amount"])
+
+    if booking.get("rate_type") == "flexible":
+        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
+        if room_type and room_type.get("flexible_cancellation_type") == "partial_refund":
+            tiers = _parse_partial_refund_tiers(room_type.get("partial_refund_tiers"))
+            if tiers:
+                percent, threshold = _resolve_tier_refund(tiers, days_until)
+                return round(total_amount * percent / 100, 2), percent, threshold
+            window = room_type.get("partial_refund_cancel_window_days") or 30
+            percent = float(room_type.get("partial_refund_amount_percent") or 50)
+            if days_until >= window:
+                return round(total_amount * percent / 100, 2), percent, window
+            return 0.0, 0.0, window
+
+    if days_until >= free_days:
+        return total_amount, 100.0, free_days
+    if partial_pct > 0:
+        return round(total_amount * partial_pct / 100, 2), partial_pct, free_days
+    return 0.0, 0.0, free_days
+
+
+async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
+    """Calculate refund details without actually cancelling."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "confirmed":
+        raise ValueError("Only confirmed bookings can be previewed for cancellation")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    refund_amount, refund_pct, free_days = await _compute_cancellation_refund(booking)
+    days_until = (booking["check_in"] - date.today()).days
+
+    return {
+        "refundAmount": refund_amount,
+        "refundPercentage": refund_pct,
+        "freeCancellationDays": free_days,
+        "daysUntilCheckIn": days_until,
+        "currency": booking["currency"],
+    }
+
+
+async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
+    """Guest cancels a confirmed booking — applies cancellation policy."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+    if booking["status"] != "confirmed":
+        raise ValueError("Only confirmed bookings can be cancelled")
+    if booking["guest_email"].lower() != guest_email.lower():
+        raise ValueError("Email does not match booking")
+
+    refund_amount, refund_pct, _ = await _compute_cancellation_refund(booking)
+
+    # Process refund if card payment
+    if booking.get("payment_method") == "card" and refund_amount > 0:
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                refund_cents = int(math.ceil(refund_amount * 100)) if refund_pct < 100 else None
+                await stripe_service.create_refund(
+                    payment["stripe_payment_intent_id"],
+                    amount=refund_cents,
+                )
+                new_status = "refunded" if refund_pct >= 100 else "partially_refunded"
+                await PaymentRepository.update_status(
+                    str(payment["id"]),
+                    new_status,
+                    refunded_at=datetime.now(timezone.utc),
+                    refund_amount=refund_amount,
+                )
+            except Exception as e:
+                logger.error("Failed to refund booking %s: %s", booking_id, e)
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    new_payment_status = "refunded" if refund_pct >= 100 else (
+        "partially_refunded" if refund_amount > 0 else booking.get("payment_status", "captured")
+    )
+    await BookingRepository.update_payment_status(booking_id, new_payment_status)
+    await PayoutRepository.cancel_by_booking(booking_id)
+
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(
+        send_guest_cancellation_refund(
+            updated["guest_email"], updated, refund_amount, refund_pct
+        )
+    )
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    if hotel:
+        asyncio.create_task(
+            send_host_guest_cancelled(hotel["contact_email"], updated)
+        )
+
+    # Sync cancellation and availability to Channex (fire-and-forget)
+    asyncio.create_task(channex_handle_cancellation(booking_id))
+    asyncio.create_task(push_ari_for_booking(booking_id))
+    _schedule_unassigned_sweep(booking)
+
+    return updated
+
+
+async def expire_booking(booking_id: str) -> None:
+    """Called by scheduler when host doesn't respond within 24h."""
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or booking["status"] != "pending":
+        return
+
+    # Release payment hold / expire invoice
+    payment = await PaymentRepository.get_by_booking_id(booking_id)
+    if booking.get("payment_method") == "card":
+        if payment and payment.get("stripe_payment_intent_id"):
+            try:
+                await stripe_service.cancel_payment_intent(
+                    payment["stripe_payment_intent_id"]
+                )
+            except Exception as e:
+                logger.warning("Failed to cancel PI for expired booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "xendit":
+        if payment and payment.get("xendit_invoice_id"):
+            try:
+                await xendit_service.expire_invoice(payment["xendit_invoice_id"])
+            except Exception as e:
+                logger.warning("Failed to expire Xendit invoice for expired booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+
+    await BookingRepository.update_status(booking_id, "expired")
+    await BookingRepository.update_payment_status(booking_id, "cancelled")
+
+    # Notify both parties
+    hotel = await Database.fetchrow(
+        "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
+    )
+    updated = await BookingRepository.get_by_id(booking_id)
+    asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
+    if hotel:
+        asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
+    _schedule_unassigned_sweep(booking)
+
+
+async def lookup_booking(
+    slug: str, booking_reference: str, guest_email: str
+) -> BookingResponse | None:
+    booking = await BookingRepository.lookup(booking_reference, guest_email)
+    if not booking:
+        return None
+    hotel = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel or str(booking["hotel_id"]) != str(hotel["id"]):
+        return None
+    return _booking_to_response(booking)
+
+
+async def get_booking_status(slug: str, booking_reference: str, guest_email: str) -> Optional[dict]:
+    """Get booking status for frontend polling."""
+    booking = await BookingRepository.lookup(booking_reference, guest_email)
+    if not booking:
+        return None
+    hotel = await Database.fetchrow(
+        "SELECT id FROM hotels WHERE slug = $1", slug
+    )
+    if not hotel or str(booking["hotel_id"]) != str(hotel["id"]):
+        return None
+    return {
+        "status": booking["status"],
+        "paymentStatus": booking.get("payment_status"),
+        "hostResponseDeadline": booking["host_response_deadline"].isoformat() if booking.get("host_response_deadline") else None,
+    }
+
+
+async def _get_hotel_id_for_user(user_id: str) -> str:
+    """Delegate to the central get_hotel_id helper so that the
+    X-Hotel-Id header is honored for admin-created bookings too.
+    Previously this bypassed the helper and always picked the
+    first hotel row — fine for single-hotel accounts, a silent
+    data-routing bug for multi-hotel accounts."""
+    try:
+        return await get_hotel_id(user_id)
+    except Exception:
+        raise ValueError("No hotel found for this account")
