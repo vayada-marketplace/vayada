@@ -187,6 +187,56 @@ resource "aws_route53_record" "docs" {
   }
 }
 
+# ─── GitHub Actions deploy permissions ───
+#
+# The OIDC deploy role (vayada-github-actions-deploy) is provisioned outside
+# this Terraform setup. We attach an inline policy to it so .github/workflows/
+# deploy-docs.yml can sync to S3 and invalidate the CloudFront distribution.
+# Terraform manages only the policy here, not the role itself.
+
+resource "aws_iam_role_policy" "docs_deploy" {
+  name = "vayada-docs-deploy"
+  role = "vayada-github-actions-deploy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DocsS3List"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.docs.arn
+      },
+      {
+        Sid    = "DocsS3Objects"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObject",
+        ]
+        Resource = "${aws_s3_bucket.docs.arn}/*"
+      },
+      {
+        Sid    = "DocsCloudFrontInvalidate"
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+        ]
+        Resource = aws_cloudfront_distribution.docs.arn
+      },
+      {
+        # ListDistributions does not support resource-level permissions.
+        Sid    = "DocsCloudFrontList"
+        Effect = "Allow"
+        Action = ["cloudfront:ListDistributions"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
 # ─── Outputs ───
 
 output "docs_cloudfront_distribution_id" {
