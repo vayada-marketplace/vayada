@@ -1,0 +1,3 @@
+# Pre-commit: format and lint touched files via lint-staged.
+# Bypass with: git commit --no-verify   (only with explicit reason)
+npx lint-staged

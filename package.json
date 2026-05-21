@@ -39,15 +39,31 @@
     "lint:landing": "npm --workspace vayada-landing run lint",
     "lint:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run lint",
     "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
-    "lint:pms-web": "npm --workspace vayada-pms-frontend run lint"
+    "lint:pms-web": "npm --workspace vayada-pms-frontend run lint",
+    "prepare": "husky"
   },
   "overrides": {
     "postcss": "$postcss",
     "serialize-javascript": "$serialize-javascript"
   },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": [
+      "prettier --write",
+      "eslint --fix --no-warn-ignored"
+    ],
+    "*.{json,md,mdx,yml,yaml,css}": [
+      "prettier --write"
+    ],
+    "*.py": [
+      "ruff check --fix",
+      "ruff format"
+    ]
+  },
   "devDependencies": {
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "postcss": "^8.5.10",
     "prettier": "^3.5.3",
     "serialize-javascript": "^7.0.5"

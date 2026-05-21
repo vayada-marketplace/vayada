@@ -1,0 +1,3 @@
+# Pre-push: lightweight type safety net. CI is the source of truth.
+# Bypass with: git push --no-verify   (only with explicit reason)
+npm run typecheck

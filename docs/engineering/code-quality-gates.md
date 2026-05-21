@@ -4,14 +4,14 @@ How Vayada enforces formatting, linting, typecheck, and tests across the monorep
 
 ## Stack
 
-| Tool | Scope | Config |
-| --- | --- | --- |
-| **Prettier** | Formatting for JS/TS/JSON/Markdown/YAML/CSS | `.prettierrc.json` + `.prettierignore` at root |
-| **ESLint** | Lint for JS/TS (Next.js apps) | `eslint.next.config.mjs` at root; each app re-exports it |
-| **TypeScript** | Type checking for JS/TS apps | Per-app `tsconfig.json` |
-| **Ruff** | Lint + format for Python | `[tool.ruff]` in root `pyproject.toml` |
-| **pytest** | Tests for Python apps | Per-app `pytest.ini` |
-| **Next.js build** | Build-time type/import errors for frontend apps | Per-app `next.config` |
+| Tool              | Scope                                           | Config                                                   |
+| ----------------- | ----------------------------------------------- | -------------------------------------------------------- |
+| **Prettier**      | Formatting for JS/TS/JSON/Markdown/YAML/CSS     | `.prettierrc.json` + `.prettierignore` at root           |
+| **ESLint**        | Lint for JS/TS (Next.js apps)                   | `eslint.next.config.mjs` at root; each app re-exports it |
+| **TypeScript**    | Type checking for JS/TS apps                    | Per-app `tsconfig.json`                                  |
+| **Ruff**          | Lint + format for Python                        | `[tool.ruff]` in root `pyproject.toml`                   |
+| **pytest**        | Tests for Python apps                           | Per-app `pytest.ini`                                     |
+| **Next.js build** | Build-time type/import errors for frontend apps | Per-app `next.config`                                    |
 
 There is no single "lint everything" command yet — see "Running checks" below for the per-tool commands.
 
@@ -49,7 +49,7 @@ The codebase was migrated from multiple repos with different historical conventi
 - **Pre-existing findings are not blockers.** New code conforms; old code gets cleaned up opportunistically or in dedicated ratchet tickets.
 - **Warnings stay warnings.** Don't promote ESLint warnings to errors without a dedicated ticket and a known cleanup path.
 
-This means it is OK to land a change that leaves the global `prettier --check .` or `ruff check .` reporting issues, as long as your *touched files* are clean.
+This means it is OK to land a change that leaves the global `prettier --check .` or `ruff check .` reporting issues, as long as your _touched files_ are clean.
 
 ## What's intentionally warn-only or deferred
 
@@ -87,12 +87,41 @@ ruff check .
 
 That issue lives downstream of cleanup work, not before it.
 
+## Git hooks
+
+Local hooks run automatically on commit and push. They are advisory: CI is still the authoritative gate.
+
+| Hook         | What runs                                                                                                                     | When it fires      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `pre-commit` | `lint-staged` — Prettier + ESLint --fix on touched JS/TS, Prettier on MD/YAML/CSS/JSON, Ruff check + format on touched Python | Every `git commit` |
+| `pre-push`   | `npm run typecheck` across workspaces                                                                                         | Every `git push`   |
+
+Both hooks operate on touched files only (or `--if-present` workspaces), so baseline drift is **not** a blocker for unrelated commits.
+
+### Install
+
+Hooks install automatically on `npm install` at the repo root via the `prepare` script (husky 9). Running `npm install` once after cloning is enough. To reinstall manually:
+
+```bash
+npx husky
+```
+
+### Bypass policy
+
+Hooks exist to catch obvious mistakes before they hit CI. Bypassing is allowed for legitimate emergencies, but **always with a reason**:
+
+- `git commit --no-verify` — skip pre-commit.
+- `git push --no-verify` — skip pre-push.
+
+Agents (Codex, Claude Code, etc.) must **not** bypass hooks without explicit user permission for that specific operation. The default is to fix the issue the hook flagged, not work around it.
+
+If a hook keeps flagging false positives, fix the hook config — don't normalize `--no-verify`.
+
 ## Ratchets — known follow-ups
 
 - Reformat the codebase with `npm run format` and `ruff format .` in a single dedicated commit, then enable CI enforcement. (Single big diff, easier to review than incremental.)
 - Bulk-fix the 2050 auto-fixable Ruff findings with `ruff check --fix .` in a single commit.
-- Pre-commit hook to format and lint only touched files (VAY-458).
-- Pre-push hook to run affected-app builds + tests (VAY-458).
+- Add `typecheck` scripts to frontend workspaces so `npm run typecheck` (and therefore pre-push) actually exercises them — today only `docs` has it.
 - Once stable, promote ESLint warnings to errors in a follow-up; same for tightening Ruff rule set.
 
 None of these block product work today.
