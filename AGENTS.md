@@ -83,6 +83,8 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
 
+Full operating model (projects, labels, statuses, priorities, issue quality, agent rules) is in [`docs/engineering/linear-workspace.md`](docs/engineering/linear-workspace.md). Read that before creating issues or restructuring tickets.
+
 ## Deployment
 
 Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Actions workflow under `.github/workflows/` that triggers on path changes under its `apps/<name>/` directory, then builds, pushes to ECR, and deploys via OIDC.
