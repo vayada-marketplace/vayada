@@ -1,0 +1,14 @@
+/**
+ * CSS Variables for theming
+ *
+ * Note: Colors, spacing, typography, and breakpoints are now handled by Tailwind.
+ * See tailwind.config.js for color definitions.
+ *
+ * Use Tailwind classes:
+ * - Colors: primary-500, success-500, warning-500, error-500, info-500
+ * - Status: Use getStatusClasses() from @/lib/constants/colors
+ */
+
+:root {
+  /* Add any CSS-specific variables here that can't be handled by Tailwind */
+}

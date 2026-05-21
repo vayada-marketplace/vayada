@@ -1,0 +1,371 @@
+'use client'
+
+import { useState, useEffect, useMemo } from 'react'
+import { AuthenticatedNavigation, ProfileWarningBanner } from '@/components/layout'
+import { useSidebar } from '@/components/layout/AuthenticatedNavigation'
+import { MarketplaceFilters } from '@/components/marketplace/MarketplaceFilters'
+import { HotelCard } from '@/components/marketplace/HotelCard'
+import { CreatorCard } from '@/components/marketplace/CreatorCard'
+import { STORAGE_KEYS } from '@/lib/constants'
+import type { Hotel, Creator, UserType } from '@/lib/types'
+import { hotelService } from '@/services/api/hotels'
+import { creatorService } from '@/services/api/creators'
+import { ApiErrorResponse } from '@/services/api/client'
+
+export default function MarketplacePage() {
+  const { isCollapsed } = useSidebar()
+  const [userType, setUserType] = useState<UserType | null>(null)
+  const [hotels, setHotels] = useState<Hotel[]>([])
+  const [creators, setCreators] = useState<Creator[]>([])
+  const [currentCreator, setCurrentCreator] = useState<Creator | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortOption, setSortOption] = useState<string>('relevance')
+  const [filters, setFilters] = useState<{
+    hotelType?: string | string[]
+    offering?: string | string[]
+    availability?: string | string[]
+    budget?: number
+    minFollowers?: number
+    minEngagementRate?: number
+    creatorPlatforms?: string | string[]
+    topCountries?: string | string[]
+    creatorTypes?: string | string[]
+  }>({})
+  // Get userType from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null
+      setUserType(storedUserType)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (userType) {
+      loadData()
+    }
+  }, [filters, userType])
+
+  const loadData = async () => {
+    if (!userType) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      // Load hotels if user is creator
+      if (userType === 'creator') {
+        const [hotelsResponse, creatorProfile] = await Promise.all([
+          hotelService.getAll(),
+          creatorService.getMyProfile()
+        ])
+        setHotels(hotelsResponse.data)
+        setCurrentCreator(creatorProfile)
+      } else {
+        setHotels([])
+        setCurrentCreator(null)
+      }
+
+      // Load creators if user is hotel
+      if (userType === 'hotel') {
+        const creatorsResponse = await creatorService.getAll()
+        setCreators(creatorsResponse.data)
+      } else {
+        setCreators([])
+      }
+    } catch (err) {
+      console.error('Error loading marketplace data:', err)
+      const errorMessage = err instanceof ApiErrorResponse
+        ? 'Failed to load marketplace data. Please try again.'
+        : 'An unexpected error occurred. Please refresh the page.'
+      setError(errorMessage)
+      setHotels([])
+      setCreators([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredHotels = useMemo(() => hotels.filter((hotel) => {
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const matchesSearch =
+        hotel.name.toLowerCase().includes(query) ||
+        hotel.location.toLowerCase().includes(query) ||
+        hotel.description.toLowerCase().includes(query)
+      if (!matchesSearch) return false
+    }
+
+    // Hotel type filter (multiselect)
+    if (filters.hotelType) {
+      const selectedTypes = Array.isArray(filters.hotelType)
+        ? filters.hotelType
+        : [filters.hotelType]
+
+      // Filter values now match data values exactly, so we can use them directly
+      const allowedTypes = selectedTypes
+
+      // Check if hotel's accommodation type matches any of the allowed types
+      if (!hotel.accommodationType || !allowedTypes.includes(hotel.accommodationType)) {
+        return false
+      }
+    }
+
+    // Offering filter (multiselect)
+    if (filters.offering) {
+      const selectedOfferings = Array.isArray(filters.offering)
+        ? filters.offering
+        : [filters.offering]
+
+      // Map filter values to data values
+      const offeringMap: Record<string, string[]> = {
+        'Free stay': ['Kostenlos'],
+        'Paid stay': ['Bezahlt'],
+        'Discount': ['Kostenlos', 'Bezahlt'], // Hybrid can be either
+      }
+
+      // Get all possible collaboration types for selected filters
+      const allowedTypes = selectedOfferings.flatMap(offering => offeringMap[offering] || [])
+
+      // Check if hotel's collaboration type matches any of the allowed types
+      if (!hotel.collaborationType || !allowedTypes.includes(hotel.collaborationType)) {
+        return false
+      }
+    }
+
+    // Availability filter (multiselect)
+    if (filters.availability && hotel.availability) {
+      const selectedMonths = Array.isArray(filters.availability)
+        ? filters.availability
+        : [filters.availability]
+
+      // Backend returns months in English, so we can check directly
+      // Check if hotel's availability includes any of the selected months
+      const hasAvailability = selectedMonths.some(month =>
+        hotel.availability?.includes(month)
+      )
+
+      if (!hasAvailability) return false
+    }
+
+    return true
+  }), [hotels, searchQuery, filters.hotelType, filters.offering, filters.availability])
+
+  const filteredCreators = useMemo(() => creators.filter((creator) => {
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const matchesSearch =
+        creator.name.toLowerCase().includes(query) ||
+        creator.location.toLowerCase().includes(query)
+      if (!matchesSearch) return false
+    }
+
+    // Minimum Followers filter
+    if (filters.minFollowers) {
+      if (creator.audienceSize < filters.minFollowers) {
+        return false
+      }
+    }
+
+    // Minimum Engagement Rate filter (weighted average proportional to follower count)
+    if (filters.minEngagementRate) {
+      const totalFollowers = creator.platforms.reduce((sum, platform) => sum + platform.followers, 0)
+      const avgEngagementRate = totalFollowers > 0
+        ? creator.platforms.reduce((sum, platform) => sum + (platform.followers * (platform.engagementRate || 0)), 0) / totalFollowers
+        : 0
+      if (avgEngagementRate < filters.minEngagementRate) {
+        return false
+      }
+    }
+
+    // Platforms filter (multiselect)
+    if (filters.creatorPlatforms) {
+      const selectedPlatforms = Array.isArray(filters.creatorPlatforms)
+        ? filters.creatorPlatforms
+        : [filters.creatorPlatforms]
+
+      const creatorPlatformNames = creator.platforms.map(p => p.name)
+      const hasMatchingPlatform = selectedPlatforms.some(platform =>
+        creatorPlatformNames.includes(platform)
+      )
+
+      if (!hasMatchingPlatform) return false
+    }
+
+    // Top Countries filter (multiselect)
+    if (filters.topCountries) {
+      const selectedCountries = Array.isArray(filters.topCountries)
+        ? filters.topCountries
+        : [filters.topCountries]
+
+      // Check if any platform has any of the selected countries in topCountries
+      const hasMatchingCountry = creator.platforms.some(platform => {
+        if (!platform.topCountries || platform.topCountries.length === 0) return false
+        return platform.topCountries.some(countryData =>
+          selectedCountries.includes(countryData.country)
+        )
+      })
+
+      if (!hasMatchingCountry) return false
+    }
+
+    // Creator Types filter (multiselect)
+    if (filters.creatorTypes) {
+      const selectedTypes = Array.isArray(filters.creatorTypes)
+        ? filters.creatorTypes
+        : [filters.creatorTypes]
+
+      if (!creator.creatorType || !selectedTypes.includes(creator.creatorType)) {
+        return false
+      }
+    }
+
+    return true
+  }), [creators, searchQuery, filters.minFollowers, filters.minEngagementRate, filters.creatorPlatforms, filters.topCountries, filters.creatorTypes])
+
+  // Memoized sorted results
+  const sortedHotels = useMemo(() => {
+    const sorted = [...filteredHotels]
+    switch (sortOption) {
+      case 'name-asc':
+        sorted.sort((a, b) => a.name.localeCompare(b.name))
+        break
+      case 'name-desc':
+        sorted.sort((a, b) => b.name.localeCompare(a.name))
+        break
+      case 'newest':
+        sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        break
+      case 'oldest':
+        sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        break
+      case 'relevance':
+      default:
+        break
+    }
+
+    return sorted
+  }, [filteredHotels, sortOption])
+
+  const sortedCreators = useMemo(() => {
+    const sorted = [...filteredCreators]
+    switch (sortOption) {
+      case 'name-asc':
+        return sorted.sort((a, b) => a.name.localeCompare(b.name))
+      case 'name-desc':
+        return sorted.sort((a, b) => b.name.localeCompare(a.name))
+      case 'newest':
+        return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      case 'oldest':
+        return sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      case 'relevance':
+      default:
+        return sorted
+    }
+  }, [filteredCreators, sortOption])
+
+  return (
+    <main className="min-h-screen" style={{ backgroundColor: '#f9f8f6' }}>
+      <AuthenticatedNavigation />
+      <div className={`transition-all duration-300 ${isCollapsed ? 'md:pl-20' : 'md:pl-64'} pt-16`}>
+        <div className="pt-4">
+          <ProfileWarningBanner />
+        </div>
+
+        <div className="max-w-7xl mx-auto pt-4 pb-8" style={{ paddingLeft: 'clamp(0.5rem, 3%, 3rem)', paddingRight: '2rem' }}>
+          {/* Header */}
+          <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div>
+              <h1 className="text-5xl font-extrabold bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent mb-3">
+                Marketplace
+              </h1>
+              <p className="text-lg text-gray-600 font-medium">
+                Explore Collaborations opportunities
+              </p>
+            </div>
+          </div>
+
+
+          {/* Filters */}
+          <MarketplaceFilters
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            sortOption={sortOption}
+            onSortChange={setSortOption}
+            filters={filters}
+            onFiltersChange={setFilters}
+            viewType={userType === 'creator' ? 'hotels' : userType === 'hotel' ? 'creators' : 'all'}
+          />
+
+          {/* Error notification */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+              <p className="text-red-700">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-red-500 hover:text-red-700"
+              >
+                <span className="sr-only">Dismiss</span>
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Results */}
+          {loading ? (
+            <div className="flex justify-center items-center py-20">
+              <div className="relative">
+                <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-100"></div>
+                <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Hotels Section - Only show if user is creator */}
+              {userType === 'creator' && (
+                <div className="mb-12">
+                  {sortedHotels.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {sortedHotels.map((hotel) => (
+                        <HotelCard
+                          key={hotel.id}
+                          hotel={hotel}
+                          creatorPlatforms={currentCreator?.platforms.map(p => p.name)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-16 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/50">
+                      <p className="text-gray-500 text-lg">No hotels found that match your criteria.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Creators Section - Only show if user is hotel */}
+              {userType === 'hotel' && (
+                <div>
+                  {sortedCreators.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {sortedCreators.map((creator) => (
+                        <CreatorCard key={creator.id} creator={creator} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-16 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/50">
+                      <p className="text-gray-500 text-lg">No creators found that match your criteria.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+    </main>
+  )
+}
+

@@ -1,0 +1,1 @@
+ALTER TABLE room_types ADD COLUMN IF NOT EXISTS monthly_rates JSONB NOT NULL DEFAULT '{}';

@@ -1,0 +1,442 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+import { hotelService } from '@/services/api/hotel'
+import { useSlug } from '@/contexts/HotelContext'
+
+interface DatePickerCalendarProps {
+  open: boolean
+  onClose: () => void
+  checkIn: string | null
+  checkOut: string | null
+  onSelect: (checkIn: string, checkOut: string) => void
+}
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate()
+}
+
+function getFirstDayOfMonth(year: number, month: number): number {
+  return new Date(year, month, 1).getDay()
+}
+
+function formatMonthYear(year: number, month: number): string {
+  return new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
+function toDateString(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function isSameDay(a: string, b: string): boolean {
+  return a === b
+}
+
+function isBeforeDate(a: string, b: string): boolean {
+  return new Date(a) < new Date(b)
+}
+
+function isBetween(date: string, start: string, end: string): boolean {
+  const d = new Date(date)
+  return d > new Date(start) && d < new Date(end)
+}
+
+function isBeforeToday(dateStr: string): boolean {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return new Date(dateStr) < today
+}
+
+function getTodayString(): string {
+  const t = new Date()
+  return toDateString(t.getFullYear(), t.getMonth(), t.getDate())
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return toDateString(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
+const DAY_LABELS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
+
+function MonthGrid({
+  year,
+  month,
+  checkIn,
+  checkOut,
+  hoverDate,
+  onDayClick,
+  onDayHover,
+  unavailableDates,
+  minCheckOut,
+  minStayNights,
+}: {
+  year: number
+  month: number
+  checkIn: string | null
+  checkOut: string | null
+  hoverDate: string | null
+  onDayClick: (date: string) => void
+  onDayHover: (date: string | null) => void
+  unavailableDates: Set<string>
+  minCheckOut: string | null
+  minStayNights: number
+}) {
+  const daysInMonth = getDaysInMonth(year, month)
+  const firstDay = getFirstDayOfMonth(year, month)
+  const today = getTodayString()
+
+  const cells: { day: number; dateStr: string; isCurrentMonth: boolean }[] = []
+
+  // Empty cells for days before the 1st
+  for (let i = 0; i < firstDay; i++) {
+    cells.push({ day: 0, dateStr: '', isCurrentMonth: false })
+  }
+
+  // Current month days
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({
+      day: d,
+      dateStr: toDateString(year, month, d),
+      isCurrentMonth: true,
+    })
+  }
+
+  // Empty cells to complete last row
+  const remaining = 7 - (cells.length % 7)
+  if (remaining < 7) {
+    for (let i = 0; i < remaining; i++) {
+      cells.push({ day: 0, dateStr: '', isCurrentMonth: false })
+    }
+  }
+
+  // Determine the effective end for range highlight (hover preview or checkOut)
+  const rangeEnd = checkIn && !checkOut && hoverDate ? hoverDate : checkOut
+
+  return (
+    <div className="w-[252px] mx-auto">
+      {/* Month title */}
+      <h3 className="text-sm font-semibold text-gray-900 text-center mb-3">
+        {formatMonthYear(year, month)}
+      </h3>
+
+      {/* Day labels */}
+      <div className="grid grid-cols-7 mb-1">
+        {DAY_LABELS.map((label) => (
+          <div key={label} className="text-center text-xs font-medium text-gray-400 py-1">
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* Day cells */}
+      <div className="grid grid-cols-7">
+        {cells.map((cell, idx) => {
+          // Empty placeholder cell
+          if (!cell.isCurrentMonth) {
+            return <div key={idx} className="w-9 h-9" />
+          }
+
+          const isPast = isBeforeToday(cell.dateStr) && !isSameDay(cell.dateStr, today)
+          const isToday = isSameDay(cell.dateStr, today)
+          const isCheckIn = checkIn ? isSameDay(cell.dateStr, checkIn) : false
+          const isCheckOut = checkOut ? isSameDay(cell.dateStr, checkOut) : false
+          const isSelected = isCheckIn || isCheckOut
+          const isInRange =
+            checkIn && rangeEnd && !isBeforeDate(rangeEnd, checkIn)
+              ? isBetween(cell.dateStr, checkIn, rangeEnd)
+              : false
+          const isUnavailable = unavailableDates.has(cell.dateStr)
+          const isBelowMinStay = !!(
+            minCheckOut &&
+            checkIn &&
+            isBeforeDate(checkIn, cell.dateStr) &&
+            isBeforeDate(cell.dateStr, minCheckOut)
+          )
+          const isDisabled = isPast || isUnavailable || isBelowMinStay
+
+          return (
+            <div
+              key={idx}
+              className={`relative flex items-center justify-center ${
+                isInRange && !isUnavailable ? 'bg-primary-50' : ''
+              } ${isCheckIn ? 'rounded-l-full bg-primary-50' : ''} ${
+                (isCheckOut || (checkIn && !checkOut && hoverDate && isSameDay(cell.dateStr, hoverDate)))
+                  ? 'rounded-r-full bg-primary-50'
+                  : ''
+              }`}
+            >
+              <button
+                disabled={isDisabled}
+                onClick={() => !isDisabled && onDayClick(cell.dateStr)}
+                onMouseEnter={() => !isDisabled && onDayHover(cell.dateStr)}
+                onMouseLeave={() => onDayHover(null)}
+                title={
+                  isUnavailable
+                    ? 'Fully booked'
+                    : isBelowMinStay
+                    ? `Minimum stay is ${minStayNights} nights`
+                    : undefined
+                }
+                className={`w-9 h-9 flex items-center justify-center text-sm rounded-full transition-colors relative z-10 ${
+                  isDisabled
+                    ? isUnavailable
+                      ? 'text-gray-300 cursor-default bg-gray-100 line-through decoration-red-300'
+                      : 'text-gray-300 cursor-default line-through decoration-gray-400'
+                    : isSelected
+                    ? 'bg-primary-600 text-white font-bold'
+                    : isToday
+                    ? 'border-2 border-primary-400 text-primary-700 font-semibold'
+                    : 'text-gray-800 hover:bg-primary-100 cursor-pointer font-medium'
+                }`}
+              >
+                {cell.day}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export default function DatePickerCalendar({
+  open,
+  onClose,
+  checkIn,
+  checkOut,
+  onSelect,
+}: DatePickerCalendarProps) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { slug } = useSlug()
+  const [hoverDate, setHoverDate] = useState<string | null>(null)
+  const [selectionState, setSelectionState] = useState<'selectCheckIn' | 'selectCheckOut'>(
+    checkIn ? 'selectCheckOut' : 'selectCheckIn'
+  )
+  const [tempCheckIn, setTempCheckIn] = useState<string | null>(checkIn)
+  const [tempCheckOut, setTempCheckOut] = useState<string | null>(checkOut)
+  const [unavailableDates, setUnavailableDates] = useState<Set<string>>(new Set())
+  const [minStayByArrival, setMinStayByArrival] = useState<Record<string, number>>({})
+
+  // Calendar months
+  const now = new Date()
+  const [baseMonth, setBaseMonth] = useState(now.getMonth())
+  const [baseYear, setBaseYear] = useState(now.getFullYear())
+
+  const secondMonth = baseMonth === 11 ? 0 : baseMonth + 1
+  const secondYear = baseMonth === 11 ? baseYear + 1 : baseYear
+
+  // Reset temp state and navigate to correct month when opening
+  useEffect(() => {
+    if (open) {
+      setTempCheckIn(checkIn)
+      setTempCheckOut(checkOut)
+      setSelectionState(checkIn && checkOut ? 'selectCheckIn' : checkIn ? 'selectCheckOut' : 'selectCheckIn')
+      // Navigate calendar to the check-in month (or current month if no check-in)
+      if (checkIn) {
+        const d = new Date(checkIn)
+        setBaseMonth(d.getMonth())
+        setBaseYear(d.getFullYear())
+      } else {
+        const now = new Date()
+        setBaseMonth(now.getMonth())
+        setBaseYear(now.getFullYear())
+      }
+    }
+  }, [open, checkIn, checkOut])
+
+  // Fetch unavailable dates for the visible months
+  useEffect(() => {
+    if (!open || !slug) return
+    const start = toDateString(baseYear, baseMonth, 1)
+    const endMonth = baseMonth === 11 ? 0 : baseMonth + 1
+    const endYear = baseMonth === 11 ? baseYear + 1 : baseYear
+    const lastDay = getDaysInMonth(endYear, endMonth)
+    const end = toDateString(endYear, endMonth, lastDay)
+    hotelService.getUnavailableDates(slug, start, end).then(({ dates, minStayByArrival }) => {
+      setUnavailableDates(new Set(dates))
+      setMinStayByArrival((prev) => ({ ...prev, ...minStayByArrival }))
+    }).catch(() => {})
+  }, [open, slug, baseMonth, baseYear])
+
+  // Click outside to close
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    if (open) document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  const handleDayClick = (date: string) => {
+    if (selectionState === 'selectCheckIn') {
+      setTempCheckIn(date)
+      setTempCheckOut(null)
+      setSelectionState('selectCheckOut')
+    } else {
+      // If clicked date is before or equal to check-in, restart selection.
+      // Same-day check-in/check-out (0 nights) is not allowed.
+      if (tempCheckIn && (date === tempCheckIn || isBeforeDate(date, tempCheckIn))) {
+        setTempCheckIn(date)
+        setTempCheckOut(null)
+        setSelectionState('selectCheckOut')
+      } else {
+        setTempCheckOut(date)
+        if (tempCheckIn) {
+          onSelect(tempCheckIn, date)
+          onClose()
+        }
+      }
+    }
+  }
+
+  const handlePrev = () => {
+    const now = new Date()
+    const currentMonth = now.getMonth()
+    const currentYear = now.getFullYear()
+    // Don't navigate before current month
+    if (baseYear === currentYear && baseMonth === currentMonth) return
+    if (baseMonth === 0) {
+      setBaseMonth(11)
+      setBaseYear(baseYear - 1)
+    } else {
+      setBaseMonth(baseMonth - 1)
+    }
+  }
+
+  const handleNext = () => {
+    if (baseMonth === 11) {
+      setBaseMonth(0)
+      setBaseYear(baseYear + 1)
+    } else {
+      setBaseMonth(baseMonth + 1)
+    }
+  }
+
+  // Calculate nights for summary
+  const nights =
+    tempCheckIn && tempCheckOut
+      ? Math.ceil((new Date(tempCheckOut).getTime() - new Date(tempCheckIn).getTime()) / (1000 * 60 * 60 * 24))
+      : 0
+
+  // Disable check-out cells that would violate min-stay for the chosen arrival.
+  const requiredMinStay =
+    selectionState === 'selectCheckOut' && tempCheckIn ? (minStayByArrival[tempCheckIn] || 1) : 1
+  const minCheckOut =
+    selectionState === 'selectCheckOut' && tempCheckIn && requiredMinStay > 1
+      ? addDays(tempCheckIn, requiredMinStay)
+      : null
+
+  const formatSummaryDate = (dateStr: string) => {
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute -left-4 md:left-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 md:p-6 z-50 w-[calc(100vw-2rem)] md:w-[640px]"
+    >
+      {/* Header */}
+      <div className="mb-4">
+        <h3 className="text-base font-bold text-gray-900">Select your dates</h3>
+        <p className="text-sm text-gray-500">Prices shown are starting rates per night</p>
+      </div>
+
+      {/* Mobile nav bar */}
+      <div className="flex md:hidden items-center justify-between mb-3">
+        <button
+          onClick={handlePrev}
+          className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <button
+          onClick={handleNext}
+          className="p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Navigation + Calendars */}
+      <div className="flex items-start md:gap-6">
+        {/* Prev button - desktop only */}
+        <button
+          onClick={handlePrev}
+          className="hidden md:block mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Two month grids */}
+        <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          <MonthGrid
+            year={baseYear}
+            month={baseMonth}
+            checkIn={tempCheckIn}
+            checkOut={tempCheckOut}
+            hoverDate={selectionState === 'selectCheckOut' ? hoverDate : null}
+            onDayClick={handleDayClick}
+            onDayHover={setHoverDate}
+            unavailableDates={unavailableDates}
+            minCheckOut={minCheckOut}
+            minStayNights={requiredMinStay}
+          />
+          <MonthGrid
+            year={secondYear}
+            month={secondMonth}
+            checkIn={tempCheckIn}
+            checkOut={tempCheckOut}
+            hoverDate={selectionState === 'selectCheckOut' ? hoverDate : null}
+            onDayClick={handleDayClick}
+            onDayHover={setHoverDate}
+            unavailableDates={unavailableDates}
+            minCheckOut={minCheckOut}
+            minStayNights={requiredMinStay}
+          />
+        </div>
+
+        {/* Next button - desktop only */}
+        <button
+          onClick={handleNext}
+          className="hidden md:block mt-1 p-1.5 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Summary bar */}
+      {tempCheckIn && (
+        <div className="mt-5 pt-4 border-t border-gray-100 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Your Stay</p>
+            <p className="text-sm font-semibold text-gray-900">
+              {formatSummaryDate(tempCheckIn)}
+              {tempCheckOut && ` — ${formatSummaryDate(tempCheckOut)}`}
+            </p>
+            {nights > 0 && <p className="text-xs text-gray-500">{nights} night{nights !== 1 ? 's' : ''}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

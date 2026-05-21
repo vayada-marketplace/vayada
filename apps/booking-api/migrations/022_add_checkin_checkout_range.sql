@@ -1,0 +1,4 @@
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS check_in_from TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS check_in_until TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS check_out_from TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS check_out_until TEXT NOT NULL DEFAULT '';

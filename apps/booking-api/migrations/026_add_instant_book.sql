@@ -1,0 +1,1 @@
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS instant_book BOOLEAN NOT NULL DEFAULT false;

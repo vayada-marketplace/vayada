@@ -57,22 +57,22 @@ case "$SERVICE" in
         DB_USER="vayada_pms_user"
         DB_NAME="vayada_pms_db"
         DB_PASSWORD_KEY="db_pms_password"
-        MIGRATION_SCRIPT="pms/vayada-pms-backend/scripts/run_migrations.py"
-        SERVICE_DIR="pms/vayada-pms-backend"
+        MIGRATION_SCRIPT="apps/pms-api/scripts/run_migrations.py"
+        SERVICE_DIR="apps/pms-api"
         ;;
     booking)
         DB_USER="vayada_booking_user"
         DB_NAME="vayada_booking_db"
         DB_PASSWORD_KEY="db_booking_password"
-        MIGRATION_SCRIPT="booking-engine/vayada-booking-engine-backend/scripts/run_migrations.py"
-        SERVICE_DIR="booking-engine/vayada-booking-engine-backend"
+        MIGRATION_SCRIPT="apps/booking-api/scripts/run_migrations.py"
+        SERVICE_DIR="apps/booking-api"
         ;;
     marketplace)
         DB_USER="vayada_user"
         DB_NAME="vayada_db"
         DB_PASSWORD_KEY="db_marketplace_password"
-        MIGRATION_SCRIPT="marketplace/vayada-creator-marketplace-backend/scripts/run_migrations.py"
-        SERVICE_DIR="marketplace/vayada-creator-marketplace-backend"
+        MIGRATION_SCRIPT="apps/marketplace-api/scripts/run_migrations.py"
+        SERVICE_DIR="apps/marketplace-api"
         ;;
     auth)
         DB_USER="vayada_auth_user"

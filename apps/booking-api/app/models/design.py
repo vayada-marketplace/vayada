@@ -1,0 +1,26 @@
+from pydantic import BaseModel
+from typing import Dict, Optional, List
+
+
+class DesignSettingsResponse(BaseModel):
+    hero_image: str
+    hero_heading: str
+    hero_subtext: str
+    primary_color: str
+    accent_color: str
+    font_pairing: str
+    booking_filters: List[str] = []
+    custom_filters: Dict[str, str] = {}
+    filter_rooms: Dict[str, List[str]] = {}
+
+
+class DesignSettingsUpdate(BaseModel):
+    hero_image: Optional[str] = None
+    hero_heading: Optional[str] = None
+    hero_subtext: Optional[str] = None
+    primary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    font_pairing: Optional[str] = None
+    booking_filters: Optional[List[str]] = None
+    custom_filters: Optional[Dict[str, str]] = None
+    filter_rooms: Optional[Dict[str, List[str]]] = None

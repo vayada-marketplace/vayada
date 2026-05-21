@@ -1,0 +1,1 @@
+ALTER TABLE hotels ADD COLUMN instant_book BOOLEAN NOT NULL DEFAULT false;
